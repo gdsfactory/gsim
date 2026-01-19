@@ -1,0 +1,230 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=61", "uv", "build", "wheel"]
+
+[project]
+authors = [{name = "GDSFactory", email = "contact@gdsfactory.com"}]
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: OS Independent"
+]
+dependencies = [
+  "gdsfactory>=8.32.2",
+  "gmsh",
+  "plotly",
+  "pydantic>=2.10.6"
+]
+description = "GDSFactory+ Simulation Tools - API and client SDK for simulation tools"
+name = "gsim"
+readme = "README.md"
+requires-python = ">=3.11"
+version = "0.0.0"
+
+[project.optional-dependencies]
+dev = [
+  "altair>=5.5.0",
+  "build>=1.2.0",
+  "griffe>=1.5.6",
+  "ipykernel>=6.29.5",
+  "matplotlib>=3.10.0",
+  "mkautodoc>=0.2.0",
+  "mkdocs-autorefs>=1.3.0",
+  "mkdocs-material>=9.6.0",
+  "mkdocs>=1.6.1",
+  "mkdocstrings[python]>=0.27.0",
+  "mkinit>=1.1.0",
+  "mypy>=1.15.0",
+  "nb-clean>=4.0.1",
+  "nbconvert>=7.16.6",
+  "papermill>=2.6.0",
+  "papermill>=2.6.0",
+  "plotly>=6.0.0",
+  "pre-commit>=4.1.0",
+  "pyright>=1.1.0",
+  "pytest-cov>=6.0.0",
+  "pytest-randomly>=3.16.0",
+  "pytest-xdist>=3.6.0",
+  "pytest>=8.3.0",
+  "ruff>=0.9.0",
+  "tbump>=6.0.0",
+  "towncrier>=24.0.0",
+  "vega-datasets>=0.9.0",
+  "nbstripout>=0.8.1"
+]
+
+[tool.mypy]
+mypy_path = ["src"]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+implicit_reexport = true
+module = "gsim"
+
+[[tool.mypy.overrides]]
+check_untyped_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call", "var-annotated", "assignment"]
+disallow_any_generics = false
+disallow_untyped_defs = false
+# The Palace subpackage is still evolving and uses optional dependencies
+# (e.g., gmsh, plotly). Keep mypy strict overall, but relax it here so
+# contributors aren't blocked by large refactors during early development.
+module = "gsim.palace.*"
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+ignore_errors = true
+module = "tests.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "gmsh"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "gmsh.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "plotly"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "plotly.*"
+
+[tool.pylsp-mypy]
+enabled = true
+live_mode = true
+strict = true
+
+[tool.pyright]
+exclude = ["tests", "**/__pycache__", "**/.venv"]
+include = ["src"]
+pythonVersion = "3.12"
+reportMissingImports = "none"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+addopts = '--tb=short'
+norecursedirs = ["scripts"]
+testpaths = ["tests"]
+
+[tool.ruff]
+fix = true
+target-version = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]  # see https://docs.astral.sh/ruff/rules
+ignore = [
+  "ANN",  # flake8-annotations (too noisy for evolving API)
+  "BLE001",  # blind exception (common around optional deps / wrappers)
+  "C408",  # unnecessary-collection-call
+  "C901",  # complex-structure
+  "COM812",  # missing-trailing-comma
+  "D417",  # undocumented-param (google convention is strict here)
+  "D105",  # undocumented-magic-method
+  "EM101",  # exception-must-not-use-string-literal
+  "EM102",  # exception-must-not-use-f-string-literal
+  "E741",  # ambiguous-variable-name
+  "ERA001",  # commented-out-code
+  "FBT",  # boolean-trap (fine for public API, use keywords in docs/examples)
+  "FIX001",  # line-contains-fixme
+  "FIX002",  # line-contains-todo
+  "FIX004",  # line-contains-hack
+  "N803",  # invalid-argument-name
+  "N806",  # non-lowercase-variable-in-function
+  "PLC0414",  # useless-import-alias
+  "PLR",  # pylint refactor (too strict for this codebase right now)
+  "PLR0913",  # too-many-arguments
+  "PLR2004",  # magic-value-comparison
+  "PLW2901",  # redefined-loop-name
+  "PTH123",  # Path.open preferred
+  "S110",  # try-except-pass
+  "RET504",  # unnecessary-assign
+  "S324",  # hashlib-insecure-hash-function
+  "TC001",  # typing-only-first-party-import
+  "TC002",  # typing-only-third-party-import
+  "TC003",  # typing-only-standard-library-import
+  "TC006",  # runtime-cast-value
+  "TD001",  # invalid-todo-tag
+  "TD002",  # missing-todo-author
+  "TD003",  # missing-todo-link
+  "TID252",  # relative-imports
+  "TRY003"  # raise-vanilla-args
+]
+select = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = [
+  "ANN",  # flake8-annotations
+  "ARG001",  # unused-function-argument
+  "D",  # pydocstyle
+  "E402",  # module-import-not-at-top-of-file
+  "E501",  # line-too-long
+  "F821",  # undefined-name
+  "FBT003",  # boolean-positional-value-in-call
+  "N816",  # mixed-case-variable-in-global-scope
+  "NPY",  # numpy (allow legacy RNG calls in notebooks)
+  "PLC2401",  # non-ascii-name
+  "S101",  # assert
+  "SLF001",  # private-member-access
+  "T201"  # print
+]
+"scripts/*.py" = [
+  "ANN",  # flake8-annotations
+  "ARG001",  # unused-function-argument
+  "D",  # pydocstyle
+  "E402",  # module-import-not-at-top-of-file
+  "E501",  # line-too-long
+  "F821",  # undefined-name
+  "FBT003",  # boolean-positional-value-in-call
+  "INP001",  # implicit-namespace-package
+  "N816",  # mixed-case-variable-in-global-scope
+  "PLC2401",  # non-ascii-name
+  "S101",  # assert
+  "SLF001",  # private-member-access
+  "T201"  # print
+]
+"tests/**/*.py" = [
+  "ANN",  # flake8-annotations
+  "D",  # pydocstyle
+  "INP001",  # implicit-namespace-package
+  "PLC0415",  # allow imports inside tests
+  "PT011",  # pytest-raises-too-broad
+  "S101",  # assert
+  "T201"  # print
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.tbump]
+
+[[tool.tbump.file]]
+src = "README.md"
+
+[[tool.tbump.file]]
+src = "pyproject.toml"
+
+[[tool.tbump.file]]
+src = "src/gsim/__init__.py"
+
+[tool.tbump.git]
+message_template = "Bump to {new_version}"
+tag_template = "{new_version}"
+
+[tool.tbump.version]
+current = "0.0.0"
+regex = '''
+  (?P<major>\d+)
+  \.
+  (?P<minor>\d+)
+  \.
+  (?P<patch>\d+)
+  '''
