@@ -1,0 +1,33 @@
+/* Hide permalink icons by default, show on hover */
+.headerlink {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  margin-left: 0.5em;
+}
+
+h1:hover .headerlink,
+h2:hover .headerlink,
+h3:hover .headerlink,
+h4:hover .headerlink,
+h5:hover .headerlink,
+h6:hover .headerlink {
+  opacity: 0.5;
+}
+
+.headerlink:hover {
+  opacity: 1 !important;
+}
+
+/* Code block styling */
+.codehilite {
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 3px;
+  padding: 1px;
+  overflow-x: auto;
+}
+
+.dark .codehilite {
+  background: #161b22;
+  border-color: #30363d;
+}

@@ -97,9 +97,11 @@ def configure_inplane_port(
         impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
 
-    Example:
-        configure_inplane_port(c.ports['o1'], layer='topmetal2', length=5.0)
-        configure_inplane_port(c.ports, layer='topmetal2', length=5.0)  # all ports
+    Examples:
+        ```python
+        configure_inplane_port(c.ports["o1"], layer="topmetal2", length=5.0)
+        configure_inplane_port(c.ports, layer="topmetal2", length=5.0)  # all ports
+        ```
     """
     # Handle single port or iterable
     port_list = [ports] if hasattr(ports, "info") else ports
@@ -131,11 +133,13 @@ def configure_via_port(
         impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
 
-    Example:
-        configure_via_port(c.ports['o1'], from_layer='metal1', to_layer='topmetal2')
+    Examples:
+        ```python
+        configure_via_port(c.ports["o1"], from_layer="metal1", to_layer="topmetal2")
         configure_via_port(
-            c.ports, from_layer='metal1', to_layer='topmetal2'
+            c.ports, from_layer="metal1", to_layer="topmetal2"
         )  # all ports
+        ```
     """
     # Handle single port or iterable
     port_list = [ports] if hasattr(ports, "info") else ports
@@ -172,13 +176,15 @@ def configure_cpw_port(
         excited: Whether port is excited (default: True)
         cpw_name: Optional name for the CPW port (default: uses port_lower.name)
 
-    Example:
+    Examples:
+        ```python
         configure_cpw_port(
-            port_upper=c.ports['gap_upper'],
-            port_lower=c.ports['gap_lower'],
-            layer='topmetal2',
+            port_upper=c.ports["gap_upper"],
+            port_lower=c.ports["gap_lower"],
+            layer="topmetal2",
             length=5.0,
         )
+        ```
     """
     # Generate unique CPW group ID
     cpw_group_id = cpw_name or f"cpw_{port_lower.name}"

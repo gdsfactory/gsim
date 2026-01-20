@@ -1,47 +1,25 @@
-site_name: DoTemplate
-repo_url: https://github.com/doplaydo/dotemplate
-site_url: https://potential-barnacle-m6m49n7.pages.github.io
-site_description: A template for DoPlayDo projects
-site_author: DoPlayDo
-repo_name: doplaydo/dotemplate
-copyright: Copyright &copy; 2025 GDSFactory
+site_name: gsim
+site_url: https://gdsfactory.com/gsim
+site_description: Palace EM Simulation API for GDSFactory
+site_author: GDSFactory
+copyright: Copyright © 2026, GDSFactory
 
 theme:
-  name: material
-  font:
-    text: Merriweather Sans
-    code: Merriweather Mono
-  # icon:
-  #   logo: simple/materialformkdocs # https://squidfunk.github.io/mkdocs-material/reference/icons-emojis
-  logo: assets/logo.svg
-  favicon: assets/logo.ico
-  features:
-    - navigation.footer
-  search: true
-  palette:
-    - media: "(prefers-color-scheme)"
-      toggle:
-        icon: material/brightness-auto
-        name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      toggle:
-        icon: material/weather-sunny
-        name: switch to dark mode
-      primary: blue
-      accent: deep purple
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      toggle:
-        icon: material/weather-night
-        name: switch to system default
-      primary: blue
-      accent: deep purple
+  name: shadcn
+  custom_dir: docs/overrides
+  pygments_style:
+    light: github-light
+    dark: github-dark
+
+extra_css:
+  - assets/custom.css
 
 nav:
   - home: index.md
-  - api: api.md
-  - example: nbs/example.md
+  - examples:
+      - example: nbs/example.md
+  - api reference:
+      - gsim.palace: api.md
 
 plugins:
   - search
@@ -49,24 +27,23 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths:
-            - src
+          paths: [src]
           inventories:
             - https://docs.python.org/3/objects.inv
-            - https://www.mkdocs.org/objects.inv
-            - https://python-markdown.github.io/objects.inv
+            - https://pandas.pydata.org/docs/objects.inv
           options:
-            docstring_style: google
             docstring_options:
               ignore_init_summary: true
-            docstring_section_style: table # table | list | spacy
+            docstring_section_style: table
+            docstring_style: google
             filters: ["!^_"]
             heading_level: 1
             inherited_members: true
+            line_length: 88
             merge_init_into_class: true
             separate_signature: true
-            show_root_heading: true
             show_root_full_path: false
+            show_root_heading: true
             show_signature_annotations: true
             show_source: true
             show_symbol_type_heading: true
@@ -76,13 +53,15 @@ plugins:
 
 markdown_extensions:
   - attr_list
+  - codehilite
+  - footnotes
   - toc:
       permalink: true
-  - pymdownx.emoji
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+      css_class: codehilite
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.magiclink
@@ -90,13 +69,7 @@ markdown_extensions:
       alternate_style: true
   - admonition
   - pymdownx.details
-  - pymdownx.arithmatex:
-      generic: true
   - pymdownx.superfences
 
-extra:
-  social:
-    - icon: simple/youtube
-      link: https://www.youtube.com/channel/UCp4ZA52J1pH4XI5gvLjgB_g
-    - icon: fontawesome/brands/github
-      link: https://github.com/gdsfactory
+hooks:
+  - docs/hooks.py

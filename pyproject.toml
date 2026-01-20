@@ -3,7 +3,7 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools>=61", "uv", "build", "wheel"]
 
 [project]
-authors = [{name = "GDSFactory", email = "contact@gdsfactory.com"}]
+authors = [{name = "flaport", email = "floris.laporte@gmail.com"}]
 classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -15,7 +15,7 @@ dependencies = [
   "plotly",
   "pydantic>=2.10.6"
 ]
-description = "GDSFactory+ Simulation Tools - API and client SDK for simulation tools"
+description = ""
 name = "gsim"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,13 +31,13 @@ dev = [
   "mkautodoc>=0.2.0",
   "mkdocs-autorefs>=1.3.0",
   "mkdocs-material>=9.6.0",
+  "mkdocs-shadcn>=0.2",
   "mkdocs>=1.6.1",
   "mkdocstrings[python]>=0.27.0",
   "mkinit>=1.1.0",
   "mypy>=1.15.0",
   "nb-clean>=4.0.1",
   "nbconvert>=7.16.6",
-  "papermill>=2.6.0",
   "papermill>=2.6.0",
   "plotly>=6.0.0",
   "pre-commit>=4.1.0",

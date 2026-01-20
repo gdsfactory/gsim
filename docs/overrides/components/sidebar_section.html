@@ -1,0 +1,41 @@
+<li
+  data-slot="sidebar-menu-item"
+  data-sidebar="menu-item"
+  class="group/menu-item relative"
+>
+  <details class="group/collapsible" {% if item.active %}open{% endif %}>
+    <summary
+      data-slot="sidebar-menu-button"
+      data-sidebar="menu-button"
+      class="hover:bg-sidebar-accent hover:text-sidebar-accent-foreground peer/menu-button ring-sidebar-ring text-muted-foreground relative flex h-[30px] w-full cursor-pointer list-none items-center gap-2 overflow-visible rounded-md border border-transparent p-2 text-left text-[0.8rem] font-medium outline-hidden transition-[width,height,padding] focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="transition-transform duration-200 group-open/collapsible:rotate-90"
+      >
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+      {{ item.title }}
+    </summary>
+    <ul
+      data-slot="sidebar-menu"
+      data-sidebar="menu"
+      class="mt-1 flex w-full min-w-0 flex-col gap-0.5 pl-4"
+    >
+      {% for subitem in item.children or [] %} {% if subitem.is_page or
+      subitem.is_link %} {% with sidebar_item = subitem %} {% include
+      "components/sidebar_item.html" %} {% endwith %} {% else %} {# Even deeper
+      nesting (4th level+) #} {% with item = subitem %} {% include
+      "components/sidebar_section.html" %} {% endwith %} {% endif %} {% endfor
+      %}
+    </ul>
+  </details>
+</li>

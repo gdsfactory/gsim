@@ -149,9 +149,12 @@ def print_stack(pdk) -> str:
     Returns:
         The formatted string (also prints to stdout)
 
-    Example:
-        >>> import ihp
-        >>> print_stack(ihp)
+    Examples:
+        ```python
+        import ihp
+
+        print_stack(ihp)
+        ```
     """
     # Extract LayerStack from PDK module if needed
     layer_stack = pdk.LAYER_STACK if hasattr(pdk, "LAYER_STACK") else pdk
@@ -296,9 +299,12 @@ def plot_stack(pdk, width: float = 600, height: float = 800, to_scale: bool = Fa
     Returns:
         plotly Figure object (displays automatically in notebooks)
 
-    Example:
-        >>> import ihp
-        >>> plot_stack(ihp)
+    Examples:
+        ```python
+        import ihp
+
+        plot_stack(ihp)
+        ```
     """
     # Extract LayerStack from PDK module if needed
     layer_stack = pdk.LAYER_STACK if hasattr(pdk, "LAYER_STACK") else pdk
@@ -588,9 +594,12 @@ def print_stack_table(pdk) -> str:
     Returns:
         The formatted string (also prints to stdout)
 
-    Example:
-        >>> import ihp
-        >>> print_stack_table(ihp)
+    Examples:
+        ```python
+        import ihp
+
+        print_stack_table(ihp)
+        ```
     """
     layer_stack = pdk.LAYER_STACK if hasattr(pdk, "LAYER_STACK") else pdk
 

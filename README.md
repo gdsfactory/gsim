@@ -1,80 +1,82 @@
-# DoTemplate (0.0.0)
+# Gsim
 
-A template for python projects.
+> a GDSFactory Simulation Plugin
 
-## Using the Init Script
+![gsim-logo](./docs/assets/img/gsim-small.png)
 
-The `init` script is used to initialize a new project from this template. It automatically replaces template placeholders with your project-specific information and sets up a new git repository.
+## Overview
 
-### Prerequisites
+Gsim bridges the gap between circuit layout design (using [GDSFactory](https://gdsfactory.github.io/gdsfactory/)) and electromagnetic simulation (using [Palace](https://awslabs.github.io/palace/)). It automates the conversion of IC component layouts into simulation-ready mesh files and configuration.
 
-Before running the init script, make sure you have:
+## Features
 
-- Git configured with your user name and email
-- `uv` package manager installed
-- `just` command runner installed
+- **Layer Stack Extraction**: Extract layer stacks from PDK definitions with a comprehensive material properties database
+- **Port Configuration**: Convert GDSFactory ports into Palace-compatible port definitions (inplane, via, and CPW ports)
+- **Mesh Generation**: Generate GMSH-compatible finite element meshes with configurable quality presets
 
-### Basic Usage
-
-```bash
-./init my-project-name
-```
-
-This will create a new project with the name "my-project-name" and default settings.
-
-### Command Line Options
-
-| Option                  | Short | Default          | Description                               |
-| ----------------------- | ----- | ---------------- | ----------------------------------------- |
-| `name`                  | -     | `dotemplate`     | Name of the new project                   |
-| `--capitalized-name`    | `-N`  | Auto-generated   | Capitalized version of the project name   |
-| `--description`         | `-d`  | Empty            | Project description                       |
-| `--github-organization` | `-o`  | `doplaydo`       | GitHub organization for the repository    |
-| `--version`             | `-v`  | `0.0.0`          | Initial version number                    |
-| `--initial-commit`      | `-c`  | `Initial Commit` | Message for the initial git commit        |
-| `--no-delete-init`      | `-D`  | False            | Keep the init script after initialization |
-
-### Examples
-
-**Basic project initialization:**
+## Installation
 
 ```bash
-./init my-awesome-project
+pip install gsim
 ```
 
-**Full customization:**
+For development:
 
 ```bash
-./init my-project \
-  --capitalized-name "MyProject" \
-  --description "An awesome Python project" \
-  --github-organization "myorg" \
-  --version "1.0.0" \
-  --initial-commit "🎉 Initial release"
+git clone https://github.com/doplaydo/gsim
+cd gsim
+pip install -e .[dev]
 ```
 
-**Keep the init script for reference:**
+## Quick Start
 
-```bash
-./init my-project --no-delete-init
+```python
+from gsim.palace import (
+    get_stack,
+    configure_inplane_port,
+    extract_ports,
+    generate_mesh,
+    MeshConfig,
+)
+
+# Get layer stack from active PDK
+stack = get_stack()
+
+# Configure ports on your component
+configure_inplane_port(c.ports["o1"], layer="topmetal2", length=5.0)
+configure_inplane_port(c.ports["o2"], layer="topmetal2", length=5.0)
+
+# Extract configured ports
+ports = extract_ports(c, stack)
+
+# Generate mesh
+result = generate_mesh(
+    component=c,
+    stack=stack,
+    ports=ports,
+    output_dir="./simulation",
+    config=MeshConfig.default(),
+)
 ```
 
-### What the Script Does
+## Mesh Presets
 
-1. **Validates environment**: Checks for git configuration and required tools
-2. **Cleans repository**: Runs `just clean` to remove build artifacts
-3. **Makes replacements**: Updates all files in the repository, replacing:
-   - `dotemplate` → your project name
-   - `DoTemplate` → your capitalized project name
-   - `0.0.0` → your specified version
-   - `doplaydo` → your GitHub organization
-4. **Updates configuration files**:
-   - Sets author information in `pyproject.toml`
-   - Updates description in `pyproject.toml` and `mkdocs.yml`
-5. **Initializes git repository**: Creates a fresh git repo with your initial commit
-6. **Sets up development tools**: Installs pre-commit hooks
-7. **Cleans up**: Removes the init script (unless `--no-delete-init` is used)
+| Preset  | Refined Size | Max Size | Use Case                          |
+| ------- | ------------ | -------- | --------------------------------- |
+| Coarse  | 10.0 µm      | 600.0 µm | Fast iteration (~2.5 elements/λ)  |
+| Default | 5.0 µm       | 300.0 µm | Balanced accuracy (~5 elements/λ) |
+| Fine    | 2.0 µm       | 70.0 µm  | High accuracy (~10 elements/λ)    |
 
-### After Initialization
+## Port Types
 
-After running the init script, you'll have a fully configured Python project ready for development. The repository will be initialized with git, and all template placeholders will be replaced with your project-specific information.
+- **Inplane ports**: Horizontal ports on single metal layer for CPW gaps
+- **Via ports**: Vertical ports between two metal layers for microstrip structures
+- **CPW ports**: Multi-element ports for proper Coplanar Waveguide excitation
+
+## Documentation
+
+See the [documentation](https://doplaydo.github.io/gsim/) for detailed API reference and examples.
+
+## License
+
+Copyright 2026 GDSFactory

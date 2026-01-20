@@ -1,0 +1,87 @@
+<div
+  view-transition-name="sidebar"
+  data-slot="sidebar-group"
+  data-sidebar="group"
+  class="no-scrollbar relative flex w-full min-w-0 flex-col p-2"
+>
+  {% if nav|length > 1 %} {% if config.theme.topbar_sections %} {% set current =
+  nav|active_section|attr('children') %} {% else %} {% set current = nav %} {%
+  endif %} {% if not current %} {# when there is not active section, keep only
+  the top level pages #} {% set current = nav|selectattr("is_page") %} {% endif
+  %} {% set pages = current|selectattr("is_page")|sort(attribute="meta.order")
+  %} {% set links = current|selectattr("is_link")|list %} {% set sections =
+  current|rejectattr("is_page")|rejectattr("is_link")|list %} {% if pages|length
+  > 0 %}
+  <div
+    data-slot="sidebar-group"
+    data-sidebar="group"
+    class="relative flex w-full min-w-0 flex-col p-2"
+  >
+    <div
+      data-slot="sidebar-group-content"
+      data-sidebar="group-content"
+      class="w-full text-sm"
+    >
+      <ul
+        data-slot="sidebar-menu"
+        data-sidebar="menu"
+        class="flex w-full min-w-0 flex-col gap-0.5"
+      >
+        {% for page in pages %} {% with sidebar_item = page %} {% include
+        "components/sidebar_item.html" %} {% endwith %} {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %} {% for section in sections %} {% if section.children %}
+  <div
+    data-slot="sidebar-group"
+    data-sidebar="group"
+    class="relative flex w-full min-w-0 flex-col p-2"
+  >
+    <div
+      data-slot="sidebar-group-label"
+      data-sidebar="group-label"
+      class="ring-sidebar-ring [&amp;&gt;svg]:size-4 [&amp;&gt;svg]:shrink-0 text-muted-foreground flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2"
+    >
+      {{ section.title }}
+    </div>
+    <div
+      data-slot="sidebar-group-content"
+      data-sidebar="group-content"
+      class="w-full text-sm"
+    >
+      <ul
+        data-slot="sidebar-menu"
+        data-sidebar="menu"
+        class="flex w-full min-w-0 flex-col gap-0.5"
+      >
+        {% for item in section.children %} {% if item.is_page or item.is_link %}
+        {% with sidebar_item = item %} {% include "components/sidebar_item.html"
+        %} {% endwith %} {% else %} {# Nested section (3rd level) #} {% include
+        "components/sidebar_section.html" %} {% endif %} {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %} {% endfor %} {% if links|length > 0 %}
+  <div
+    data-slot="sidebar-group"
+    data-sidebar="group"
+    class="relative flex w-full min-w-0 flex-col p-2"
+  >
+    <div
+      data-slot="sidebar-group-content"
+      data-sidebar="group-content"
+      class="w-full text-sm"
+    >
+      <ul
+        data-slot="sidebar-menu"
+        data-sidebar="menu"
+        class="flex w-full min-w-0 flex-col gap-0.5"
+      >
+        {% for link in links %} {% with sidebar_item = link %} {% include
+        "components/sidebar_item.html" %} {% endwith %} {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %} {% endif %}
+</div>

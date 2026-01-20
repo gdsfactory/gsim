@@ -10,10 +10,10 @@ uv:
   curl -LsSf https://astral.sh/uv/install.sh | sh
 
 inits:
-  cd src/dotemplate && uvx mkinit --relative --recursive --write && uvx ruff format __init__.py
+  cd src/gsim && uvx mkinit --relative --recursive --write && uvx ruff format __init__.py
 
 ipykernel:
-  uv run python -m ipykernel install --user --name dotemplate --display-name dotemplate
+  uv run python -m ipykernel install --user --name gsim --display-name gsim
 
 test:
   uv run pytest -s -n logical
@@ -25,7 +25,7 @@ serve:
   uv run mkdocs serve -a localhost:8080
 
 nbrun:
-  find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run papermill {} {} -k dotemplate :::
+  find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run papermill {} {} -k gsim :::
 
 nbdocs:
   find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run jupyter nbconvert --to markdown --embed-images {} --output-dir docs/nbs ':::'

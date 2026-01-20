@@ -1,0 +1,131 @@
+<dialog
+  id="bottom-sidebar"
+  onclick="onBottomSidebarDialogClick(event)"
+  class="bg-transparent"
+  style="
+    position: fixed;
+    left: 0px;
+    top: 0px;
+    transform: translate(0px, 58px);
+    min-width: max-content;
+    --radix-popper-transform-origin: 0% 0px;
+    will-change: transform;
+    z-index: 50;
+  "
+>
+  <div
+    data-side="bottom"
+    data-align="start"
+    data-state="open"
+    role="dialog"
+    data-slot="popover-content"
+    class="text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 bg-background no-scrollbar z-50 w-64 overflow-y-auto rounded-lg border shadow-lg outline-hidden duration-100"
+    style="max-height: calc(100vh - 80px)"
+    tabindex="-1"
+  >
+    <div class="flex flex-col p-2">
+      {% if nav|length > 1 %} {% set top_items = nav|selectattr("is_page")|list
+      %} {% set top_links = nav|selectattr("is_link")|list %} {% set other_items
+      = nav|rejectattr("is_page")|rejectattr("is_link")|list %} {# Top level
+      pages #} {% if top_items|length > 0 %}
+      <div class="mb-2 flex flex-col gap-0.5">
+        {% for top_item in top_items %}
+        <a
+          class="hover:bg-accent {% if top_item.active %}bg-accent text-accent-foreground{% endif %} flex items-center gap-2 rounded-md p-2 text-sm font-medium"
+          href="{{ top_item.url | url }}"
+        >
+          {% if top_item.meta and top_item.meta.sidebar_title %} {{
+          top_item.meta.sidebar_title }} {% else %} {{ top_item.title }} {%
+          endif %}
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %} {# Sections #} {% for section in other_items %} {% if
+      section.children %}
+      <div class="flex flex-col p-2">
+        <div
+          class="text-muted-foreground flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium"
+        >
+          {{ section.title }}
+        </div>
+        <ul class="flex flex-col gap-0.5">
+          {% for item in section.children %} {% if item.is_page or item.is_link
+          %}
+          <li>
+            <a
+              class="hover:bg-accent {% if item.active %}bg-accent text-accent-foreground{% endif %} flex items-center gap-2 rounded-md p-2 text-sm font-medium"
+              href="{% if item.is_link %}{{ item.url }}{% else %}{{ item.url | url }}{% endif %}"
+              {%
+              if
+              item.is_link
+              %}target="_blank"
+              rel="noopener noreferrer"
+              {%
+              endif
+              %}
+            >
+              {% if item.meta and item.meta.sidebar_title %} {{
+              item.meta.sidebar_title }} {% else %} {{ item.title }} {% endif %}
+              {% if item.is_link %}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="opacity-50"
+              >
+                <path
+                  d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              {% endif %}
+            </a>
+          </li>
+          {% else %} {# Nested section #}
+          <li>{% include "components/bottom_sidebar_section.html" %}</li>
+          {% endif %} {% endfor %}
+        </ul>
+      </div>
+      {% endif %} {% endfor %} {# Top level links #} {% if top_links|length > 0
+      %}
+      <div class="mt-2 flex flex-col gap-0.5">
+        {% for top_link in top_links %}
+        <a
+          class="hover:bg-accent flex items-center gap-2 rounded-md p-2 text-sm font-medium"
+          href="{{ top_link.url }}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {{ top_link.title }}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="opacity-50"
+          >
+            <path
+              d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+            />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %} {% endif %}
+    </div>
+  </div>
+</dialog>
