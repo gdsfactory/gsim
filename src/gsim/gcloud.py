@@ -121,19 +121,7 @@ def run_simulation(
         on_started(job)
 
     # Wait
-    if verbose:
-        print("Waiting for completion... ", end="", flush=True)  # noqa: T201
-
     finished_job = sim.wait_for_simulation(job)
-
-    if verbose:
-        if finished_job.started_at and finished_job.finished_at:
-            delta = finished_job.finished_at - finished_job.started_at
-            minutes, seconds = divmod(int(delta.total_seconds()), 60)
-            duration = f"{minutes}m {seconds}s"
-        else:
-            duration = "N/A"
-        print(f"done ({duration})")  # noqa: T201
 
     # Check status
     if finished_job.exit_code != 0:
@@ -143,23 +131,14 @@ def run_simulation(
         )
 
     # Download
-    if verbose:
-        print("Downloading results... ", end="", flush=True)  # noqa: T201
-
     results = sim.download_results(finished_job)
 
-    if verbose:
-        print("done")  # noqa: T201
-        _print_result_summary(results)
+    if verbose and results:
+        first_path = next(iter(results.values()))
+        download_dir = first_path.parent
+        print(f"Downloaded {len(results)} files to {download_dir}")  # noqa: T201
 
     return results
-
-
-def _print_result_summary(results: dict[str, Path]) -> None:
-    """Print a summary of downloaded result files."""
-    print(f"\nResults ({len(results)} files):")  # noqa: T201
-    for name in sorted(results.keys()):
-        print(f"  - {name}")  # noqa: T201
 
 
 def print_job_summary(job) -> None:
