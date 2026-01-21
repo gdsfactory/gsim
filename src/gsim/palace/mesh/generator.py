@@ -18,6 +18,7 @@ import gmsh
 from . import gmsh_utils
 
 if TYPE_CHECKING:
+    from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
     from gsim.palace.stack import LayerStack
 
@@ -680,8 +681,39 @@ def _generate_palace_config(
     output_path: Path,
     model_name: str,
     fmax: float,
+    driven_config: DrivenConfig | None = None,
 ) -> Path:
-    """Generate Palace config.json file."""
+    """Generate Palace config.json file.
+
+    Args:
+        groups: Physical group information from mesh generation
+        ports: List of PalacePort objects
+        port_info: Port metadata list
+        stack: Layer stack for material properties
+        output_path: Output directory path
+        model_name: Base name for output files
+        fmax: Maximum frequency (Hz) - used as fallback if driven_config not provided
+        driven_config: Optional DrivenConfig for frequency sweep settings
+    """
+    # Use driven_config if provided, otherwise fall back to legacy parameters
+    if driven_config is not None:
+        solver_driven = driven_config.to_palace_config()
+    else:
+        # Legacy behavior - compute from fmax
+        freq_step = fmax / 40e9
+        solver_driven = {
+            "Samples": [
+                {
+                    "Type": "Linear",
+                    "MinFreq": 1.0,  # 1 GHz
+                    "MaxFreq": fmax / 1e9,
+                    "FreqStep": freq_step,
+                    "SaveStep": 0,
+                }
+            ],
+            "AdaptiveTol": 0.02,
+        }
+
     config: dict[str, object] = {
         "Problem": {
             "Type": "Driven",
@@ -706,18 +738,7 @@ def _generate_palace_config(
             },
             "Order": 2,
             "Device": "CPU",
-            "Driven": {
-                "Samples": [
-                    {
-                        "Type": "Linear",
-                        "MinFreq": 1e9 / 1e9,
-                        "MaxFreq": fmax / 1e9,
-                        "FreqStep": fmax / 40e9,
-                        "SaveStep": 0,
-                    }
-                ],
-                "AdaptiveTol": 2e-2,
-            },
+            "Driven": solver_driven,
         },
     }
 
@@ -843,6 +864,7 @@ def generate_mesh(
     air_margin: float = 50.0,
     fmax: float = 100e9,
     show_gui: bool = False,
+    driven_config: DrivenConfig | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -858,6 +880,7 @@ def generate_mesh(
         air_margin: Air box margin (um)
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
+        driven_config: Optional DrivenConfig for frequency sweep settings
 
     Returns:
         MeshResult with paths and metadata
@@ -939,7 +962,7 @@ def generate_mesh(
         # Generate config
         logger.info("Generating Palace config...")
         config_path = _generate_palace_config(
-            groups, ports, port_info, stack, output_dir, model_name, fmax
+            groups, ports, port_info, stack, output_dir, model_name, fmax, driven_config
         )
 
     finally:

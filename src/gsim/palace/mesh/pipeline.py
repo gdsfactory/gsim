@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
     from gsim.palace.stack.extractor import LayerStack
 
@@ -146,6 +147,7 @@ def generate_mesh(
     output_dir: str | Path,
     config: MeshConfig | None = None,
     model_name: str = "palace",
+    driven_config: DrivenConfig | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -156,6 +158,7 @@ def generate_mesh(
         output_dir: Directory for output files
         config: MeshConfig with mesh parameters
         model_name: Base name for output files (default: "mesh" -> mesh.msh)
+        driven_config: Optional DrivenConfig for frequency sweep settings
 
     Returns:
         MeshResult with mesh path and metadata
@@ -178,6 +181,7 @@ def generate_mesh(
         air_margin=config.margin,
         fmax=config.fmax,
         show_gui=config.show_gui,
+        driven_config=driven_config,
     )
 
     # Convert to pipeline's MeshResult format

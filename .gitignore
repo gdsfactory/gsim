@@ -1,3 +1,7 @@
+# Simulation outputs
+palace-sim-*/
+dev-palace-simulation-*/
+
 # files
 *.c
 *.cover

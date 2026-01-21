@@ -51,6 +51,25 @@ from gsim.palace.mesh import (
     MeshResult,
     generate_mesh,
 )
+from gsim.palace.models import (
+    DrivenConfig,
+    EigenmodeConfig,
+    ElectrostaticConfig,
+    LayerModel,
+    LayerStackModel,
+    MagnetostaticConfig,
+    MaterialPropertiesModel,
+    MeshConfigModel,
+    NumericalConfig,
+    PhysicsConfig,
+    PortConfigModel,
+    ProblemType,
+    SimulationResult,
+    TerminalConfig,
+    TransientConfig,
+    ValidationResultModel,
+    WavePortConfig,
+)
 from gsim.palace.ports import (
     PalacePort,
     PortGeometry,
@@ -60,6 +79,7 @@ from gsim.palace.ports import (
     configure_via_port,
     extract_ports,
 )
+from gsim.palace.sim import PalaceSim
 from gsim.palace.stack import (
     MATERIALS_DB,
     Layer,
@@ -82,6 +102,29 @@ from gsim.palace.stack import (
 from gsim.viz import plot_mesh
 
 __all__ = [
+    # New Pydantic-based fluent API
+    "PalaceSim",
+    # Problem type configs
+    "DrivenConfig",
+    "EigenmodeConfig",
+    "ElectrostaticConfig",
+    "MagnetostaticConfig",
+    "TransientConfig",
+    "ProblemType",
+    # Port configs
+    "WavePortConfig",
+    "TerminalConfig",
+    # Other models
+    "LayerModel",
+    "LayerStackModel",
+    "MaterialPropertiesModel",
+    "MeshConfigModel",
+    "NumericalConfig",
+    "PhysicsConfig",  # Deprecated: use DrivenConfig, etc.
+    "PortConfigModel",
+    "SimulationResult",
+    "ValidationResultModel",
+    # Legacy API (still supported)
     "MATERIALS_DB",
     "GroundPlane",
     "Layer",
