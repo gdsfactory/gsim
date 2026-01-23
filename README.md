@@ -20,13 +20,30 @@ Gsim bridges the gap between circuit layout design (using [GDSFactory](https://g
 pip install gsim
 ```
 
-For development:
+For development (using [just](https://github.com/casey/just) and [uv](https://github.com/astral-sh/uv)):
 
 ```bash
 git clone https://github.com/doplaydo/gsim
 cd gsim
-pip install -e .[dev]
+
+# Install uv (if not already installed)
+just uv
+
+# Install dependencies and set up dev environment
+just dev
 ```
+
+### Available Commands
+
+| Command          | Description                                            |
+| ---------------- | ------------------------------------------------------ |
+| `just dev`       | Install all dependencies, extras, and pre-commit hooks |
+| `just test`      | Run the test suite with pytest                         |
+| `just docs`      | Build documentation with mkdocs                        |
+| `just serve`     | Serve documentation locally at localhost:8080          |
+| `just dist`      | Build wheel distribution                               |
+| `just ipykernel` | Install Jupyter kernel for notebooks                   |
+| `just clean`     | Clean all build artifacts and caches                   |
 
 ## Quick Start
 

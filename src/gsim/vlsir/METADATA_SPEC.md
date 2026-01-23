@@ -36,9 +36,8 @@ def MyPDKDevice(...):
             "param1" : PARAM1 (str/int/float),
             "param2" : PARAM2 (str/int/float),
             "param3" : PARAM3 (str/int/float)
-        }  
+        }
     }
 
     return c
 ```
-
