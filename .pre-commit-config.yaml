@@ -58,6 +58,7 @@ repos:
         entry: uv run --no-sync pyright
         language: system
         files: \.(py)$
+        exclude: (src/gsim/vlsir/|docs/)
 
   - repo: local
     hooks:
@@ -66,6 +67,7 @@ repos:
         entry: uv run --no-sync mypy
         language: system
         files: \.(py)$
+        exclude: (src/gsim/vlsir/|docs/)
 
   - repo: local
     hooks:
