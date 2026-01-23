@@ -42,6 +42,7 @@ uv.lock
 .DS_Store
 
 # folders
+.cursor/
 .eggs/
 .hypothesis/
 .ipynb_checkpoints/
@@ -49,6 +50,7 @@ uv.lock
 .nox/
 .pytest_cache/
 .tox/
+.vscode/
 ENV/
 __pycache__/
 __pypackages__/
@@ -56,6 +58,7 @@ build/
 develop-eggs/
 dist/
 docs/_build/
+docs/nbs/
 docs/site/
 downloads/
 eggs/
@@ -78,5 +81,3 @@ venv.bak/
 venv/
 wheelhouse/
 wheels/
-.vscode/
-.cursor/
