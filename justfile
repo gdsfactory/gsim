@@ -2,6 +2,7 @@ dist:
   uv run python -m build --wheel
 
 dev:
+  uv venv --python 3.13 --clear
   uv sync --all-extras
   uv pip install -e .
   uvx pre-commit install
@@ -24,7 +25,7 @@ docs:
 serve:
   uv run mkdocs serve -a localhost:8080
 
-nbrun:
+nbrun: ipykernel
   find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run papermill {} {} -k gsim :::
 
 nbdocs:
