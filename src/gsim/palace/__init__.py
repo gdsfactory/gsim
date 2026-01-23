@@ -4,46 +4,42 @@ This module provides a comprehensive API for setting up and running
 electromagnetic simulations using the Palace solver with gdsfactory components.
 
 Features:
+    - Problem-specific simulation classes (DrivenSim, EigenmodeSim, ElectrostaticSim)
     - Layer stack extraction from PDK
     - Port configuration (inplane, via, CPW)
     - Mesh generation with COMSOL-style presets
     - Palace config file generation
 
 Usage:
-    from gsim.palace import (
-        get_stack, configure_inplane_port, configure_via_port,
-        extract_ports, generate_mesh
-    )
+    from gsim.palace import DrivenSim
 
-    # 1. Get layer stack from active PDK
-    stack = get_stack()
+    # Create and configure simulation
+    sim = DrivenSim()
+    sim.set_geometry(component)
+    sim.set_stack(air_above=300.0)
+    sim.add_cpw_port("P2", "P1", layer="topmetal2", length=5.0)
+    sim.set_driven(fmin=1e9, fmax=100e9)
 
-    # 2. Configure ports on component
-    # Inplane port (horizontal, on single layer - for CPW gaps)
-    configure_inplane_port(c.ports['o1'], layer='topmetal2', length=5.0)
-    configure_inplane_port(c.ports['o2'], layer='topmetal2', length=5.0)
-
-    # Via port (vertical, between two layers - for microstrip feed)
-    configure_via_port(c.ports['feed'], from_layer='metal1', to_layer='topmetal2')
-
-    # 3. Extract configured ports
-    ports = extract_ports(c, stack)
-
-    # 4. Generate mesh
-    result = generate_mesh(
-        component=c,
-        stack=stack,
-        ports=ports,
-        output_dir="./simulation",
-    )
+    # Generate mesh and run
+    sim.mesh("./sim", preset="fine")
+    results = sim.simulate()
 """
 
 from __future__ import annotations
 
+import warnings
 from functools import partial
 
 from gsim.gcloud import print_job_summary
 from gsim.gcloud import run_simulation as _run_simulation
+
+# New simulation classes
+from gsim.palace.base import SimBase
+from gsim.palace.driven import DrivenSim
+from gsim.palace.eigenmode import EigenmodeSim
+from gsim.palace.electrostatic import ElectrostaticSim
+
+# Mesh utilities
 from gsim.palace.mesh import (
     GroundPlane,
     MeshConfig,
@@ -51,25 +47,29 @@ from gsim.palace.mesh import (
     MeshResult,
     generate_mesh,
 )
+
+# Models (new submodule)
 from gsim.palace.models import (
+    CPWPortConfig,
     DrivenConfig,
     EigenmodeConfig,
     ElectrostaticConfig,
-    LayerModel,
-    LayerStackModel,
+    GeometryConfig,
+    LayerConfig,
     MagnetostaticConfig,
-    MaterialPropertiesModel,
-    MeshConfigModel,
+    MaterialConfig,
+    MeshConfig as MeshConfigModel,
     NumericalConfig,
-    PhysicsConfig,
-    PortConfigModel,
-    ProblemType,
+    PortConfig,
     SimulationResult,
+    StackConfig,
     TerminalConfig,
     TransientConfig,
-    ValidationResultModel,
+    ValidationResult,
     WavePortConfig,
 )
+
+# Port utilities
 from gsim.palace.ports import (
     PalacePort,
     PortGeometry,
@@ -79,14 +79,15 @@ from gsim.palace.ports import (
     configure_via_port,
     extract_ports,
 )
-from gsim.palace.sim import PalaceSim
+
+# Stack utilities
 from gsim.palace.stack import (
     MATERIALS_DB,
     Layer,
     LayerStack,
     MaterialProperties,
     StackLayer,
-    ValidationResult,
+    ValidationResult as StackValidationResult,
     extract_from_pdk,
     extract_layer_stack,
     get_material_properties,
@@ -99,31 +100,153 @@ from gsim.palace.stack import (
     print_stack,
     print_stack_table,
 )
+
+# Visualization
 from gsim.viz import plot_mesh
 
+
+# Backward compatibility: PalaceSim as alias for DrivenSim
+class PalaceSim(DrivenSim):
+    """Legacy alias for DrivenSim.
+
+    DEPRECATED: Use DrivenSim directly instead.
+
+    This class provides backward compatibility with the old fluent API.
+    It wraps the old method names to the new API.
+    """
+
+    def __init__(self, **kwargs):
+        warnings.warn(
+            "PalaceSim is deprecated. Use DrivenSim instead:\n"
+            "  from gsim.palace import DrivenSim\n"
+            "  sim = DrivenSim()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(**kwargs)
+
+    # Legacy fluent methods that return self
+    def geometry(self, component):
+        """DEPRECATED: Use set_geometry() instead."""
+        self.set_geometry(component)
+        return self
+
+    def stack(self, **kwargs):
+        """DEPRECATED: Use set_stack() instead."""
+        self.set_stack(**kwargs)
+        return self
+
+    def material(self, name, **kwargs):
+        """DEPRECATED: Use set_material() instead."""
+        self.set_material(name, **kwargs)
+        return self
+
+    def materials(self, overrides):
+        """DEPRECATED: Use set_material() for each material instead."""
+        for name, props in overrides.items():
+            self.set_material(name, **props)
+        return self
+
+    def numerical(self, **kwargs):
+        """DEPRECATED: Use set_numerical() instead."""
+        self.set_numerical(**kwargs)
+        return self
+
+    def port(self, name, **kwargs):
+        """DEPRECATED: Use add_port() instead."""
+        # Map old parameter names to new
+        if "port_type" in kwargs:
+            del kwargs["port_type"]  # Not used in new API (always lumped)
+        self.add_port(name, **kwargs)
+        return self
+
+    def ports(self, **kwargs):
+        """DEPRECATED: Configure ports individually with add_port()."""
+        if self._component is None:
+            raise ValueError("Must call geometry(component) before ports()")
+        for gf_port in self._component.ports:
+            self.add_port(
+                gf_port.name,
+                layer=kwargs.get("layer"),
+                length=kwargs.get("length"),
+                impedance=kwargs.get("impedance", 50.0),
+                excited=kwargs.get("excited", True),
+            )
+        return self
+
+    def cpw_port(
+        self,
+        port_upper,
+        port_lower,
+        *,
+        layer,
+        length,
+        impedance=50.0,
+        excited=True,
+        name=None,
+    ):
+        """DEPRECATED: Use add_cpw_port() instead."""
+        self.add_cpw_port(
+            port_upper,
+            port_lower,
+            layer=layer,
+            length=length,
+            impedance=impedance,
+            excited=excited,
+            name=name,
+        )
+        return self
+
+    def driven(self, **kwargs):
+        """DEPRECATED: Use set_driven() instead."""
+        self.set_driven(**kwargs)
+        return self
+
+    def physics(self, **kwargs):
+        """DEPRECATED: Use set_driven() or other problem-specific methods."""
+        warnings.warn(
+            "physics() is deprecated. Use set_driven() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # Map old physics kwargs to driven config
+        self.set_driven(
+            fmin=kwargs.get("fmin", 1e9),
+            fmax=kwargs.get("fmax", 100e9),
+            num_points=kwargs.get("num_frequency_points", 40),
+            scale=kwargs.get("frequency_scale", "linear"),
+        )
+        return self
+
+
 __all__ = [
-    # New Pydantic-based fluent API
+    # Primary simulation classes (new API)
+    "DrivenSim",
+    "EigenmodeSim",
+    "ElectrostaticSim",
+    "SimBase",
+    # Legacy (deprecated)
     "PalaceSim",
-    # Problem type configs
+    # Problem configs
     "DrivenConfig",
     "EigenmodeConfig",
     "ElectrostaticConfig",
     "MagnetostaticConfig",
     "TransientConfig",
-    "ProblemType",
     # Port configs
-    "WavePortConfig",
+    "CPWPortConfig",
+    "PortConfig",
     "TerminalConfig",
-    # Other models
-    "LayerModel",
-    "LayerStackModel",
-    "MaterialPropertiesModel",
+    "WavePortConfig",
+    # Other configs
+    "GeometryConfig",
+    "LayerConfig",
+    "MaterialConfig",
     "MeshConfigModel",
     "NumericalConfig",
-    "PhysicsConfig",  # Deprecated: use DrivenConfig, etc.
-    "PortConfigModel",
     "SimulationResult",
-    "ValidationResultModel",
+    "StackConfig",
+    "ValidationResult",
     # Legacy API (still supported)
     "MATERIALS_DB",
     "GroundPlane",
@@ -137,7 +260,6 @@ __all__ = [
     "PortGeometry",
     "PortType",
     "StackLayer",
-    "ValidationResult",
     "configure_cpw_port",
     "configure_inplane_port",
     "configure_via_port",
