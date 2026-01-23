@@ -20,7 +20,7 @@ from . import gmsh_utils
 if TYPE_CHECKING:
     from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
-    from gsim.palace.stack import LayerStack
+    from gsim.common.stack import LayerStack
 
 from gsim.palace.ports.config import PortGeometry
 

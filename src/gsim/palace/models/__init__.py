@@ -5,7 +5,7 @@ offering validation, serialization, and a clean API.
 
 Submodules:
     - geometry: GeometryConfig
-    - stack: StackConfig, LayerConfig, MaterialConfig
+    - stack: MaterialConfig (Layer/Stack are in gsim.common.stack)
     - ports: PortConfig, CPWPortConfig, TerminalConfig, WavePortConfig
     - mesh: MeshConfig
     - numerical: NumericalConfig
@@ -32,15 +32,13 @@ from gsim.palace.models.problems import (
     TransientConfig,
 )
 from gsim.palace.models.results import SimulationResult, ValidationResult
-from gsim.palace.models.stack import LayerConfig, MaterialConfig, StackConfig
+from gsim.palace.models.stack import MaterialConfig
 
 __all__ = [
     # Geometry
     "GeometryConfig",
     # Stack
-    "LayerConfig",
     "MaterialConfig",
-    "StackConfig",
     # Ports
     "CPWPortConfig",
     "PortConfig",

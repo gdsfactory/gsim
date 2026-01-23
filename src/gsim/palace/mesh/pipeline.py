@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from gsim.common.stack import LayerStack
     from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
-    from gsim.palace.stack.extractor import LayerStack
 
 from gsim.palace.mesh.generator import generate_mesh as gen_mesh
 

@@ -1,8 +1,11 @@
-"""Layer stack extraction and parsing for Palace EM simulation.
+"""Layer stack extraction and parsing for EM simulation.
+
+This module provides stack extraction functionality that can be shared
+between different solvers (Palace, FDTD, etc.).
 
 Usage:
     # From PDK module (preferred, no file needed)
-    from gsim.palace.stack import get_stack
+    from gsim.common.stack import get_stack
     stack = get_stack(pdk=ihp)
 
     # From YAML file (for custom/tweaked stacks)
@@ -19,21 +22,21 @@ from pathlib import Path
 import gdsfactory as gf
 import yaml
 
-from gsim.palace.stack.extractor import (
+from gsim.common.stack.extractor import (
     Layer,
     LayerStack,
     ValidationResult,
     extract_from_pdk,
     extract_layer_stack,
 )
-from gsim.palace.stack.materials import (
+from gsim.common.stack.materials import (
     MATERIALS_DB,
     MaterialProperties,
     get_material_properties,
     material_is_conductor,
     material_is_dielectric,
 )
-from gsim.palace.stack.visualization import (
+from gsim.common.stack.visualization import (
     StackLayer,
     parse_layer_stack,
     plot_stack,

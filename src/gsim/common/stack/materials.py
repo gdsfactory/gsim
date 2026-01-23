@@ -6,17 +6,20 @@ This database provides the EM properties needed for Palace simulation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-@dataclass
-class MaterialProperties:
+class MaterialProperties(BaseModel):
     """EM properties for a material."""
 
-    type: str  # "conductor", "dielectric", "semiconductor"
-    conductivity: float | None = None  # S/m (for conductors)
-    permittivity: float | None = None  # relative permittivity
-    loss_tangent: float | None = None  # dielectric loss tangent
+    model_config = ConfigDict(validate_assignment=True)
+
+    type: Literal["conductor", "dielectric", "semiconductor"]
+    conductivity: float | None = Field(default=None, ge=0)  # S/m (for conductors)
+    permittivity: float | None = Field(default=None, ge=1.0)  # relative permittivity
+    loss_tangent: float | None = Field(default=None, ge=0, le=1)
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary for YAML output."""
@@ -29,6 +32,20 @@ class MaterialProperties:
             d["loss_tangent"] = self.loss_tangent
         return d
 
+    @classmethod
+    def conductor(cls, conductivity: float = 5.8e7) -> "MaterialProperties":
+        """Create a conductor material."""
+        return cls(type="conductor", conductivity=conductivity)
+
+    @classmethod
+    def dielectric(
+        cls, permittivity: float, loss_tangent: float = 0.0
+    ) -> "MaterialProperties":
+        """Create a dielectric material."""
+        return cls(
+            type="dielectric", permittivity=permittivity, loss_tangent=loss_tangent
+        )
+
 
 # Material properties database
 # Sources:
@@ -38,7 +55,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     # Conductors (conductivity in S/m)
     "aluminum": MaterialProperties(
         type="conductor",
-        conductivity=3.77e7,  # S/m
+        conductivity=3.77e7,
     ),
     "copper": MaterialProperties(
         type="conductor",
@@ -64,7 +81,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "SiO2": MaterialProperties(
         type="dielectric",
         permittivity=4.1,  # Matches gds2palace IHP SG13G2
-        loss_tangent=0.0,  # Matches gds2palace (no loss)
+        loss_tangent=0.0,
     ),
     "passive": MaterialProperties(
         type="dielectric",
@@ -100,7 +117,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "si": MaterialProperties(
         type="semiconductor",
         permittivity=11.9,
-        conductivity=2.0,  # ~50 Ω·cm substrate (matches gds2palace)
+        conductivity=2.0,
     ),
 }
 
@@ -130,7 +147,6 @@ def get_material_properties(material_name: str) -> MaterialProperties | None:
     Returns:
         MaterialProperties if found, None otherwise
     """
-    # Normalize name
     name_lower = material_name.lower().strip()
 
     # Check direct match
