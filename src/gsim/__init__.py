@@ -5,6 +5,7 @@ of gdsfactory+.
 
 Currently includes:
     - palace: Palace EM simulation API
+    - vlsir: GDSF -> VLSIR Netlisting API
 """
 
 from __future__ import annotations

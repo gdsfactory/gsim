@@ -16,7 +16,9 @@ dependencies = [
   "meshio>=5.0.0",
   "plotly",
   "pydantic>=2.10.6",
-  "pyvista>=0.43.0"
+  "pyvista>=0.43.0",
+  "vlsir>=7.0.0",
+  "vlsirtools>=7.0.0"
 ]
 description = ""
 name = "gsim"
