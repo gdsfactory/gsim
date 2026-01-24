@@ -19,6 +19,7 @@ nav:
   - examples:
       - Simple Example: nbs/example.md
       - Palace CPW: nbs/palace_demo_cpw.md
+      - Palace Microstrip: nbs/palace_demo_microstrip.md
   - api reference:
       - gsim.palace: api.md
 
