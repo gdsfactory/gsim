@@ -56,7 +56,7 @@ dev = [
   "ty>=0.0.13"
 ]
 docs = [
-  "ihp @ git+https://github.com/gdsfactory/IHP.git",
+  "ihp-gdsfactory @ git+https://github.com/gdsfactory/IHP.git",
 ]
 
 [[tool.bver.file]]
