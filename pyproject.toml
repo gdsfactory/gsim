@@ -59,6 +59,9 @@ docs = [
   "ihp-gdsfactory @ git+https://github.com/gdsfactory/IHP.git",
 ]
 
+[tool.bver]
+commit = "Release {version}"
+
 [[tool.bver.file]]
 src = "README.md"
 
