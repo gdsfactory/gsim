@@ -28,7 +28,12 @@ Usage:
 
 from __future__ import annotations
 
-from gsim.palace.mesh.generator import generate_mesh as generate_mesh_direct
+from gsim.palace.mesh.generator import (
+    GeometryData,
+    MeshResult as MeshResultDirect,
+    generate_mesh as generate_mesh_direct,
+    write_config,
+)
 from gsim.palace.mesh.pipeline import (
     GroundPlane,
     MeshConfig,
@@ -40,11 +45,17 @@ from gsim.palace.mesh.pipeline import (
 from . import gmsh_utils
 
 __all__ = [
+    # Pipeline API (recommended)
     "GroundPlane",
     "MeshConfig",
     "MeshPreset",
     "MeshResult",
     "generate_mesh",
+    # Direct API
+    "GeometryData",
+    "MeshResultDirect",
     "generate_mesh_direct",
+    "write_config",
+    # Utilities
     "gmsh_utils",
 ]
