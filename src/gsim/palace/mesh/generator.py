@@ -44,6 +44,11 @@ class MeshResult:
     config_path: Path | None = None
     port_info: list = field(default_factory=list)
     mesh_stats: dict = field(default_factory=dict)
+    # Data needed for deferred config generation
+    groups: dict = field(default_factory=dict)
+    output_dir: Path | None = None
+    model_name: str = "palace"
+    fmax: float = 100e9
 
 
 def extract_geometry(component, stack: LayerStack) -> GeometryData:
@@ -963,6 +968,7 @@ def generate_mesh(
     fmax: float = 100e9,
     show_gui: bool = False,
     driven_config: DrivenConfig | None = None,
+    write_config: bool = True,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -979,6 +985,7 @@ def generate_mesh(
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
         driven_config: Optional DrivenConfig for frequency sweep settings
+        write_config: Whether to write config.json (default True)
 
     Returns:
         MeshResult with paths and metadata
@@ -1060,22 +1067,71 @@ def generate_mesh(
 
         logger.info("Mesh saved: %s", msh_path)
 
-        # Generate config
-        logger.info("Generating Palace config...")
-        config_path = _generate_palace_config(
-            groups, ports, port_info, stack, output_dir, model_name, fmax, driven_config
-        )
+        # Generate config if requested
+        config_path = None
+        if write_config:
+            logger.info("Generating Palace config...")
+            config_path = _generate_palace_config(
+                groups, ports, port_info, stack, output_dir, model_name, fmax, driven_config
+            )
 
     finally:
         gmsh.clear()
         gmsh.finalize()
 
-    # Build result
+    # Build result (store groups for deferred config generation)
     result = MeshResult(
         mesh_path=msh_path,
         config_path=config_path,
         port_info=port_info,
         mesh_stats=mesh_stats,
+        groups=groups,
+        output_dir=output_dir,
+        model_name=model_name,
+        fmax=fmax,
     )
 
     return result
+
+
+def write_config(
+    mesh_result: MeshResult,
+    stack: LayerStack,
+    ports: list[PalacePort],
+    driven_config: DrivenConfig | None = None,
+) -> Path:
+    """Write Palace config.json from a MeshResult.
+
+    Use this to generate config separately after mesh().
+
+    Args:
+        mesh_result: Result from generate_mesh(write_config=False)
+        stack: LayerStack for material properties
+        ports: List of PalacePort objects
+        driven_config: Optional DrivenConfig for frequency sweep settings
+
+    Returns:
+        Path to the generated config.json
+
+    Example:
+        >>> result = sim.mesh(output_dir, write_config=False)
+        >>> config_path = write_config(result, stack, ports, driven_config)
+    """
+    if not mesh_result.groups:
+        raise ValueError("MeshResult has no groups data. Was it generated with write_config=False?")
+
+    config_path = _generate_palace_config(
+        groups=mesh_result.groups,
+        ports=ports,
+        port_info=mesh_result.port_info,
+        stack=stack,
+        output_path=mesh_result.output_dir,
+        model_name=mesh_result.model_name,
+        fmax=mesh_result.fmax,
+        driven_config=driven_config,
+    )
+
+    # Update the mesh_result with the config path
+    mesh_result.config_path = config_path
+
+    return config_path

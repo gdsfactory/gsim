@@ -91,6 +91,29 @@ class DrivenSim(BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+    _last_mesh_result: Any = PrivateAttr(default=None)
+    _last_ports: list = PrivateAttr(default_factory=list)
+
+    # -------------------------------------------------------------------------
+    # Output directory
+    # -------------------------------------------------------------------------
+
+    def set_output_dir(self, path: str | Path) -> None:
+        """Set the output directory for mesh and config files.
+
+        Args:
+            path: Directory path for output files
+
+        Example:
+            >>> sim.set_output_dir("./palace-sim")
+        """
+        self._output_dir = Path(path)
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def output_dir(self) -> Path | None:
+        """Get the current output directory."""
+        return self._output_dir
 
     # -------------------------------------------------------------------------
     # Geometry methods
@@ -609,6 +632,7 @@ class DrivenSim(BaseModel):
         driven_config: Any,
         model_name: str,
         verbose: bool,
+        write_config: bool = True,
     ) -> SimulationResult:
         """Internal mesh generation."""
         from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
@@ -646,7 +670,12 @@ class DrivenSim(BaseModel):
             config=legacy_mesh_config,
             model_name=model_name,
             driven_config=driven_config,
+            write_config=write_config,
         )
+
+        # Store mesh_result for deferred config generation
+        self._last_mesh_result = mesh_result
+        self._last_ports = ports
 
         return SimulationResult(
             mesh_path=mesh_result.mesh_path,
@@ -784,7 +813,6 @@ class DrivenSim(BaseModel):
 
     def mesh(
         self,
-        output_dir: str | Path,
         *,
         preset: Literal["coarse", "default", "fine"] | None = None,
         refined_mesh_size: float | None = None,
@@ -796,10 +824,14 @@ class DrivenSim(BaseModel):
         model_name: str = "palace",
         verbose: bool = True,
     ) -> SimulationResult:
-        """Generate the mesh and configuration files for Palace simulation.
+        """Generate the mesh for Palace simulation.
+
+        Only generates the mesh file (palace.msh). Config is generated
+        separately with write_config().
+
+        Requires set_output_dir() to be called first.
 
         Args:
-            output_dir: Directory for output files
             preset: Mesh quality preset ("coarse", "default", "fine")
             refined_mesh_size: Mesh size near conductors (um), overrides preset
             max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
@@ -811,16 +843,20 @@ class DrivenSim(BaseModel):
             verbose: Print progress messages
 
         Returns:
-            SimulationResult with mesh and config paths
+            SimulationResult with mesh path
 
         Raises:
-            ValueError: If configuration is invalid
+            ValueError: If output_dir not set or configuration is invalid
 
         Example:
-            >>> result = sim.mesh("./sim", preset="fine")
+            >>> sim.set_output_dir("./sim")
+            >>> result = sim.mesh(preset="fine")
             >>> print(f"Mesh saved to: {result.mesh_path}")
         """
         from gsim.palace.ports import extract_ports
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
 
         component = self.geometry.component if self.geometry else None
 
@@ -842,11 +878,7 @@ class DrivenSim(BaseModel):
                 f"Invalid configuration:\n" + "\n".join(validation.errors)
             )
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Store output_dir for simulate() calls
-        self._output_dir = output_dir
+        output_dir = self._output_dir
 
         # Resolve stack and configure ports
         stack = self._resolve_stack()
@@ -855,7 +887,7 @@ class DrivenSim(BaseModel):
         # Extract ports
         palace_ports = extract_ports(component, stack)
 
-        # Generate mesh
+        # Generate mesh (config is written separately by simulate() or write_config())
         return self._generate_mesh_internal(
             output_dir=output_dir,
             mesh_config=mesh_config,
@@ -863,7 +895,44 @@ class DrivenSim(BaseModel):
             driven_config=self.driven,
             model_name=model_name,
             verbose=verbose,
+            write_config=False,
         )
+
+    def write_config(self) -> Path:
+        """Write Palace config.json after mesh generation.
+
+        Use this when mesh() was called with write_config=False.
+
+        Returns:
+            Path to the generated config.json
+
+        Raises:
+            ValueError: If mesh() hasn't been called yet
+
+        Example:
+            >>> result = sim.mesh("./sim", write_config=False)
+            >>> config_path = sim.write_config()
+        """
+        from gsim.palace.mesh.generator import write_config as gen_write_config
+
+        if self._last_mesh_result is None:
+            raise ValueError("No mesh result. Call mesh() first.")
+
+        if not self._last_mesh_result.groups:
+            raise ValueError(
+                "Mesh result has no groups data. "
+                "Was mesh() called with write_config=True already?"
+            )
+
+        stack = self._resolve_stack()
+        config_path = gen_write_config(
+            mesh_result=self._last_mesh_result,
+            stack=stack,
+            ports=self._last_ports,
+            driven_config=self.driven,
+        )
+
+        return config_path
 
     # -------------------------------------------------------------------------
     # Simulation
@@ -871,25 +940,22 @@ class DrivenSim(BaseModel):
 
     def simulate(
         self,
-        output_dir: str | Path | None = None,
         *,
         verbose: bool = True,
     ) -> dict[str, Path]:
         """Run simulation on GDSFactory+ cloud.
 
-        Requires mesh files to exist in output_dir (call mesh() first).
+        Requires mesh() and write_config() to be called first.
 
         Args:
-            output_dir: Directory containing mesh files. If None, uses the
-                directory from the last mesh() call.
             verbose: Print progress messages
 
         Returns:
             Dict mapping result filenames to local paths
 
         Raises:
-            ValueError: If output_dir not provided and mesh() not called
-            FileNotFoundError: If output directory doesn't exist
+            ValueError: If output_dir not set
+            FileNotFoundError: If mesh or config files don't exist
             RuntimeError: If simulation fails
 
         Example:
@@ -898,15 +964,10 @@ class DrivenSim(BaseModel):
         """
         from gsim.gcloud import run_simulation
 
-        if output_dir is None:
-            if self._output_dir is None:
-                raise ValueError(
-                    "output_dir not provided and mesh() has not been called. "
-                    "Either call mesh() first or provide output_dir explicitly."
-                )
-            output_dir = self._output_dir
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
 
-        output_dir = Path(output_dir)
+        output_dir = self._output_dir
 
         return run_simulation(
             output_dir,
@@ -916,18 +977,15 @@ class DrivenSim(BaseModel):
 
     def simulate_local(
         self,
-        output_dir: str | Path | None = None,
         *,
         verbose: bool = True,
     ) -> dict[str, Path]:
         """Run simulation locally using Palace.
 
-        Requires mesh files to exist in output_dir (call mesh() first)
+        Requires mesh() and write_config() to be called first,
         and Palace to be installed locally.
 
         Args:
-            output_dir: Directory containing mesh files. If None, uses the
-                directory from the last mesh() call.
             verbose: Print progress messages
 
         Returns:

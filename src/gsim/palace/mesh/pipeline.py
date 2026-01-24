@@ -142,6 +142,12 @@ class MeshResult:
     # Mesh statistics
     mesh_stats: dict = field(default_factory=dict)
 
+    # Data needed for deferred config generation
+    groups: dict = field(default_factory=dict)
+    output_dir: Path | None = None
+    model_name: str = "palace"
+    fmax: float = 100e9
+
 
 def generate_mesh(
     component,
@@ -151,6 +157,7 @@ def generate_mesh(
     config: MeshConfig | None = None,
     model_name: str = "palace",
     driven_config: DrivenConfig | None = None,
+    write_config: bool = True,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -162,6 +169,7 @@ def generate_mesh(
         config: MeshConfig with mesh parameters
         model_name: Base name for output files (default: "mesh" -> mesh.msh)
         driven_config: Optional DrivenConfig for frequency sweep settings
+        write_config: Whether to write config.json (default True)
 
     Returns:
         MeshResult with mesh path and metadata
@@ -185,6 +193,7 @@ def generate_mesh(
         fmax=config.fmax,
         show_gui=config.show_gui,
         driven_config=driven_config,
+        write_config=write_config,
     )
 
     # Convert to pipeline's MeshResult format
@@ -193,4 +202,8 @@ def generate_mesh(
         config_path=result.config_path,
         port_info=result.port_info,
         mesh_stats=result.mesh_stats,
+        groups=result.groups,
+        output_dir=result.output_dir,
+        model_name=result.model_name,
+        fmax=result.fmax,
     )
