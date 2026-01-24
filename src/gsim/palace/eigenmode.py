@@ -6,9 +6,12 @@ frequencies and mode shapes.
 
 from __future__ import annotations
 
+import logging
 import tempfile
 import warnings
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -541,7 +544,7 @@ class EigenmodeSim(BaseModel):
         stack = self._resolve_stack()
 
         if verbose:
-            print(f"Generating mesh in {output_dir}...")
+            logger.info("Generating mesh in %s", output_dir)
 
         mesh_result = generate_mesh(
             component=component,
@@ -553,16 +556,12 @@ class EigenmodeSim(BaseModel):
             driven_config=None,  # Eigenmode doesn't use driven config
         )
 
-        if verbose:
-            print(f"Mesh saved: {mesh_result.mesh_path}")
-            if mesh_result.config_path:
-                print(f"Config saved: {mesh_result.config_path}")
-
         return SimulationResult(
             mesh_path=mesh_result.mesh_path,
             output_dir=output_dir,
             config_path=mesh_result.config_path,
             port_info=mesh_result.port_info,
+            mesh_stats=mesh_result.mesh_stats,
         )
 
     def _get_ports_for_preview(self, stack: LayerStack) -> list:

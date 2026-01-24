@@ -139,6 +139,9 @@ class MeshResult:
     # Port metadata
     port_info: list = field(default_factory=list)
 
+    # Mesh statistics
+    mesh_stats: dict = field(default_factory=dict)
+
 
 def generate_mesh(
     component,
@@ -189,4 +192,5 @@ def generate_mesh(
         mesh_path=result.mesh_path,
         config_path=result.config_path,
         port_info=result.port_info,
+        mesh_stats=result.mesh_stats,
     )
