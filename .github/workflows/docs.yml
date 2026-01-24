@@ -22,7 +22,7 @@ jobs:
       - name: Install Just
         uses: taiki-e/install-action@just
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa
+        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
       - name: Create environment
         run: just dev
       - name: Create ipykernel
@@ -32,7 +32,7 @@ jobs:
           for nb in $(find nbs -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" | sort); do
             dir=$(dirname "$nb")
             filename=$(basename "$nb")
-            (cd "$dir" && uv run --no-sync papermill "$filename" "$filename" -k gsim)
+            (cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim)
           done
       - name: Upload executed notebooks
         uses: actions/upload-artifact@v4
