@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
+from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     EigenmodeConfig,
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
 
-class EigenmodeSim(BaseModel):
+class EigenmodeSim(PalaceSimMixin, BaseModel):
     """Eigenmode simulation for finding resonant frequencies.
 
     This class configures and runs eigenmode simulations to find

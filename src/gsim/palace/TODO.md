@@ -20,17 +20,27 @@ Changes needed:
 
 ## Code Organization
 
-### Extract Common Base Class
-Create a common base module with shared functionality:
+### Extract Common Base Class (Mixin)
+Create a common mixin with shared functionality. File `src/gsim/palace/base.py` exists with `PalaceSimMixin`.
 
-- [ ] Create `src/gsim/palace/base.py` with `PalaceSimBase` class containing:
-  - `set_output_dir()` / `output_dir` property
-  - `set_geometry()`
-  - `set_stack()`
-  - `validate()` base implementation
-  - `_resolve_stack()`
-  - `write_config()` (if signature is identical)
-  - Common private attributes (`_output_dir`, `_last_mesh_result`, etc.)
+Methods to move to mixin (identical across all 3 sim classes):
+- [x] `plot_mesh()` - visualize mesh (added)
+- [ ] `set_output_dir()` / `output_dir` property
+- [ ] `set_geometry()` / `component` / `_component` properties
+- [ ] `set_stack()`
+- [ ] `set_material()`
+- [ ] `set_numerical()`
+- [ ] `_resolve_stack()`
+- [ ] `_build_mesh_config()`
+- [ ] `show_stack()`
+- [ ] `plot_stack()`
+
+Keep in each class (type-specific):
+- `validate()` - different validation rules per type
+- `add_port()` / `add_cpw_port()` - only Driven/Eigenmode
+- `add_terminal()` - only Electrostatic
+- `set_driven()` / `set_eigenmode()` / `set_electrostatic()`
+- `mesh()` / `simulate()` - similar but type-specific logic
 
 ### Break Down Large Files
 Files over 500 lines need refactoring:

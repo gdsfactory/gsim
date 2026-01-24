@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
+from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     ElectrostaticConfig,
     MaterialConfig,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
 
-class ElectrostaticSim(BaseModel):
+class ElectrostaticSim(PalaceSimMixin, BaseModel):
     """Electrostatic simulation for capacitance matrix extraction.
 
     This class configures and runs electrostatic simulations to extract

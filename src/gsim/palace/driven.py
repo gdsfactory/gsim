@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
+from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     DrivenConfig,
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
 
-class DrivenSim(BaseModel):
+class DrivenSim(PalaceSimMixin, BaseModel):
     """Frequency-domain driven simulation for S-parameter extraction.
 
     This class configures and runs driven simulations that sweep through
