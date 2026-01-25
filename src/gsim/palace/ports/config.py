@@ -11,7 +11,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gsim.palace.stack import LayerStack
+    from gsim.common.stack import LayerStack
 
 
 class PortType(Enum):

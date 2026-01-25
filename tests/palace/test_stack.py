@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from gsim.palace.stack import (
+from gsim.common.stack import (
+    MATERIALS_DB,
     Layer,
     LayerStack,
     ValidationResult,
@@ -10,7 +11,6 @@ from gsim.palace.stack import (
     material_is_conductor,
     material_is_dielectric,
 )
-from gsim.palace.stack.materials import MATERIALS_DB
 
 
 class TestMaterials:
@@ -261,7 +261,7 @@ class TestValidation:
             {"name": "air_box", "zmin": 0.5, "zmax": 100.0, "material": "air"},
         ]
 
-        result = stack.validate()
+        result = stack.validate_stack()
         assert result.valid
 
     def test_missing_material(self):
@@ -285,7 +285,7 @@ class TestValidation:
             },
         ]
 
-        result = stack.validate()
+        result = stack.validate_stack()
         assert not result.valid
         assert any("undefined_material" in e for e in result.errors)
 
@@ -304,7 +304,7 @@ class TestValidation:
         )
         stack.dielectrics = []
 
-        result = stack.validate()
+        result = stack.validate_stack()
         assert not result.valid
         assert any("negative thickness" in e for e in result.errors)
 
@@ -323,6 +323,6 @@ class TestValidation:
         )
         stack.dielectrics = []
 
-        result = stack.validate()
+        result = stack.validate_stack()
         assert not result.valid
         assert any("No dielectric" in e for e in result.errors)

@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: "v5.0.0"
+    rev: "v6.0.0"
     hooks:
       - id: check-added-large-files
       - id: check-case-conflict
@@ -21,25 +21,25 @@ repos:
         exclude: 'changelog\.d/.*|CHANGELOG\.md'
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.5
+    rev: v0.14.14
     hooks:
       - id: ruff-format
         stages: [pre-commit]
         args: ["--config", "pyproject.toml"]
         types_or: [python, jupyter]
-      - id: ruff
+      - id: ruff-check
         stages: [pre-commit]
         args: ["--fix", "--config", "pyproject.toml"]
         types_or: [python]
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.14.0
+    rev: v2.16.0
     hooks:
       - id: pretty-format-toml
         args: [--autofix]
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.0
+    rev: v2.4.1
     hooks:
       - id: codespell
         args: [--skip="*.ipynb"]
@@ -47,25 +47,9 @@ repos:
           - tomli
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: "v3.5.1"
+    rev: "v3.8.1"
     hooks:
       - id: prettier
-
-  - repo: local
-    hooks:
-      - id: pyright
-        name: pyright
-        entry: uv run --no-sync pyright
-        language: system
-        files: \.(py)$
-
-  - repo: local
-    hooks:
-      - id: mypy
-        name: mypy
-        entry: uv run --no-sync mypy
-        language: system
-        files: \.(py)$
 
   - repo: local
     hooks:
@@ -74,3 +58,11 @@ repos:
         entry: just nbclean
         language: system
         files: \.(ipynb)$
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: uv run --no-sync ty check
+        language: system
+        files: \.(py)$

@@ -95,7 +95,7 @@ def test_palace_ports_import():
 
 def test_palace_stack_import():
     """Test that palace.stack submodule can be imported."""
-    from gsim.palace.stack import (
+    from gsim.common.stack import (
         get_material_properties,
         get_stack,
         load_stack_yaml,
@@ -130,7 +130,7 @@ def test_mesh_config_presets():
 
 def test_material_properties():
     """Test material property lookups."""
-    from gsim.palace.stack import (
+    from gsim.common.stack import (
         get_material_properties,
         material_is_conductor,
         material_is_dielectric,

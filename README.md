@@ -1,4 +1,4 @@
-# Gsim
+# Gsim 0.0.2
 
 > a GDSFactory Simulation Plugin
 

@@ -10,7 +10,7 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 dependencies = [
-  "gdsfactory>=8.32.2",
+  "gdsfactory>=9.32.0",
   "gdsfactoryplus>=1.3.7",
   "gmsh",
   "meshio>=5.0.0",
@@ -21,8 +21,8 @@ dependencies = [
 description = ""
 name = "gsim"
 readme = "README.md"
-requires-python = ">=3.12"
-version = "0.0.0"
+requires-python = ">=3.12,<3.14"
+version = "0.0.2"
 
 [project.optional-dependencies]
 dev = [
@@ -50,11 +50,26 @@ dev = [
   "pytest-xdist>=3.6.0",
   "pytest>=8.3.0",
   "ruff>=0.9.0",
-  "tbump>=6.0.0",
   "towncrier>=24.0.0",
   "vega-datasets>=0.9.0",
-  "nbstripout>=0.8.1"
+  "nbstripout>=0.8.1",
+  "ty>=0.0.13"
 ]
+docs = [
+  "ihp-gdsfactory>=0.1.4",
+]
+
+[tool.bver.git]
+commit-template = "Release {new-version}"
+
+[[tool.bver.file]]
+src = "README.md"
+
+[[tool.bver.file]]
+src = "pyproject.toml"
+
+[[tool.bver.file]]
+src = "src/gsim/__init__.py"
 
 [tool.mypy]
 mypy_path = ["src"]
@@ -206,28 +221,3 @@ convention = "google"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.tbump]
-
-[[tool.tbump.file]]
-src = "README.md"
-
-[[tool.tbump.file]]
-src = "pyproject.toml"
-
-[[tool.tbump.file]]
-src = "src/gsim/__init__.py"
-
-[tool.tbump.git]
-message_template = "Bump to {new_version}"
-tag_template = "{new_version}"
-
-[tool.tbump.version]
-current = "0.0.0"
-regex = '''
-  (?P<major>\d+)
-  \.
-  (?P<minor>\d+)
-  \.
-  (?P<patch>\d+)
-  '''

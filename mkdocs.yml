@@ -1,6 +1,6 @@
 site_name: gsim
 site_url: https://gdsfactory.com/gsim
-site_description: Palace EM Simulation API for GDSFactory
+site_description: Simulations API for GDSFactory
 site_author: GDSFactory
 copyright: Copyright © 2026, GDSFactory
 
@@ -17,7 +17,9 @@ extra_css:
 nav:
   - home: index.md
   - examples:
-      - example: nbs/example.md
+      - Simple Example: nbs/example.md
+      - Palace CPW: nbs/palace_demo_cpw.md
+      - Palace Microstrip: nbs/palace_demo_microstrip.md
   - api reference:
       - gsim.palace: api.md
 
