@@ -16,7 +16,6 @@ Usage:
 
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +24,64 @@ from gdsfactoryplus import sim  # type: ignore[import-untyped]
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Literal
+
+
+def _handle_failed_job(job, output_dir: Path, verbose: bool) -> None:
+    """Handle a failed simulation job by downloading logs and raising informative error.
+
+    Args:
+        job: The finished Job object with non-zero exit code
+        output_dir: Directory to download logs to
+        verbose: Whether to print progress
+
+    Raises:
+        RuntimeError: Always raised with detailed error information
+    """
+    error_parts = [
+        f"Simulation failed with exit code {job.exit_code}",
+        f"Status: {job.status.value}",
+    ]
+
+    if job.status_reason:
+        error_parts.append(f"Reason: {job.status_reason}")
+    if job.detail_reason:
+        error_parts.append(f"Details: {job.detail_reason}")
+
+    # Try to download logs even though job failed
+    try:
+        if job.download_urls:
+            if verbose:
+                print("Downloading logs from failed job...")  # noqa: T201
+
+            raw_results = sim.download_results(job, output_dir=output_dir)
+
+            # Flatten results to find all files
+            all_files: dict[str, Path] = {}
+            for result_path in raw_results.values():
+                if result_path.is_dir():
+                    for file_path in result_path.rglob("*"):
+                        if file_path.is_file() and not file_path.name.startswith("."):
+                            all_files[file_path.name] = file_path
+                else:
+                    all_files[result_path.name] = result_path
+
+            # Look for log files and display them
+            log_files = ["palace.log", "stdout.log", "stderr.log", "output.log"]
+            for log_name in log_files:
+                if log_name in all_files:
+                    content = all_files[log_name].read_text()
+                    error_parts.append(f"\n--- {log_name} (last 100 lines) ---")
+                    lines = content.strip().split("\n")
+                    error_parts.append("\n".join(lines[-100:]))
+                    break
+
+            if verbose and all_files:
+                print(f"Logs downloaded to {output_dir}")  # noqa: T201
+
+    except Exception as e:
+        error_parts.append(f"(Failed to download logs: {e})")
+
+    raise RuntimeError("\n".join(error_parts))
 
 
 def _get_job_definition(job_type: str):
@@ -37,7 +94,7 @@ def _get_job_definition(job_type: str):
 
 
 def upload_simulation_dir(input_dir: str | Path, job_type: str):
-    """Zip all files in a directory and upload for simulation.
+    """Upload a simulation directory for cloud execution.
 
     Args:
         input_dir: Directory containing simulation files
@@ -47,21 +104,8 @@ def upload_simulation_dir(input_dir: str | Path, job_type: str):
         PreJob object from gdsfactoryplus
     """
     input_dir = Path(input_dir)
-    zip_path = Path("_gsim_upload.zip")
-
-    try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-            for file in input_dir.rglob("*"):
-                if file.is_file():
-                    zf.write(file, arcname=file.relative_to(input_dir))
-
-        job_definition = _get_job_definition(job_type)
-        pre_job = sim.upload_simulation(path=zip_path, job_definition=job_definition)
-    finally:
-        if zip_path.exists():
-            zip_path.unlink()
-
-    return pre_job
+    job_definition = _get_job_definition(job_type)
+    return sim.upload_simulation(path=input_dir, job_definition=job_definition)
 
 
 def run_simulation(
@@ -125,18 +169,27 @@ def run_simulation(
 
     # Check status
     if finished_job.exit_code != 0:
-        raise RuntimeError(
-            f"Simulation failed with exit code {finished_job.exit_code}. "
-            f"Status: {finished_job.status.value}"
-        )
+        _handle_failed_job(finished_job, output_dir, verbose)
 
     # Download
-    results = sim.download_results(finished_job)
+    raw_results = sim.download_results(finished_job)
+
+    # Flatten results: gdsfactoryplus returns extracted directories,
+    # but we want a dict of filename -> Path for individual files
+    results: dict[str, Path] = {}
+    for result_path in raw_results.values():
+        if result_path.is_dir():
+            # Recursively find all files in the extracted directory
+            for file_path in result_path.rglob("*"):
+                if file_path.is_file() and not file_path.name.startswith("."):
+                    results[file_path.name] = file_path
+        else:
+            results[result_path.name] = result_path
 
     if verbose and results:
+        # Find common parent directory for display
         first_path = next(iter(results.values()))
-        download_dir = first_path.parent
-        print(f"Downloaded {len(results)} files to {download_dir}")  # noqa: T201
+        print(f"Downloaded {len(results)} files to {first_path.parent}")  # noqa: T201
 
     return results
 
