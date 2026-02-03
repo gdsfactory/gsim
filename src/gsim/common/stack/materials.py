@@ -33,14 +33,14 @@ class MaterialProperties(BaseModel):
         return d
 
     @classmethod
-    def conductor(cls, conductivity: float = 5.8e7) -> "MaterialProperties":
+    def conductor(cls, conductivity: float = 5.8e7) -> MaterialProperties:
         """Create a conductor material."""
         return cls(type="conductor", conductivity=conductivity)
 
     @classmethod
     def dielectric(
         cls, permittivity: float, loss_tangent: float = 0.0
-    ) -> "MaterialProperties":
+    ) -> MaterialProperties:
         """Create a dielectric material."""
         return cls(
             type="dielectric", permittivity=permittivity, loss_tangent=loss_tangent

@@ -9,9 +9,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -28,8 +26,7 @@ from gsim.palace.models import (
     ValidationResult,
 )
 
-if TYPE_CHECKING:
-    from gdsfactory.component import Component
+logger = logging.getLogger(__name__)
 
 
 class DrivenSim(PalaceSimMixin, BaseModel):
@@ -124,7 +121,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         Example:
             >>> sim.add_port("o1", layer="topmetal2", length=5.0)
-            >>> sim.add_port("feed", from_layer="metal1", to_layer="topmetal2", geometry="via")
+            >>> sim.add_port(
+            ...     "feed", from_layer="metal1", to_layer="topmetal2", geometry="via"
+            ... )
         """
         # Remove existing config for this port if any
         self.ports = [p for p in self.ports if p.name != name]
@@ -236,7 +235,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Validation
     # -------------------------------------------------------------------------
 
-    def validate(self) -> ValidationResult:
+    def validate_config(self) -> ValidationResult:
         """Validate the simulation configuration.
 
         Returns:
@@ -265,22 +264,21 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             # Validate port configurations
             for port in self.ports:
                 if port.geometry == "inplane" and port.layer is None:
+                    errors.append(f"Port '{port.name}': inplane ports require 'layer'")
+                if port.geometry == "via" and (
+                    port.from_layer is None or port.to_layer is None
+                ):
                     errors.append(
-                        f"Port '{port.name}': inplane ports require 'layer'"
+                        f"Port '{port.name}': via ports require "
+                        "'from_layer' and 'to_layer'"
                     )
-                if port.geometry == "via":
-                    if port.from_layer is None or port.to_layer is None:
-                        errors.append(
-                            f"Port '{port.name}': via ports require "
-                            "'from_layer' and 'to_layer'"
-                        )
 
             # Validate CPW ports
-            for cpw in self.cpw_ports:
-                if not cpw.layer:
-                    errors.append(
-                        f"CPW port ({cpw.upper}, {cpw.lower}): 'layer' is required"
-                    )
+            errors.extend(
+                f"CPW port ({cpw.upper}, {cpw.lower}): 'layer' is required"
+                for cpw in self.cpw_ports
+                if not cpw.layer
+            )
 
         # Validate excitation port if specified
         if self.driven.excitation_port is not None:
@@ -300,7 +298,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Internal helpers
     # -------------------------------------------------------------------------
 
-    def _configure_ports_on_component(self, stack: LayerStack) -> None:
+    def _configure_ports_on_component(self, stack: LayerStack) -> None:  # noqa: ARG002
         """Configure ports on the component using legacy functions."""
         from gsim.palace.ports import (
             configure_cpw_port,
@@ -330,7 +328,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     f"Available ports: {[p.name for p in component.ports]}"
                 )
 
-            if port_config.geometry == "inplane":
+            if port_config.geometry == "inplane" and port_config.layer is not None:
                 configure_inplane_port(
                     gf_port,
                     layer=port_config.layer,
@@ -338,7 +336,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     impedance=port_config.impedance,
                     excited=port_config.excited,
                 )
-            elif port_config.geometry == "via":
+            elif port_config.geometry == "via" and (
+                port_config.from_layer is not None and port_config.to_layer is not None
+            ):
                 configure_via_port(
                     gf_port,
                     from_layer=port_config.from_layer,
@@ -491,11 +491,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         component = self.geometry.component if self.geometry else None
 
         # Validate configuration
-        validation = self.validate()
+        validation = self.validate_config()
         if not validation.valid:
-            raise ValueError(
-                f"Invalid configuration:\n" + "\n".join(validation.errors)
-            )
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         # Build mesh config
         mesh_config = self._build_mesh_config(
@@ -601,11 +599,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         )
 
         # Validate configuration
-        validation = self.validate()
+        validation = self.validate_config()
         if not validation.valid:
-            raise ValueError(
-                f"Invalid configuration:\n" + "\n".join(validation.errors)
-            )
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         output_dir = self._output_dir
 

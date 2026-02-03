@@ -103,9 +103,8 @@ class SimulationResult(BaseModel):
             # Edge lengths
             edge = self.mesh_stats.get("edge_length", {})
             if edge:
-                lines.append(
-                    f"Edge length: {edge.get('min', 0):.2f} - {edge.get('max', 0):.2f} µm"
-                )
+                e_min, e_max = edge.get("min", 0), edge.get("max", 0)
+                lines.append(f"Edge length: {e_min:.2f} - {e_max:.2f} µm")
 
             # Mesh quality (gamma)
             quality = self.mesh_stats.get("quality", {})
@@ -119,7 +118,9 @@ class SimulationResult(BaseModel):
             if sicn:
                 invalid = sicn.get("invalid", 0)
                 if invalid > 0:
-                    lines.append(f"SICN:       {sicn.get('mean', 0):.3f} ({invalid} invalid!)")
+                    lines.append(
+                        f"SICN:       {sicn.get('mean', 0):.3f} ({invalid} invalid!)"
+                    )
                 else:
                     lines.append(f"SICN:       {sicn.get('mean', 0):.3f} (all valid)")
 

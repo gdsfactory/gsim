@@ -35,27 +35,23 @@ from gsim.common.stack import (
 Stack = LayerStack
 
 __all__ = [
-    # Geometry
+    "MATERIALS_DB",
     "Geometry",
-    # Stack (LayerStack is the primary name, Stack is an alias)
-    "LayerStack",
-    "Stack",
     "Layer",
+    "LayerStack",
+    "MaterialProperties",
+    "Stack",
     "StackLayer",
     "ValidationResult",
-    # Stack functions
-    "get_stack",
-    "load_stack_yaml",
     "extract_from_pdk",
     "extract_layer_stack",
-    "parse_layer_stack",
-    "print_stack",
-    "print_stack_table",
-    "plot_stack",
-    # Materials
-    "MATERIALS_DB",
-    "MaterialProperties",
     "get_material_properties",
+    "get_stack",
+    "load_stack_yaml",
     "material_is_conductor",
     "material_is_dielectric",
+    "parse_layer_stack",
+    "plot_stack",
+    "print_stack",
+    "print_stack_table",
 ]

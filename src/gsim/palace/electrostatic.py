@@ -9,9 +9,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -27,8 +25,7 @@ from gsim.palace.models import (
     ValidationResult,
 )
 
-if TYPE_CHECKING:
-    from gdsfactory.component import Component
+logger = logging.getLogger(__name__)
 
 
 class ElectrostaticSim(PalaceSimMixin, BaseModel):
@@ -138,12 +135,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             save_fields=save_fields,
         )
 
-
     # -------------------------------------------------------------------------
     # Validation
     # -------------------------------------------------------------------------
 
-    def validate(self) -> ValidationResult:
+    def validate_config(self) -> ValidationResult:
         """Validate the simulation configuration.
 
         Returns:
@@ -170,9 +166,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             )
 
         # Validate terminal configurations
-        for terminal in self.terminals:
-            if not terminal.layer:
-                errors.append(f"Terminal '{terminal.name}': 'layer' is required")
+        errors.extend(
+            f"Terminal '{terminal.name}': 'layer' is required"
+            for terminal in self.terminals
+            if not terminal.layer
+        )
 
         valid = len(errors) == 0
         return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
@@ -262,11 +260,9 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
 
         component = self.geometry.component if self.geometry else None
 
-        validation = self.validate()
+        validation = self.validate_config()
         if not validation.valid:
-            raise ValueError(
-                f"Invalid configuration:\n" + "\n".join(validation.errors)
-            )
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         mesh_config = self._build_mesh_config(
             preset=preset,
@@ -356,11 +352,9 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             show_gui=show_gui,
         )
 
-        validation = self.validate()
+        validation = self.validate_config()
         if not validation.valid:
-            raise ValueError(
-                f"Invalid configuration:\n" + "\n".join(validation.errors)
-            )
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         output_dir = self._output_dir
 

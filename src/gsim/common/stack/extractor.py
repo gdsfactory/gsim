@@ -288,7 +288,7 @@ def _get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int]:
     if hasattr(layer, "layer"):
         inner = layer.layer
         if hasattr(inner, "layer") and hasattr(inner, "datatype"):
-            return (int(inner.layer), int(inner.datatype))
+            return (int(inner.layer), int(inner.datatype))  # type: ignore[arg-type]
         if isinstance(inner, int):
             datatype = getattr(layer, "datatype", 0)
             return (int(inner), int(datatype) if datatype else 0)
@@ -299,11 +299,11 @@ def _get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int]:
                 return (int(innermost), int(datatype) if datatype else 0)
 
     if hasattr(layer, "layer") and hasattr(layer, "datatype"):
-        return (int(layer.layer), int(layer.datatype))
+        return (int(layer.layer), int(layer.datatype))  # type: ignore[arg-type]
 
     if hasattr(layer, "value"):
         if isinstance(layer.value, tuple):
-            return (int(layer.value[0]), int(layer.value[1]))
+            return (int(layer.value[0]), int(layer.value[1]))  # type: ignore[arg-type]
         if isinstance(layer.value, int):
             return (int(layer.value), 0)
 
@@ -314,7 +314,7 @@ def _get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int]:
         return (0, 0)
 
     try:
-        return (int(layer), 0)
+        return (int(layer), 0)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         logger.warning("Could not parse layer %s, using (0, 0)", layer)
         return (0, 0)

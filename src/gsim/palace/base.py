@@ -132,7 +132,8 @@ class PalaceSimMixin:
         self,
         name: str,
         *,
-        type: Literal["conductor", "dielectric", "semiconductor"] | None = None,
+        material_type: Literal["conductor", "dielectric", "semiconductor"]
+        | None = None,
         conductivity: float | None = None,
         permittivity: float | None = None,
         loss_tangent: float | None = None,
@@ -141,28 +142,31 @@ class PalaceSimMixin:
 
         Args:
             name: Material name
-            type: Material type (conductor, dielectric, semiconductor)
+            material_type: Material type (conductor, dielectric, semiconductor)
             conductivity: Conductivity in S/m (for conductors)
             permittivity: Relative permittivity (for dielectrics)
             loss_tangent: Dielectric loss tangent
 
         Example:
-            >>> sim.set_material("aluminum", type="conductor", conductivity=3.8e7)
-            >>> sim.set_material("sio2", type="dielectric", permittivity=3.9)
+            >>> sim.set_material(
+            ...     "aluminum", material_type="conductor", conductivity=3.8e7
+            ... )
+            >>> sim.set_material("sio2", material_type="dielectric", permittivity=3.9)
         """
         from gsim.palace.models import MaterialConfig
 
         # Determine type if not provided
-        if type is None:
+        resolved_type = material_type
+        if resolved_type is None:
             if conductivity is not None and conductivity > 1e4:
-                type = "conductor"
+                resolved_type = "conductor"
             elif permittivity is not None:
-                type = "dielectric"
+                resolved_type = "dielectric"
             else:
-                type = "dielectric"
+                resolved_type = "dielectric"
 
         self.materials[name] = MaterialConfig(
-            type=type,
+            type=resolved_type,
             conductivity=conductivity,
             permittivity=permittivity,
             loss_tangent=loss_tangent,
@@ -355,9 +359,7 @@ class PalaceSimMixin:
 
         mesh_path = self._output_dir / "palace.msh"
         if not mesh_path.exists():
-            raise ValueError(
-                f"Mesh file not found: {mesh_path}. Call mesh() first."
-            )
+            raise ValueError(f"Mesh file not found: {mesh_path}. Call mesh() first.")
 
         # Default output path if not interactive
         if output is None and not interactive:

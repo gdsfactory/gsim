@@ -167,6 +167,7 @@ ignore = [
   "TC001",  # typing-only-first-party-import
   "TC002",  # typing-only-third-party-import
   "TC003",  # typing-only-standard-library-import
+  "PLC0415",  # import-outside-top-level (needed for lazy imports to avoid circular deps)
   "TC006",  # runtime-cast-value
   "TD001",  # invalid-todo-tag
   "TD002",  # missing-todo-author
@@ -191,6 +192,11 @@ select = ["ALL"]
   "S101",  # assert
   "SLF001",  # private-member-access
   "T201"  # print
+]
+"docs/hooks.py" = [
+  "ARG001",  # unused-function-argument (MkDocs hooks require specific signatures)
+  "INP001",  # implicit-namespace-package
+  "PERF401"  # use-list-extend (keeping for readability)
 ]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations
