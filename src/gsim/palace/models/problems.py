@@ -74,7 +74,7 @@ class DrivenConfig(BaseModel):
                     "SaveStep": 0,
                 }
             ],
-            "AdaptiveTol": self.adaptive_tol if self.adaptive_tol > 0 else 0,
+            "AdaptiveTol": max(0, self.adaptive_tol),
         }
 
 

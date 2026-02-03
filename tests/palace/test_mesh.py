@@ -16,6 +16,7 @@ class TestMeshConfig:
         assert config.margin == 50.0
         assert config.fmax == 100e9
         assert config.show_gui is False
+        assert config.boundary_conditions is not None
         assert len(config.boundary_conditions) == 6
 
     def test_coarse_preset(self):

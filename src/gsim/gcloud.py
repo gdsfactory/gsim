@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from gdsfactoryplus import sim  # type: ignore[import-untyped]
+from gdsfactoryplus import sim
 
 if TYPE_CHECKING:
     from collections.abc import Callable

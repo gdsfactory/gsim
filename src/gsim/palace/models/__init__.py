@@ -35,26 +35,19 @@ from gsim.palace.models.results import SimulationResult, ValidationResult
 from gsim.palace.models.stack import MaterialConfig
 
 __all__ = [
-    # Geometry
-    "GeometryConfig",
-    # Stack
-    "MaterialConfig",
-    # Ports
     "CPWPortConfig",
-    "PortConfig",
-    "TerminalConfig",
-    "WavePortConfig",
-    # Mesh
-    "MeshConfig",
-    # Numerical
-    "NumericalConfig",
-    # Problems
     "DrivenConfig",
     "EigenmodeConfig",
     "ElectrostaticConfig",
+    "GeometryConfig",
     "MagnetostaticConfig",
-    "TransientConfig",
-    # Results
+    "MaterialConfig",
+    "MeshConfig",
+    "NumericalConfig",
+    "PortConfig",
     "SimulationResult",
+    "TerminalConfig",
+    "TransientConfig",
     "ValidationResult",
+    "WavePortConfig",
 ]

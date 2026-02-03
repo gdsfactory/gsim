@@ -245,7 +245,14 @@ def generate_mesh(
         if write_config:
             logger.info("Generating Palace config...")
             config_path = generate_palace_config(
-                groups, ports, port_info, stack, output_dir, model_name, fmax, driven_config
+                groups,
+                ports,
+                port_info,
+                stack,
+                output_dir,
+                model_name,
+                fmax,
+                driven_config,
             )
 
     finally:
@@ -268,4 +275,4 @@ def generate_mesh(
 
 
 # Re-export write_config from config_generator for backward compatibility
-__all__ = ["MeshResult", "GeometryData", "generate_mesh", "write_config"]
+__all__ = ["GeometryData", "MeshResult", "generate_mesh", "write_config"]

@@ -44,21 +44,21 @@ class NumericalConfig(BaseModel):
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
-        config = {
-            "Order": self.order,
-            "Solver": {
-                "Tolerance": self.tolerance,
-                "MaxIterations": self.max_iterations,
-            },
+        solver_config: dict[str, str | int | float] = {
+            "Tolerance": self.tolerance,
+            "MaxIterations": self.max_iterations,
         }
 
         if self.solver_type != "Default":
-            config["Solver"]["Type"] = self.solver_type
+            solver_config["Type"] = self.solver_type
 
         if self.preconditioner != "Default":
-            config["Solver"]["Preconditioner"] = self.preconditioner
+            solver_config["Preconditioner"] = self.preconditioner
 
-        return config
+        return {
+            "Order": self.order,
+            "Solver": solver_config,
+        }
 
 
 __all__ = [
