@@ -172,7 +172,9 @@ def run_simulation(
         _handle_failed_job(finished_job, output_dir, verbose)
 
     # Download
-    raw_results = sim.download_results(finished_job)
+    raw_results = sim.download_results(
+        finished_job, output_dir=f"sim-data-{finished_job.job_name}"
+    )
 
     # Flatten results: gdsfactoryplus returns extracted directories,
     # but we want a dict of filename -> Path for individual files
