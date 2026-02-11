@@ -151,6 +151,14 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         conductivity=2.0,
         refractive_index=3.47,
     ),
+    "quartz": MaterialProperties(
+        type="dielectric",
+        permittivity=4.5
+    ),
+    "tfln": MaterialProperties(
+        type="dielectric",
+        permittivity=44.0
+    )
 }
 
 # Aliases for common variations in naming
