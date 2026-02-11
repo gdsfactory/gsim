@@ -3,6 +3,8 @@ site_url: https://gdsfactory.com/gsim
 site_description: Simulations API for GDSFactory
 site_author: GDSFactory
 copyright: Copyright © 2026, GDSFactory
+repo_url: https://github.com/gdsfactory/gsim
+repo_name: gdsfactory/gsim
 
 theme:
   name: shadcn

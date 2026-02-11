@@ -45,49 +45,49 @@ class MeshConfig(BaseModel):
         return self
 
     @classmethod
-    def coarse(cls, **kwargs) -> Self:
+    def coarse(cls, **kwargs: float | bool | list[str] | None) -> Self:
         """Fast mesh for quick iteration (~2.5 elements per wavelength).
 
         This preset is suitable for initial debugging and quick checks.
         Not recommended for accurate results.
         """
-        defaults = {
+        defaults: dict[str, float | int | bool | list[str] | None] = {
             "refined_mesh_size": 10.0,
             "max_mesh_size": 600.0,
             "cells_per_wavelength": 5,
         }
         defaults.update(kwargs)
-        return cls(**defaults)
+        return cls(**defaults)  # type: ignore[arg-type]
 
     @classmethod
-    def default(cls, **kwargs) -> Self:
+    def default(cls, **kwargs: float | bool | list[str] | None) -> Self:
         """Balanced mesh matching COMSOL defaults (~5 elements per wavelength).
 
         This preset provides a good balance between accuracy and computation time.
         Suitable for most simulations.
         """
-        defaults = {
+        defaults: dict[str, float | int | bool | list[str] | None] = {
             "refined_mesh_size": 5.0,
             "max_mesh_size": 300.0,
             "cells_per_wavelength": 10,
         }
         defaults.update(kwargs)
-        return cls(**defaults)
+        return cls(**defaults)  # type: ignore[arg-type]
 
     @classmethod
-    def fine(cls, **kwargs) -> Self:
+    def fine(cls, **kwargs: float | bool | list[str] | None) -> Self:
         """High accuracy mesh (~10 elements per wavelength).
 
         This preset provides higher accuracy at the cost of increased
         computation time. Use for final production simulations.
         """
-        defaults = {
+        defaults: dict[str, float | int | bool | list[str] | None] = {
             "refined_mesh_size": 2.0,
             "max_mesh_size": 70.0,
             "cells_per_wavelength": 20,
         }
         defaults.update(kwargs)
-        return cls(**defaults)
+        return cls(**defaults)  # type: ignore[arg-type]
 
 
 __all__ = [

@@ -464,9 +464,9 @@ def add_ports(
 
 __all__ = [
     "GeometryData",
+    "add_dielectrics",
+    "add_metals",
+    "add_ports",
     "extract_geometry",
     "get_layer_info",
-    "add_metals",
-    "add_dielectrics",
-    "add_ports",
 ]

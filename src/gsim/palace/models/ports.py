@@ -47,11 +47,10 @@ class PortConfig(BaseModel):
         """Validate layer configuration based on geometry type."""
         if self.geometry == "inplane" and self.layer is None:
             raise ValueError("Inplane ports require 'layer' to be specified")
-        if self.geometry == "via":
-            if self.from_layer is None or self.to_layer is None:
-                raise ValueError(
-                    "Via ports require both 'from_layer' and 'to_layer'"
-                )
+        if self.geometry == "via" and (
+            self.from_layer is None or self.to_layer is None
+        ):
+            raise ValueError("Via ports require both 'from_layer' and 'to_layer'")
         return self
 
 

@@ -248,7 +248,7 @@ def collect_mesh_stats() -> dict:
         stats["elements"] = total_elements
 
         # Count tetrahedra (type 4) and save tags
-        for etype, tags in zip(element_types, element_tags):
+        for etype, tags in zip(element_types, element_tags, strict=False):
             if etype == 4:  # 4-node tetrahedron
                 stats["tetrahedra"] = len(tags)
                 tet_tags = list(tags)
@@ -361,7 +361,7 @@ def write_config(
 
 
 __all__ = [
-    "generate_palace_config",
     "collect_mesh_stats",
+    "generate_palace_config",
     "write_config",
 ]

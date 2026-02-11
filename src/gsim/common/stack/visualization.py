@@ -43,15 +43,15 @@ def _get_gds_layer_number(layer_level: LayerLevel) -> int | None:
     if hasattr(layer, "layer"):
         inner = layer.layer
         if hasattr(inner, "layer"):
-            return int(inner.layer)
+            return int(inner.layer)  # type: ignore[arg-type]
         if isinstance(inner, int):
             return int(inner)
 
     # Handle enum with value
     if hasattr(layer, "value"):
         if isinstance(layer.value, tuple):
-            return int(layer.value[0])
-        return int(layer.value)
+            return int(layer.value[0])  # type: ignore[arg-type]
+        return int(layer.value)  # type: ignore[arg-type]
 
     return None
 

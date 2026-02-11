@@ -5,10 +5,13 @@ This module provides visualization tools for meshes and simulation results.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-import meshio  # type: ignore[import-untyped]
-import pyvista as pv  # type: ignore[import-untyped]
+import meshio
+import pyvista as pv
+
+logger = logging.getLogger(__name__)
 
 
 def plot_mesh(
@@ -44,7 +47,7 @@ def plot_mesh(
     else:
         plotter = pv.Plotter(off_screen=True, window_size=[1200, 900])
 
-    plotter.set_background("white")
+    plotter.set_background("white")  # type: ignore[arg-type]
 
     if show_groups:
         # Filter to matching groups
@@ -64,7 +67,7 @@ def plot_mesh(
                     line_width=1,
                     label=group_map.get(gid, str(gid)),
                 )
-        plotter.add_legend()
+        plotter.add_legend()  # type: ignore[call-arg]
     else:
         plotter.add_mesh(mesh, style="wireframe", color="black", line_width=1)
 
@@ -79,8 +82,8 @@ def plot_mesh(
         plotter.close()
         # Display in notebook if available
         try:
-            from IPython.display import Image, display  # type: ignore[import-untyped]
+            from IPython.display import Image, display
 
             display(Image(str(output)))
         except ImportError:
-            print(f"Saved: {output}")
+            logger.info("Saved mesh plot to %s", output)

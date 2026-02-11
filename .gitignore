@@ -1,6 +1,6 @@
 # Simulation outputs
+sim-data-*/
 palace-sim-*/
-dev-palace-simulation-*/
 
 # files
 *.c
