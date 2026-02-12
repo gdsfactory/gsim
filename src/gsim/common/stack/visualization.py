@@ -88,7 +88,7 @@ def parse_layer_stack(layer_stack: GfLayerStack) -> list[StackLayer]:
         zmin = level.zmin if level.zmin is not None else 0.0
         thickness = level.thickness if level.thickness is not None else 0.0
         zmax = zmin + thickness
-        material = level.material if level.material else None
+        material = level.material or None
         gds_layer = _get_gds_layer_number(level)
         layer_type = _classify_layer(name)
 
