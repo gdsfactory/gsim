@@ -1,0 +1,311 @@
+"""MEEP FDTD simulation class for S-parameter extraction.
+
+Main entry point for photonic FDTD simulation using MEEP on the cloud.
+No local MEEP dependency — MEEP runs only on the cloud.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+
+from gsim.common import Geometry, LayerStack, ValidationResult
+from gsim.common.stack.materials import MaterialProperties
+from gsim.meep.base import MeepSimMixin
+from gsim.meep.models import (
+    FDTDConfig,
+    ResolutionConfig,
+    SimConfig,
+    SParameterResult,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class MeepSim(MeepSimMixin, BaseModel):
+    """MEEP FDTD simulation for photonic S-parameter extraction.
+
+    Uses a fluent API to collect configuration, then serializes to
+    JSON + GDS + Python runner script for cloud execution.
+
+    Example:
+        >>> from gsim.meep import MeepSim
+        >>>
+        >>> sim = MeepSim()
+        >>> sim.set_geometry(component)
+        >>> sim.set_stack()
+        >>> sim.set_material("si", refractive_index=3.47)
+        >>> sim.set_wavelength(wavelength=1.55, bandwidth=0.1)
+        >>> sim.set_resolution(pixels_per_um=32)
+        >>> sim.set_output_dir("./meep-sim")
+        >>> result = sim.simulate()
+        >>> result.plot()
+    """
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+    )
+
+    # Composed objects (from common)
+    geometry: Geometry | None = None
+    stack: LayerStack | None = None
+
+    # MEEP-specific configs
+    fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
+    resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
+
+    # Material overrides (optical properties)
+    materials: dict[str, MaterialProperties] = Field(default_factory=dict)
+
+    # Source port override
+    source_port: str | None = None
+
+    # Private state
+    _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _output_dir: Path | None = PrivateAttr(default=None)
+
+    # -------------------------------------------------------------------------
+    # Wavelength / frequency config
+    # -------------------------------------------------------------------------
+
+    def set_wavelength(
+        self,
+        *,
+        wavelength: float = 1.55,
+        bandwidth: float = 0.1,
+        num_freqs: int = 21,
+        run_time_factor: float = 200.0,
+    ) -> None:
+        """Configure wavelength range for simulation.
+
+        Args:
+            wavelength: Center wavelength in um
+            bandwidth: Wavelength bandwidth in um
+            num_freqs: Number of frequency points
+            run_time_factor: Run time as multiple of 1/df
+        """
+        self.fdtd_config = FDTDConfig(
+            wavelength=wavelength,
+            bandwidth=bandwidth,
+            num_freqs=num_freqs,
+            run_time_factor=run_time_factor,
+        )
+
+    # -------------------------------------------------------------------------
+    # Resolution config
+    # -------------------------------------------------------------------------
+
+    def set_resolution(
+        self,
+        *,
+        pixels_per_um: int | None = None,
+        preset: str | None = None,
+    ) -> None:
+        """Configure MEEP grid resolution.
+
+        Args:
+            pixels_per_um: Grid pixels per micrometer
+            preset: Resolution preset ("coarse", "default", "fine")
+        """
+        if preset is not None:
+            if preset == "coarse":
+                self.resolution_config = ResolutionConfig.coarse()
+            elif preset == "fine":
+                self.resolution_config = ResolutionConfig.fine()
+            else:
+                self.resolution_config = ResolutionConfig.default()
+        elif pixels_per_um is not None:
+            self.resolution_config = ResolutionConfig(pixels_per_um=pixels_per_um)
+
+    # -------------------------------------------------------------------------
+    # Source port
+    # -------------------------------------------------------------------------
+
+    def set_source_port(self, name: str) -> None:
+        """Set which port is the excitation source.
+
+        Args:
+            name: Port name (must match a gdsfactory component port)
+        """
+        self.source_port = name
+
+    # -------------------------------------------------------------------------
+    # Validation
+    # -------------------------------------------------------------------------
+
+    def validate_config(self) -> ValidationResult:
+        """Validate the simulation configuration.
+
+        Returns:
+            ValidationResult with validation status and messages
+        """
+        errors: list[str] = []
+        warnings_list: list[str] = []
+
+        if self.geometry is None:
+            errors.append("No component set. Call set_geometry(component) first.")
+
+        if self.stack is None and not self._stack_kwargs:
+            warnings_list.append(
+                "No stack configured. Will use active PDK with defaults."
+            )
+
+        if self.geometry is not None:
+            ports = list(self.geometry.component.ports)
+            if not ports:
+                errors.append("Component has no ports.")
+            elif self.source_port is not None:
+                port_names = [p.name for p in ports]
+                if self.source_port not in port_names:
+                    errors.append(
+                        f"Source port '{self.source_port}' not found. "
+                        f"Available: {port_names}"
+                    )
+
+        if self.fdtd_config.bandwidth <= 0:
+            warnings_list.append(
+                "Bandwidth is zero; simulation will use a single frequency."
+            )
+
+        valid = len(errors) == 0
+        return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
+
+    # -------------------------------------------------------------------------
+    # Config writing
+    # -------------------------------------------------------------------------
+
+    def write_config(self) -> Path:
+        """Serialize simulation config to output directory.
+
+        Writes:
+        - layout.gds: The component GDS file
+        - sim_config.json: Simulation config (layer stack, ports, materials, fdtd)
+        - run_meep.py: Self-contained MEEP runner script
+
+        Returns:
+            Path to the output directory
+
+        Raises:
+            ValueError: If output_dir not set or config is invalid
+        """
+        from gsim.meep.materials import resolve_materials
+        from gsim.meep.ports import extract_port_info
+        from gsim.meep.script import generate_meep_script
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        validation = self.validate_config()
+        if not validation.valid:
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
+
+        if self.stack is None:
+            self._resolve_stack()
+
+        if self.stack is None:
+            raise ValueError("Stack resolution failed.")
+        if self.geometry is None:
+            raise ValueError("No geometry set.")
+
+        component = self.geometry.component.copy()
+
+        # 1. Write GDS file
+        gds_path = self._output_dir / "layout.gds"
+        component.write_gds(gds_path)
+
+        # 2. Build layer stack entries from our Layer objects
+        layer_stack_entries = []
+        used_materials: set[str] = set()
+        for layer_name, layer in self.stack.layers.items():
+            layer_stack_entries.append(
+                {
+                    "layer_name": layer_name,
+                    "gds_layer": list(layer.gds_layer),
+                    "zmin": layer.zmin,
+                    "zmax": layer.zmax,
+                    "material": layer.material,
+                    "sidewall_angle": layer.sidewall_angle,
+                }
+            )
+            used_materials.add(layer.material)
+
+        # 3. Extract port info
+        port_infos = extract_port_info(
+            component, self.stack, source_port=self.source_port
+        )
+
+        # 4. Resolve materials (only those used by layers)
+        material_data = resolve_materials(used_materials, overrides=self.materials)
+
+        # 5. Build SimConfig
+        sim_config = SimConfig(
+            gds_filename="layout.gds",
+            layer_stack=layer_stack_entries,
+            ports=[p.to_dict() for p in port_infos],
+            materials={name: mat.to_dict() for name, mat in material_data.items()},
+            fdtd=self.fdtd_config.to_dict(),
+            resolution=self.resolution_config.to_dict(),
+        )
+
+        # 6. Write JSON config
+        config_path = self._output_dir / "sim_config.json"
+        sim_config.to_json(config_path)
+
+        # 7. Write runner script
+        script_path = self._output_dir / "run_meep.py"
+        script_content = generate_meep_script(config_filename="sim_config.json")
+        script_path.write_text(script_content)
+
+        logger.info("Config written to %s", self._output_dir)
+        return self._output_dir
+
+    # -------------------------------------------------------------------------
+    # Simulation
+    # -------------------------------------------------------------------------
+
+    def simulate(
+        self,
+        *,
+        verbose: bool = True,
+    ) -> SParameterResult:
+        """Run MEEP simulation on GDSFactory+ cloud.
+
+        Writes config, uploads to cloud, waits for completion,
+        downloads results, and parses S-parameters.
+
+        Args:
+            verbose: Print progress messages
+
+        Returns:
+            SParameterResult with parsed S-parameters
+
+        Raises:
+            ValueError: If output_dir not set
+            RuntimeError: If simulation fails
+        """
+        from gsim.gcloud import run_simulation
+
+        self.write_config()
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set.")
+
+        results = run_simulation(
+            self._output_dir,
+            job_type="meep",
+            verbose=verbose,
+        )
+
+        csv_path = results.get("s_parameters.csv")
+        if csv_path is not None:
+            return SParameterResult.from_csv(csv_path)
+
+        logger.warning("No s_parameters.csv found in results")
+        return SParameterResult()
+
+
+__all__ = ["MeepSim"]

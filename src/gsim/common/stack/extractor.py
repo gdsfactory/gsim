@@ -35,6 +35,7 @@ class Layer(BaseModel):
     thickness: float  # um
     material: str
     layer_type: Literal["conductor", "via", "dielectric", "substrate"]
+    sidewall_angle: float = 0.0  # degrees
     mesh_resolution: str | float = "medium"
 
     def get_mesh_size(self, base_size: float = 1.0) -> float:
@@ -58,7 +59,7 @@ class Layer(BaseModel):
 
     def to_dict(self) -> dict:
         """Convert to dictionary for YAML output."""
-        return {
+        d = {
             "gds_layer": list(self.gds_layer),
             "zmin": round(self.zmin, 4),
             "zmax": round(self.zmax, 4),
@@ -67,6 +68,9 @@ class Layer(BaseModel):
             "type": self.layer_type,
             "mesh_resolution": self.mesh_resolution,
         }
+        if self.sidewall_angle != 0.0:
+            d["sidewall_angle"] = self.sidewall_angle
+        return d
 
 
 class ValidationResult(BaseModel):
@@ -387,9 +391,10 @@ def extract_layer_stack(
         zmin = layer_level.zmin if layer_level.zmin is not None else 0.0
         thickness = layer_level.thickness if layer_level.thickness is not None else 0.0
         zmax = zmin + thickness
-        material = layer_level.material if layer_level.material else "unknown"
+        material = layer_level.material or "unknown"
         gds_layer = _get_gds_layer_tuple(layer_level)
         layer_type = _classify_layer_type(layer_name, material)
+        sidewall_angle = getattr(layer_level, "sidewall_angle", 0.0) or 0.0
 
         if layer_type == "substrate" and not include_substrate:
             continue
@@ -402,6 +407,7 @@ def extract_layer_stack(
             thickness=thickness,
             material=material,
             layer_type=layer_type,
+            sidewall_angle=float(sidewall_angle),
         )
 
         stack.layers[layer_name] = layer

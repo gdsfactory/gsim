@@ -110,7 +110,7 @@ def upload_simulation_dir(input_dir: str | Path, job_type: str):
 
 def run_simulation(
     output_dir: str | Path,
-    job_type: Literal["palace"] = "palace",
+    job_type: Literal["palace", "meep"] = "palace",
     verbose: bool = True,
     on_started: Callable | None = None,
 ) -> dict[str, Path]:

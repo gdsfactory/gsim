@@ -11,6 +11,7 @@ Classes:
 from __future__ import annotations
 
 from gsim.common.geometry import Geometry
+from gsim.common.geometry_model import GeometryModel, Prism, extract_geometry_model
 from gsim.common.stack import (
     MATERIALS_DB,
     Layer,
@@ -37,13 +38,16 @@ Stack = LayerStack
 __all__ = [
     "MATERIALS_DB",
     "Geometry",
+    "GeometryModel",
     "Layer",
     "LayerStack",
     "MaterialProperties",
+    "Prism",
     "Stack",
     "StackLayer",
     "ValidationResult",
     "extract_from_pdk",
+    "extract_geometry_model",
     "extract_layer_stack",
     "get_material_properties",
     "get_stack",
