@@ -27,6 +27,7 @@ Layer Parsing        Representation       Visualization
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib                  |
 | **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, margin |
 | **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes      |
+| **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
 Tests: 62 meep-specific, 119 total passing.
 
@@ -58,17 +59,17 @@ Solver-agnostic modules reusable by meep and palace.
 
 ### `gsim.meep` — MEEP Photonic FDTD Simulation
 
-| Module                   | Purpose                                                                                                                                                                                        |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `MarginConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                       |
-| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_wavelength`, `set_resolution`, `set_margin`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz. |
-| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.                     |
-| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `MarginConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                  |
-| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                       |
-| `meep/overlay.py`        | `SimOverlay` + `PortOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers.                                                              |
-| `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                             |
-| `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                 |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config (incl. margin), builds `mp.Prism`, handles holes via Delaunay, runs FDTD, saves S-params CSV.                             |
+| Module                   | Purpose                                                                                                                                                                                                           |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `MarginConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                                          |
+| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_margin`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.       |
+| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.                                        |
+| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `MarginConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                                     |
+| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                                          |
+| `meep/overlay.py`        | `SimOverlay` + `PortOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers.                                                                                 |
+| `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
+| `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config (incl. margin), builds `mp.Prism`, handles holes via Delaunay, runs FDTD with `until_after_sources`, saves S-params CSV.                     |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -149,6 +150,37 @@ output_dir/
 
 **Rationale:** RF (Palace) ports span between metal layers, but photonic ports need to be centered on the waveguide core for proper mode overlap.
 
+### Z-domain cropping via `set_z_crop()`
+
+**Decision:** Add `set_z_crop()` to crop the layer stack along z around the photonic core, removing non-essential layers (metals, heaters, vias) and clipping oversized cladding/substrate.
+
+**Rationale:**
+
+- Full PDK stacks include metal layers up to z=5.2um and substrate down to z=-8um, but the waveguide core is only 0.22um thick
+- The MEEP simulation cell z-extent is derived from `min/max` of all layer z-values — unnecessary layers inflate the domain
+- For a 220nm SOI waveguide, MEEP tutorials use ~4-6um total z-extent (2um cladding above/below core)
+- Full stack: 15.2um cell → cropped: 6.2um cell (**60% reduction** in z, massive compute savings in 3D)
+
+**Implementation:**
+
+- Auto-detects core layer via highest refractive index (same logic as port z-center)
+- Default: 2um padding above and below core
+- Removes layers entirely outside the crop window
+- Clips layers that partially overlap (adjusts zmin/zmax/thickness)
+- Called after `set_stack()`, before `write_config()`
+- No runner changes needed — the runner derives z-extent from the serialized layer_stack
+
+### Run time: `until_after_sources` (not `run_time_factor`)
+
+**Decision:** Replace `run_time_factor` (gsim invention: `run_time = factor / df`) with `run_after_sources` using MEEP's standard `sim.run(until_after_sources=N)`.
+
+**Rationale:**
+
+- MEEP tutorials universally use `until_after_sources=100` for S-parameter extraction
+- The old `run_time_factor / df` formula was fragile (division by zero if bandwidth=0) and non-standard
+- `until_after_sources` lets the Gaussian source decay naturally, then runs N more time units for fields to ring down
+- Default: 100 time units (matches MEEP GDS import tutorial)
+
 ### Removed gsim.fdtd (Tidy3D wrapper)
 
 **Decision:** Remove the `gsim.fdtd` module entirely. MEEP is the sole FDTD solver.
@@ -172,6 +204,7 @@ output_dir/
 | MEEP's `epsilon_input_file` (HDF5)     | Only frequency-independent real permittivities, loses subpixel smoothing             |
 | MEEP's `epsilon_func` / `MaterialGrid` | Very slow startup, designed for topology optimization                                |
 | Keeping gsim.fdtd alongside gsim.meep  | Redundant FDTD modules, fdtd was unmaintained with no tests                          |
+| `run_time_factor / df` for run time    | Non-standard, fragile (div-by-zero), MEEP uses `until_after_sources` everywhere      |
 
 ---
 
@@ -179,3 +212,120 @@ output_dir/
 
 - **Cloud testing:** The full cloud round-trip (upload → run meep → download results) hasn't been tested end-to-end with a real cloud instance.
 - **`_build_geometry_model()` note:** Uses `gf.get_active_pdk().layer_stack` (gdsfactory's LayerStack) instead of `self.stack` (gsim's LayerStack) because `LayeredComponentBase` needs gdsfactory's type for DerivedLayer resolution.
+
+---
+
+## Docker Integration
+
+### Directory Structure
+
+In `simulation-engines/meep/` (separate repo):
+
+```
+meep/
+├── Dockerfile           # Production (linux/amd64, non-root user, MPI)
+├── Dockerfile.local     # Local testing (no platform pin, no non-root user)
+├── entrypoint.sh        # Handles run_meep.py discovery + output collection
+├── utils.sh             # S3 presigned URL download/upload helpers
+├── src/                 # Bundled gsim test files (fallback when no presigned URL)
+│   ├── layout.gds
+│   ├── sim_config.json
+│   └── run_meep.py
+└── legacy/              # Old files (preserved for reference)
+    ├── Dockerfile
+    ├── Dockerfile.local
+    ├── entrypoint.sh
+    └── src/main.py
+```
+
+### Key Docker Details
+
+**Base image:** `continuumio/miniconda3:24.11.1-0`
+
+**Conda env `mp` (python 3.12):**
+- `gdsfactory`, `numpy<2`, `scipy`, `shapely` (pip)
+- `pymeep=*=mpi_mpich_*`, `nlopt` (conda-forge) — MPI-enabled MEEP
+
+**Entrypoint conventions** (matches palace):
+- `MEEP_NP` env var controls MPI processes (default 8)
+- `OMPI_MCA` oversubscribe flags for containerized environments
+- Downloads input from `INPUT_DOWNLOAD_PRESIGNED_URL` (clears `/app/src/*` first)
+- `cd /app/src` for relative path resolution
+- Finds `run_meep.py` first, falls back to `main.py`
+- Runs via `mpirun -np $NP python run_meep.py`
+- Collects outputs (csv/h5/pkl/png) to `/app/data/`
+- Uploads via `OUTPUT_UPLOAD_PRESIGNED_URL`
+
+**Runner script requires PDK activation:** `gf.gpdk.PDK.activate()` is called in `load_gds_component()` because `component.get_polygons()` internally calls `get_active_pdk()`. The generic PDK is sufficient since all layer info comes from `sim_config.json`.
+
+### Contract Summary
+
+```
+gsim.meep.MeepSim.write_config()
+  └─ output_dir/
+      ├── layout.gds          # GDS geometry
+      ├── sim_config.json     # All simulation parameters
+      └── run_meep.py         # Self-contained cloud runner
+
+    ↓ (zipped and uploaded)
+
+Docker container /app/src/
+  ├── layout.gds
+  ├── sim_config.json
+  └── run_meep.py
+  entrypoint: cd /app/src && mpirun -np $NP python run_meep.py
+
+    ↓ (runner writes to CWD)
+
+/app/src/s_parameters.csv
+  entrypoint: cp *.csv /app/data/
+
+    ↓ (tarballed and uploaded)
+
+gsim receives s_parameters.csv → SParameterResult.from_csv()
+```
+
+### Local Testing
+
+```bash
+cd simulation-engines/meep
+docker build -f Dockerfile.local -t meep-gsim:local .
+docker run --rm -e MEEP_NP=4 -v /tmp/meep-out:/app/data meep-gsim:local
+ls /tmp/meep-out/s_parameters.csv
+```
+
+---
+
+## Typical Workflow
+
+```python
+import gdsfactory as gf
+from gdsfactory.gpdk import get_generic_pdk
+
+pdk = get_generic_pdk()
+pdk.activate()
+
+component = gf.components.mmi1x2()
+
+from gsim.meep import MeepSim
+
+sim = MeepSim()
+sim.set_geometry(component)
+sim.set_stack()
+sim.set_z_crop()  # crop to 2um above/below core (removes metals, substrate)
+sim.set_material("si", refractive_index=3.47)
+sim.set_wavelength(wavelength=1.55, bandwidth=0.1, run_after_sources=100)
+sim.set_resolution(pixels_per_um=40)
+sim.set_margin(pml_thickness=1.0)
+sim.set_output_dir("./meep-sim-test")
+
+# Visualize before running
+sim.plot_2d(slices="xyz")
+
+# Write config files
+sim.write_config()
+
+# Run on cloud
+result = sim.simulate()
+result.plot()
+```

@@ -80,7 +80,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         wavelength: float = 1.55,
         bandwidth: float = 0.1,
         num_freqs: int = 21,
-        run_time_factor: float = 200.0,
+        run_after_sources: float = 100.0,
     ) -> None:
         """Configure wavelength range for simulation.
 
@@ -88,13 +88,13 @@ class MeepSim(MeepSimMixin, BaseModel):
             wavelength: Center wavelength in um
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
-            run_time_factor: Run time as multiple of 1/df
+            run_after_sources: Time units to run after sources turn off
         """
         self.fdtd_config = FDTDConfig(
             wavelength=wavelength,
             bandwidth=bandwidth,
             num_freqs=num_freqs,
-            run_time_factor=run_time_factor,
+            run_after_sources=run_after_sources,
         )
 
     # -------------------------------------------------------------------------

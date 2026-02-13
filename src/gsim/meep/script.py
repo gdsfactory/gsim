@@ -61,6 +61,7 @@ def build_materials(config):
 def load_gds_component(gds_filename):
     """Load GDS file as a gdsfactory Component."""
     import gdsfactory as gf
+    gf.gpdk.PDK.activate()
     return gf.import_gds(gds_filename)
 
 
@@ -400,10 +401,10 @@ def main():
     print("Building monitors...")
     monitors = build_monitors(config, sim)
 
-    run_time = fdtd["run_time_factor"] / fdtd["df"]
-    print(f"Running simulation for {run_time:.1f} time units...")
+    run_after = fdtd["run_after_sources"]
+    print(f"Running simulation (until_after_sources={run_after:.1f})...")
 
-    sim.run(until=run_time)
+    sim.run(until_after_sources=run_after)
 
     print("Extracting S-parameters...")
     s_params = extract_s_params(config, sim, monitors)

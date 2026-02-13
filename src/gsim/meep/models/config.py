@@ -49,8 +49,10 @@ class FDTDConfig(BaseModel):
         default=0.1, ge=0, description="Wavelength bandwidth in um"
     )
     num_freqs: int = Field(default=21, ge=1, description="Number of frequency points")
-    run_time_factor: float = Field(
-        default=200.0, gt=0, description="Run time as multiple of 1/df"
+    run_after_sources: float = Field(
+        default=100.0,
+        gt=0,
+        description="Time units to run after sources turn off",
     )
 
     @property
@@ -75,7 +77,7 @@ class FDTDConfig(BaseModel):
             "num_freqs": self.num_freqs,
             "fcen": self.fcen,
             "df": self.df,
-            "run_time_factor": self.run_time_factor,
+            "run_after_sources": self.run_after_sources,
         }
 
 

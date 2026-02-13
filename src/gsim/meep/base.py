@@ -120,6 +120,125 @@ class MeepSimMixin:
         self.stack = None
 
     # -------------------------------------------------------------------------
+    # Z-crop
+    # -------------------------------------------------------------------------
+
+    def set_z_crop(
+        self,
+        *,
+        pad_above: float = 2.0,
+        pad_below: float = 2.0,
+        reference_layer: str | None = None,
+    ) -> None:
+        """Crop the layer stack along z to focus on the photonic core.
+
+        Removes layers outside the crop window and clips layers that partially
+        overlap. Must be called after ``set_stack()``.
+
+        By default, auto-detects the core layer (highest refractive index)
+        and keeps ``pad_below`` um below it and ``pad_above`` um above it.
+
+        Args:
+            pad_above: Padding above the reference layer in um.
+            pad_below: Padding below the reference layer in um.
+            reference_layer: Explicit layer name to crop around. If None,
+                auto-detects the layer with the highest refractive index.
+
+        Raises:
+            ValueError: If stack is not configured or reference layer not found.
+
+        Example:
+            >>> sim.set_stack()
+            >>> sim.set_z_crop()  # 2um above/below core
+            >>> sim.set_z_crop(pad_above=3.0, reference_layer="core")
+        """
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.common.stack.materials import get_material_properties
+
+        if self.stack is None:
+            if self._stack_kwargs:
+                self._resolve_stack()
+            else:
+                raise ValueError(
+                    "No stack configured. Call set_stack() before set_z_crop()."
+                )
+
+        assert self.stack is not None  # for type checker
+
+        # Find reference layer
+        ref: Layer | None = None
+        if reference_layer is not None:
+            if reference_layer not in self.stack.layers:
+                raise ValueError(
+                    f"Layer '{reference_layer}' not found. "
+                    f"Available: {list(self.stack.layers.keys())}"
+                )
+            ref = self.stack.layers[reference_layer]
+        else:
+            # Auto-detect: highest refractive index (same logic as port z-center)
+            best_n = 0.0
+            for layer in self.stack.layers.values():
+                props = get_material_properties(layer.material)
+                if (
+                    props is not None
+                    and props.refractive_index is not None
+                    and props.refractive_index > best_n
+                ):
+                    best_n = props.refractive_index
+                    ref = layer
+
+            if ref is None or best_n <= 1.5:
+                raise ValueError(
+                    "Could not auto-detect core layer (no layer with n > 1.5). "
+                    "Specify reference_layer explicitly."
+                )
+
+        z_lo = ref.zmin - pad_below
+        z_hi = ref.zmax + pad_above
+
+        # Filter and clip layers
+        cropped: dict[str, Layer] = {}
+        for name, layer in self.stack.layers.items():
+            if layer.zmax <= z_lo or layer.zmin >= z_hi:
+                continue
+            new_zmin = max(layer.zmin, z_lo)
+            new_zmax = min(layer.zmax, z_hi)
+            cropped[name] = layer.model_copy(
+                update={
+                    "zmin": new_zmin,
+                    "zmax": new_zmax,
+                    "thickness": new_zmax - new_zmin,
+                }
+            )
+
+        # Crop dielectrics list too
+        cropped_dielectrics = []
+        for diel in self.stack.dielectrics:
+            if diel["zmax"] <= z_lo or diel["zmin"] >= z_hi:
+                continue
+            cropped_dielectrics.append({
+                **diel,
+                "zmin": max(diel["zmin"], z_lo),
+                "zmax": min(diel["zmax"], z_hi),
+            })
+
+        self.stack = LayerStack(
+            pdk_name=self.stack.pdk_name,
+            units=self.stack.units,
+            layers=cropped,
+            materials=self.stack.materials,
+            dielectrics=cropped_dielectrics,
+            simulation=self.stack.simulation,
+        )
+
+        n_removed = len(self.stack.layers) - len(cropped) + len(cropped)
+        print(
+            f"Z-crop around '{ref.name}' [{ref.zmin:.2f}, {ref.zmax:.2f}] um: "
+            f"window [{z_lo:.2f}, {z_hi:.2f}], "
+            f"{len(cropped)} layers kept"
+        )
+
+    # -------------------------------------------------------------------------
     # Material methods
     # -------------------------------------------------------------------------
 
@@ -240,7 +359,54 @@ class MeepSimMixin:
             component=self.geometry.component,
             layer_stack=gf_layer_stack,
         )
-        return extract_geometry_model(lc)
+        gm = extract_geometry_model(lc)
+
+        # If the stack has been z-cropped, clip the geometry model to match
+        if self.stack is not None:
+            gm = self._crop_geometry_model(gm)
+
+        return gm
+
+    def _crop_geometry_model(self, gm: GeometryModel) -> GeometryModel:
+        """Clip a GeometryModel's prisms and bbox to self.stack z-range."""
+        from gsim.common.geometry_model import GeometryModel, Prism
+
+        z_lo = min(l.zmin for l in self.stack.layers.values())
+        z_hi = max(l.zmax for l in self.stack.layers.values())
+
+        cropped_prisms: dict[str, list[Prism]] = {}
+        for layer_name, prism_list in gm.prisms.items():
+            clipped = []
+            for p in prism_list:
+                if p.z_top <= z_lo or p.z_base >= z_hi:
+                    continue
+                clipped.append(
+                    Prism(
+                        vertices=p.vertices,
+                        z_base=max(p.z_base, z_lo),
+                        z_top=min(p.z_top, z_hi),
+                        layer_name=p.layer_name,
+                        material=p.material,
+                        sidewall_angle=p.sidewall_angle,
+                        original_polygon=p.original_polygon,
+                    )
+                )
+            if clipped:
+                cropped_prisms[layer_name] = clipped
+
+        # Recompute bbox
+        old_min, old_max = gm.bbox
+        new_bbox = (
+            (old_min[0], old_min[1], z_lo),
+            (old_max[0], old_max[1], z_hi),
+        )
+
+        return GeometryModel(
+            prisms=cropped_prisms,
+            bbox=new_bbox,
+            layer_bboxes=gm.layer_bboxes,
+            layer_mesh_orders=gm.layer_mesh_orders,
+        )
 
     def plot_3d(self, backend: str = "open3d", **kwargs: Any) -> Any:
         """Create interactive 3D visualisation of the geometry.
