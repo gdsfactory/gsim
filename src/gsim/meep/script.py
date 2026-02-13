@@ -368,10 +368,16 @@ def main():
     z_min = min(l["zmin"] for l in config["layer_stack"])
     z_max = max(l["zmax"] for l in config["layer_stack"])
 
-    padding = 1.0  # um PML padding
-    cell_x = (bbox.right - bbox.left) + 2 * padding
-    cell_y = (bbox.top - bbox.bottom) + 2 * padding
-    cell_z = (z_max - z_min) + 2 * padding
+    margin = config.get("margin", {})
+    pml = margin.get("pml_thickness", 1.0)
+    margin_xy = margin.get("margin_xy", 0.0)
+    margin_z = margin.get("margin_z", 0.0)
+    padding_xy = pml + margin_xy
+    padding_z = pml + margin_z
+
+    cell_x = (bbox.right - bbox.left) + 2 * padding_xy
+    cell_y = (bbox.top - bbox.bottom) + 2 * padding_xy
+    cell_z = (z_max - z_min) + 2 * padding_z
     cell_center = mp.Vector3(
         (bbox.right + bbox.left) / 2,
         (bbox.top + bbox.bottom) / 2,
@@ -379,6 +385,7 @@ def main():
     )
 
     print(f"Cell size: {cell_x:.2f} x {cell_y:.2f} x {cell_z:.2f} um")
+    print(f"PML: {pml:.2f} um, margin_xy: {margin_xy:.2f}, margin_z: {margin_z:.2f}")
     print(f"Resolution: {resolution} pixels/um")
 
     sim = mp.Simulation(
@@ -387,7 +394,7 @@ def main():
         geometry=geometry,
         sources=sources,
         resolution=resolution,
-        boundary_layers=[mp.PML(padding)],
+        boundary_layers=[mp.PML(pml)],
     )
 
     print("Building monitors...")

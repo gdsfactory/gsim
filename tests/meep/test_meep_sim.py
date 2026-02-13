@@ -7,7 +7,14 @@ import json
 
 import pytest
 
-from gsim.meep import FDTDConfig, MeepSim, ResolutionConfig, SimConfig, SParameterResult
+from gsim.meep import (
+    FDTDConfig,
+    MarginConfig,
+    MeepSim,
+    ResolutionConfig,
+    SimConfig,
+    SParameterResult,
+)
 from gsim.meep.models.config import LayerStackEntry, MaterialData, PortData
 
 # ---------------------------------------------------------------------------
@@ -555,6 +562,7 @@ class TestImportWithoutMeep:
     def test_import_all_public_api(self):
         from gsim.meep import (
             FDTDConfig,
+            MarginConfig,
             MeepSim,
             ResolutionConfig,
             SimConfig,
@@ -562,7 +570,291 @@ class TestImportWithoutMeep:
         )
 
         assert FDTDConfig is not None
+        assert MarginConfig is not None
         assert MeepSim is not None
         assert ResolutionConfig is not None
         assert SParameterResult is not None
         assert SimConfig is not None
+
+
+# ---------------------------------------------------------------------------
+# MarginConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestMarginConfig:
+    """Test MarginConfig model."""
+
+    def test_defaults(self):
+        cfg = MarginConfig()
+        assert cfg.pml_thickness == 1.0
+        assert cfg.margin_xy == 0.0
+        assert cfg.margin_z == 0.0
+
+    def test_custom(self):
+        cfg = MarginConfig(pml_thickness=0.5, margin_xy=0.2, margin_z=0.3)
+        assert cfg.pml_thickness == 0.5
+        assert cfg.margin_xy == 0.2
+        assert cfg.margin_z == 0.3
+
+    def test_to_dict(self):
+        cfg = MarginConfig(pml_thickness=2.0, margin_xy=0.5, margin_z=1.0)
+        d = cfg.to_dict()
+        assert d["pml_thickness"] == 2.0
+        assert d["margin_xy"] == 0.5
+        assert d["margin_z"] == 1.0
+
+
+class TestSetMargin:
+    """Test MeepSim.set_margin() API."""
+
+    def test_set_margin_defaults(self):
+        sim = MeepSim()
+        sim.set_margin()
+        assert sim.margin_config.pml_thickness == 1.0
+        assert sim.margin_config.margin_xy == 0.0
+        assert sim.margin_config.margin_z == 0.0
+
+    def test_set_margin_custom(self):
+        sim = MeepSim()
+        sim.set_margin(pml_thickness=0.5, margin_xy=0.3, margin_z=0.2)
+        assert sim.margin_config.pml_thickness == 0.5
+        assert sim.margin_config.margin_xy == 0.3
+        assert sim.margin_config.margin_z == 0.2
+
+    def test_margin_in_sim_config_json(self, tmp_path):
+        """Verify margin dict appears in SimConfig serialization."""
+        cfg = SimConfig(
+            gds_filename="layout.gds",
+            layer_stack=[],
+            ports=[],
+            materials={},
+            fdtd=FDTDConfig().to_dict(),
+            resolution=ResolutionConfig().to_dict(),
+            margin=MarginConfig(pml_thickness=0.5, margin_xy=0.2).to_dict(),
+        )
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        import json
+
+        data = json.loads(path.read_text())
+        assert "margin" in data
+        assert data["margin"]["pml_thickness"] == 0.5
+        assert data["margin"]["margin_xy"] == 0.2
+
+
+# ---------------------------------------------------------------------------
+# Overlay tests
+# ---------------------------------------------------------------------------
+
+
+class TestOverlay:
+    """Test SimOverlay + PortOverlay dataclasses and build_sim_overlay."""
+
+    def test_port_overlay_creation(self):
+        from gsim.meep.overlay import PortOverlay
+
+        p = PortOverlay(
+            name="o1",
+            center=(0.0, 0.0, 0.11),
+            width=0.5,
+            normal_axis=0,
+            direction="-",
+            is_source=True,
+            z_span=0.22,
+        )
+        assert p.name == "o1"
+        assert p.is_source
+        assert p.z_span == 0.22
+
+    def test_sim_overlay_creation(self):
+        from gsim.meep.overlay import SimOverlay
+
+        ov = SimOverlay(
+            cell_min=(-5.0, -2.0, -1.0),
+            cell_max=(5.0, 2.0, 1.0),
+            pml_thickness=1.0,
+            ports=[],
+        )
+        assert ov.cell_min == (-5.0, -2.0, -1.0)
+        assert ov.pml_thickness == 1.0
+
+    def test_build_sim_overlay(self):
+        import numpy as np
+
+        from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.meep.overlay import build_sim_overlay
+
+        gm = GeometryModel(
+            prisms={
+                "core": [
+                    Prism(
+                        vertices=np.array([[-2, -1], [2, -1], [2, 1], [-2, 1]]),
+                        z_base=0.0,
+                        z_top=0.22,
+                        layer_name="core",
+                    )
+                ]
+            },
+            bbox=((-2.0, -1.0, 0.0), (2.0, 1.0, 0.22)),
+        )
+
+        margin_cfg = MarginConfig(pml_thickness=1.0, margin_xy=0.5, margin_z=0.0)
+
+        port_data = [
+            PortData(
+                name="o1",
+                center=[-2.0, 0.0, 0.11],
+                orientation=0.0,
+                width=0.5,
+                normal_axis=0,
+                direction="-",
+                is_source=True,
+            ),
+            PortData(
+                name="o2",
+                center=[2.0, 0.0, 0.11],
+                orientation=180.0,
+                width=0.5,
+                normal_axis=0,
+                direction="+",
+                is_source=False,
+            ),
+        ]
+
+        overlay = build_sim_overlay(gm, margin_cfg, port_data)
+
+        # cell_min = geo_min - (pml + margin_xy) for xy, - (pml + margin_z) for z
+        assert overlay.cell_min[0] == pytest.approx(-3.5)  # -2 - 1.5
+        assert overlay.cell_min[1] == pytest.approx(-2.5)  # -1 - 1.5
+        assert overlay.cell_min[2] == pytest.approx(-1.0)  # 0 - 1.0
+        assert overlay.cell_max[0] == pytest.approx(3.5)
+        assert overlay.cell_max[1] == pytest.approx(2.5)
+        assert overlay.cell_max[2] == pytest.approx(1.22)
+
+        assert len(overlay.ports) == 2
+        assert overlay.ports[0].is_source
+        assert not overlay.ports[1].is_source
+        assert overlay.pml_thickness == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Script margin config tests
+# ---------------------------------------------------------------------------
+
+
+class TestScriptMarginConfig:
+    """Test that the runner script reads margin config."""
+
+    def test_script_reads_margin(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "margin" in script
+        assert "pml_thickness" in script
+        assert "margin_xy" in script
+        assert "margin_z" in script
+
+    def test_script_uses_pml_from_config(self):
+        """Verify the script no longer hardcodes padding = 1.0."""
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        # The old hardcoded line should be gone
+        assert "padding = 1.0" not in script
+
+
+# ---------------------------------------------------------------------------
+# Render2d overlay tests
+# ---------------------------------------------------------------------------
+
+
+class TestRender2dOverlay:
+    """Test overlay drawing in render2d."""
+
+    def test_plot_prism_slices_with_overlay(self):
+        """Verify plot_prism_slices accepts overlay kwarg without error."""
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.common.viz.render2d import plot_prism_slices
+        from gsim.meep.overlay import PortOverlay, SimOverlay
+
+        gm = GeometryModel(
+            prisms={
+                "core": [
+                    Prism(
+                        vertices=np.array([[-2, -1], [2, -1], [2, 1], [-2, 1]]),
+                        z_base=0.0,
+                        z_top=0.22,
+                        layer_name="core",
+                    )
+                ]
+            },
+            bbox=((-2.0, -1.0, 0.0), (2.0, 1.0, 0.22)),
+        )
+
+        overlay = SimOverlay(
+            cell_min=(-3.0, -2.0, -1.0),
+            cell_max=(3.0, 2.0, 1.22),
+            pml_thickness=1.0,
+            ports=[
+                PortOverlay(
+                    name="o1",
+                    center=(-2.0, 0.0, 0.11),
+                    width=0.5,
+                    normal_axis=0,
+                    direction="-",
+                    is_source=True,
+                    z_span=0.22,
+                ),
+            ],
+        )
+
+        fig, ax = plt.subplots()
+        result = plot_prism_slices(gm, z=0.11, ax=ax, overlay=overlay)
+        assert result is ax
+
+        # Check that sim cell boundary was drawn (check patches)
+        patch_labels = [p.get_label() for p in ax.patches]
+        assert "Sim cell" in patch_labels
+
+        plt.close(fig)
+
+    def test_plot_without_overlay_fallback(self):
+        """Without overlay, should still draw geometry bbox."""
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.common.viz.render2d import plot_prism_slices
+
+        gm = GeometryModel(
+            prisms={
+                "core": [
+                    Prism(
+                        vertices=np.array([[-2, -1], [2, -1], [2, 1], [-2, 1]]),
+                        z_base=0.0,
+                        z_top=0.22,
+                        layer_name="core",
+                    )
+                ]
+            },
+            bbox=((-2.0, -1.0, 0.0), (2.0, 1.0, 0.22)),
+        )
+
+        fig, ax = plt.subplots()
+        result = plot_prism_slices(gm, z=0.11, ax=ax)
+        assert result is ax
+
+        patch_labels = [p.get_label() for p in ax.patches]
+        assert "Simulation" in patch_labels
+
+        plt.close(fig)

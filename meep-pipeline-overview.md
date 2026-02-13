@@ -20,15 +20,15 @@ Layer Parsing        Representation       Visualization
 
 ## Implementation Status
 
-| Block                | Status | Notes                                                                    |
-| -------------------- | ------ | ------------------------------------------------------------------------ |
-| **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`             |
-| **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps    |
-| **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib             |
-| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution    |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes |
+| Block                | Status | Notes                                                                         |
+| -------------------- | ------ | ----------------------------------------------------------------------------- |
+| **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
+| **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
+| **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib                  |
+| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, margin |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes      |
 
-Tests: 49 meep-specific, 98 total passing.
+Tests: 62 meep-specific, 119 total passing.
 
 **Note:** The `gsim.fdtd` module (Tidy3D wrapper) was removed. MEEP is now the sole FDTD solver. The fdtd module had zero tests and zero usage outside itself. Its mode solver functionality (Waveguide, WaveguideCoupler, sweep functions) was Tidy3D-specific and not portable.
 
@@ -49,7 +49,7 @@ Solver-agnostic modules reusable by meep and palace.
 | `common/stack/extractor.py`      | `Layer`, `LayerStack` — extracts layer metadata from any PDK.                                                                               |
 | `common/stack/materials.py`      | `MaterialProperties` with `refractive_index`, `extinction_coeff`, `optical()` classmethod.                                                  |
 | `common/viz/__init__.py`         | Public API for all visualization backends.                                                                                                  |
-| `common/viz/render2d.py`         | Matplotlib 2D cross-sections (XY, XZ, YZ slices).                                                                                           |
+| `common/viz/render2d.py`         | Matplotlib 2D cross-sections (XY, XZ, YZ slices). Supports `SimOverlay` for PML shading, sim cell boundary, source/monitor port markers.    |
 | `common/viz/render3d_pyvista.py` | PyVista 3D rendering with Delaunay hole support.                                                                                            |
 | `common/viz/render3d_open3d.py`  | Open3D + Plotly 3D rendering (Jupyter-friendly).                                                                                            |
 | `common/viz/render3d_threejs.py` | Three.js + FastAPI live server visualization.                                                                                               |
@@ -58,16 +58,17 @@ Solver-agnostic modules reusable by meep and palace.
 
 ### `gsim.meep` — MEEP Photonic FDTD Simulation
 
-| Module                   | Purpose                                                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                                   |
-| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_wavelength`, `set_resolution`, `set_material`, `set_source_port`). Builds `GeometryModel` using gdsfactory PDK layer stack. |
-| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.                 |
-| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                              |
-| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                   |
-| `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                         |
-| `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                             |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Prism`, handles holes via Delaunay, runs FDTD, saves S-params CSV.                                        |
+| Module                   | Purpose                                                                                                                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `MarginConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                       |
+| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_wavelength`, `set_resolution`, `set_margin`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz. |
+| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.                     |
+| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `MarginConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                  |
+| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                       |
+| `meep/overlay.py`        | `SimOverlay` + `PortOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers.                                                              |
+| `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                             |
+| `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                 |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config (incl. margin), builds `mp.Prism`, handles holes via Delaunay, runs FDTD, saves S-params CSV.                             |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -96,7 +97,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, ports, materials, fdtd, resolution
+  sim_config.json    # layer_stack, ports, materials, fdtd, resolution, margin
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -120,6 +121,27 @@ output_dir/
 - The rendering code only reads `.vertices` and `.height` — no solver types needed
 - Generic `Prism` dataclass replaces solver-specific prism objects
 - Split into separate backend files (~350 lines each) for maintainability
+
+### Margin / PML configuration
+
+**Decision:** Add a `MarginConfig` model with `pml_thickness`, `margin_xy`, `margin_z` fields, exposed via `sim.set_margin()`.
+
+**Rationale:**
+
+- PML thickness was hardcoded to 1.0 um in the runner script — not configurable
+- Extra margin between geometry and PML is useful for avoiding evanescent field interaction with PML
+- Margin values are serialized into `sim_config.json` and read by the cloud runner
+
+### Simulation overlay visualization
+
+**Decision:** Add `SimOverlay` / `PortOverlay` dataclasses and draw them on `plot_2d()` cross-sections.
+
+**Rationale:**
+
+- `plot_2d()` previously only showed geometry prisms and a dashed bbox matching geometry bounds
+- Users need to see the actual simulation cell (geometry + margin + PML), PML regions, and port locations
+- Overlay rendering is solver-agnostic — `render2d.py` draws from generic overlay metadata
+- Source ports shown in red with arrow, monitor ports in blue, PML as semi-transparent orange
 
 ### Port z-center uses highest refractive index
 
@@ -155,6 +177,5 @@ output_dir/
 
 ## Remaining Work / Known Issues
 
-- **Boundary conditions:** PML is hardcoded in cloud script. No client-side config yet.
 - **Cloud testing:** The full cloud round-trip (upload → run meep → download results) hasn't been tested end-to-end with a real cloud instance.
 - **`_build_geometry_model()` note:** Uses `gf.get_active_pdk().layer_stack` (gdsfactory's LayerStack) instead of `self.stack` (gsim's LayerStack) because `LayeredComponentBase` needs gdsfactory's type for DerivedLayer resolution.

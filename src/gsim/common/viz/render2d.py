@@ -2,9 +2,16 @@
 
 Provides matplotlib-based 2D slicing views (XY, XZ, YZ) of a generic
 GeometryModel without any solver-specific imports.
+
+When a ``SimOverlay`` is provided, the plot also draws:
+- Simulation cell boundary (dashed black)
+- PML regions (semi-transparent orange)
+- Port markers (source in red, monitors in blue)
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,6 +32,8 @@ def plot_prism_slices(
     ax: plt.Axes | None = None,
     legend: bool = True,
     slices: str = "z",
+    *,
+    overlay: Any | None = None,
 ) -> plt.Axes | None:
     """Plot cross sections of a GeometryModel with multi-view support.
 
@@ -37,6 +46,7 @@ def plot_prism_slices(
         legend: Whether to show the legend.
         slices: Which slice(s) to plot -- "x", "y", "z", or combinations
             like "xy", "xz", "yz", "xyz".
+        overlay: Optional SimOverlay with sim cell / PML / port metadata.
 
     Returns:
         ``plt.Axes`` when *ax* was provided, otherwise ``None``
@@ -53,19 +63,45 @@ def plot_prism_slices(
         if slice_axis == "x":
             x_val = x if x is not None else "core"
             return _plot_single_prism_slice(
-                geometry_model, x=x_val, y=None, z=None, ax=ax, legend=legend
+                geometry_model,
+                x=x_val,
+                y=None,
+                z=None,
+                ax=ax,
+                legend=legend,
+                overlay=overlay,
             )
         if slice_axis == "y":
             y_val = y if y is not None else "core"
             return _plot_single_prism_slice(
-                geometry_model, x=None, y=y_val, z=None, ax=ax, legend=legend
+                geometry_model,
+                x=None,
+                y=y_val,
+                z=None,
+                ax=ax,
+                legend=legend,
+                overlay=overlay,
             )
         if slice_axis == "z":
             return _plot_single_prism_slice(
-                geometry_model, x=None, y=None, z=z, ax=ax, legend=legend
+                geometry_model,
+                x=None,
+                y=None,
+                z=z,
+                ax=ax,
+                legend=legend,
+                overlay=overlay,
             )
 
-    _plot_multi_view(geometry_model, slices_to_plot, x, y, z, show_legend=legend)
+    _plot_multi_view(
+        geometry_model,
+        slices_to_plot,
+        x,
+        y,
+        z,
+        show_legend=legend,
+        overlay=overlay,
+    )
     return None
 
 
@@ -81,6 +117,7 @@ def _plot_multi_view(
     y: float | str | None,
     z: float | str | None,
     show_legend: bool = True,
+    overlay: Any | None = None,
 ) -> None:
     """Create multi-view plot with a shared legend panel."""
     num_plots = len(slices_to_plot)
@@ -93,16 +130,34 @@ def _plot_multi_view(
         if slice_axis == "x":
             x_val = x if x is not None else "core"
             _plot_single_prism_slice(
-                geometry_model, x=x_val, y=None, z=None, ax=ax_i, legend=False
+                geometry_model,
+                x=x_val,
+                y=None,
+                z=None,
+                ax=ax_i,
+                legend=False,
+                overlay=overlay,
             )
         elif slice_axis == "y":
             y_val = y if y is not None else "core"
             _plot_single_prism_slice(
-                geometry_model, x=None, y=y_val, z=None, ax=ax_i, legend=False
+                geometry_model,
+                x=None,
+                y=y_val,
+                z=None,
+                ax=ax_i,
+                legend=False,
+                overlay=overlay,
             )
         elif slice_axis == "z":
             _plot_single_prism_slice(
-                geometry_model, x=None, y=None, z=z, ax=ax_i, legend=False
+                geometry_model,
+                x=None,
+                y=None,
+                z=z,
+                ax=ax_i,
+                legend=False,
+                overlay=overlay,
             )
 
     if show_legend:
@@ -139,6 +194,7 @@ def _plot_single_prism_slice(
     z: float | str | None = None,
     ax: plt.Axes | None = None,
     legend: bool = True,
+    overlay: Any | None = None,
 ) -> plt.Axes:
     """Plot a single cross-section using generic Prisms."""
     if ax is None:
@@ -159,7 +215,7 @@ def _plot_single_prism_slice(
     colors = dict(
         zip(
             layer_names,
-            plt.colormaps.get_cmap("Spectral")(
+            plt.colormaps.get_cmap("tab10")(
                 np.linspace(0, 1, max(len(layer_names), 1))
             ),
             strict=True,
@@ -292,16 +348,36 @@ def _plot_single_prism_slice(
         ax.set_title(f"XZ cross section at y={y:.2f}")
         ymin, ymax = cmin[1], cmin[1] + size[1]
 
-    sim_roi = Rectangle(
-        tuple(cmin),  # type: ignore[arg-type]
-        *size,
-        facecolor="none",
-        edgecolor="k",
-        linestyle="--",
-        linewidth=1,
-        label="Simulation",
-    )
-    ax.add_patch(sim_roi)
+    # Draw overlay or fallback geometry bbox
+    if overlay is not None:
+        _draw_overlay(ax, overlay, x=x, y=y, z=z)
+        # Expand axis limits to include full sim cell
+        if z is not None:
+            xmin = min(xmin, overlay.cell_min[0])
+            xmax = max(xmax, overlay.cell_max[0])
+            ymin = min(ymin, overlay.cell_min[1])
+            ymax = max(ymax, overlay.cell_max[1])
+        elif x is not None:
+            xmin = min(xmin, overlay.cell_min[1])
+            xmax = max(xmax, overlay.cell_max[1])
+            ymin = min(ymin, overlay.cell_min[2])
+            ymax = max(ymax, overlay.cell_max[2])
+        elif y is not None:
+            xmin = min(xmin, overlay.cell_min[0])
+            xmax = max(xmax, overlay.cell_max[0])
+            ymin = min(ymin, overlay.cell_min[2])
+            ymax = max(ymax, overlay.cell_max[2])
+    else:
+        sim_roi = Rectangle(
+            tuple(cmin),  # type: ignore[arg-type]
+            *size,
+            facecolor="none",
+            edgecolor="k",
+            linestyle="--",
+            linewidth=1,
+            label="Simulation",
+        )
+        ax.add_patch(sim_roi)
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -313,3 +389,288 @@ def _plot_single_prism_slice(
         ax.legend(fancybox=True, framealpha=1.0)
 
     return ax
+
+
+# ---------------------------------------------------------------------------
+# Overlay drawing
+# ---------------------------------------------------------------------------
+
+_PML_COLOR = (1.0, 0.6, 0.0, 0.20)  # semi-transparent orange
+_PML_EDGE = (1.0, 0.6, 0.0, 0.50)
+_SRC_COLOR = "red"
+_MON_COLOR = "royalblue"
+
+
+def _draw_overlay(
+    ax: plt.Axes,
+    overlay: Any,
+    *,
+    x: float | None,
+    y: float | None,
+    z: float | None,
+) -> None:
+    """Draw simulation cell boundary, PML regions, and port markers."""
+    cmin = overlay.cell_min
+    cmax = overlay.cell_max
+    pml = overlay.pml_thickness
+
+    if z is not None:
+        _draw_overlay_xy(ax, cmin, cmax, pml, overlay.ports)
+    elif x is not None:
+        _draw_overlay_yz(ax, cmin, cmax, pml, overlay.ports, x)
+    elif y is not None:
+        _draw_overlay_xz(ax, cmin, cmax, pml, overlay.ports, y)
+
+
+def _draw_overlay_xy(
+    ax: plt.Axes,
+    cmin: tuple[float, float, float],
+    cmax: tuple[float, float, float],
+    pml: float,
+    ports: list,
+) -> None:
+    """Draw overlay elements for an XY (z-slice) view."""
+    x0, y0 = cmin[0], cmin[1]
+    x1, y1 = cmax[0], cmax[1]
+    w, h = x1 - x0, y1 - y0
+
+    # Sim cell boundary
+    ax.add_patch(
+        Rectangle(
+            (x0, y0),
+            w,
+            h,
+            facecolor="none",
+            edgecolor="k",
+            linestyle="--",
+            linewidth=1,
+            label="Sim cell",
+            zorder=90,
+        )
+    )
+
+    # PML rectangles (4 edges)
+    _add_pml_rect(ax, x0, y0, pml, h, label="PML")  # left
+    _add_pml_rect(ax, x1 - pml, y0, pml, h)  # right
+    _add_pml_rect(ax, x0 + pml, y0, w - 2 * pml, pml)  # bottom
+    _add_pml_rect(ax, x0 + pml, y1 - pml, w - 2 * pml, pml)  # top
+
+    # Ports
+    labeled: set[str] = set()
+    for port in ports:
+        cx, cy, _cz = port.center
+        color = _SRC_COLOR if port.is_source else _MON_COLOR
+        legend_key = "Source" if port.is_source else "Monitor"
+        label = legend_key if legend_key not in labeled else None
+        labeled.add(legend_key)
+        hw = port.width / 2
+
+        if port.normal_axis == 0:  # x-normal → vertical line
+            ax.plot(
+                [cx, cx],
+                [cy - hw, cy + hw],
+                color=color,
+                linewidth=2,
+                zorder=95,
+                label=label,
+            )
+            if port.is_source:
+                dx = 0.15 if port.direction == "+" else -0.15
+                ax.annotate(
+                    "",
+                    xy=(cx + dx, cy),
+                    xytext=(cx, cy),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+                    zorder=96,
+                )
+        else:  # y-normal → horizontal line
+            ax.plot(
+                [cx - hw, cx + hw],
+                [cy, cy],
+                color=color,
+                linewidth=2,
+                zorder=95,
+                label=label,
+            )
+            if port.is_source:
+                dy = 0.15 if port.direction == "+" else -0.15
+                ax.annotate(
+                    "",
+                    xy=(cx, cy + dy),
+                    xytext=(cx, cy),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+                    zorder=96,
+                )
+
+        ax.annotate(
+            port.name,
+            (cx, cy),
+            fontsize=7,
+            ha="center",
+            va="bottom",
+            color=color,
+            zorder=96,
+            xytext=(0, 4),
+            textcoords="offset points",
+        )
+
+
+def _draw_overlay_yz(
+    ax: plt.Axes,
+    cmin: tuple[float, float, float],
+    cmax: tuple[float, float, float],
+    pml: float,
+    ports: list,
+    x_slice: float,
+) -> None:
+    """Draw overlay elements for a YZ (x-slice) view."""
+    y0, z0 = cmin[1], cmin[2]
+    y1, z1 = cmax[1], cmax[2]
+    w, h = y1 - y0, z1 - z0
+
+    # Sim cell boundary
+    ax.add_patch(
+        Rectangle(
+            (y0, z0),
+            w,
+            h,
+            facecolor="none",
+            edgecolor="k",
+            linestyle="--",
+            linewidth=1,
+            label="Sim cell",
+            zorder=90,
+        )
+    )
+
+    # PML rectangles
+    _add_pml_rect(ax, y0, z0, pml, h, label="PML")  # left
+    _add_pml_rect(ax, y1 - pml, z0, pml, h)  # right
+    _add_pml_rect(ax, y0 + pml, z0, w - 2 * pml, pml)  # bottom
+    _add_pml_rect(ax, y0 + pml, z1 - pml, w - 2 * pml, pml)  # top
+
+    # Ports that intersect this x-slice (x-normal ports at x_slice)
+    labeled: set[str] = set()
+    for port in ports:
+        cx, cy, cz = port.center
+        if port.normal_axis == 0 and abs(cx - x_slice) < 0.01:
+            color = _SRC_COLOR if port.is_source else _MON_COLOR
+            legend_key = "Source" if port.is_source else "Monitor"
+            label = legend_key if legend_key not in labeled else None
+            labeled.add(legend_key)
+            hw = port.width / 2
+            hz = port.z_span / 2
+            ax.add_patch(
+                Rectangle(
+                    (cy - hw, cz - hz),
+                    port.width,
+                    port.z_span,
+                    facecolor="none",
+                    edgecolor=color,
+                    linewidth=1.5,
+                    label=label,
+                    zorder=95,
+                )
+            )
+            ax.annotate(
+                port.name,
+                (cy, cz + hz),
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                color=color,
+                zorder=96,
+            )
+
+
+def _draw_overlay_xz(
+    ax: plt.Axes,
+    cmin: tuple[float, float, float],
+    cmax: tuple[float, float, float],
+    pml: float,
+    ports: list,
+    y_slice: float,
+) -> None:
+    """Draw overlay elements for an XZ (y-slice) view."""
+    x0, z0 = cmin[0], cmin[2]
+    x1, z1 = cmax[0], cmax[2]
+    w, h = x1 - x0, z1 - z0
+
+    # Sim cell boundary
+    ax.add_patch(
+        Rectangle(
+            (x0, z0),
+            w,
+            h,
+            facecolor="none",
+            edgecolor="k",
+            linestyle="--",
+            linewidth=1,
+            label="Sim cell",
+            zorder=90,
+        )
+    )
+
+    # PML rectangles
+    _add_pml_rect(ax, x0, z0, pml, h, label="PML")  # left
+    _add_pml_rect(ax, x1 - pml, z0, pml, h)  # right
+    _add_pml_rect(ax, x0 + pml, z0, w - 2 * pml, pml)  # bottom
+    _add_pml_rect(ax, x0 + pml, z1 - pml, w - 2 * pml, pml)  # top
+
+    # Ports that intersect this y-slice (y-normal ports at y_slice)
+    labeled: set[str] = set()
+    for port in ports:
+        cx, cy, cz = port.center
+        if port.normal_axis == 1 and abs(cy - y_slice) < 0.01:
+            color = _SRC_COLOR if port.is_source else _MON_COLOR
+            legend_key = "Source" if port.is_source else "Monitor"
+            label = legend_key if legend_key not in labeled else None
+            labeled.add(legend_key)
+            hw = port.width / 2
+            hz = port.z_span / 2
+            ax.add_patch(
+                Rectangle(
+                    (cx - hw, cz - hz),
+                    port.width,
+                    port.z_span,
+                    facecolor="none",
+                    edgecolor=color,
+                    linewidth=1.5,
+                    label=label,
+                    zorder=95,
+                )
+            )
+            ax.annotate(
+                port.name,
+                (cx, cz + hz),
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                color=color,
+                zorder=96,
+            )
+
+
+def _add_pml_rect(
+    ax: plt.Axes,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    label: str | None = None,
+) -> None:
+    """Add a single semi-transparent PML rectangle."""
+    if w <= 0 or h <= 0:
+        return
+    ax.add_patch(
+        Rectangle(
+            (x, y),
+            w,
+            h,
+            facecolor=_PML_COLOR,
+            edgecolor=_PML_EDGE,
+            linewidth=0.5,
+            label=label,
+            zorder=80,
+        )
+    )

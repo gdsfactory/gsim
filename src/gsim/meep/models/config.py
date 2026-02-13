@@ -13,6 +13,28 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class MarginConfig(BaseModel):
+    """Simulation cell margin / PML configuration.
+
+    Controls the spacing between geometry bounds and the simulation cell edges,
+    as well as PML (perfectly matched layer) thickness.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    pml_thickness: float = Field(default=1.0, ge=0, description="PML thickness in um")
+    margin_xy: float = Field(
+        default=0.0, ge=0, description="Extra margin between geometry and PML in xy"
+    )
+    margin_z: float = Field(
+        default=0.0, ge=0, description="Extra margin between geometry and PML in z"
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON config."""
+        return self.model_dump()
+
+
 class FDTDConfig(BaseModel):
     """Wavelength and frequency settings for MEEP FDTD simulation.
 
@@ -156,6 +178,7 @@ class SimConfig(BaseModel):
     materials: dict[str, dict[str, Any]] = Field(default_factory=dict)
     fdtd: dict[str, Any] = Field(default_factory=dict)
     resolution: dict[str, Any] = Field(default_factory=dict)
+    margin: dict[str, Any] = Field(default_factory=dict)
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.

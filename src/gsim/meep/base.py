@@ -261,6 +261,36 @@ class MeepSimMixin:
             return plot_prisms_3d_open3d(gm, **kwargs)
         raise ValueError(f"Unsupported backend: {backend}. Use 'open3d' or 'pyvista'")
 
+    def _build_overlay(self, geometry_model: GeometryModel) -> Any:
+        """Build a SimOverlay from current config, if available.
+
+        Returns SimOverlay or None if ports/stack aren't configured yet.
+        """
+        from gsim.meep.models import MarginConfig
+        from gsim.meep.overlay import build_sim_overlay
+
+        if self.geometry is None:
+            return None
+
+        if self.stack is None and self._stack_kwargs:
+            self._resolve_stack()
+
+        if self.stack is None:
+            return None
+
+        try:
+            from gsim.meep.ports import extract_port_info
+
+            component = self.geometry.component.copy()
+            port_data = extract_port_info(
+                component, self.stack, source_port=getattr(self, "source_port", None)
+            )
+        except Exception:
+            port_data = []
+
+        margin_config = getattr(self, "margin_config", MarginConfig())
+        return build_sim_overlay(geometry_model, margin_config, port_data)
+
     def plot_2d(
         self,
         x: float | str | None = None,
@@ -289,4 +319,5 @@ class MeepSimMixin:
         from gsim.common.viz import plot_prism_slices
 
         gm = self._build_geometry_model()
-        return plot_prism_slices(gm, x, y, z, ax, legend, slices)
+        overlay = self._build_overlay(gm)
+        return plot_prism_slices(gm, x, y, z, ax, legend, slices, overlay=overlay)

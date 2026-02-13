@@ -17,6 +17,7 @@ from gsim.common.stack.materials import MaterialProperties
 from gsim.meep.base import MeepSimMixin
 from gsim.meep.models import (
     FDTDConfig,
+    MarginConfig,
     ResolutionConfig,
     SimConfig,
     SParameterResult,
@@ -57,6 +58,7 @@ class MeepSim(MeepSimMixin, BaseModel):
     # MEEP-specific configs
     fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
+    margin_config: MarginConfig = Field(default_factory=MarginConfig)
 
     # Material overrides (optical properties)
     materials: dict[str, MaterialProperties] = Field(default_factory=dict)
@@ -120,6 +122,30 @@ class MeepSim(MeepSimMixin, BaseModel):
                 self.resolution_config = ResolutionConfig.default()
         elif pixels_per_um is not None:
             self.resolution_config = ResolutionConfig(pixels_per_um=pixels_per_um)
+
+    # -------------------------------------------------------------------------
+    # Margin / PML config
+    # -------------------------------------------------------------------------
+
+    def set_margin(
+        self,
+        *,
+        pml_thickness: float = 1.0,
+        margin_xy: float = 0.0,
+        margin_z: float = 0.0,
+    ) -> None:
+        """Configure PML thickness and extra margin around geometry.
+
+        Args:
+            pml_thickness: PML absorber thickness in um
+            margin_xy: Extra margin between geometry and PML in xy plane
+            margin_z: Extra margin between geometry and PML in z direction
+        """
+        self.margin_config = MarginConfig(
+            pml_thickness=pml_thickness,
+            margin_xy=margin_xy,
+            margin_z=margin_z,
+        )
 
     # -------------------------------------------------------------------------
     # Source port
@@ -249,6 +275,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             materials={name: mat.to_dict() for name, mat in material_data.items()},
             fdtd=self.fdtd_config.to_dict(),
             resolution=self.resolution_config.to_dict(),
+            margin=self.margin_config.to_dict(),
         )
 
         # 6. Write JSON config
