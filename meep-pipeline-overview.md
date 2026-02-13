@@ -25,7 +25,7 @@ Layer Parsing        Representation       Visualization
 | **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib                  |
-| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, margin |
+| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, padding |
 | **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes      |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
@@ -61,15 +61,15 @@ Solver-agnostic modules reusable by meep and palace.
 
 | Module                   | Purpose                                                                                                                                                                                                           |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `MarginConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                                          |
-| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_margin`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.       |
-| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.                                        |
-| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `MarginConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                                     |
+| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                                           |
+| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
+| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack + dielectrics. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.   |
+| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                                      |
 | `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                                          |
-| `meep/overlay.py`        | `SimOverlay` + `PortOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers.                                                                                 |
+| `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
 | `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config (incl. margin), builds `mp.Prism`, handles holes via Delaunay, runs FDTD with `until_after_sources`, saves S-params CSV.                     |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` background slabs from dielectrics + `mp.Prism` from layers, handles holes via Delaunay, runs FDTD, saves S-params CSV.     |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -98,7 +98,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, ports, materials, fdtd, resolution, margin
+  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -123,19 +123,22 @@ output_dir/
 - Generic `Prism` dataclass replaces solver-specific prism objects
 - Split into separate backend files (~350 lines each) for maintainability
 
-### Margin / PML configuration
+### Domain configuration (margins + PML + dielectric backgrounds)
 
-**Decision:** Add a `MarginConfig` model with `pml_thickness`, `margin_xy`, `margin_z` fields, exposed via `sim.set_margin()`.
+**Decision:** Add a `DomainConfig` model with `dpml`, `margin_xy`, `margin_z_above`, `margin_z_below` fields, exposed via `sim.set_domain()`.
 
 **Rationale:**
 
 - PML thickness was hardcoded to 1.0 um in the runner script — not configurable
-- Extra margin between geometry and PML is useful for avoiding evanescent field interaction with PML
-- Margin values are serialized into `sim_config.json` and read by the cloud runner
+- Margins control how much material (cladding) is kept around the waveguide core
+- `margin_z_above`/`margin_z_below` are used by `set_z_crop()` to determine the crop window
+- `margin_xy` is the gap between geometry bbox and PML inner edge
+- Background dielectric slabs (`stack.dielectrics`) are serialized to JSON and created as `mp.Block` objects in the runner, ensuring the entire simulation domain is filled with the correct material at each z-position (no vacuum gaps)
+- `mp.Block` slabs are placed first in the geometry list; MEEP's "later objects override" rule ensures patterned waveguide prisms take precedence
 
 ### Simulation overlay visualization
 
-**Decision:** Add `SimOverlay` / `PortOverlay` dataclasses and draw them on `plot_2d()` cross-sections.
+**Decision:** Add `SimOverlay` / `PortOverlay` / `DielectricOverlay` dataclasses and draw them on `plot_2d()` cross-sections.
 
 **Rationale:**
 
@@ -143,6 +146,7 @@ output_dir/
 - Users need to see the actual simulation cell (geometry + margin + PML), PML regions, and port locations
 - Overlay rendering is solver-agnostic — `render2d.py` draws from generic overlay metadata
 - Source ports shown in red with arrow, monitor ports in blue, PML as semi-transparent orange
+- Dielectric background slabs shown as coloured bands in XZ/YZ views (SiO2 light blue, silicon grey, air transparent)
 
 ### Port z-center uses highest refractive index
 
@@ -164,7 +168,7 @@ output_dir/
 **Implementation:**
 
 - Auto-detects core layer via highest refractive index (same logic as port z-center)
-- Default: 2um padding above and below core
+- Crops tightly to `[ref.zmin, ref.zmax]` — actual gap before PML is controlled by `set_padding()`
 - Removes layers entirely outside the crop window
 - Clips layers that partially overlap (adjusts zmin/zmax/thickness)
 - Called after `set_stack()`, before `write_config()`
@@ -312,11 +316,11 @@ from gsim.meep import MeepSim
 sim = MeepSim()
 sim.set_geometry(component)
 sim.set_stack()
-sim.set_z_crop()  # crop to 2um above/below core (removes metals, substrate)
+sim.set_domain(1.0)  # 1um margins, 1um PML (defaults)
+sim.set_z_crop()  # crop to margin_z_above/below around core
 sim.set_material("si", refractive_index=3.47)
 sim.set_wavelength(wavelength=1.55, bandwidth=0.1, run_after_sources=100)
 sim.set_resolution(pixels_per_um=40)
-sim.set_margin(pml_thickness=1.0)
 sim.set_output_dir("./meep-sim-test")
 
 # Visualize before running

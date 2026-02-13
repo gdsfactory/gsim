@@ -19,7 +19,7 @@ Example:
 
 from gsim.meep.models import (
     FDTDConfig,
-    MarginConfig,
+    DomainConfig,
     ResolutionConfig,
     SimConfig,
     SParameterResult,
@@ -28,7 +28,7 @@ from gsim.meep.sim import MeepSim
 
 __all__ = [
     "FDTDConfig",
-    "MarginConfig",
+    "DomainConfig",
     "MeepSim",
     "ResolutionConfig",
     "SParameterResult",

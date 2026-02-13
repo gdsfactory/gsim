@@ -9,8 +9,8 @@ import pytest
 
 from gsim.meep import (
     FDTDConfig,
-    MarginConfig,
     MeepSim,
+    DomainConfig,
     ResolutionConfig,
     SimConfig,
     SParameterResult,
@@ -562,15 +562,15 @@ class TestImportWithoutMeep:
     def test_import_all_public_api(self):
         from gsim.meep import (
             FDTDConfig,
-            MarginConfig,
             MeepSim,
+            DomainConfig,
             ResolutionConfig,
             SimConfig,
             SParameterResult,
         )
 
         assert FDTDConfig is not None
-        assert MarginConfig is not None
+        assert DomainConfig is not None
         assert MeepSim is not None
         assert ResolutionConfig is not None
         assert SParameterResult is not None
@@ -578,52 +578,78 @@ class TestImportWithoutMeep:
 
 
 # ---------------------------------------------------------------------------
-# MarginConfig tests
+# DomainConfig tests
 # ---------------------------------------------------------------------------
 
 
-class TestMarginConfig:
-    """Test MarginConfig model."""
+class TestDomainConfig:
+    """Test DomainConfig model."""
 
     def test_defaults(self):
-        cfg = MarginConfig()
-        assert cfg.pml_thickness == 1.0
-        assert cfg.margin_xy == 0.0
-        assert cfg.margin_z == 0.0
+        cfg = DomainConfig()
+        assert cfg.dpml == 1.0
+        assert cfg.margin_xy == 1.0
+        assert cfg.margin_z_above == 1.0
+        assert cfg.margin_z_below == 1.0
 
     def test_custom(self):
-        cfg = MarginConfig(pml_thickness=0.5, margin_xy=0.2, margin_z=0.3)
-        assert cfg.pml_thickness == 0.5
+        cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)
+        assert cfg.dpml == 0.5
         assert cfg.margin_xy == 0.2
-        assert cfg.margin_z == 0.3
+        assert cfg.margin_z_above == 0.3
+        assert cfg.margin_z_below == 0.4
 
     def test_to_dict(self):
-        cfg = MarginConfig(pml_thickness=2.0, margin_xy=0.5, margin_z=1.0)
+        cfg = DomainConfig(dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5)
         d = cfg.to_dict()
-        assert d["pml_thickness"] == 2.0
+        assert d["dpml"] == 2.0
         assert d["margin_xy"] == 0.5
-        assert d["margin_z"] == 1.0
+        assert d["margin_z_above"] == 1.0
+        assert d["margin_z_below"] == 1.5
 
 
-class TestSetMargin:
-    """Test MeepSim.set_margin() API."""
+class TestSetDomain:
+    """Test MeepSim.set_domain() API."""
 
-    def test_set_margin_defaults(self):
+    def test_set_domain_defaults(self):
         sim = MeepSim()
-        sim.set_margin()
-        assert sim.margin_config.pml_thickness == 1.0
-        assert sim.margin_config.margin_xy == 0.0
-        assert sim.margin_config.margin_z == 0.0
+        sim.set_domain()
+        assert sim.domain_config.dpml == 1.0
+        assert sim.domain_config.margin_xy == 1.0
+        assert sim.domain_config.margin_z_above == 1.0
+        assert sim.domain_config.margin_z_below == 1.0
 
-    def test_set_margin_custom(self):
+    def test_set_domain_uniform(self):
         sim = MeepSim()
-        sim.set_margin(pml_thickness=0.5, margin_xy=0.3, margin_z=0.2)
-        assert sim.margin_config.pml_thickness == 0.5
-        assert sim.margin_config.margin_xy == 0.3
-        assert sim.margin_config.margin_z == 0.2
+        sim.set_domain(2.0)
+        assert sim.domain_config.margin_xy == 2.0
+        assert sim.domain_config.margin_z_above == 2.0
+        assert sim.domain_config.margin_z_below == 2.0
 
-    def test_margin_in_sim_config_json(self, tmp_path):
-        """Verify margin dict appears in SimConfig serialization."""
+    def test_set_domain_per_axis(self):
+        sim = MeepSim()
+        sim.set_domain(margin_xy=0.5, margin_z_above=2.0, margin_z_below=1.0, dpml=0.5)
+        assert sim.domain_config.dpml == 0.5
+        assert sim.domain_config.margin_xy == 0.5
+        assert sim.domain_config.margin_z_above == 2.0
+        assert sim.domain_config.margin_z_below == 1.0
+
+    def test_set_domain_margin_z_shorthand(self):
+        sim = MeepSim()
+        sim.set_domain(margin_z=3.0)
+        assert sim.domain_config.margin_z_above == 3.0
+        assert sim.domain_config.margin_z_below == 3.0
+
+    def test_set_domain_resolution_order(self):
+        """margin_z_above/below > margin_z > margin > default."""
+        sim = MeepSim()
+        sim.set_domain(0.5, margin_z=2.0, margin_z_above=3.0)
+        assert sim.domain_config.margin_xy == 0.5
+        assert sim.domain_config.margin_z_above == 3.0  # explicit wins
+        assert sim.domain_config.margin_z_below == 2.0  # margin_z wins over margin
+
+    def test_domain_in_sim_config_json(self, tmp_path):
+        """Verify domain dict appears in SimConfig serialization."""
         cfg = SimConfig(
             gds_filename="layout.gds",
             layer_stack=[],
@@ -631,16 +657,16 @@ class TestSetMargin:
             materials={},
             fdtd=FDTDConfig().to_dict(),
             resolution=ResolutionConfig().to_dict(),
-            margin=MarginConfig(pml_thickness=0.5, margin_xy=0.2).to_dict(),
+            domain=DomainConfig(dpml=0.5, margin_xy=0.2).to_dict(),
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
         import json
 
         data = json.loads(path.read_text())
-        assert "margin" in data
-        assert data["margin"]["pml_thickness"] == 0.5
-        assert data["margin"]["margin_xy"] == 0.2
+        assert "domain" in data
+        assert data["domain"]["dpml"] == 0.5
+        assert data["domain"]["margin_xy"] == 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -673,11 +699,24 @@ class TestOverlay:
         ov = SimOverlay(
             cell_min=(-5.0, -2.0, -1.0),
             cell_max=(5.0, 2.0, 1.0),
-            pml_thickness=1.0,
+            dpml=1.0,
             ports=[],
         )
         assert ov.cell_min == (-5.0, -2.0, -1.0)
-        assert ov.pml_thickness == 1.0
+        assert ov.dpml == 1.0
+
+    def test_dielectric_overlay_creation(self):
+        from gsim.meep.overlay import DielectricOverlay
+
+        d = DielectricOverlay(
+            name="oxide",
+            material="SiO2",
+            zmin=-1.0,
+            zmax=0.0,
+        )
+        assert d.name == "oxide"
+        assert d.material == "SiO2"
+        assert d.zmin == -1.0
 
     def test_build_sim_overlay(self):
         import numpy as np
@@ -699,7 +738,7 @@ class TestOverlay:
             bbox=((-2.0, -1.0, 0.0), (2.0, 1.0, 0.22)),
         )
 
-        margin_cfg = MarginConfig(pml_thickness=1.0, margin_xy=0.5, margin_z=0.0)
+        domain_cfg = DomainConfig(dpml=1.0, margin_xy=0.5, margin_z_above=0.0, margin_z_below=0.0)
 
         port_data = [
             PortData(
@@ -722,46 +761,87 @@ class TestOverlay:
             ),
         ]
 
-        overlay = build_sim_overlay(gm, margin_cfg, port_data)
+        overlay = build_sim_overlay(gm, domain_cfg, port_data)
 
-        # cell_min = geo_min - (pml + margin_xy) for xy, - (pml + margin_z) for z
-        assert overlay.cell_min[0] == pytest.approx(-3.5)  # -2 - 1.5
-        assert overlay.cell_min[1] == pytest.approx(-2.5)  # -1 - 1.5
+        # cell_min = geo_min - (margin_xy + dpml) for xy, - dpml for z
+        assert overlay.cell_min[0] == pytest.approx(-3.5)  # -2 - (0.5 + 1.0)
+        assert overlay.cell_min[1] == pytest.approx(-2.5)  # -1 - (0.5 + 1.0)
         assert overlay.cell_min[2] == pytest.approx(-1.0)  # 0 - 1.0
         assert overlay.cell_max[0] == pytest.approx(3.5)
         assert overlay.cell_max[1] == pytest.approx(2.5)
-        assert overlay.cell_max[2] == pytest.approx(1.22)
+        assert overlay.cell_max[2] == pytest.approx(1.22)  # 0.22 + 1.0
 
         assert len(overlay.ports) == 2
         assert overlay.ports[0].is_source
         assert not overlay.ports[1].is_source
-        assert overlay.pml_thickness == 1.0
+        assert overlay.dpml == 1.0
+
+    def test_build_sim_overlay_with_dielectrics(self):
+        import numpy as np
+
+        from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.meep.overlay import build_sim_overlay
+
+        gm = GeometryModel(
+            prisms={
+                "core": [
+                    Prism(
+                        vertices=np.array([[-2, -1], [2, -1], [2, 1], [-2, 1]]),
+                        z_base=0.0,
+                        z_top=0.22,
+                        layer_name="core",
+                    )
+                ]
+            },
+            bbox=((-2.0, -1.0, -1.0), (2.0, 1.0, 1.22)),
+        )
+
+        domain_cfg = DomainConfig(dpml=1.0, margin_xy=0.5)
+        dielectrics = [
+            {"name": "substrate", "material": "silicon", "zmin": -1.0, "zmax": 0.0},
+            {"name": "oxide", "material": "SiO2", "zmin": 0.0, "zmax": 1.22},
+        ]
+
+        overlay = build_sim_overlay(gm, domain_cfg, [], dielectrics=dielectrics)
+
+        assert len(overlay.dielectrics) == 2
+        assert overlay.dielectrics[0].name == "substrate"
+        assert overlay.dielectrics[0].material == "silicon"
+        assert overlay.dielectrics[1].name == "oxide"
+        assert overlay.dielectrics[1].material == "SiO2"
 
 
 # ---------------------------------------------------------------------------
-# Script margin config tests
+# Script domain config tests
 # ---------------------------------------------------------------------------
 
 
-class TestScriptMarginConfig:
-    """Test that the runner script reads margin config."""
+class TestScriptDomainConfig:
+    """Test that the runner script reads domain config."""
 
-    def test_script_reads_margin(self):
+    def test_script_reads_domain(self):
         from gsim.meep.script import generate_meep_script
 
         script = generate_meep_script()
-        assert "margin" in script
-        assert "pml_thickness" in script
+        assert "domain" in script
+        assert "dpml" in script
         assert "margin_xy" in script
-        assert "margin_z" in script
 
-    def test_script_uses_pml_from_config(self):
+    def test_script_uses_dpml_from_config(self):
         """Verify the script no longer hardcodes padding = 1.0."""
         from gsim.meep.script import generate_meep_script
 
         script = generate_meep_script()
-        # The old hardcoded line should be gone
         assert "padding = 1.0" not in script
+
+    def test_script_has_background_slabs(self):
+        """Verify the script has build_background_slabs function."""
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "build_background_slabs" in script
+        assert "mp.Block" in script
+        assert "mp.inf" in script
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +881,7 @@ class TestRender2dOverlay:
         overlay = SimOverlay(
             cell_min=(-3.0, -2.0, -1.0),
             cell_max=(3.0, 2.0, 1.22),
-            pml_thickness=1.0,
+            dpml=1.0,
             ports=[
                 PortOverlay(
                     name="o1",
@@ -856,5 +936,64 @@ class TestRender2dOverlay:
 
         patch_labels = [p.get_label() for p in ax.patches]
         assert "Simulation" in patch_labels
+
+        plt.close(fig)
+
+    def test_plot_with_dielectric_overlay(self):
+        """Verify dielectric overlays render without error."""
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.common.viz.render2d import plot_prism_slices
+        from gsim.meep.overlay import DielectricOverlay, SimOverlay
+
+        gm = GeometryModel(
+            prisms={
+                "core": [
+                    Prism(
+                        vertices=np.array([[-2, -1], [2, -1], [2, 1], [-2, 1]]),
+                        z_base=0.0,
+                        z_top=0.22,
+                        layer_name="core",
+                    )
+                ]
+            },
+            bbox=((-2.0, -1.0, -1.0), (2.0, 1.0, 1.22)),
+        )
+
+        overlay = SimOverlay(
+            cell_min=(-3.0, -2.0, -2.0),
+            cell_max=(3.0, 2.0, 2.22),
+            dpml=1.0,
+            ports=[],
+            dielectrics=[
+                DielectricOverlay(name="substrate", material="silicon", zmin=-1.0, zmax=0.0),
+                DielectricOverlay(name="oxide", material="SiO2", zmin=0.0, zmax=1.22),
+            ],
+        )
+
+        # Test XZ view (side view — should draw horizontal bands)
+        fig, ax = plt.subplots()
+        result = plot_prism_slices(gm, y=0.0, ax=ax, slices="y", overlay=overlay)
+        assert result is ax
+
+        patch_labels = [p.get_label() for p in ax.patches]
+        assert "substrate" in patch_labels
+        assert "oxide" in patch_labels
+
+        plt.close(fig)
+
+        # Test XY view (top view — should draw background fill for active z)
+        fig, ax = plt.subplots()
+        result = plot_prism_slices(gm, z=0.11, ax=ax, slices="z", overlay=overlay)
+        assert result is ax
+
+        patch_labels = [p.get_label() for p in ax.patches]
+        # z=0.11 is within oxide (0.0 to 1.22) but not substrate (-1.0 to 0.0)
+        assert "oxide" in patch_labels
 
         plt.close(fig)

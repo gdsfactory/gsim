@@ -17,7 +17,7 @@ from gsim.common.stack.materials import MaterialProperties
 from gsim.meep.base import MeepSimMixin
 from gsim.meep.models import (
     FDTDConfig,
-    MarginConfig,
+    DomainConfig,
     ResolutionConfig,
     SimConfig,
     SParameterResult,
@@ -58,7 +58,7 @@ class MeepSim(MeepSimMixin, BaseModel):
     # MEEP-specific configs
     fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
-    margin_config: MarginConfig = Field(default_factory=MarginConfig)
+    domain_config: DomainConfig = Field(default_factory=DomainConfig)
 
     # Material overrides (optical properties)
     materials: dict[str, MaterialProperties] = Field(default_factory=dict)
@@ -124,27 +124,49 @@ class MeepSim(MeepSimMixin, BaseModel):
             self.resolution_config = ResolutionConfig(pixels_per_um=pixels_per_um)
 
     # -------------------------------------------------------------------------
-    # Margin / PML config
+    # Domain / PML config
     # -------------------------------------------------------------------------
 
-    def set_margin(
+    def set_domain(
         self,
+        margin: float | None = None,
         *,
-        pml_thickness: float = 1.0,
-        margin_xy: float = 0.0,
-        margin_z: float = 0.0,
+        margin_xy: float | None = None,
+        margin_z: float | None = None,
+        margin_z_above: float | None = None,
+        margin_z_below: float | None = None,
+        dpml: float = 1.0,
     ) -> None:
-        """Configure PML thickness and extra margin around geometry.
+        """Configure simulation domain margins and PML thickness.
+
+        Margins control how much material is kept around the geometry.
+        Along z, ``set_z_crop()`` uses ``margin_z_above`` / ``margin_z_below``
+        to determine how much of the layer stack to keep around the core.
+        Along XY, the margin is the gap between geometry bbox and PML.
+
+        Resolution order for each axis:
+            margin_z_above/margin_z_below > margin_z > margin > default (1.0)
 
         Args:
-            pml_thickness: PML absorber thickness in um
-            margin_xy: Extra margin between geometry and PML in xy plane
-            margin_z: Extra margin between geometry and PML in z direction
+            margin: Uniform margin in all directions (um).
+            margin_xy: XY margin between geometry and PML (um).
+            margin_z: Z margin above and below core (um).
+            margin_z_above: Z margin above core (um).
+            margin_z_below: Z margin below core (um).
+            dpml: PML absorber thickness in um.
         """
-        self.margin_config = MarginConfig(
-            pml_thickness=pml_thickness,
-            margin_xy=margin_xy,
-            margin_z=margin_z,
+        default = 1.0
+        base = margin if margin is not None else default
+        xy = margin_xy if margin_xy is not None else base
+        z = margin_z if margin_z is not None else base
+        z_above = margin_z_above if margin_z_above is not None else z
+        z_below = margin_z_below if margin_z_below is not None else z
+
+        self.domain_config = DomainConfig(
+            dpml=dpml,
+            margin_xy=xy,
+            margin_z_above=z_above,
+            margin_z_below=z_below,
         )
 
     # -------------------------------------------------------------------------
@@ -259,23 +281,37 @@ class MeepSim(MeepSimMixin, BaseModel):
             )
             used_materials.add(layer.material)
 
+        # 2b. Build dielectric entries (background slabs from stack)
+        dielectric_entries = []
+        for diel in self.stack.dielectrics:
+            dielectric_entries.append(
+                {
+                    "name": diel["name"],
+                    "zmin": diel["zmin"],
+                    "zmax": diel["zmax"],
+                    "material": diel["material"],
+                }
+            )
+            used_materials.add(diel["material"])
+
         # 3. Extract port info
         port_infos = extract_port_info(
             component, self.stack, source_port=self.source_port
         )
 
-        # 4. Resolve materials (only those used by layers)
+        # 4. Resolve materials (layers + dielectrics)
         material_data = resolve_materials(used_materials, overrides=self.materials)
 
         # 5. Build SimConfig
         sim_config = SimConfig(
             gds_filename="layout.gds",
             layer_stack=layer_stack_entries,
+            dielectrics=dielectric_entries,
             ports=[p.to_dict() for p in port_infos],
             materials={name: mat.to_dict() for name, mat in material_data.items()},
             fdtd=self.fdtd_config.to_dict(),
             resolution=self.resolution_config.to_dict(),
-            margin=self.margin_config.to_dict(),
+            domain=self.domain_config.to_dict(),
         )
 
         # 6. Write JSON config

@@ -3,7 +3,7 @@
 from gsim.meep.models.config import (
     FDTDConfig,
     LayerStackEntry,
-    MarginConfig,
+    DomainConfig,
     MaterialData,
     PortData,
     ResolutionConfig,
@@ -14,7 +14,7 @@ from gsim.meep.models.results import SParameterResult
 __all__ = [
     "FDTDConfig",
     "LayerStackEntry",
-    "MarginConfig",
+    "DomainConfig",
     "MaterialData",
     "PortData",
     "ResolutionConfig",

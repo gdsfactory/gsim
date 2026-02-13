@@ -139,6 +139,32 @@ def triangulate_polygon_with_holes(polygon):
     return triangles if triangles else [list(polygon.exterior.coords[:-1])]
 
 
+def build_background_slabs(config, materials):
+    """Build background mp.Block slabs from dielectric entries.
+
+    These infinite-XY slabs fill the simulation cell at each z-range with
+    the correct cladding/substrate material.  They must come FIRST in the
+    geometry list so that patterned prisms (added later) take precedence.
+    """
+    slabs = []
+    for diel in sorted(config.get("dielectrics", []), key=lambda d: d["zmin"]):
+        mat = materials.get(diel["material"])
+        if mat is None:
+            continue
+        zmin = diel["zmin"]
+        zmax = diel["zmax"]
+        thickness = zmax - zmin
+        if thickness <= 0:
+            continue
+        block = mp.Block(
+            size=mp.Vector3(mp.inf, mp.inf, thickness),
+            center=mp.Vector3(0, 0, (zmin + zmax) / 2),
+            material=mat,
+        )
+        slabs.append(block)
+    return slabs
+
+
 def build_geometry(config, materials):
     """Build MEEP geometry from GDS file + layer stack config.
 
@@ -350,9 +376,16 @@ def main():
     print("Building materials...")
     materials = build_materials(config)
 
+    print("Building background dielectric slabs...")
+    background_slabs = build_background_slabs(config, materials)
+    print(f"  Created {len(background_slabs)} background slabs")
+
     print("Building geometry from GDS + layer stack...")
     geometry, component = build_geometry(config, materials)
     print(f"  Created {len(geometry)} prisms from {len(config['layer_stack'])} layers")
+
+    # Background slabs first, then patterned prisms (later objects take precedence)
+    geometry = background_slabs + geometry
 
     print("Building sources...")
     sources = build_sources(config)
@@ -369,16 +402,16 @@ def main():
     z_min = min(l["zmin"] for l in config["layer_stack"])
     z_max = max(l["zmax"] for l in config["layer_stack"])
 
-    margin = config.get("margin", {})
-    pml = margin.get("pml_thickness", 1.0)
-    margin_xy = margin.get("margin_xy", 0.0)
-    margin_z = margin.get("margin_z", 0.0)
-    padding_xy = pml + margin_xy
-    padding_z = pml + margin_z
+    domain = config.get("domain", {})
+    dpml = domain.get("dpml", 1.0)
+    margin_xy = domain.get("margin_xy", 1.0)
 
-    cell_x = (bbox.right - bbox.left) + 2 * padding_xy
-    cell_y = (bbox.top - bbox.bottom) + 2 * padding_xy
-    cell_z = (z_max - z_min) + 2 * padding_z
+    # XY: margin_xy is gap between geometry bbox and PML
+    cell_x = (bbox.right - bbox.left) + 2 * (margin_xy + dpml)
+    cell_y = (bbox.top - bbox.bottom) + 2 * (margin_xy + dpml)
+    # Z: margin_z_above/below is already baked into layer_stack via set_z_crop(),
+    #    so only add dpml beyond the stack extent
+    cell_z = (z_max - z_min) + 2 * dpml
     cell_center = mp.Vector3(
         (bbox.right + bbox.left) / 2,
         (bbox.top + bbox.bottom) / 2,
@@ -386,7 +419,7 @@ def main():
     )
 
     print(f"Cell size: {cell_x:.2f} x {cell_y:.2f} x {cell_z:.2f} um")
-    print(f"PML: {pml:.2f} um, margin_xy: {margin_xy:.2f}, margin_z: {margin_z:.2f}")
+    print(f"PML: {dpml:.2f} um, margin_xy: {margin_xy:.2f}")
     print(f"Resolution: {resolution} pixels/um")
 
     sim = mp.Simulation(
@@ -395,7 +428,7 @@ def main():
         geometry=geometry,
         sources=sources,
         resolution=resolution,
-        boundary_layers=[mp.PML(pml)],
+        boundary_layers=[mp.PML(dpml)],
     )
 
     print("Building monitors...")

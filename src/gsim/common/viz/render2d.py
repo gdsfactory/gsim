@@ -400,6 +400,16 @@ _PML_EDGE = (1.0, 0.6, 0.0, 0.50)
 _SRC_COLOR = "red"
 _MON_COLOR = "royalblue"
 
+# Dielectric background colours — keyed by lowercase material name
+_DIELECTRIC_COLORS: dict[str, tuple[float, float, float, float]] = {
+    "sio2": (0.68, 0.85, 0.90, 0.25),  # light blue
+    "silicon": (0.60, 0.60, 0.65, 0.30),  # warm grey
+    "si": (0.60, 0.60, 0.65, 0.30),
+    "air": (1.00, 1.00, 1.00, 0.08),  # near-transparent
+}
+_DIELECTRIC_DEFAULT_COLOR = (0.80, 0.80, 0.80, 0.20)  # light grey fallback
+_DIELECTRIC_ZORDER = -10
+
 
 def _draw_overlay(
     ax: plt.Axes,
@@ -409,10 +419,20 @@ def _draw_overlay(
     y: float | None,
     z: float | None,
 ) -> None:
-    """Draw simulation cell boundary, PML regions, and port markers."""
+    """Draw dielectric backgrounds, cell boundary, PML regions, and port markers."""
     cmin = overlay.cell_min
     cmax = overlay.cell_max
-    pml = overlay.pml_thickness
+    pml = overlay.dpml
+
+    # Draw dielectric background slabs first (lowest zorder)
+    dielectrics = getattr(overlay, "dielectrics", [])
+    if dielectrics:
+        if z is not None:
+            _draw_dielectrics_xy(ax, dielectrics, z, cmin, cmax)
+        elif x is not None:
+            _draw_dielectrics_side(ax, dielectrics, cmin[1], cmax[1], axis="yz")
+        elif y is not None:
+            _draw_dielectrics_side(ax, dielectrics, cmin[0], cmax[0], axis="xz")
 
     if z is not None:
         _draw_overlay_xy(ax, cmin, cmax, pml, overlay.ports)
@@ -674,3 +694,79 @@ def _add_pml_rect(
             zorder=80,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Dielectric background drawing
+# ---------------------------------------------------------------------------
+
+
+def _diel_color(material: str) -> tuple[float, float, float, float]:
+    """Look up the fill colour for a dielectric material name."""
+    return _DIELECTRIC_COLORS.get(material.lower(), _DIELECTRIC_DEFAULT_COLOR)
+
+
+def _draw_dielectrics_side(
+    ax: plt.Axes,
+    dielectrics: list,
+    h_min: float,
+    h_max: float,
+    axis: str = "xz",
+) -> None:
+    """Draw dielectric background bands for a side view (XZ or YZ).
+
+    Each dielectric is a horizontal band spanning the full horizontal extent
+    of the simulation cell at the dielectric's z-range.
+    """
+    labeled: set[str] = set()
+    for diel in dielectrics:
+        zmin, zmax = diel.zmin, diel.zmax
+        if zmax <= zmin:
+            continue
+        color = _diel_color(diel.material)
+        label = diel.name if diel.name not in labeled else None
+        labeled.add(diel.name)
+        ax.add_patch(
+            Rectangle(
+                (h_min, zmin),
+                h_max - h_min,
+                zmax - zmin,
+                facecolor=color,
+                edgecolor="none",
+                label=label,
+                zorder=_DIELECTRIC_ZORDER,
+            )
+        )
+
+
+def _draw_dielectrics_xy(
+    ax: plt.Axes,
+    dielectrics: list,
+    z_slice: float,
+    cmin: tuple[float, float, float],
+    cmax: tuple[float, float, float],
+) -> None:
+    """Draw dielectric background for an XY (z-slice) view.
+
+    If the z-slice is within a dielectric slab, fill the entire cell with
+    that material's colour.  If multiple slabs overlap, draw all of them
+    (later ones on top).
+    """
+    labeled: set[str] = set()
+    for diel in dielectrics:
+        if not (diel.zmin <= z_slice <= diel.zmax):
+            continue
+        color = _diel_color(diel.material)
+        label = diel.name if diel.name not in labeled else None
+        labeled.add(diel.name)
+        ax.add_patch(
+            Rectangle(
+                (cmin[0], cmin[1]),
+                cmax[0] - cmin[0],
+                cmax[1] - cmin[1],
+                facecolor=color,
+                edgecolor="none",
+                label=label,
+                zorder=_DIELECTRIC_ZORDER,
+            )
+        )

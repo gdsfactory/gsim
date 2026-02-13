@@ -1,17 +1,18 @@
 """Simulation overlay metadata for 2D visualization.
 
 Provides dataclasses that describe the simulation cell boundaries, PML regions,
-and port locations for rendering on top of geometry cross-sections.
+port locations, and dielectric background layers for rendering on top of
+geometry cross-sections.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gsim.common.geometry_model import GeometryModel
-    from gsim.meep.models.config import MarginConfig, PortData
+    from gsim.meep.models.config import DomainConfig, PortData
 
 
 @dataclass(frozen=True)
@@ -38,48 +39,77 @@ class PortOverlay:
 
 
 @dataclass(frozen=True)
+class DielectricOverlay:
+    """Background dielectric slab metadata for 2D overlay rendering.
+
+    Attributes:
+        name: Dielectric region name (e.g. "oxide", "substrate").
+        material: Material name (e.g. "SiO2", "silicon").
+        zmin: Bottom z-coordinate of the slab in um.
+        zmax: Top z-coordinate of the slab in um.
+    """
+
+    name: str
+    material: str
+    zmin: float
+    zmax: float
+
+
+@dataclass(frozen=True)
 class SimOverlay:
     """Simulation cell metadata for 2D visualization overlays.
 
     Attributes:
         cell_min: (xmin, ymin, zmin) of the full simulation cell.
         cell_max: (xmax, ymax, zmax) of the full simulation cell.
-        pml_thickness: PML absorber thickness in um.
+        dpml: PML absorber thickness in um.
         ports: List of port overlays for rendering.
+        dielectrics: List of background dielectric slabs for rendering.
     """
 
     cell_min: tuple[float, float, float]
     cell_max: tuple[float, float, float]
-    pml_thickness: float
+    dpml: float
     ports: list[PortOverlay] = field(default_factory=list)
+    dielectrics: list[DielectricOverlay] = field(default_factory=list)
 
 
 def build_sim_overlay(
     geometry_model: GeometryModel,
-    margin_config: MarginConfig,
+    domain_config: DomainConfig,
     port_data: list[PortData],
     z_span: float | None = None,
+    dielectrics: list[dict[str, Any]] | None = None,
 ) -> SimOverlay:
-    """Build a SimOverlay from geometry model, margin config, and port data.
+    """Build a SimOverlay from geometry model, domain config, and port data.
 
     Args:
         geometry_model: The geometry model providing the geometry bbox.
-        margin_config: PML / margin configuration.
+        domain_config: Domain / PML configuration.
         port_data: List of PortData objects from port extraction.
         z_span: Port monitor z-span. If None, computed from geometry bbox.
+        dielectrics: List of dielectric dicts from stack.dielectrics.
 
     Returns:
         SimOverlay with computed cell boundaries and port overlays.
     """
     gmin, gmax = geometry_model.bbox
-    pml = margin_config.pml_thickness
-    mxy = margin_config.margin_xy
-    mz = margin_config.margin_z
-    pad_xy = pml + mxy
-    pad_z = pml + mz
+    dpml = domain_config.dpml
+    margin_xy = domain_config.margin_xy
 
-    cell_min = (gmin[0] - pad_xy, gmin[1] - pad_xy, gmin[2] - pad_z)
-    cell_max = (gmax[0] + pad_xy, gmax[1] + pad_xy, gmax[2] + pad_z)
+    # XY: margin_xy is gap between geometry bbox and PML
+    # Z: margin_z_above/below is already baked into the geometry bbox via set_z_crop(),
+    #    so only add dpml beyond the geometry z-extent
+    cell_min = (
+        gmin[0] - margin_xy - dpml,
+        gmin[1] - margin_xy - dpml,
+        gmin[2] - dpml,
+    )
+    cell_max = (
+        gmax[0] + margin_xy + dpml,
+        gmax[1] + margin_xy + dpml,
+        gmax[2] + dpml,
+    )
 
     if z_span is None:
         z_span = gmax[2] - gmin[2]
@@ -97,9 +127,22 @@ def build_sim_overlay(
         for p in port_data
     ]
 
+    diel_overlays: list[DielectricOverlay] = []
+    if dielectrics:
+        for d in dielectrics:
+            diel_overlays.append(
+                DielectricOverlay(
+                    name=d["name"],
+                    material=d["material"],
+                    zmin=d["zmin"],
+                    zmax=d["zmax"],
+                )
+            )
+
     return SimOverlay(
         cell_min=cell_min,
         cell_max=cell_max,
-        pml_thickness=pml,
+        dpml=dpml,
         ports=ports,
+        dielectrics=diel_overlays,
     )

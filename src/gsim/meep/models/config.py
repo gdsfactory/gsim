@@ -13,21 +13,31 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class MarginConfig(BaseModel):
-    """Simulation cell margin / PML configuration.
+class DomainConfig(BaseModel):
+    """Simulation domain sizing: margins around geometry + PML thickness.
 
-    Controls the spacing between geometry bounds and the simulation cell edges,
-    as well as PML (perfectly matched layer) thickness.
+    Margins control how much material (from the layer stack) is kept around
+    the waveguide core.  ``set_z_crop()`` uses ``margin_z_above`` /
+    ``margin_z_below`` to determine the crop window.  Along XY the margin
+    is the gap between the geometry bounding-box and the PML inner edge.
+
+    Cell size formula:
+        cell_x = bbox_width  + 2*(margin_xy + dpml)
+        cell_y = bbox_height + 2*(margin_xy + dpml)
+        cell_z = z_extent + 2*dpml          (z-margins baked into z_extent via set_z_crop)
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    pml_thickness: float = Field(default=1.0, ge=0, description="PML thickness in um")
+    dpml: float = Field(default=1.0, ge=0, description="PML thickness in um")
     margin_xy: float = Field(
-        default=0.0, ge=0, description="Extra margin between geometry and PML in xy"
+        default=1.0, ge=0, description="XY margin between geometry and PML in um"
     )
-    margin_z: float = Field(
-        default=0.0, ge=0, description="Extra margin between geometry and PML in z"
+    margin_z_above: float = Field(
+        default=1.0, ge=0, description="Z margin above core kept by set_z_crop in um"
+    )
+    margin_z_below: float = Field(
+        default=1.0, ge=0, description="Z margin below core kept by set_z_crop in um"
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -176,11 +186,12 @@ class SimConfig(BaseModel):
         default="layout.gds", description="GDS file with 2D layout"
     )
     layer_stack: list[dict[str, Any]] = Field(default_factory=list)
+    dielectrics: list[dict[str, Any]] = Field(default_factory=list)
     ports: list[dict[str, Any]] = Field(default_factory=list)
     materials: dict[str, dict[str, Any]] = Field(default_factory=dict)
     fdtd: dict[str, Any] = Field(default_factory=dict)
     resolution: dict[str, Any] = Field(default_factory=dict)
-    margin: dict[str, Any] = Field(default_factory=dict)
+    domain: dict[str, Any] = Field(default_factory=dict)
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.

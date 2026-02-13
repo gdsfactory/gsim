@@ -126,21 +126,21 @@ class MeepSimMixin:
     def set_z_crop(
         self,
         *,
-        pad_above: float = 2.0,
-        pad_below: float = 2.0,
         reference_layer: str | None = None,
     ) -> None:
-        """Crop the layer stack along z to focus on the photonic core.
+        """Crop the layer stack along z using ``domain_config`` margins.
 
-        Removes layers outside the crop window and clips layers that partially
-        overlap. Must be called after ``set_stack()``.
+        Keeps materials within ``[ref.zmin - margin_z_below, ref.zmax + margin_z_above]``
+        around the reference layer, then clips layers that partially overlap.
+        Must be called after ``set_stack()``.
 
-        By default, auto-detects the core layer (highest refractive index)
-        and keeps ``pad_below`` um below it and ``pad_above`` um above it.
+        The crop window is derived from ``domain_config`` (set via
+        ``set_domain()``).  Call ``set_domain()`` *before* ``set_z_crop()``
+        if you need non-default values.
+
+        By default, auto-detects the core layer (highest refractive index).
 
         Args:
-            pad_above: Padding above the reference layer in um.
-            pad_below: Padding below the reference layer in um.
             reference_layer: Explicit layer name to crop around. If None,
                 auto-detects the layer with the highest refractive index.
 
@@ -149,11 +149,11 @@ class MeepSimMixin:
 
         Example:
             >>> sim.set_stack()
-            >>> sim.set_z_crop()  # 2um above/below core
-            >>> sim.set_z_crop(pad_above=3.0, reference_layer="core")
+            >>> sim.set_z_crop()  # keeps margin_z_above/below of material around core
         """
         from gsim.common.stack.extractor import Layer, LayerStack
         from gsim.common.stack.materials import get_material_properties
+        from gsim.meep.models import DomainConfig
 
         if self.stack is None:
             if self._stack_kwargs:
@@ -193,8 +193,10 @@ class MeepSimMixin:
                     "Specify reference_layer explicitly."
                 )
 
-        z_lo = ref.zmin - pad_below
-        z_hi = ref.zmax + pad_above
+        # Use domain_config to determine how much material to keep
+        dcfg: DomainConfig = getattr(self, "domain_config", DomainConfig())
+        z_lo = ref.zmin - dcfg.margin_z_below
+        z_hi = ref.zmax + dcfg.margin_z_above
 
         # Filter and clip layers
         cropped: dict[str, Layer] = {}
@@ -231,7 +233,6 @@ class MeepSimMixin:
             simulation=self.stack.simulation,
         )
 
-        n_removed = len(self.stack.layers) - len(cropped) + len(cropped)
         print(
             f"Z-crop around '{ref.name}' [{ref.zmin:.2f}, {ref.zmax:.2f}] um: "
             f"window [{z_lo:.2f}, {z_hi:.2f}], "
@@ -432,7 +433,7 @@ class MeepSimMixin:
 
         Returns SimOverlay or None if ports/stack aren't configured yet.
         """
-        from gsim.meep.models import MarginConfig
+        from gsim.meep.models import DomainConfig
         from gsim.meep.overlay import build_sim_overlay
 
         if self.geometry is None:
@@ -454,8 +455,11 @@ class MeepSimMixin:
         except Exception:
             port_data = []
 
-        margin_config = getattr(self, "margin_config", MarginConfig())
-        return build_sim_overlay(geometry_model, margin_config, port_data)
+        domain_config = getattr(self, "domain_config", DomainConfig())
+        dielectrics = self.stack.dielectrics if self.stack else []
+        return build_sim_overlay(
+            geometry_model, domain_config, port_data, dielectrics=dielectrics
+        )
 
     def plot_2d(
         self,
