@@ -599,7 +599,7 @@ class TestDomainConfig:
         assert cfg.margin_xy == 0.5
         assert cfg.margin_z_above == 0.5
         assert cfg.margin_z_below == 0.5
-        assert cfg.port_margin == 2.0
+        assert cfg.port_margin == 0.5
 
     def test_custom(self):
         cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)

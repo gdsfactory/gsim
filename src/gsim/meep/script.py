@@ -335,7 +335,7 @@ def build_sources(config):
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     z_span = get_port_z_span(config)
-    port_margin = config.get("domain", {}).get("port_margin", 2.0)
+    port_margin = config.get("domain", {}).get("port_margin", 0.5)
 
     sources = []
     for port in config["ports"]:
@@ -381,7 +381,7 @@ def build_monitors(config, sim):
     df = fdtd["df"]
     nfreq = fdtd["num_freqs"]
     z_span = get_port_z_span(config)
-    port_margin = config.get("domain", {}).get("port_margin", 2.0)
+    port_margin = config.get("domain", {}).get("port_margin", 0.5)
 
     monitors = {}
     for port in config["ports"]:
@@ -429,6 +429,10 @@ def extract_s_params(config, sim, monitors):
     Port "direction" field = direction of incoming mode along normal_axis:
       "+" -> incoming goes +normal, outgoing (reflected/transmitted) goes -normal
       "-" -> incoming goes -normal, outgoing (reflected/transmitted) goes +normal
+
+    Returns:
+        (s_params, debug_data) tuple where debug_data contains eigenmode
+        diagnostics for post-run analysis.
     """
     port_names = [p["name"] for p in config["ports"]]
     ports = {p["name"]: p for p in config["ports"]}
@@ -439,7 +443,15 @@ def extract_s_params(config, sim, monitors):
             break
 
     if not source_port:
-        return {}
+        return {}, {}
+
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    nfreq = fdtd["num_freqs"]
+    df = fdtd["df"]
+    freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
+
+    debug_data = {"eigenmode_info": {}, "raw_coefficients": {}, "incident_coefficients": {}}
 
     def _incoming_idx(direction):
         """Alpha index for the incoming (incident) mode at a port."""
@@ -449,6 +461,27 @@ def extract_s_params(config, sim, monitors):
         """Alpha index for the outgoing (reflected/transmitted) mode at a port."""
         return 1 if direction == "+" else 0
 
+    def _collect_eigenmode_debug(port_name, ob, freqs):
+        """Collect eigenmode diagnostics from coefficients object."""
+        info = {"band": 1}
+        try:
+            kdom = ob.kdom
+            kdom_list = [[float(kdom[i].x), float(kdom[i].y), float(kdom[i].z)]
+                         for i in range(len(kdom))]
+            info["kdom"] = kdom_list
+            info["n_eff"] = [float(np.linalg.norm(kdom_list[i])) / float(freqs[i])
+                             if float(freqs[i]) > 0 else 0.0
+                             for i in range(min(len(kdom_list), len(freqs)))]
+        except Exception:
+            info["kdom"] = []
+            info["n_eff"] = []
+        try:
+            cg = ob.cg
+            info["group_velocity"] = [float(cg[i]) for i in range(len(cg))]
+        except Exception:
+            info["group_velocity"] = []
+        return info
+
     # Get incident coefficient at source port for normalization
     src_dir = ports[source_port]["direction"]
     src_kp = _port_kpoint(ports[source_port])
@@ -457,6 +490,17 @@ def extract_s_params(config, sim, monitors):
         kpoint_func=lambda f, n, kp=src_kp: kp,
     )
     incident_coeffs = src_ob.alpha[0, :, _incoming_idx(src_dir)]
+
+    debug_data["eigenmode_info"][source_port] = _collect_eigenmode_debug(
+        source_port, src_ob, freqs)
+    debug_data["incident_coefficients"] = {
+        "port": source_port,
+        "magnitudes": [float(abs(c)) for c in incident_coeffs],
+    }
+    debug_data["raw_coefficients"][source_port] = {
+        "forward_mag": [float(abs(src_ob.alpha[0, i, 0])) for i in range(len(freqs))],
+        "backward_mag": [float(abs(src_ob.alpha[0, i, 1])) for i in range(len(freqs))],
+    }
 
     s_params = {}
 
@@ -473,13 +517,28 @@ def extract_s_params(config, sim, monitors):
                 kpoint_func=lambda f, n, kp=port_kp: kp,
             )
 
+            # Collect debug info (skip source port — already collected)
+            if port_i != source_port:
+                debug_data["eigenmode_info"][port_i] = _collect_eigenmode_debug(
+                    port_i, ob, freqs)
+                debug_data["raw_coefficients"][port_i] = {
+                    "forward_mag": [float(abs(ob.alpha[0, k, 0])) for k in range(len(freqs))],
+                    "backward_mag": [float(abs(ob.alpha[0, k, 1])) for k in range(len(freqs))],
+                }
+
             # Outgoing direction: reflected at source port, transmitted at output ports
             port_dir = ports[port_i]["direction"]
             alpha = ob.alpha[0, :, _outgoing_idx(port_dir)]
 
             s_params[s_name] = alpha / incident_coeffs
 
-    return s_params
+    # Power conservation: sum |Sij|^2 per frequency
+    power_conservation = np.zeros(len(freqs))
+    for s_name, s_vals in s_params.items():
+        power_conservation += np.abs(s_vals) ** 2
+    debug_data["power_conservation"] = [float(p) for p in power_conservation]
+
+    return s_params, debug_data
 
 
 def save_results(config, s_params, output_path="s_parameters.csv"):
@@ -509,6 +568,43 @@ def save_results(config, s_params, output_path="s_parameters.csv"):
             writer.writerow(row)
 
     print(f"S-parameters saved to {output_path}")
+
+
+def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
+                   output_path="meep_debug.json"):
+    """Save eigenmode diagnostics as JSON for post-run analysis."""
+    fdtd = config["fdtd"]
+    domain = config.get("domain", {})
+    resolution = config.get("resolution", {}).get("pixels_per_um", 0)
+    stopping = fdtd.get("stopping", {})
+
+    meep_time = 0.0
+    timesteps = 0
+    try:
+        # These are set by caller if available
+        meep_time = debug_data.get("_meep_time", 0.0)
+        timesteps = debug_data.get("_timesteps", 0)
+    except Exception:
+        pass
+
+    log = {
+        "metadata": {
+            "resolution": resolution,
+            "cell_size": debug_data.get("_cell_size", []),
+            "meep_time": meep_time,
+            "timesteps": timesteps,
+            "wall_seconds": wall_seconds,
+            "stopping_mode": stopping.get("mode", "fixed"),
+        },
+        "eigenmode_info": debug_data.get("eigenmode_info", {}),
+        "incident_coefficients": debug_data.get("incident_coefficients", {}),
+        "raw_coefficients": debug_data.get("raw_coefficients", {}),
+        "power_conservation": debug_data.get("power_conservation", []),
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(log, f, indent=2)
+    print(f"Debug log saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +703,8 @@ def main():
 
     stop_mode = stopping.get("mode", "fixed")
 
+    wall_start = time.time()
+
     if stop_mode == "dft_decay":
         decay_by = stopping.get("decay_by", 1e-3)
         min_time = stopping.get("dft_min_run_time", 0)
@@ -636,10 +734,18 @@ def main():
         print(f"Running simulation (until_after_sources={run_after:.1f})...")
         sim.run(*step_funcs, until_after_sources=run_after)
 
+    wall_seconds = time.time() - wall_start
+
     print("Extracting S-parameters...")
-    s_params = extract_s_params(config, sim, monitors)
+    s_params, debug_data = extract_s_params(config, sim, monitors)
+
+    # Attach simulation metadata to debug_data
+    debug_data["_meep_time"] = sim.meep_time()
+    debug_data["_timesteps"] = sim.timestep()
+    debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
 
     save_results(config, s_params)
+    save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
     print("Done!")
 
 

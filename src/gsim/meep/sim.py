@@ -183,7 +183,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         margin_z: float | None = None,
         margin_z_above: float | None = None,
         margin_z_below: float | None = None,
-        port_margin: float = 2.0,
+        port_margin: float = 0.5,
         dpml: float = 1.0,
     ) -> None:
         """Configure simulation domain margins and PML thickness.
@@ -203,7 +203,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_z_above: Z margin above core (um).
             margin_z_below: Z margin below core (um).
             port_margin: Margin on each side of waveguide width for mode
-                monitors/sources (um). Default 2.0.
+                monitors/sources (um). Default 0.5.
             dpml: PML absorber thickness in um.
         """
         default = 0.5

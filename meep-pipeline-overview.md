@@ -26,7 +26,7 @@ Layer Parsing        Representation       Visualization
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib. Port arrows on all ports (source + monitor). |
 | **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`) |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
 Tests: 97 meep-specific, 155 total passing.
@@ -65,11 +65,11 @@ Solver-agnostic modules reusable by meep and palace.
 | `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
 | `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, verbose_interval, symmetries. `simulate()` calls gcloud. |
 | `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                   |
-| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                                          |
+| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase. Auto-loads `meep_debug.json` into `debug_info` field when present alongside CSV.                                                            |
 | `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
 | `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV. |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV + eigenmode debug log (`meep_debug.json`) via `save_debug_log()`. |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -245,6 +245,14 @@ output_dir/
 - Passed as a step function to `sim.run()` — empty list when off, preserving existing behavior
 - Solves the "3-hour simulation with no output" problem
 
+**9. Eigenmode debug logging (`meep_debug.json`)**
+
+- `extract_s_params()` now collects per-port eigenmode diagnostics alongside S-parameters
+- `save_debug_log()` writes `meep_debug.json` with: metadata (resolution, cell size, wall time, timesteps, stopping mode), per-port eigenmode info (n_eff, kdom, group velocity), raw forward/backward coefficients, incident coefficient magnitudes, and power conservation per frequency
+- `SParameterResult.from_csv()` auto-loads `meep_debug.json` into the `debug_info` field when present
+- Primary use: verify n_eff values match expected guided mode (e.g. ~2.44 for Si at 1550nm) and power conservation ~1.0
+- Catches port_margin or geometry issues immediately without re-running the simulation
+
 **Implementation constraint:** All configuration happens client-side via Pydantic models; the generated `run_meep.py` reads the JSON config at runtime. gsim has no meep dependency.
 
 ### Removed gsim.fdtd (Tidy3D wrapper)
@@ -312,11 +320,11 @@ For the ebeam_y_1550 Y-branch:
 
 **Root cause:** The mode overlap integral in `get_eigenmode_coefficients` integrates over the monitor cross-section. With a 0.5 um monitor matching the waveguide width, the significant evanescent field outside the waveguide is excluded from the overlap, artificially reducing all mode coefficients.
 
-**Fix:** Added `port_margin` field to `DomainConfig` (default: 2.0 um). The runner script now uses `width + 2 * port_margin` for source/monitor transverse size (e.g. 0.5 + 4.0 = 4.5 um). This follows the gplugins convention where `port_margin=3.0` by default.
+**Fix:** Added `port_margin` field to `DomainConfig` (default: 0.5 um). The runner script now uses `width + 2 * port_margin` for source/monitor transverse size (e.g. 0.5 + 1.0 = 1.5 um). This matches gplugins' default `port_margin=0.5`.
 
 **Files changed:**
-- `meep/models/config.py` — `DomainConfig.port_margin: float = 2.0`
-- `meep/sim.py` — `set_domain(..., port_margin=2.0)`
+- `meep/models/config.py` — `DomainConfig.port_margin: float = 0.5`
+- `meep/sim.py` — `set_domain(..., port_margin=0.5)`
 - `meep/script.py` — `build_sources()` and `build_monitors()` use `width + 2 * port_margin`
 - `meep/overlay.py` — `build_sim_overlay()` applies `port_margin` to overlay port width for accurate visualization
 
@@ -336,6 +344,20 @@ For the ebeam_y_1550 Y-branch:
 3. Added `_port_kpoint(port)` helper function that returns the positive-axis kpoint vector for a given port.
 
 **Files changed:** `meep/script.py` — `build_sources()`, `extract_s_params()`, new `_port_kpoint()` helper.
+
+### Port margin default reduced from 2.0 to 0.5 (cladding mode fix)
+
+**Problem:** With `port_margin=2.0`, the mode monitor cross-section for a 0.5 um waveguide was 0.5 + 2*2.0 = 4.5 um. MPB's band 1 eigenmode in this oversized cell converged to a cladding mode (n_eff ~ 1.43) rather than the guided TE0 mode (n_eff ~ 2.44). All S-parameters were computed against the wrong mode.
+
+**Symptom:** S11 ~ 0.33, S21 ~ 0.35 for the ebeam_y_1550 Y-branch (expected: S11 ~ 0, S21 ~ 0.7). Power conservation ~ 0.35 (severe violation).
+
+**Root cause:** The 4.5 um monitor cross-section is ~9x the waveguide width. In a cell this large, the lowest-order eigenmode (band 1) is a plane wave in the cladding material rather than the guided waveguide mode. The guided mode becomes band 2 or higher, but `eig_band=1` always requests band 1.
+
+**Fix:** Reduced `port_margin` default from 2.0 to 0.5 (matching gplugins' default). Monitor cross-section: 0.5 + 2*0.5 = 1.5 um. In this tighter cell, band 1 is correctly the guided TE0 mode (n_eff ~ 2.44).
+
+**Diagnostic:** Added `meep_debug.json` output with per-port `n_eff` values so this issue can be caught immediately on future runs — n_eff should be ~2.44 for silicon waveguides at 1550nm, not ~1.44 (cladding index).
+
+**Files changed:** `meep/models/config.py`, `meep/sim.py`, `meep/script.py`, `tests/meep/test_meep_sim.py`.
 
 ### Decay component default changed to "Ey"
 
@@ -417,12 +439,14 @@ Docker container /app/src/
 
     ↓ (runner writes to CWD)
 
-/app/src/s_parameters.csv
-  entrypoint: cp *.csv /app/data/
+/app/src/s_parameters.csv    # S-parameter results
+/app/src/meep_debug.json     # Eigenmode diagnostics (n_eff, kdom, power conservation)
+  entrypoint: cp *.csv *.json /app/data/
 
     ↓ (tarballed and uploaded)
 
-gsim receives s_parameters.csv → SParameterResult.from_csv()
+gsim receives s_parameters.csv + meep_debug.json → SParameterResult.from_csv()
+  (debug_info auto-loaded from meep_debug.json if present)
 ```
 
 ### Local Testing

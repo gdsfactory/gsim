@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,10 @@ class SParameterResult(BaseModel):
         description="S-param name -> list of complex values per wavelength",
     )
     port_names: list[str] = Field(default_factory=list)
+    debug_info: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Eigenmode diagnostics from meep_debug.json (if available)",
+    )
 
     @classmethod
     def from_csv(cls, path: str | Path) -> SParameterResult:
@@ -32,6 +37,9 @@ class SParameterResult(BaseModel):
         Expected CSV format:
             wavelength,S11_mag,S11_phase,S21_mag,S21_phase,...
             1.5, 0.1, -30.0, 0.9, 45.0, ...
+
+        Automatically loads ``meep_debug.json`` from the same directory
+        if it exists, populating the ``debug_info`` field.
 
         Args:
             path: Path to CSV file
@@ -75,10 +83,20 @@ class SParameterResult(BaseModel):
                 for idx_char in indices:
                     port_names.add(f"port_{idx_char}")
 
+        # Auto-load debug log if present alongside CSV
+        debug_info: dict[str, Any] = {}
+        debug_path = path.parent / "meep_debug.json"
+        if debug_path.exists():
+            try:
+                debug_info = json.loads(debug_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
         return cls(
             wavelengths=wavelengths,
             s_params=s_params,
             port_names=sorted(port_names),
+            debug_info=debug_info,
         )
 
     def plot(self, db: bool = True, **kwargs: Any) -> Any:

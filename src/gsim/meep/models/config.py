@@ -52,7 +52,7 @@ class DomainConfig(BaseModel):
         default=0.5, ge=0, description="Z margin below core kept by set_z_crop in um"
     )
     port_margin: float = Field(
-        default=2.0,
+        default=0.5,
         ge=0,
         description="Margin on each side of port waveguide width for mode monitors in um",
     )
