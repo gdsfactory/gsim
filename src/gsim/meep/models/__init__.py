@@ -8,6 +8,8 @@ from gsim.meep.models.config import (
     PortData,
     ResolutionConfig,
     SimConfig,
+    StoppingConfig,
+    SymmetryEntry,
 )
 from gsim.meep.models.results import SParameterResult
 
@@ -20,4 +22,6 @@ __all__ = [
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",
+    "StoppingConfig",
+    "SymmetryEntry",
 ]

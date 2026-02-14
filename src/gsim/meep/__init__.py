@@ -23,6 +23,7 @@ from gsim.meep.models import (
     ResolutionConfig,
     SimConfig,
     SParameterResult,
+    SymmetryEntry,
 )
 from gsim.meep.sim import MeepSim
 
@@ -33,4 +34,5 @@ __all__ = [
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",
+    "SymmetryEntry",
 ]

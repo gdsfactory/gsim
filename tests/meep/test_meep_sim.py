@@ -14,8 +14,14 @@ from gsim.meep import (
     ResolutionConfig,
     SimConfig,
     SParameterResult,
+    SymmetryEntry,
 )
-from gsim.meep.models.config import LayerStackEntry, MaterialData, PortData
+from gsim.meep.models.config import (
+    LayerStackEntry,
+    MaterialData,
+    PortData,
+    StoppingConfig,
+)
 
 # ---------------------------------------------------------------------------
 # Config model tests
@@ -29,7 +35,9 @@ class TestFDTDConfig:
         cfg = FDTDConfig()
         assert cfg.wavelength == 1.55
         assert cfg.bandwidth == 0.1
-        assert cfg.num_freqs == 21
+        assert cfg.num_freqs == 11
+        assert cfg.stopping.mode == "fixed"
+        assert cfg.stopping.run_after_sources == 100.0
 
     def test_fcen(self):
         cfg = FDTDConfig(wavelength=1.55)
@@ -588,9 +596,9 @@ class TestDomainConfig:
     def test_defaults(self):
         cfg = DomainConfig()
         assert cfg.dpml == 1.0
-        assert cfg.margin_xy == 1.0
-        assert cfg.margin_z_above == 1.0
-        assert cfg.margin_z_below == 1.0
+        assert cfg.margin_xy == 0.5
+        assert cfg.margin_z_above == 0.5
+        assert cfg.margin_z_below == 0.5
 
     def test_custom(self):
         cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)
@@ -615,9 +623,9 @@ class TestSetDomain:
         sim = MeepSim()
         sim.set_domain()
         assert sim.domain_config.dpml == 1.0
-        assert sim.domain_config.margin_xy == 1.0
-        assert sim.domain_config.margin_z_above == 1.0
-        assert sim.domain_config.margin_z_below == 1.0
+        assert sim.domain_config.margin_xy == 0.5
+        assert sim.domain_config.margin_z_above == 0.5
+        assert sim.domain_config.margin_z_below == 0.5
 
     def test_set_domain_uniform(self):
         sim = MeepSim()
@@ -667,6 +675,221 @@ class TestSetDomain:
         assert "domain" in data
         assert data["domain"]["dpml"] == 0.5
         assert data["domain"]["margin_xy"] == 0.2
+
+
+# ---------------------------------------------------------------------------
+# SymmetryEntry tests
+# ---------------------------------------------------------------------------
+
+
+class TestSymmetryEntry:
+    """Test SymmetryEntry model."""
+
+    def test_creation(self):
+        s = SymmetryEntry(direction="X", phase=-1)
+        assert s.direction == "X"
+        assert s.phase == -1
+
+    def test_default_phase(self):
+        s = SymmetryEntry(direction="Y")
+        assert s.phase == 1
+
+    def test_to_dict(self):
+        s = SymmetryEntry(direction="Z", phase=-1)
+        d = s.to_dict()
+        assert d == {"direction": "Z", "phase": -1}
+
+    def test_invalid_direction(self):
+        with pytest.raises(Exception):
+            SymmetryEntry(direction="W")
+
+    def test_invalid_phase(self):
+        with pytest.raises(Exception):
+            SymmetryEntry(direction="X", phase=2)
+
+
+# ---------------------------------------------------------------------------
+# StoppingConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestStoppingConfig:
+    """Test StoppingConfig model."""
+
+    def test_default_is_fixed(self):
+        cfg = StoppingConfig()
+        assert cfg.mode == "fixed"
+        assert cfg.run_after_sources == 100.0
+        assert cfg.decay_dt == 50.0
+        assert cfg.decay_component == "Ez"
+        assert cfg.decay_by == 1e-3
+        assert cfg.decay_monitor_port is None
+
+    def test_decay_mode(self):
+        cfg = StoppingConfig(mode="decay", decay_by=1e-4, decay_dt=25.0)
+        assert cfg.mode == "decay"
+        assert cfg.decay_by == 1e-4
+        assert cfg.decay_dt == 25.0
+
+    def test_invalid_mode(self):
+        with pytest.raises(Exception):
+            StoppingConfig(mode="invalid")
+
+    def test_decay_by_bounds(self):
+        with pytest.raises(Exception):
+            StoppingConfig(decay_by=0)
+        with pytest.raises(Exception):
+            StoppingConfig(decay_by=1.0)
+
+
+class TestFDTDConfigStopping:
+    """Test FDTDConfig with embedded StoppingConfig."""
+
+    def test_to_dict_includes_stopping(self):
+        cfg = FDTDConfig()
+        d = cfg.to_dict()
+        assert "stopping" in d
+        assert d["stopping"]["mode"] == "fixed"
+
+    def test_backward_compat_run_after_sources(self):
+        cfg = FDTDConfig(stopping=StoppingConfig(run_after_sources=200.0))
+        d = cfg.to_dict()
+        assert d["run_after_sources"] == 200.0
+        assert d["stopping"]["run_after_sources"] == 200.0
+
+
+# ---------------------------------------------------------------------------
+# set_symmetry tests
+# ---------------------------------------------------------------------------
+
+
+class TestSetSymmetry:
+    """Test MeepSim.set_symmetry() API."""
+
+    def test_default_empty(self):
+        sim = MeepSim()
+        assert sim.symmetries == []
+
+    def test_single_symmetry(self):
+        sim = MeepSim()
+        sim.set_symmetry(y=-1)
+        assert len(sim.symmetries) == 1
+        assert sim.symmetries[0].direction == "Y"
+        assert sim.symmetries[0].phase == -1
+
+    def test_multiple_symmetries(self):
+        sim = MeepSim()
+        sim.set_symmetry(x=1, y=-1)
+        assert len(sim.symmetries) == 2
+
+    def test_replace_symmetries(self):
+        sim = MeepSim()
+        sim.set_symmetry(x=1)
+        sim.set_symmetry(y=-1)
+        assert len(sim.symmetries) == 1
+        assert sim.symmetries[0].direction == "Y"
+
+    def test_clear_symmetries(self):
+        sim = MeepSim()
+        sim.set_symmetry(x=1)
+        sim.set_symmetry()
+        assert sim.symmetries == []
+
+    def test_invalid_phase(self):
+        sim = MeepSim()
+        with pytest.raises(ValueError, match="Phase for X must be"):
+            sim.set_symmetry(x=2)
+
+
+# ---------------------------------------------------------------------------
+# set_wavelength decay tests
+# ---------------------------------------------------------------------------
+
+
+class TestSetWavelengthDecay:
+    """Test MeepSim.set_wavelength() with decay parameters."""
+
+    def test_fixed_default(self):
+        sim = MeepSim()
+        sim.set_wavelength()
+        assert sim.fdtd_config.stopping.mode == "fixed"
+
+    def test_decay_mode(self):
+        sim = MeepSim()
+        sim.set_wavelength(stop_when_decayed=True, decay_threshold=1e-4)
+        assert sim.fdtd_config.stopping.mode == "decay"
+        assert sim.fdtd_config.stopping.decay_by == 1e-4
+
+    def test_decay_monitor_port(self):
+        sim = MeepSim()
+        sim.set_wavelength(stop_when_decayed=True, decay_monitor_port="o2")
+        assert sim.fdtd_config.stopping.decay_monitor_port == "o2"
+
+    def test_backward_compat_run_after_sources(self):
+        sim = MeepSim()
+        sim.set_wavelength(run_after_sources=200.0)
+        assert sim.fdtd_config.stopping.run_after_sources == 200.0
+
+    def test_num_freqs_default(self):
+        sim = MeepSim()
+        sim.set_wavelength()
+        assert sim.fdtd_config.num_freqs == 11
+
+
+# ---------------------------------------------------------------------------
+# Script symmetry tests
+# ---------------------------------------------------------------------------
+
+
+class TestScriptSymmetry:
+    """Test that the runner script includes symmetry support."""
+
+    def test_script_has_build_symmetries(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "build_symmetries" in script
+
+    def test_script_has_mp_mirror(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "mp.Mirror" in script
+
+    def test_script_has_split_chunks_evenly(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "split_chunks_evenly" in script
+
+
+# ---------------------------------------------------------------------------
+# Script decay tests
+# ---------------------------------------------------------------------------
+
+
+class TestScriptDecay:
+    """Test that the runner script includes decay stopping logic."""
+
+    def test_script_has_stop_when_fields_decayed(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "stop_when_fields_decayed" in script
+
+    def test_script_has_component_map(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "_COMPONENT_MAP" in script
+        assert "mp.Ez" in script
+        assert "mp.Ey" in script
+
+    def test_script_valid_python(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        ast.parse(script)
 
 
 # ---------------------------------------------------------------------------

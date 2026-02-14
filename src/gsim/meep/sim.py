@@ -21,6 +21,8 @@ from gsim.meep.models import (
     ResolutionConfig,
     SimConfig,
     SParameterResult,
+    StoppingConfig,
+    SymmetryEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,10 @@ class MeepSim(MeepSimMixin, BaseModel):
     # Source port override
     source_port: str | None = None
 
+    # Performance options
+    symmetries: list[SymmetryEntry] = Field(default_factory=list)
+    split_chunks_evenly: bool = False
+
     # Private state
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
     _output_dir: Path | None = PrivateAttr(default=None)
@@ -79,8 +85,13 @@ class MeepSim(MeepSimMixin, BaseModel):
         *,
         wavelength: float = 1.55,
         bandwidth: float = 0.1,
-        num_freqs: int = 21,
+        num_freqs: int = 11,
         run_after_sources: float = 100.0,
+        stop_when_decayed: bool = False,
+        decay_threshold: float = 1e-3,
+        decay_dt: float = 50.0,
+        decay_component: str = "Ez",
+        decay_monitor_port: str | None = None,
     ) -> None:
         """Configure wavelength range for simulation.
 
@@ -89,12 +100,28 @@ class MeepSim(MeepSimMixin, BaseModel):
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
             run_after_sources: Time units to run after sources turn off
+                (also used as max-time safety cap in decay mode)
+            stop_when_decayed: If True, use decay-based stopping instead of
+                fixed time
+            decay_threshold: Stop when fields decay to this fraction (0 < x < 1)
+            decay_dt: Time interval between decay checks in MEEP time units
+            decay_component: Field component to monitor (e.g. "Ez", "Ey")
+            decay_monitor_port: Port name to monitor for decay. If None, the
+                first non-source port is used automatically.
         """
+        stopping = StoppingConfig(
+            mode="decay" if stop_when_decayed else "fixed",
+            run_after_sources=run_after_sources,
+            decay_dt=decay_dt,
+            decay_component=decay_component,
+            decay_by=decay_threshold,
+            decay_monitor_port=decay_monitor_port,
+        )
         self.fdtd_config = FDTDConfig(
             wavelength=wavelength,
             bandwidth=bandwidth,
             num_freqs=num_freqs,
-            run_after_sources=run_after_sources,
+            stopping=stopping,
         )
 
     # -------------------------------------------------------------------------
@@ -145,7 +172,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         Along XY, the margin is the gap between geometry bbox and PML.
 
         Resolution order for each axis:
-            margin_z_above/margin_z_below > margin_z > margin > default (1.0)
+            margin_z_above/margin_z_below > margin_z > margin > default (0.5)
 
         Args:
             margin: Uniform margin in all directions (um).
@@ -155,7 +182,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_z_below: Z margin below core (um).
             dpml: PML absorber thickness in um.
         """
-        default = 1.0
+        default = 0.5
         base = margin if margin is not None else default
         xy = margin_xy if margin_xy is not None else base
         z = margin_z if margin_z is not None else base
@@ -180,6 +207,38 @@ class MeepSim(MeepSimMixin, BaseModel):
             name: Port name (must match a gdsfactory component port)
         """
         self.source_port = name
+
+    # -------------------------------------------------------------------------
+    # Symmetry
+    # -------------------------------------------------------------------------
+
+    def set_symmetry(
+        self,
+        *,
+        x: int | None = None,
+        y: int | None = None,
+        z: int | None = None,
+    ) -> None:
+        """Set mirror symmetry planes for the simulation.
+
+        Each axis with a non-None phase (+1 or -1) adds a mirror symmetry.
+        This can give 2-4x speedup when the geometry has the corresponding
+        symmetry.
+
+        Args:
+            x: Phase (+1 or -1) for X mirror symmetry, or None to skip.
+            y: Phase (+1 or -1) for Y mirror symmetry, or None to skip.
+            z: Phase (+1 or -1) for Z mirror symmetry, or None to skip.
+        """
+        entries: list[SymmetryEntry] = []
+        for direction, phase in [("X", x), ("Y", y), ("Z", z)]:
+            if phase is not None:
+                if phase not in (1, -1):
+                    raise ValueError(
+                        f"Phase for {direction} must be +1 or -1, got {phase}"
+                    )
+                entries.append(SymmetryEntry(direction=direction, phase=phase))
+        self.symmetries = entries
 
     # -------------------------------------------------------------------------
     # Validation
@@ -312,6 +371,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             fdtd=self.fdtd_config.to_dict(),
             resolution=self.resolution_config.to_dict(),
             domain=self.domain_config.to_dict(),
+            symmetries=[s.to_dict() for s in self.symmetries],
+            split_chunks_evenly=self.split_chunks_evenly,
         )
 
         # 6. Write JSON config

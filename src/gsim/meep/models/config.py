@@ -13,6 +13,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class SymmetryEntry(BaseModel):
+    """One MEEP mirror symmetry plane."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    direction: Literal["X", "Y", "Z"]
+    phase: Literal[1, -1] = Field(default=1)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class DomainConfig(BaseModel):
     """Simulation domain sizing: margins around geometry + PML thickness.
 
@@ -31,18 +43,36 @@ class DomainConfig(BaseModel):
 
     dpml: float = Field(default=1.0, ge=0, description="PML thickness in um")
     margin_xy: float = Field(
-        default=1.0, ge=0, description="XY margin between geometry and PML in um"
+        default=0.5, ge=0, description="XY margin between geometry and PML in um"
     )
     margin_z_above: float = Field(
-        default=1.0, ge=0, description="Z margin above core kept by set_z_crop in um"
+        default=0.5, ge=0, description="Z margin above core kept by set_z_crop in um"
     )
     margin_z_below: float = Field(
-        default=1.0, ge=0, description="Z margin below core kept by set_z_crop in um"
+        default=0.5, ge=0, description="Z margin below core kept by set_z_crop in um"
     )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON config."""
         return self.model_dump()
+
+
+class StoppingConfig(BaseModel):
+    """Controls when the MEEP simulation stops.
+
+    ``fixed`` mode runs for a fixed time after sources turn off.
+    ``decay`` mode monitors field decay and stops when the fields
+    have decayed by ``decay_by`` (with a safety cap at ``run_after_sources``).
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    mode: Literal["fixed", "decay"] = Field(default="fixed")
+    run_after_sources: float = Field(default=100.0, gt=0)
+    decay_dt: float = Field(default=50.0, gt=0)
+    decay_component: str = Field(default="Ez")
+    decay_by: float = Field(default=1e-3, gt=0, lt=1)
+    decay_monitor_port: str | None = Field(default=None)
 
 
 class FDTDConfig(BaseModel):
@@ -58,12 +88,8 @@ class FDTDConfig(BaseModel):
     bandwidth: float = Field(
         default=0.1, ge=0, description="Wavelength bandwidth in um"
     )
-    num_freqs: int = Field(default=21, ge=1, description="Number of frequency points")
-    run_after_sources: float = Field(
-        default=100.0,
-        gt=0,
-        description="Time units to run after sources turn off",
-    )
+    num_freqs: int = Field(default=11, ge=1, description="Number of frequency points")
+    stopping: StoppingConfig = Field(default_factory=StoppingConfig)
 
     @property
     def fcen(self) -> float:
@@ -87,7 +113,8 @@ class FDTDConfig(BaseModel):
             "num_freqs": self.num_freqs,
             "fcen": self.fcen,
             "df": self.df,
-            "run_after_sources": self.run_after_sources,
+            "run_after_sources": self.stopping.run_after_sources,
+            "stopping": self.stopping.model_dump(),
         }
 
 
@@ -192,6 +219,8 @@ class SimConfig(BaseModel):
     fdtd: dict[str, Any] = Field(default_factory=dict)
     resolution: dict[str, Any] = Field(default_factory=dict)
     domain: dict[str, Any] = Field(default_factory=dict)
+    symmetries: list[dict[str, Any]] = Field(default_factory=list)
+    split_chunks_evenly: bool = Field(default=False)
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.

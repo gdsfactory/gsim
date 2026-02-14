@@ -165,6 +165,50 @@ def build_background_slabs(config, materials):
     return slabs
 
 
+def build_symmetries(config):
+    """Build MEEP symmetry objects from config."""
+    direction_map = {"X": mp.X, "Y": mp.Y, "Z": mp.Z}
+    symmetries = []
+    for sym in config.get("symmetries", []):
+        symmetries.append(
+            mp.Mirror(direction_map[sym["direction"]], phase=sym.get("phase", 1))
+        )
+    return symmetries
+
+
+# Map string component names to MEEP field components
+_COMPONENT_MAP = {
+    "Ex": mp.Ex, "Ey": mp.Ey, "Ez": mp.Ez,
+    "Hx": mp.Hx, "Hy": mp.Hy, "Hz": mp.Hz,
+}
+
+
+def resolve_decay_monitor_point(config):
+    """Return center mp.Vector3 for decay monitoring.
+
+    Uses the port named by stopping.decay_monitor_port if set,
+    otherwise picks the first non-source port.  Falls back to
+    the first port if all are sources.
+    """
+    stopping = config.get("fdtd", {}).get("stopping", {})
+    target_name = stopping.get("decay_monitor_port")
+    ports = config.get("ports", [])
+
+    if target_name:
+        for p in ports:
+            if p["name"] == target_name:
+                return mp.Vector3(*p["center"])
+
+    # Fallback: first non-source port, or first port
+    for p in ports:
+        if not p.get("is_source", False):
+            return mp.Vector3(*p["center"])
+    if ports:
+        return mp.Vector3(*ports[0]["center"])
+
+    return mp.Vector3(0, 0, 0)
+
+
 def build_geometry(config, materials):
     """Build MEEP geometry from GDS file + layer stack config.
 
@@ -404,7 +448,7 @@ def main():
 
     domain = config.get("domain", {})
     dpml = domain.get("dpml", 1.0)
-    margin_xy = domain.get("margin_xy", 1.0)
+    margin_xy = domain.get("margin_xy", 0.5)
 
     # XY: margin_xy is gap between geometry bbox and PML
     cell_x = (bbox.right - bbox.left) + 2 * (margin_xy + dpml)
@@ -429,15 +473,36 @@ def main():
         sources=sources,
         resolution=resolution,
         boundary_layers=[mp.PML(dpml)],
+        symmetries=build_symmetries(config),
+        split_chunks_evenly=config.get("split_chunks_evenly", False),
     )
 
     print("Building monitors...")
     monitors = build_monitors(config, sim)
 
+    stopping = fdtd.get("stopping", {})
     run_after = fdtd["run_after_sources"]
-    print(f"Running simulation (until_after_sources={run_after:.1f})...")
 
-    sim.run(until_after_sources=run_after)
+    if stopping.get("mode") == "decay":
+        dt = stopping.get("decay_dt", 50.0)
+        comp_name = stopping.get("decay_component", "Ez")
+        comp = _COMPONENT_MAP.get(comp_name, mp.Ez)
+        decay_by = stopping.get("decay_by", 1e-3)
+        monitor_pt = resolve_decay_monitor_point(config)
+        print(f"Running simulation (decay mode: component={comp_name}, "
+              f"dt={dt}, decay_by={decay_by}, cap={run_after:.1f})...")
+
+        # Build capped decay condition: stop when decayed OR max time reached
+        decay_fn = mp.stop_when_fields_decayed(dt, comp, monitor_pt, decay_by)
+        time_fn = mp.stop_when_fields_decayed(run_after, comp, monitor_pt, 1.0)
+
+        def capped_condition(sim_obj):
+            return decay_fn(sim_obj) or time_fn(sim_obj)
+
+        sim.run(until_after_sources=capped_condition)
+    else:
+        print(f"Running simulation (until_after_sources={run_after:.1f})...")
+        sim.run(until_after_sources=run_after)
 
     print("Extracting S-parameters...")
     s_params = extract_s_params(config, sim, monitors)

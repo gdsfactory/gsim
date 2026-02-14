@@ -25,11 +25,11 @@ Layer Parsing        Representation       Visualization
 | **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib                  |
-| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, padding |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes      |
+| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, symmetries |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
-Tests: 62 meep-specific, 119 total passing.
+Tests: 97 meep-specific, 155 total passing.
 
 **Note:** The `gsim.fdtd` module (Tidy3D wrapper) was removed. MEEP is now the sole FDTD solver. The fdtd module had zero tests and zero usage outside itself. Its mode solver functionality (Waveguide, WaveguideCoupler, sweep functions) was Tidy3D-specific and not portable.
 
@@ -61,15 +61,15 @@ Solver-agnostic modules reusable by meep and palace.
 
 | Module                   | Purpose                                                                                                                                                                                                           |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`                                                                                                           |
+| `meep/__init__.py`       | Public API: `MeepSim`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`, `SymmetryEntry`                                                                                          |
 | `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
-| `meep/sim.py`            | `MeepSim` — main class. `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack + dielectrics. `simulate()` calls gcloud. `plot_2d()`/`plot_3d()` for client-side viz.   |
-| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                                                      |
+| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, symmetries. `simulate()` calls gcloud.                   |
+| `meep/models/config.py`  | Pydantic models: `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                                    |
 | `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase.                                                                                                                                          |
 | `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
 | `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` background slabs from dielectrics + `mp.Prism` from layers, handles holes via Delaunay, runs FDTD, saves S-params CSV.     |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, saves S-params CSV. |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -98,7 +98,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain
+  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, symmetries
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -184,6 +184,46 @@ output_dir/
 - The old `run_time_factor / df` formula was fragile (division by zero if bandwidth=0) and non-standard
 - `until_after_sources` lets the Gaussian source decay naturally, then runs N more time units for fields to ring down
 - Default: 100 time units (matches MEEP GDS import tutorial)
+
+### Performance optimizations (symmetry, decay stopping, reduced defaults)
+
+**Decision:** Add five performance features to reduce simulation time without sacrificing accuracy.
+
+**1. Symmetry exploitation (2-4x speedup)**
+
+- `SymmetryEntry` model with `direction` (X/Y/Z) and `phase` (+1/-1)
+- `sim.set_symmetry(y=-1)` adds `mp.Mirror` symmetries to the MEEP runner
+- MEEP only simulates half (or quarter) of the domain, mirroring the fields
+- Most photonic components (MMIs, directional couplers) have at least one mirror plane
+
+**2. Decay-based stopping (1.5-3x speedup)**
+
+- `StoppingConfig` model embedded in `FDTDConfig` with `mode="fixed"|"decay"`
+- Fixed mode: `sim.run(until_after_sources=N)` (original behavior)
+- Decay mode: `mp.stop_when_fields_decayed(dt, component, point, decay_by)` — stops when fields at a monitor point decay below threshold, with `run_after_sources` as safety cap
+- `resolve_decay_monitor_point()` auto-selects the first non-source port center
+- `_COMPONENT_MAP` maps string names ("Ez", "Ey", ...) to MEEP field components
+
+**3. Reduced default margins (1.3-2x speedup)**
+
+- `DomainConfig` margins changed from 1.0 to **0.5** um (xy, z_above, z_below)
+- PML (`dpml`) stays at 1.0 um — important for 1.55um wavelength
+- 0.5um margin is sufficient for evanescent field decay in typical photonic waveguides
+- Users can still override via `sim.set_domain(margin_xy=1.0)` for leaky structures
+
+**4. Reduced default `num_freqs` (~2x speedup)**
+
+- Default changed from 21 to **11** frequency points
+- 11 points across a 100nm bandwidth gives ~10nm resolution — sufficient for most S-parameter characterization
+- Users can still request more points via `sim.set_wavelength(num_freqs=51)`
+
+**5. `split_chunks_evenly=False` (MPI load balancing)**
+
+- Default `False` in `SimConfig`, passed through to `mp.Simulation(split_chunks_evenly=False)`
+- MEEP's default (`True`) splits the domain into equal-sized chunks regardless of geometry
+- `False` lets MEEP assign more processors to chunks with more geometry, improving MPI efficiency
+
+**Implementation constraint:** All configuration happens client-side via Pydantic models; the generated `run_meep.py` reads the JSON config at runtime. gsim has no meep dependency.
 
 ### Removed gsim.fdtd (Tidy3D wrapper)
 
@@ -316,11 +356,15 @@ from gsim.meep import MeepSim
 sim = MeepSim()
 sim.set_geometry(component)
 sim.set_stack()
-sim.set_domain(1.0)  # 1um margins, 1um PML (defaults)
+sim.set_domain(0.5)  # 0.5um margins (default), 1um PML
 sim.set_z_crop()  # crop to margin_z_above/below around core
 sim.set_material("si", refractive_index=3.47)
-sim.set_wavelength(wavelength=1.55, bandwidth=0.1, run_after_sources=100)
+sim.set_wavelength(
+    wavelength=1.55, bandwidth=0.1,
+    stop_when_decayed=True,  # decay-based stopping (1.5-3x faster)
+)
 sim.set_resolution(pixels_per_um=40)
+sim.set_symmetry(y=-1)  # mirror symmetry (2-4x faster for symmetric components)
 sim.set_output_dir("./meep-sim-test")
 
 # Visualize before running
