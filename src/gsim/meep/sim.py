@@ -91,10 +91,12 @@ class MeepSim(MeepSimMixin, BaseModel):
         num_freqs: int = 11,
         run_after_sources: float = 100.0,
         stop_when_decayed: bool = False,
+        stop_when_dft_decayed: bool = False,
         decay_threshold: float = 1e-3,
         decay_dt: float = 50.0,
         decay_component: str = "Ey",
         decay_monitor_port: str | None = None,
+        dft_min_run_time: float = 0,
     ) -> None:
         """Configure wavelength range for simulation.
 
@@ -102,23 +104,39 @@ class MeepSim(MeepSimMixin, BaseModel):
             wavelength: Center wavelength in um
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
-            run_after_sources: Time units to run after sources turn off
-                (also used as max-time safety cap in decay mode)
-            stop_when_decayed: If True, use decay-based stopping instead of
-                fixed time
-            decay_threshold: Stop when fields decay to this fraction (0 < x < 1)
+            run_after_sources: Time units to run after sources turn off.
+                In fixed mode this is the run time.  In decay/dft_decay
+                modes it is the maximum time cap.
+            stop_when_decayed: If True, use field-decay stopping (monitors
+                a single component at one point).
+            stop_when_dft_decayed: If True, use DFT-convergence stopping
+                (monitors all DFT monitors).  Best for S-parameter
+                extraction.  Takes precedence over ``stop_when_decayed``.
+            decay_threshold: Stop when fields/DFT decay to this fraction
             decay_dt: Time interval between decay checks in MEEP time units
-            decay_component: Field component to monitor (e.g. "Ez", "Ey")
+            decay_component: Field component to monitor (e.g. "Ez", "Ey").
+                Only used in ``decay`` mode.
             decay_monitor_port: Port name to monitor for decay. If None, the
                 first non-source port is used automatically.
+                Only used in ``decay`` mode.
+            dft_min_run_time: Minimum time after sources for ``dft_decay``
+                mode (respects Fourier uncertainty principle).
         """
+        if stop_when_dft_decayed:
+            mode = "dft_decay"
+        elif stop_when_decayed:
+            mode = "decay"
+        else:
+            mode = "fixed"
+
         stopping = StoppingConfig(
-            mode="decay" if stop_when_decayed else "fixed",
+            mode=mode,
             run_after_sources=run_after_sources,
             decay_dt=decay_dt,
             decay_component=decay_component,
             decay_by=decay_threshold,
             decay_monitor_port=decay_monitor_port,
+            dft_min_run_time=dft_min_run_time,
         )
         self.fdtd_config = FDTDConfig(
             wavelength=wavelength,

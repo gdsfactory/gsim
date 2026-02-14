@@ -66,18 +66,25 @@ class StoppingConfig(BaseModel):
     """Controls when the MEEP simulation stops.
 
     ``fixed`` mode runs for a fixed time after sources turn off.
-    ``decay`` mode monitors field decay and stops when the fields
-    have decayed by ``decay_by`` (with a safety cap at ``run_after_sources``).
+    ``decay`` mode monitors field decay at a point and stops when the
+    fields have decayed by ``decay_by``, with ``run_after_sources`` as
+    a numeric time cap (whichever fires first).
+    ``dft_decay`` mode monitors convergence of all DFT monitors and
+    stops when they stabilize, with built-in min/max time bounds.
+    Best for S-parameter extraction.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    mode: Literal["fixed", "decay"] = Field(default="fixed")
+    mode: Literal["fixed", "decay", "dft_decay"] = Field(default="fixed")
     run_after_sources: float = Field(default=100.0, gt=0)
     decay_dt: float = Field(default=50.0, gt=0)
     decay_component: str = Field(default="Ey")
     decay_by: float = Field(default=1e-3, gt=0, lt=1)
     decay_monitor_port: str | None = Field(default=None)
+    dft_min_run_time: float = Field(
+        default=0, ge=0, description="Minimum run time after sources for dft_decay mode"
+    )
 
 
 class FDTDConfig(BaseModel):

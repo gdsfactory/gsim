@@ -196,12 +196,13 @@ output_dir/
 - MEEP only simulates half (or quarter) of the domain, mirroring the fields
 - Most photonic components (MMIs, directional couplers) have at least one mirror plane
 
-**2. Decay-based stopping (1.5-3x speedup)**
+**2. Stopping modes (1.5-3x speedup)**
 
-- `StoppingConfig` model embedded in `FDTDConfig` with `mode="fixed"|"decay"`
+- `StoppingConfig` model embedded in `FDTDConfig` with `mode="fixed"|"decay"|"dft_decay"`
 - Fixed mode: `sim.run(until_after_sources=N)` (original behavior)
-- Decay mode: `mp.stop_when_fields_decayed(dt, component, point, decay_by)` — stops when fields at a monitor point decay below threshold, with `run_after_sources` as safety cap
-- `resolve_decay_monitor_point()` auto-selects the first non-source port center
+- Decay mode: `[mp.stop_when_fields_decayed(...), run_after]` list — MEEP's native OR logic stops on whichever fires first (decay or time cap)
+- DFT-decay mode: `mp.stop_when_dft_decayed(tol, minimum_run_time, maximum_run_time)` — monitors convergence of all DFT monitors (best for S-parameter extraction), has built-in min/max time bounds
+- `resolve_decay_monitor_point()` auto-selects the first non-source port center (decay mode only)
 - `_COMPONENT_MAP` maps string names ("Ez", "Ey", ...) to MEEP field components
 
 **3. Reduced default margins (1.3-2x speedup)**
@@ -475,7 +476,8 @@ sim.set_z_crop()  # crop to margin_z_above/below around core
 sim.set_material("si", refractive_index=3.47)
 sim.set_wavelength(
     wavelength=1.55, bandwidth=0.1,
-    stop_when_decayed=True,  # decay-based stopping (1.5-3x faster)
+    stop_when_dft_decayed=True,  # DFT convergence stopping (best for S-params)
+    run_after_sources=200,       # max time cap
 )
 sim.set_resolution(pixels_per_um=40)
 sim.set_symmetry(y=-1)  # mirror symmetry (2-4x faster for symmetric components)

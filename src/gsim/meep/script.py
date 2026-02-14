@@ -605,7 +605,22 @@ def main():
             print(f"  t={sim_obj.meep_time():.2f} | wall={elapsed:.1f}s", flush=True)
         step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
-    if stopping.get("mode") == "decay":
+    stop_mode = stopping.get("mode", "fixed")
+
+    if stop_mode == "dft_decay":
+        decay_by = stopping.get("decay_by", 1e-3)
+        min_time = stopping.get("dft_min_run_time", 0)
+        print(f"Running simulation (dft_decay mode: tol={decay_by}, "
+              f"min={min_time:.1f}, max={run_after:.1f})...")
+        sim.run(
+            *step_funcs,
+            until_after_sources=mp.stop_when_dft_decayed(
+                tol=decay_by,
+                minimum_run_time=min_time,
+                maximum_run_time=run_after,
+            ),
+        )
+    elif stop_mode == "decay":
         dt = stopping.get("decay_dt", 50.0)
         comp_name = stopping.get("decay_component", "Ey")
         comp = _COMPONENT_MAP.get(comp_name, mp.Ey)
@@ -614,14 +629,9 @@ def main():
         print(f"Running simulation (decay mode: component={comp_name}, "
               f"dt={dt}, decay_by={decay_by}, cap={run_after:.1f})...")
 
-        # Build capped decay condition: stop when decayed OR max time reached
+        # Decay condition + numeric time cap (list = OR logic, first wins)
         decay_fn = mp.stop_when_fields_decayed(dt, comp, monitor_pt, decay_by)
-        time_fn = mp.stop_when_fields_decayed(run_after, comp, monitor_pt, 1.0)
-
-        def capped_condition(sim_obj):
-            return decay_fn(sim_obj) or time_fn(sim_obj)
-
-        sim.run(*step_funcs, until_after_sources=capped_condition)
+        sim.run(*step_funcs, until_after_sources=[decay_fn, run_after])
     else:
         print(f"Running simulation (until_after_sources={run_after:.1f})...")
         sim.run(*step_funcs, until_after_sources=run_after)
