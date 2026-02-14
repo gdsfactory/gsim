@@ -222,19 +222,58 @@ def _plot_single_prism_slice(
         )
     )
 
-    # Sort layers by zmin (descending) for drawing order -- mimic
-    # the old sort_layers(..., sort_by="zmin", reverse=True)
+    # Compute total polygon area per layer for draw-order tiebreaking
+    # and alpha assignment.  Larger area → background → draw first / more
+    # transparent.  Smaller area → patterned → draw last / most opaque.
+    def _layer_area(name: str) -> float:
+        if name not in geometry_model.prisms:
+            return float("inf")
+        return sum(
+            p.original_polygon.area
+            for p in geometry_model.prisms[name]
+            if p.original_polygon is not None
+        )
+
+    layer_areas: dict[str, float] = {n: _layer_area(n) for n in layer_names}
+
+    # Sort layers for drawing: lower mesh_order first (background), then
+    # larger polygon area first (background).  This ensures patterned
+    # layers (small area, like waveguide cores) are drawn on top of
+    # fill layers (large area, like cladding rectangles).
     sorted_names = sorted(
         layer_names,
-        key=lambda n: geometry_model.get_layer_bbox(n)[0][2],
-        reverse=True,
+        key=lambda n: (
+            geometry_model.layer_mesh_orders.get(n, 0),
+            -layer_areas.get(n, 0.0),
+        ),
     )
 
-    # Mesh-order -> zorder mapping
+    # Mesh-order → zorder: lower mesh_order = background = lower zorder
     mesh_orders = np.unique(
         [geometry_model.layer_mesh_orders.get(n, 0) for n in sorted_names]
     )
     order_map = dict(zip(mesh_orders, range(0, -len(mesh_orders), -1), strict=True))
+
+    # Assign a small per-layer zorder bump so that within the same
+    # mesh_order, layers with smaller area (patterned) are on top.
+    _names_by_mesh: dict[int, list[str]] = {}
+    for n in sorted_names:
+        mo = geometry_model.layer_mesh_orders.get(n, 0)
+        _names_by_mesh.setdefault(mo, []).append(n)
+
+    _layer_zorder_bump: dict[str, float] = {}
+    for names_in_group in _names_by_mesh.values():
+        for rank, n in enumerate(names_in_group):
+            _layer_zorder_bump[n] = rank * 0.01
+
+    # Alpha mapping: patterned layers (smaller area) get higher alpha,
+    # background layers (larger area) get lower alpha.
+    max_area = max(layer_areas.values()) if layer_areas else 1.0
+    _layer_alpha: dict[str, float] = {}
+    for n in layer_names:
+        ratio = layer_areas.get(n, max_area) / max_area if max_area > 0 else 1.0
+        # Map: ratio 1.0 (largest area) → alpha 0.35, ratio ~0 → alpha 0.90
+        _layer_alpha[n] = 0.90 - 0.55 * ratio
 
     xmin, xmax = np.inf, -np.inf
     ymin, ymax = np.inf, -np.inf
@@ -259,10 +298,17 @@ def _plot_single_prism_slice(
 
     # Second pass: draw patches
     for name in sorted_names:
-        color = colors.get(name, "lightgray")
+        base_color = colors.get(name, "lightgray")
         mesh_order = geometry_model.layer_mesh_orders.get(name, 0)
         bbox = geometry_model.get_layer_bbox(name)
-        layer_zorder = order_map.get(mesh_order, 0)
+        layer_zorder = order_map.get(mesh_order, 0) + _layer_zorder_bump.get(name, 0)
+        alpha = _layer_alpha.get(name, 0.7)
+
+        # Build RGBA face colour with per-layer alpha
+        if hasattr(base_color, "__len__") and len(base_color) >= 3:
+            fc = (*base_color[:3], alpha)
+        else:
+            fc = base_color  # fallback for named colours
 
         if z is not None:
             z_min_layer = bbox[0][2]
@@ -279,7 +325,7 @@ def _plot_single_prism_slice(
                     xy_points = prism.vertices.tolist()
                     patch = Polygon(
                         xy_points,
-                        facecolor=color,
+                        facecolor=fc,
                         edgecolor="k",
                         linewidth=0.5,
                         label=name if idx == 0 else None,
@@ -291,7 +337,7 @@ def _plot_single_prism_slice(
                     (bbox[0][0], bbox[0][1]),
                     bbox[1][0] - bbox[0][0],
                     bbox[1][1] - bbox[0][1],
-                    facecolor=color,
+                    facecolor=fc,
                     edgecolor="k",
                     linewidth=0.5,
                     label=name,
@@ -304,7 +350,7 @@ def _plot_single_prism_slice(
                 (bbox[0][1], bbox[0][2]),
                 bbox[1][1] - bbox[0][1],
                 bbox[1][2] - bbox[0][2],
-                facecolor=color,
+                facecolor=fc,
                 edgecolor="k",
                 linewidth=0.5,
                 label=name,
@@ -317,7 +363,7 @@ def _plot_single_prism_slice(
                 (bbox[0][0], bbox[0][2]),
                 bbox[1][0] - bbox[0][0],
                 bbox[1][2] - bbox[0][2],
-                facecolor=color,
+                facecolor=fc,
                 edgecolor="k",
                 linewidth=0.5,
                 label=name,
