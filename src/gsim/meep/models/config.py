@@ -51,6 +51,11 @@ class DomainConfig(BaseModel):
     margin_z_below: float = Field(
         default=0.5, ge=0, description="Z margin below core kept by set_z_crop in um"
     )
+    port_margin: float = Field(
+        default=2.0,
+        ge=0,
+        description="Margin on each side of port waveguide width for mode monitors in um",
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON config."""
@@ -70,7 +75,7 @@ class StoppingConfig(BaseModel):
     mode: Literal["fixed", "decay"] = Field(default="fixed")
     run_after_sources: float = Field(default=100.0, gt=0)
     decay_dt: float = Field(default=50.0, gt=0)
-    decay_component: str = Field(default="Ez")
+    decay_component: str = Field(default="Ey")
     decay_by: float = Field(default=1e-3, gt=0, lt=1)
     decay_monitor_port: str | None = Field(default=None)
 

@@ -285,6 +285,7 @@ def build_sources(config):
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     z_span = get_port_z_span(config)
+    port_margin = config.get("domain", {}).get("port_margin", 2.0)
 
     sources = []
     for port in config["ports"]:
@@ -293,17 +294,30 @@ def build_sources(config):
 
         center = mp.Vector3(*port["center"])
         normal_axis = port["normal_axis"]
+        direction = port["direction"]
 
         size = [0, 0, 0]
         transverse_axis = 1 - normal_axis
-        size[transverse_axis] = port["width"]
+        size[transverse_axis] = port["width"] + 2 * port_margin
         size[2] = z_span
+
+        # Propagation axis
+        prop_axis = mp.X if normal_axis == 0 else mp.Y
+
+        # eig_kpoint points INTO the device (direction of incoming mode)
+        if normal_axis == 0:
+            kpoint = mp.Vector3(x=1) if direction == "+" else mp.Vector3(x=-1)
+        else:
+            kpoint = mp.Vector3(y=1) if direction == "+" else mp.Vector3(y=-1)
 
         eig_src = mp.EigenModeSource(
             src=mp.GaussianSource(frequency=fcen, fwidth=df),
             center=center,
             size=mp.Vector3(*size),
             eig_band=1,
+            direction=prop_axis,
+            eig_kpoint=kpoint,
+            eig_match_freq=True,
         )
         sources.append(eig_src)
 
@@ -317,6 +331,7 @@ def build_monitors(config, sim):
     df = fdtd["df"]
     nfreq = fdtd["num_freqs"]
     z_span = get_port_z_span(config)
+    port_margin = config.get("domain", {}).get("port_margin", 2.0)
 
     monitors = {}
     for port in config["ports"]:
@@ -325,7 +340,7 @@ def build_monitors(config, sim):
 
         size = [0, 0, 0]
         transverse_axis = 1 - normal_axis
-        size[transverse_axis] = port["width"]
+        size[transverse_axis] = port["width"] + 2 * port_margin
         size[2] = z_span
 
         flux = sim.add_mode_monitor(
@@ -341,14 +356,57 @@ def build_monitors(config, sim):
 # S-parameter extraction
 # ---------------------------------------------------------------------------
 
+def _port_kpoint(port):
+    """Return positive-axis kpoint vector for eigenmode decomposition.
+
+    Always points along +normal_axis so that:
+      alpha[band, freq, 0] = forward (+axis) coefficient
+      alpha[band, freq, 1] = backward (-axis) coefficient
+    """
+    if port["normal_axis"] == 0:
+        return mp.Vector3(x=1)
+    return mp.Vector3(y=1)
+
+
 def extract_s_params(config, sim, monitors):
-    """Extract S-parameters via mode decomposition."""
+    """Extract S-parameters via mode decomposition.
+
+    Uses MEEP eigenmode coefficients with explicit kpoint_func to anchor
+    the forward/backward convention:
+      alpha[band, freq, 0] = forward (+normal_axis) coefficient
+      alpha[band, freq, 1] = backward (-normal_axis) coefficient
+
+    Port "direction" field = direction of incoming mode along normal_axis:
+      "+" -> incoming goes +normal, outgoing (reflected/transmitted) goes -normal
+      "-" -> incoming goes -normal, outgoing (reflected/transmitted) goes +normal
+    """
     port_names = [p["name"] for p in config["ports"]]
+    ports = {p["name"]: p for p in config["ports"]}
     source_port = None
     for p in config["ports"]:
         if p["is_source"]:
             source_port = p["name"]
             break
+
+    if not source_port:
+        return {}
+
+    def _incoming_idx(direction):
+        """Alpha index for the incoming (incident) mode at a port."""
+        return 0 if direction == "+" else 1
+
+    def _outgoing_idx(direction):
+        """Alpha index for the outgoing (reflected/transmitted) mode at a port."""
+        return 1 if direction == "+" else 0
+
+    # Get incident coefficient at source port for normalization
+    src_dir = ports[source_port]["direction"]
+    src_kp = _port_kpoint(ports[source_port])
+    src_ob = sim.get_eigenmode_coefficients(
+        monitors[source_port], [1], eig_parity=mp.NO_PARITY,
+        kpoint_func=lambda f, n, kp=src_kp: kp,
+    )
+    incident_coeffs = src_ob.alpha[0, :, _incoming_idx(src_dir)]
 
     s_params = {}
 
@@ -358,23 +416,18 @@ def extract_s_params(config, sim, monitors):
                 continue
 
             s_name = f"S{i+1}{j+1}"
-            monitor = monitors[port_i]
 
+            port_kp = _port_kpoint(ports[port_i])
             ob = sim.get_eigenmode_coefficients(
-                monitor, [1], eig_parity=mp.NO_PARITY,
+                monitors[port_i], [1], eig_parity=mp.NO_PARITY,
+                kpoint_func=lambda f, n, kp=port_kp: kp,
             )
 
-            alpha = ob.alpha[0, :, 0]
-            s_params[s_name] = alpha
+            # Outgoing direction: reflected at source port, transmitted at output ports
+            port_dir = ports[port_i]["direction"]
+            alpha = ob.alpha[0, :, _outgoing_idx(port_dir)]
 
-    # Normalize by source port forward coefficient
-    if source_port:
-        src_idx = port_names.index(source_port)
-        norm_key = f"S{src_idx+1}{src_idx+1}"
-        norm_coeffs = s_params.get(norm_key)
-        if norm_coeffs is not None:
-            for key in s_params:
-                s_params[key] = s_params[key] / norm_coeffs
+            s_params[s_name] = alpha / incident_coeffs
 
     return s_params
 
@@ -485,8 +538,8 @@ def main():
 
     if stopping.get("mode") == "decay":
         dt = stopping.get("decay_dt", 50.0)
-        comp_name = stopping.get("decay_component", "Ez")
-        comp = _COMPONENT_MAP.get(comp_name, mp.Ez)
+        comp_name = stopping.get("decay_component", "Ey")
+        comp = _COMPONENT_MAP.get(comp_name, mp.Ey)
         decay_by = stopping.get("decay_by", 1e-3)
         monitor_pt = resolve_decay_monitor_point(config)
         print(f"Running simulation (decay mode: component={comp_name}, "

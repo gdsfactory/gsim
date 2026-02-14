@@ -540,15 +540,14 @@ def _draw_overlay_xy(
                 zorder=95,
                 label=label,
             )
-            if port.is_source:
-                dx = 0.15 if port.direction == "+" else -0.15
-                ax.annotate(
-                    "",
-                    xy=(cx + dx, cy),
-                    xytext=(cx, cy),
-                    arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
-                    zorder=96,
-                )
+            dx = 0.15 if port.direction == "+" else -0.15
+            ax.annotate(
+                "",
+                xy=(cx + dx, cy),
+                xytext=(cx, cy),
+                arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+                zorder=96,
+            )
         else:  # y-normal → horizontal line
             ax.plot(
                 [cx - hw, cx + hw],
@@ -558,15 +557,14 @@ def _draw_overlay_xy(
                 zorder=95,
                 label=label,
             )
-            if port.is_source:
-                dy = 0.15 if port.direction == "+" else -0.15
-                ax.annotate(
-                    "",
-                    xy=(cx, cy + dy),
-                    xytext=(cx, cy),
-                    arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
-                    zorder=96,
-                )
+            dy = 0.15 if port.direction == "+" else -0.15
+            ax.annotate(
+                "",
+                xy=(cx, cy + dy),
+                xytext=(cx, cy),
+                arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+                zorder=96,
+            )
 
         ax.annotate(
             port.name,

@@ -24,9 +24,9 @@ Layer Parsing        Representation       Visualization
 | -------------------- | ------ | ----------------------------------------------------------------------------- |
 | **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
-| **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib                  |
+| **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib. Port arrows on all ports (source + monitor). |
 | **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, symmetries |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
 Tests: 97 meep-specific, 155 total passing.
@@ -125,7 +125,7 @@ output_dir/
 
 ### Domain configuration (margins + PML + dielectric backgrounds)
 
-**Decision:** Add a `DomainConfig` model with `dpml`, `margin_xy`, `margin_z_above`, `margin_z_below` fields, exposed via `sim.set_domain()`.
+**Decision:** Add a `DomainConfig` model with `dpml`, `margin_xy`, `margin_z_above`, `margin_z_below`, `port_margin` fields, exposed via `sim.set_domain()`.
 
 **Rationale:**
 
@@ -145,7 +145,7 @@ output_dir/
 - `plot_2d()` previously only showed geometry prisms and a dashed bbox matching geometry bounds
 - Users need to see the actual simulation cell (geometry + margin + PML), PML regions, and port locations
 - Overlay rendering is solver-agnostic — `render2d.py` draws from generic overlay metadata
-- Source ports shown in red with arrow, monitor ports in blue, PML as semi-transparent orange
+- Source ports shown in red with arrow, monitor ports in blue with arrow, PML as semi-transparent orange
 - Dielectric background slabs shown as coloured bands in XZ/YZ views (SiO2 light blue, silicon grey, air transparent)
 
 ### Port z-center uses highest refractive index
@@ -257,6 +257,80 @@ output_dir/
 - **Cloud testing:** The full cloud round-trip (upload → run meep → download results) hasn't been tested end-to-end with a real cloud instance.
 - **`_build_geometry_model()` note:** Uses `gf.get_active_pdk().layer_stack` (gdsfactory's LayerStack) instead of `self.stack` (gsim's LayerStack) because `LayeredComponentBase` needs gdsfactory's type for DerivedLayer resolution.
 
+## Bug Fixes
+
+### S-parameter direction index fix (extract_s_params)
+
+**Problem:** `extract_s_params()` used `alpha[0, :, 0]` (forward/+normal coefficient) for ALL ports, then normalized by dividing everything by S11. Since S11 was the forward (incident) coefficient at the source port, `S11 / S11 = 1.0` always. The reflected wave was never extracted.
+
+**Symptom:** S11 = 1.000000 (0 dB) at all wavelengths — 100% apparent reflection. S21/S31 ≈ 0.183 (-14.7 dB) instead of expected -4 dB. Power conservation violated (|S11|² + |S21|² + |S31|² = 1.067).
+
+**Root cause:** MEEP's `get_eigenmode_coefficients` returns `alpha[band, freq, direction]` where direction index 0 = forward (+normal) and 1 = backward (-normal). The old code always used index 0 for all ports, capturing the incident wave at the source port instead of the reflected wave.
+
+**Fix:** Use the port `direction` field from the config to select the correct alpha index:
+
+- Port `direction` = the direction of the **incoming** mode along normal_axis (from `ports.py:get_port_normal()`)
+- At each port, the **outgoing** (reflected or transmitted) wave goes in the **opposite** direction
+- `direction="+"` → incoming index 0, outgoing index 1
+- `direction="-"` → incoming index 1, outgoing index 0
+- Normalization uses the incident coefficient at the source port (incoming direction), computed separately from S11
+
+For the ebeam_y_1550 Y-branch:
+- Source port o1 (x=-7.4, direction="+"): S11 = `alpha[0,:,1]` (backward/reflected) / `alpha[0,:,0]` (forward/incident)
+- Output port o2 (x=+7.4, direction="-"): S21 = `alpha[0,:,0]` (forward/transmitted) / incident
+- Output port o3 (x=+7.4, direction="-"): S31 = `alpha[0,:,0]` (forward/transmitted) / incident
+
+**Files changed:** `gsim/meep/script.py` (template), `simulation-engines/meep/src/run_meep.py` (deployed copy). 97 tests pass.
+
+### Port monitor/source width fix (CRITICAL — 70% power loss)
+
+**Problem:** Port width from gdsfactory (`gf_port.width` = physical waveguide width, e.g. 0.5 um) was used directly as the transverse size of both `EigenModeSource` and mode monitors. The fundamental waveguide mode's evanescent tails extend ~0.5-1.0 um beyond the waveguide edges into the cladding. A 0.5 um monitor truncates these tails, so `get_eigenmode_coefficients` captures only ~30% of the mode power.
+
+**Symptom:** S11 ≈ 0.49 (-6 dB, should be -20 dB), S21 = S31 ≈ 0.183 (-14.7 dB, should be -4 dB). Power conservation: |S11|² + |S21|² + |S31|² ≈ 0.307 (only 31% accounted for, ~70% lost).
+
+**Root cause:** The mode overlap integral in `get_eigenmode_coefficients` integrates over the monitor cross-section. With a 0.5 um monitor matching the waveguide width, the significant evanescent field outside the waveguide is excluded from the overlap, artificially reducing all mode coefficients.
+
+**Fix:** Added `port_margin` field to `DomainConfig` (default: 2.0 um). The runner script now uses `width + 2 * port_margin` for source/monitor transverse size (e.g. 0.5 + 4.0 = 4.5 um). This follows the gplugins convention where `port_margin=3.0` by default.
+
+**Files changed:**
+- `meep/models/config.py` — `DomainConfig.port_margin: float = 2.0`
+- `meep/sim.py` — `set_domain(..., port_margin=2.0)`
+- `meep/script.py` — `build_sources()` and `build_monitors()` use `width + 2 * port_margin`
+- `meep/overlay.py` — `build_sim_overlay()` applies `port_margin` to overlay port width for accurate visualization
+
+### Eigenmode kpoint and direction fix
+
+**Problem:** `EigenModeSource` was created without explicit `direction`, `eig_kpoint`, or `eig_match_freq`. The `get_eigenmode_coefficients` calls didn't pass `kpoint_func`. Without these, MEEP's auto-detection of "forward" vs "backward" may not match our assumed alpha index convention, and the eigenmode solver has no directional preference for the initial k-vector guess.
+
+**Fix (following gplugins pattern):**
+
+1. **`EigenModeSource`** now sets:
+   - `direction=mp.X` or `mp.Y` based on `normal_axis`
+   - `eig_kpoint` pointing INTO the device (e.g. `Vector3(x=1)` for a west-facing source)
+   - `eig_match_freq=True` for correct mode at each frequency
+
+2. **`get_eigenmode_coefficients`** now passes `kpoint_func=lambda f, n, kp=kp: kp` with a positive-axis kpoint (`Vector3(x=1)` for x-normal ports). This anchors the convention: `alpha[0]=forward (+axis)`, `alpha[1]=backward (-axis)`, which is exactly what `_incoming_idx` / `_outgoing_idx` assumes.
+
+3. Added `_port_kpoint(port)` helper function that returns the positive-axis kpoint vector for a given port.
+
+**Files changed:** `meep/script.py` — `build_sources()`, `extract_s_params()`, new `_port_kpoint()` helper.
+
+### Decay component default changed to "Ey"
+
+**Problem:** Default `decay_component` was `"Ez"`, but for TE-polarized modes in SOI (the dominant mode in 220nm silicon strip waveguides), the dominant electric field component is **Ey** (transverse to propagation, in-plane with the slab). Ez is the weakest TE component and can decay 10-100x faster than Ey, causing premature simulation termination.
+
+**Fix:** Changed default from `"Ez"` to `"Ey"` in `StoppingConfig`, `set_wavelength()`, and the runner script fallback.
+
+**Files changed:** `meep/models/config.py`, `meep/sim.py`, `meep/script.py`.
+
+### Monitor port direction arrows in visualization
+
+**Problem:** Only source ports showed direction arrows in the XY cross-section view. Monitor ports were drawn as blue lines without any directional indicator, making it hard to verify port orientation.
+
+**Fix:** Removed the `if port.is_source:` guards in `_draw_overlay_xy()`. Now ALL ports (source and monitor) show direction arrows. Source arrows remain red, monitor arrows are blue — the color is already set per-port based on `port.is_source`.
+
+**Files changed:** `common/viz/render2d.py`.
+
 ---
 
 ## Docker Integration
@@ -331,11 +405,30 @@ gsim receives s_parameters.csv → SParameterResult.from_csv()
 
 ### Local Testing
 
+**Automated (recommended):** Use `nbs/test_meep_local.sh` which runs the full loop:
+
+```bash
+# From gsim project root:
+./nbs/test_meep_local.sh          # default 4 MPI procs
+MEEP_NP=8 ./nbs/test_meep_local.sh  # override proc count
+```
+
+The script: regenerates config → copies to Docker context → rebuilds image → runs container → prints CSV results with dB summary and power conservation check.
+
+**Manual:**
+
 ```bash
 cd simulation-engines/meep
-docker build -f Dockerfile.local -t meep-gsim:local .
-docker run --rm -e MEEP_NP=4 -v /tmp/meep-out:/app/data meep-gsim:local
-ls /tmp/meep-out/s_parameters.csv
+docker build -f Dockerfile.local -t meep-local .
+docker run --rm -e MEEP_NP=4 -v /tmp/meep-out:/app/data meep-local
+cat /tmp/meep-out/s_parameters.csv
+```
+
+**Config regeneration only** (no Docker):
+
+```bash
+uv run python nbs/generate_meep_config.py
+# Output: nbs/meep-sim-test/{layout.gds, sim_config.json, run_meep.py}
 ```
 
 ---

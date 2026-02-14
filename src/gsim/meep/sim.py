@@ -90,7 +90,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         stop_when_decayed: bool = False,
         decay_threshold: float = 1e-3,
         decay_dt: float = 50.0,
-        decay_component: str = "Ez",
+        decay_component: str = "Ey",
         decay_monitor_port: str | None = None,
     ) -> None:
         """Configure wavelength range for simulation.
@@ -162,6 +162,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         margin_z: float | None = None,
         margin_z_above: float | None = None,
         margin_z_below: float | None = None,
+        port_margin: float = 2.0,
         dpml: float = 1.0,
     ) -> None:
         """Configure simulation domain margins and PML thickness.
@@ -180,6 +181,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_z: Z margin above and below core (um).
             margin_z_above: Z margin above core (um).
             margin_z_below: Z margin below core (um).
+            port_margin: Margin on each side of waveguide width for mode
+                monitors/sources (um). Default 2.0.
             dpml: PML absorber thickness in um.
         """
         default = 0.5
@@ -194,6 +197,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_xy=xy,
             margin_z_above=z_above,
             margin_z_below=z_below,
+            port_margin=port_margin,
         )
 
     # -------------------------------------------------------------------------

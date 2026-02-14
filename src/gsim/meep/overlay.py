@@ -114,11 +114,13 @@ def build_sim_overlay(
     if z_span is None:
         z_span = gmax[2] - gmin[2]
 
+    port_margin = domain_config.port_margin
+
     ports: list[PortOverlay] = [
         PortOverlay(
             name=p.name,
             center=tuple(p.center),  # type: ignore[arg-type]
-            width=p.width,
+            width=p.width + 2 * port_margin,
             normal_axis=p.normal_axis,
             direction=p.direction,
             is_source=p.is_source,

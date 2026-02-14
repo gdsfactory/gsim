@@ -599,6 +599,7 @@ class TestDomainConfig:
         assert cfg.margin_xy == 0.5
         assert cfg.margin_z_above == 0.5
         assert cfg.margin_z_below == 0.5
+        assert cfg.port_margin == 2.0
 
     def test_custom(self):
         cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)
@@ -721,7 +722,7 @@ class TestStoppingConfig:
         assert cfg.mode == "fixed"
         assert cfg.run_after_sources == 100.0
         assert cfg.decay_dt == 50.0
-        assert cfg.decay_component == "Ez"
+        assert cfg.decay_component == "Ey"
         assert cfg.decay_by == 1e-3
         assert cfg.decay_monitor_port is None
 
