@@ -22,6 +22,7 @@ import cmath
 import json
 import math
 import sys
+import time
 
 import meep as mp
 import numpy as np
@@ -65,15 +66,36 @@ def load_gds_component(gds_filename):
     return gf.import_gds(gds_filename)
 
 
-def extract_layer_polygons(component, gds_layer):
+def _klayout_poly_to_coords(poly_obj, dbu):
+    """Convert a KLayout polygon object to a list of (x, y) coordinate tuples.
+
+    Args:
+        poly_obj: KLayout PolygonWithProperties or similar object
+        dbu: Database unit scaling factor (converts integer coords to microns)
+
+    Returns:
+        list of (float, float) coordinate tuples
+    """
+    coords = []
+    for pt in poly_obj.each_point_hull():
+        coords.append((pt.x * dbu, pt.y * dbu))
+    return coords
+
+
+def extract_layer_polygons(component, gds_layer, simplify_tol=0.0):
     """Extract merged Shapely polygons for a GDS layer from a component.
 
     Uses gdsfactory / KLayout to get polygons for the given (layer, datatype)
     tuple, then converts to Shapely with hole support.
 
+    Handles both old gdsfactory (dict keys are (layer, datatype) tuples,
+    values are numpy arrays) and new gdsfactory 9.x (dict keys are integer
+    KLayout layer indices, values are PolygonWithProperties objects).
+
     Args:
         component: gdsfactory Component
         gds_layer: [layer_number, datatype] list
+        simplify_tol: Shapely simplification tolerance in um (0=off)
 
     Returns:
         list of Shapely Polygon objects
@@ -84,27 +106,48 @@ def extract_layer_polygons(component, gds_layer):
     layer_tuple = tuple(gds_layer)
     raw = component.get_polygons(layers=(layer_tuple,), merge=True)
 
-    # get_polygons returns dict[tuple, list[ndarray]]
+    # Collect all polygon objects from the dict, regardless of key type.
+    # Old gdsfactory: keys are (layer, datatype) tuples, values are ndarray lists
+    # New gdsfactory 9.x: keys are integer layer indices, values are
+    # PolygonWithProperties lists
+    all_objects = []
     if isinstance(raw, dict):
-        arrays = raw.get(layer_tuple, [])
-    else:
-        arrays = raw if raw else []
+        for v in raw.values():
+            if isinstance(v, list):
+                all_objects.extend(v)
+            else:
+                all_objects.append(v)
+    elif raw is not None:
+        all_objects = list(raw) if hasattr(raw, '__iter__') else [raw]
+
+    dbu = getattr(getattr(component, 'kcl', None), 'dbu', 0.001)
 
     shapely_polygons = []
-    for arr in arrays:
-        if len(arr) >= 3:
-            coords = [(float(p[0]), float(p[1])) for p in arr]
-            try:
-                poly = Polygon(coords)
-                if poly.is_valid and not poly.is_empty:
-                    shapely_polygons.append(poly)
-            except Exception:
+    for obj in all_objects:
+        try:
+            # KLayout PolygonWithProperties — convert via each_point_hull
+            if hasattr(obj, 'each_point_hull'):
+                coords = _klayout_poly_to_coords(obj, dbu)
+            # Numpy array — legacy path
+            elif hasattr(obj, 'shape') and len(obj) >= 3:
+                coords = [(float(p[0]), float(p[1])) for p in obj]
+            else:
                 continue
+
+            if len(coords) < 3:
+                continue
+            poly = Polygon(coords)
+            if poly.is_valid and not poly.is_empty:
+                shapely_polygons.append(poly)
+        except Exception:
+            continue
 
     if not shapely_polygons:
         return []
 
     merged = unary_union(shapely_polygons)
+    if simplify_tol > 0:
+        merged = merged.simplify(simplify_tol, preserve_topology=True)
     if hasattr(merged, "geoms"):
         return list(merged.geoms)
     return [merged] if not merged.is_empty else []
@@ -220,7 +263,11 @@ def build_geometry(config, materials):
     gds_filename = config.get("gds_filename", "layout.gds")
     component = load_gds_component(gds_filename)
 
+    accuracy = config.get("accuracy", {})
+    simplify_tol = accuracy.get("simplify_tol", 0.0)
+
     geometry = []
+    total_vertices = 0
 
     for layer_entry in config["layer_stack"]:
         material_name = layer_entry["material"]
@@ -235,7 +282,7 @@ def build_geometry(config, materials):
         if height <= 0:
             continue
 
-        polygons = extract_layer_polygons(component, gds_layer)
+        polygons = extract_layer_polygons(component, gds_layer, simplify_tol=simplify_tol)
 
         for polygon in polygons:
             if polygon.is_empty or not polygon.is_valid:
@@ -246,6 +293,7 @@ def build_geometry(config, materials):
                 triangles = triangulate_polygon_with_holes(polygon)
                 for tri_coords in triangles:
                     vertices = [mp.Vector3(p[0], p[1], zmin) for p in tri_coords]
+                    total_vertices += len(vertices)
                     prism = mp.Prism(
                         vertices=vertices,
                         height=height,
@@ -257,6 +305,7 @@ def build_geometry(config, materials):
                 # Simple polygon — direct extrusion
                 coords = list(polygon.exterior.coords[:-1])
                 vertices = [mp.Vector3(p[0], p[1], zmin) for p in coords]
+                total_vertices += len(vertices)
                 prism = mp.Prism(
                     vertices=vertices,
                     height=height,
@@ -265,6 +314,7 @@ def build_geometry(config, materials):
                 )
                 geometry.append(prism)
 
+    print(f"  Total vertices across all prisms: {total_vertices}")
     return geometry, component
 
 
@@ -519,7 +569,8 @@ def main():
     print(f"PML: {dpml:.2f} um, margin_xy: {margin_xy:.2f}")
     print(f"Resolution: {resolution} pixels/um")
 
-    sim = mp.Simulation(
+    accuracy = config.get("accuracy", {})
+    sim_kwargs = dict(
         cell_size=mp.Vector3(cell_x, cell_y, cell_z),
         geometry_center=cell_center,
         geometry=geometry,
@@ -528,13 +579,31 @@ def main():
         boundary_layers=[mp.PML(dpml)],
         symmetries=build_symmetries(config),
         split_chunks_evenly=config.get("split_chunks_evenly", False),
+        eps_averaging=accuracy.get("eps_averaging", True),
     )
+    spx_maxeval = accuracy.get("subpixel_maxeval", 0)
+    if spx_maxeval > 0:
+        sim_kwargs["subpixel_maxeval"] = spx_maxeval
+    spx_tol = accuracy.get("subpixel_tol", 1e-4)
+    if spx_tol != 1e-4:
+        sim_kwargs["subpixel_tol"] = spx_tol
+    sim = mp.Simulation(**sim_kwargs)
 
     print("Building monitors...")
     monitors = build_monitors(config, sim)
 
     stopping = fdtd.get("stopping", {})
     run_after = fdtd["run_after_sources"]
+
+    # Build verbose step functions
+    step_funcs = []
+    verbose_interval = config.get("verbose_interval", 0)
+    if verbose_interval > 0:
+        _wall_start = time.time()
+        def _verbose_print(sim_obj):
+            elapsed = time.time() - _wall_start
+            print(f"  t={sim_obj.meep_time():.2f} | wall={elapsed:.1f}s", flush=True)
+        step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
     if stopping.get("mode") == "decay":
         dt = stopping.get("decay_dt", 50.0)
@@ -552,10 +621,10 @@ def main():
         def capped_condition(sim_obj):
             return decay_fn(sim_obj) or time_fn(sim_obj)
 
-        sim.run(until_after_sources=capped_condition)
+        sim.run(*step_funcs, until_after_sources=capped_condition)
     else:
         print(f"Running simulation (until_after_sources={run_after:.1f})...")
-        sim.run(until_after_sources=run_after)
+        sim.run(*step_funcs, until_after_sources=run_after)
 
     print("Extracting S-parameters...")
     s_params = extract_s_params(config, sim, monitors)

@@ -152,6 +152,34 @@ class ResolutionConfig(BaseModel):
         return {"pixels_per_um": self.pixels_per_um}
 
 
+class AccuracyConfig(BaseModel):
+    """Controls MEEP subpixel averaging and polygon simplification.
+
+    ``eps_averaging`` toggles MEEP's subpixel smoothing (expensive for
+    complex polygons).  ``subpixel_maxeval`` / ``subpixel_tol`` tune the
+    integration that implements it.  ``simplify_tol`` applies Shapely
+    polygon simplification before extrusion, dramatically reducing vertex
+    counts on dense GDS curves.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    eps_averaging: bool = Field(default=True, description="Toggle subpixel averaging")
+    subpixel_maxeval: int = Field(
+        default=0, ge=0, description="Cap on integration evaluations (0=unlimited)"
+    )
+    subpixel_tol: float = Field(
+        default=1e-4, gt=0, description="Subpixel integration tolerance"
+    )
+    simplify_tol: float = Field(
+        default=0.0, ge=0, description="Shapely simplification tolerance in um (0=off)"
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON config."""
+        return self.model_dump()
+
+
 class PortData(BaseModel):
     """Serializable port data for the config JSON."""
 
@@ -224,6 +252,10 @@ class SimConfig(BaseModel):
     fdtd: dict[str, Any] = Field(default_factory=dict)
     resolution: dict[str, Any] = Field(default_factory=dict)
     domain: dict[str, Any] = Field(default_factory=dict)
+    accuracy: dict[str, Any] = Field(default_factory=dict)
+    verbose_interval: float = Field(
+        default=0, ge=0, description="MEEP time units between progress prints (0=off)"
+    )
     symmetries: list[dict[str, Any]] = Field(default_factory=list)
     split_chunks_evenly: bool = Field(default=False)
 

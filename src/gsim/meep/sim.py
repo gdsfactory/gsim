@@ -16,6 +16,7 @@ from gsim.common import Geometry, LayerStack, ValidationResult
 from gsim.common.stack.materials import MaterialProperties
 from gsim.meep.base import MeepSimMixin
 from gsim.meep.models import (
+    AccuracyConfig,
     FDTDConfig,
     DomainConfig,
     ResolutionConfig,
@@ -61,6 +62,8 @@ class MeepSim(MeepSimMixin, BaseModel):
     fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
     domain_config: DomainConfig = Field(default_factory=DomainConfig)
+    accuracy_config: AccuracyConfig = Field(default_factory=AccuracyConfig)
+    verbose_interval: float = Field(default=0, ge=0)
 
     # Material overrides (optical properties)
     materials: dict[str, MaterialProperties] = Field(default_factory=dict)
@@ -199,6 +202,41 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_z_below=z_below,
             port_margin=port_margin,
         )
+
+    # -------------------------------------------------------------------------
+    # Accuracy / performance
+    # -------------------------------------------------------------------------
+
+    def set_accuracy(
+        self,
+        *,
+        eps_averaging: bool = True,
+        subpixel_maxeval: int = 0,
+        subpixel_tol: float = 1e-4,
+        simplify_tol: float = 0.0,
+        verbose_interval: float = 0,
+    ) -> None:
+        """Configure accuracy and performance trade-offs.
+
+        Args:
+            eps_averaging: Enable MEEP subpixel averaging (expensive for
+                complex polygons).
+            subpixel_maxeval: Maximum integration evaluations for subpixel
+                averaging (0 = unlimited).
+            subpixel_tol: Convergence tolerance for subpixel integration.
+            simplify_tol: Shapely polygon simplification tolerance in um.
+                Reduces vertex count on dense GDS curves.  0 = no
+                simplification.
+            verbose_interval: Print progress every *interval* MEEP time
+                units during FDTD stepping.  0 = silent.
+        """
+        self.accuracy_config = AccuracyConfig(
+            eps_averaging=eps_averaging,
+            subpixel_maxeval=subpixel_maxeval,
+            subpixel_tol=subpixel_tol,
+            simplify_tol=simplify_tol,
+        )
+        self.verbose_interval = verbose_interval
 
     # -------------------------------------------------------------------------
     # Source port
@@ -375,6 +413,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             fdtd=self.fdtd_config.to_dict(),
             resolution=self.resolution_config.to_dict(),
             domain=self.domain_config.to_dict(),
+            accuracy=self.accuracy_config.to_dict(),
+            verbose_interval=self.verbose_interval,
             symmetries=[s.to_dict() for s in self.symmetries],
             split_chunks_evenly=self.split_chunks_evenly,
         )

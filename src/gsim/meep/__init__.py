@@ -18,6 +18,7 @@ Example:
 """
 
 from gsim.meep.models import (
+    AccuracyConfig,
     FDTDConfig,
     DomainConfig,
     ResolutionConfig,
@@ -28,6 +29,7 @@ from gsim.meep.models import (
 from gsim.meep.sim import MeepSim
 
 __all__ = [
+    "AccuracyConfig",
     "FDTDConfig",
     "DomainConfig",
     "MeepSim",
