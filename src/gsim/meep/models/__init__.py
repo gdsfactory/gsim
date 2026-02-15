@@ -2,6 +2,7 @@
 
 from gsim.meep.models.config import (
     AccuracyConfig,
+    DiagnosticsConfig,
     FDTDConfig,
     LayerStackEntry,
     DomainConfig,
@@ -16,6 +17,7 @@ from gsim.meep.models.results import SParameterResult
 
 __all__ = [
     "AccuracyConfig",
+    "DiagnosticsConfig",
     "FDTDConfig",
     "LayerStackEntry",
     "DomainConfig",

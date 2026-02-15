@@ -187,6 +187,28 @@ class AccuracyConfig(BaseModel):
         return self.model_dump()
 
 
+class DiagnosticsConfig(BaseModel):
+    """Controls diagnostic outputs from the MEEP runner."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    save_geometry: bool = Field(default=True, description="Pre-run geometry cross-section plots")
+    save_fields: bool = Field(default=True, description="Post-run field snapshot")
+    save_epsilon_raw: bool = Field(
+        default=False, description="Raw epsilon .npy (advanced)"
+    )
+    save_animation: bool = Field(
+        default=False, description="Field animation MP4 (heavy, needs ffmpeg)"
+    )
+    preview_only: bool = Field(
+        default=False,
+        description="Init sim and save geometry diagnostics, skip FDTD run",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class PortData(BaseModel):
     """Serializable port data for the config JSON."""
 
@@ -263,6 +285,7 @@ class SimConfig(BaseModel):
     verbose_interval: float = Field(
         default=0, ge=0, description="MEEP time units between progress prints (0=off)"
     )
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     symmetries: list[dict[str, Any]] = Field(default_factory=list)
     split_chunks_evenly: bool = Field(default=False)
 

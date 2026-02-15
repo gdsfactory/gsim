@@ -27,6 +27,14 @@ import time
 import meep as mp
 import numpy as np
 
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 
 # ---------------------------------------------------------------------------
 # Config loading
@@ -608,6 +616,133 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+def save_geometry_diagnostics(sim, config, cell_center):
+    """Save geometry cross-section plots showing epsilon, sources, monitors, PML."""
+    if not HAS_MATPLOTLIB:
+        print("WARNING: matplotlib not available, skipping geometry diagnostics")
+        return
+    if not mp.am_master():
+        # plot2D is collective — all ranks call it, only master saves
+        pass
+
+    domain = config.get("domain", {})
+    dpml = domain.get("dpml", 1.0)
+    z_min = min(l["zmin"] for l in config["layer_stack"])
+    z_max = max(l["zmax"] for l in config["layer_stack"])
+    z_core = (z_min + z_max) / 2
+
+    # XY cross-section at z=core center
+    try:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        xy_plane = mp.Volume(
+            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+        )
+        sim.plot2D(ax=ax, output_plane=xy_plane)
+        ax.set_title(f"XY cross-section at z={z_core:.3f} um (core center)")
+        ax.set_xlabel("x (um)")
+        ax.set_ylabel("y (um)")
+        fig.tight_layout()
+        if mp.am_master():
+            fig.savefig("meep_geometry_xy.png", dpi=150)
+            print("Saved meep_geometry_xy.png")
+        plt.close(fig)
+    except Exception as e:
+        print(f"WARNING: XY geometry plot failed: {e}")
+
+    # For 3D sims: XZ and YZ cross-sections
+    if sim.cell_size.z > 0:
+        # XZ at y=center
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+            xz_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, cell_center.z),
+                size=mp.Vector3(sim.cell_size.x, 0, sim.cell_size.z),
+            )
+            sim.plot2D(ax=ax, output_plane=xz_plane)
+            ax.set_title(f"XZ cross-section at y={cell_center.y:.3f} um")
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("z (um)")
+            fig.tight_layout()
+            if mp.am_master():
+                fig.savefig("meep_geometry_xz.png", dpi=150)
+                print("Saved meep_geometry_xz.png")
+            plt.close(fig)
+        except Exception as e:
+            print(f"WARNING: XZ geometry plot failed: {e}")
+
+        # YZ at x=center
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+            yz_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, cell_center.z),
+                size=mp.Vector3(0, sim.cell_size.y, sim.cell_size.z),
+            )
+            sim.plot2D(ax=ax, output_plane=yz_plane)
+            ax.set_title(f"YZ cross-section at x={cell_center.x:.3f} um")
+            ax.set_xlabel("y (um)")
+            ax.set_ylabel("z (um)")
+            fig.tight_layout()
+            if mp.am_master():
+                fig.savefig("meep_geometry_yz.png", dpi=150)
+                print("Saved meep_geometry_yz.png")
+            plt.close(fig)
+        except Exception as e:
+            print(f"WARNING: YZ geometry plot failed: {e}")
+
+
+def save_field_snapshot(sim, config, cell_center):
+    """Save post-run field snapshot (Ey overlaid on epsilon)."""
+    if not HAS_MATPLOTLIB:
+        print("WARNING: matplotlib not available, skipping field snapshot")
+        return
+
+    z_min = min(l["zmin"] for l in config["layer_stack"])
+    z_max = max(l["zmax"] for l in config["layer_stack"])
+    z_core = (z_min + z_max) / 2
+
+    try:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        xy_plane = mp.Volume(
+            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+        )
+        sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
+        ax.set_title(f"Ey field at z={z_core:.3f} um (post-run)")
+        ax.set_xlabel("x (um)")
+        ax.set_ylabel("y (um)")
+        fig.tight_layout()
+        if mp.am_master():
+            fig.savefig("meep_fields_xy.png", dpi=150)
+            print("Saved meep_fields_xy.png")
+        plt.close(fig)
+    except Exception as e:
+        print(f"WARNING: field snapshot failed: {e}")
+
+
+def save_epsilon_raw(sim, config, cell_center):
+    """Save raw epsilon array as .npy for XY slice at core center."""
+    z_min = min(l["zmin"] for l in config["layer_stack"])
+    z_max = max(l["zmax"] for l in config["layer_stack"])
+    z_core = (z_min + z_max) / 2
+
+    try:
+        xy_plane = mp.Volume(
+            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+        )
+        eps_data = sim.get_array(vol=xy_plane, component=mp.Dielectric)
+        if mp.am_master():
+            np.save("meep_epsilon_xy.npy", eps_data)
+            print(f"Saved meep_epsilon_xy.npy (shape={eps_data.shape})")
+    except Exception as e:
+        print(f"WARNING: epsilon raw save failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -666,6 +801,12 @@ def main():
     print(f"Resolution: {resolution} pixels/um")
 
     accuracy = config.get("accuracy", {})
+    diagnostics = config.get("diagnostics", {})
+    preview_only = diagnostics.get("preview_only", False)
+
+    # In preview mode, skip expensive subpixel averaging
+    eps_avg = False if preview_only else accuracy.get("eps_averaging", True)
+
     sim_kwargs = dict(
         cell_size=mp.Vector3(cell_x, cell_y, cell_z),
         geometry_center=cell_center,
@@ -675,7 +816,7 @@ def main():
         boundary_layers=[mp.PML(dpml)],
         symmetries=build_symmetries(config),
         split_chunks_evenly=config.get("split_chunks_evenly", False),
-        eps_averaging=accuracy.get("eps_averaging", True),
+        eps_averaging=eps_avg,
     )
     spx_maxeval = accuracy.get("subpixel_maxeval", 0)
     if spx_maxeval > 0:
@@ -684,6 +825,26 @@ def main():
     if spx_tol != 1e-4:
         sim_kwargs["subpixel_tol"] = spx_tol
     sim = mp.Simulation(**sim_kwargs)
+
+    # --- Diagnostics & preview mode ---
+    diag_geometry = diagnostics.get("save_geometry", True)
+    diag_fields = diagnostics.get("save_fields", True)
+    diag_epsilon = diagnostics.get("save_epsilon_raw", False)
+
+    if diag_geometry or diag_epsilon or preview_only:
+        print("Initializing simulation for diagnostics...")
+        sim.init_sim()
+        if diag_geometry or preview_only:
+            save_geometry_diagnostics(sim, config, cell_center)
+        if diag_epsilon:
+            save_epsilon_raw(sim, config, cell_center)
+
+    if preview_only:
+        print("MEEP_PREVIEW_ONLY=1 — skipping simulation run.")
+        save_debug_log(config, {}, {"_meep_time": 0, "_timesteps": 0,
+                                    "_cell_size": [cell_x, cell_y, cell_z]})
+        print("Preview complete.")
+        sys.exit(0)
 
     print("Building monitors...")
     monitors = build_monitors(config, sim)
@@ -735,6 +896,9 @@ def main():
         sim.run(*step_funcs, until_after_sources=run_after)
 
     wall_seconds = time.time() - wall_start
+
+    if diag_fields:
+        save_field_snapshot(sim, config, cell_center)
 
     print("Extracting S-parameters...")
     s_params, debug_data = extract_s_params(config, sim, monitors)

@@ -26,7 +26,7 @@ Layer Parsing        Representation       Visualization
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib. Port arrows on all ports (source + monitor). |
 | **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`) |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`), geometry/field diagnostics PNG output, preview-only mode |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
 Tests: 97 meep-specific, 155 total passing.
@@ -61,15 +61,15 @@ Solver-agnostic modules reusable by meep and palace.
 
 | Module                   | Purpose                                                                                                                                                                                                           |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meep/__init__.py`       | Public API: `MeepSim`, `AccuracyConfig`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`, `SymmetryEntry`                                                                         |
+| `meep/__init__.py`       | Public API: `MeepSim`, `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`, `SymmetryEntry`                                                      |
 | `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
-| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, verbose_interval, symmetries. `simulate()` calls gcloud. |
-| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                                   |
-| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase. Auto-loads `meep_debug.json` into `debug_info` field when present alongside CSV.                                                            |
+| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `set_diagnostics()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, diagnostics, verbose_interval, symmetries. `simulate()` calls gcloud. |
+| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                |
+| `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase. Auto-loads `meep_debug.json` into `debug_info` field and diagnostic PNGs into `diagnostic_images`. `from_directory()` for preview-only (no CSV). `show_diagnostics()` for Jupyter display. |
 | `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
 | `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV + eigenmode debug log (`meep_debug.json`) via `save_debug_log()`. |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV + eigenmode debug log (`meep_debug.json`) via `save_debug_log()`. Server-side diagnostics: geometry cross-section PNGs (`save_geometry_diagnostics`), field snapshot (`save_field_snapshot`), raw epsilon (`save_epsilon_raw`). Preview-only mode (`preview_only` in config) skips FDTD run. |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -98,7 +98,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries
+  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, accuracy, diagnostics, verbose_interval, symmetries
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -252,6 +252,18 @@ output_dir/
 - `SParameterResult.from_csv()` auto-loads `meep_debug.json` into the `debug_info` field when present
 - Primary use: verify n_eff values match expected guided mode (e.g. ~2.44 for Si at 1550nm) and power conservation ~1.0
 - Catches port_margin or geometry issues immediately without re-running the simulation
+
+**10. Server-side diagnostics and preview mode**
+
+- `DiagnosticsConfig` model controls what the runner outputs beyond S-parameters: `save_geometry` (pre-run epsilon cross-sections), `save_fields` (post-run field snapshot), `save_epsilon_raw` (numpy array), `preview_only` (skip FDTD entirely)
+- `sim.set_diagnostics(save_geometry=True, save_fields=True, preview_only=False)` — fluent API
+- Runner calls `sim.init_sim()` before diagnostics (needed for epsilon grid), then `sim.plot2D()` with matplotlib for cross-section PNGs
+- For 3D sims: XY (at z=core), XZ (at y=center), YZ (at x=center) geometry cross-sections
+- `preview_only=True` initializes the sim and saves geometry diagnostics, then exits without running FDTD — fast geometry validation (seconds instead of minutes)
+- `HAS_MATPLOTLIB` flag provides graceful degradation on Docker images without matplotlib (though gdsfactory already depends on it)
+- MPI-safe: all ranks call `plot2D()` (collective via `get_array()`), only rank 0 saves files
+- `SParameterResult.from_directory()` loads preview-only results (no CSV, just debug JSON + diagnostic PNGs)
+- `result.show_diagnostics()` displays diagnostic PNGs inline in Jupyter
 
 **Implementation constraint:** All configuration happens client-side via Pydantic models; the generated `run_meep.py` reads the JSON config at runtime. gsim has no meep dependency.
 
@@ -439,14 +451,18 @@ Docker container /app/src/
 
     ↓ (runner writes to CWD)
 
-/app/src/s_parameters.csv    # S-parameter results
-/app/src/meep_debug.json     # Eigenmode diagnostics (n_eff, kdom, power conservation)
-  entrypoint: cp *.csv *.json /app/data/
+/app/src/s_parameters.csv      # S-parameter results
+/app/src/meep_debug.json       # Eigenmode diagnostics (n_eff, kdom, power conservation)
+/app/src/meep_geometry_xy.png  # Pre-run geometry cross-section (XY at z=core)
+/app/src/meep_geometry_xz.png  # Pre-run geometry cross-section (XZ, 3D only)
+/app/src/meep_geometry_yz.png  # Pre-run geometry cross-section (YZ, 3D only)
+/app/src/meep_fields_xy.png    # Post-run field snapshot (Ey on epsilon)
+  entrypoint: cp *.csv *.json *.png /app/data/
 
     ↓ (tarballed and uploaded)
 
-gsim receives s_parameters.csv + meep_debug.json → SParameterResult.from_csv()
-  (debug_info auto-loaded from meep_debug.json if present)
+gsim receives results → SParameterResult.from_csv() or .from_directory()
+  (debug_info auto-loaded from meep_debug.json, diagnostic_images from PNGs)
 ```
 
 ### Local Testing
@@ -510,9 +526,10 @@ sim.set_accuracy(
     eps_averaging=True,       # subpixel averaging (disable for quick tests)
     verbose_interval=5.0,     # progress prints every 5 MEEP time units
 )
+sim.set_diagnostics(save_geometry=True, save_fields=True)  # server-side PNGs
 sim.set_output_dir("./meep-sim-test")
 
-# Visualize before running
+# Visualize before running (client-side, no MEEP)
 sim.plot_2d(slices="xyz")
 
 # Write config files
@@ -521,4 +538,13 @@ sim.write_config()
 # Run on cloud
 result = sim.simulate()
 result.plot()
+
+# View server-side diagnostics (geometry + field PNGs from MEEP)
+result.show_diagnostics()
+
+# Preview-only: fast geometry validation (seconds, no FDTD)
+sim.set_diagnostics(preview_only=True)
+sim.write_config()
+result = sim.simulate()
+result.show_diagnostics()  # geometry PNGs only, no fields or S-params
 ```

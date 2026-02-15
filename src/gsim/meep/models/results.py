@@ -29,6 +29,10 @@ class SParameterResult(BaseModel):
         default_factory=dict,
         description="Eigenmode diagnostics from meep_debug.json (if available)",
     )
+    diagnostic_images: dict[str, str] = Field(
+        default_factory=dict,
+        description="Diagnostic image paths: key -> filepath",
+    )
 
     @classmethod
     def from_csv(cls, path: str | Path) -> SParameterResult:
@@ -92,12 +96,80 @@ class SParameterResult(BaseModel):
             except (json.JSONDecodeError, OSError):
                 pass
 
+        # Auto-detect diagnostic PNGs
+        diagnostic_images: dict[str, str] = {}
+        for key, filename in [
+            ("geometry_xy", "meep_geometry_xy.png"),
+            ("geometry_xz", "meep_geometry_xz.png"),
+            ("geometry_yz", "meep_geometry_yz.png"),
+            ("fields_xy", "meep_fields_xy.png"),
+        ]:
+            img_path = path.parent / filename
+            if img_path.exists():
+                diagnostic_images[key] = str(img_path)
+
         return cls(
             wavelengths=wavelengths,
             s_params=s_params,
             port_names=sorted(port_names),
             debug_info=debug_info,
+            diagnostic_images=diagnostic_images,
         )
+
+    @classmethod
+    def from_directory(cls, directory: str | Path) -> SParameterResult:
+        """Load from directory — handles preview-only with no CSV.
+
+        If ``s_parameters.csv`` exists, delegates to ``from_csv()``.
+        Otherwise loads only debug info and diagnostic images (preview mode).
+
+        Args:
+            directory: Path to results directory
+
+        Returns:
+            SParameterResult instance
+        """
+        directory = Path(directory)
+        csv_path = directory / "s_parameters.csv"
+        if csv_path.exists():
+            return cls.from_csv(csv_path)
+
+        # Preview-only: load debug + images only
+        debug_info: dict[str, Any] = {}
+        debug_path = directory / "meep_debug.json"
+        if debug_path.exists():
+            try:
+                debug_info = json.loads(debug_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        diagnostic_images: dict[str, str] = {}
+        for key, filename in [
+            ("geometry_xy", "meep_geometry_xy.png"),
+            ("geometry_xz", "meep_geometry_xz.png"),
+            ("geometry_yz", "meep_geometry_yz.png"),
+            ("fields_xy", "meep_fields_xy.png"),
+        ]:
+            img_path = directory / filename
+            if img_path.exists():
+                diagnostic_images[key] = str(img_path)
+
+        return cls(
+            debug_info=debug_info,
+            diagnostic_images=diagnostic_images,
+        )
+
+    def show_diagnostics(self) -> None:
+        """Display diagnostic images in Jupyter."""
+        from IPython.display import Image, display
+
+        if not self.diagnostic_images:
+            print("No diagnostic images available.")
+            return
+
+        for name, img_path in sorted(self.diagnostic_images.items()):
+            print(f"--- {name} ---")
+            display(Image(filename=img_path))
 
     def plot(self, db: bool = True, **kwargs: Any) -> Any:
         """Plot S-parameters vs wavelength.

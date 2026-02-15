@@ -13,7 +13,8 @@ SIM_ENGINE_DIR="$(cd "$GSIM_DIR/../simulation-engines/meep" && pwd)"
 CONFIG_OUTPUT="$GSIM_DIR/nbs/meep-sim-test"
 RESULTS_DIR="$(mktemp -d)"
 IMAGE_NAME="meep-local"
-MEEP_NP="${MEEP_NP:-4}"
+MEEP_NP="${MEEP_NP:-8}"
+LOG_FILE="$CONFIG_OUTPUT/docker_meep.log"
 
 cleanup() { rm -rf "$RESULTS_DIR"; }
 trap cleanup EXIT
@@ -35,7 +36,16 @@ echo "=== 4. Run simulation (MEEP_NP=$MEEP_NP) ==="
 docker run --rm \
     -e MEEP_NP="$MEEP_NP" \
     -v "$RESULTS_DIR:/app/data" \
-    "$IMAGE_NAME"
+    "$IMAGE_NAME" 2>&1 | tee "$LOG_FILE"
+echo ""
+echo "Docker log saved to $LOG_FILE"
+
+# Collect diagnostic PNGs from results
+for PNG in "$RESULTS_DIR"/meep_*.png; do
+    [ -f "$PNG" ] || continue
+    cp "$PNG" "$CONFIG_OUTPUT/"
+    echo "Copied $(basename "$PNG") -> $CONFIG_OUTPUT/"
+done
 
 echo ""
 echo "=== 5. Results ==="
@@ -67,9 +77,47 @@ print(f'  Power conservation: {total_power:.4f} (should be ~1.0)')
     cp "$CSV" "$CONFIG_OUTPUT/s_parameters.csv"
     echo ""
     echo "CSV copied to $CONFIG_OUTPUT/s_parameters.csv"
+
+    # Copy and display debug JSON if present
+    DEBUG_JSON="$RESULTS_DIR/meep_debug.json"
+    if [ -f "$DEBUG_JSON" ]; then
+        cp "$DEBUG_JSON" "$CONFIG_OUTPUT/meep_debug.json"
+        echo ""
+        echo "--- meep_debug.json summary ---"
+        uv run python -c "
+import json
+with open('$DEBUG_JSON') as f:
+    d = json.load(f)
+meta = d.get('metadata', {})
+print(f'Resolution: {meta.get(\"resolution\")} pixels/um')
+print(f'Cell size: {meta.get(\"cell_size\")}')
+print(f'Wall time: {meta.get(\"wall_seconds\", 0):.1f}s')
+print(f'MEEP time: {meta.get(\"meep_time\", 0):.1f}')
+print(f'Timesteps: {meta.get(\"timesteps\", 0)}')
+print(f'Stopping mode: {meta.get(\"stopping_mode\")}')
+print()
+for port, info in d.get('eigenmode_info', {}).items():
+    n_effs = info.get('n_eff', [])
+    if n_effs:
+        mid = n_effs[len(n_effs)//2]
+        print(f'Port {port} n_eff (center freq): {mid:.4f}')
+pcons = d.get('power_conservation', [])
+if pcons:
+    mid = pcons[len(pcons)//2]
+    print(f'Power conservation (center freq): {mid:.4f}')
+"
+        echo "Debug JSON copied to $CONFIG_OUTPUT/meep_debug.json"
+    else
+        echo ""
+        echo "WARNING: No meep_debug.json found (eigenmode diagnostics unavailable)"
+        echo "Files in results dir:"
+        ls -la "$RESULTS_DIR"
+    fi
 else
     echo "ERROR: No s_parameters.csv found in $RESULTS_DIR"
     echo "Files in results dir:"
     ls -la "$RESULTS_DIR"
+    echo ""
+    echo "Check docker log: $LOG_FILE"
     exit 1
 fi

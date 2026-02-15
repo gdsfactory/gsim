@@ -30,13 +30,19 @@ sim.set_wavelength(
     wavelength=1.55,
     bandwidth=0.1,
     num_freqs=11,
-    run_after_sources=100,
-    stop_when_decayed=True,
+    run_after_sources=200,
+    stop_when_dft_decayed=True,
     decay_threshold=1e-3,
 )
-sim.set_resolution(pixels_per_um=20)
+sim.set_resolution(pixels_per_um=30)
 sim.set_symmetry(y=-1)
-sim.set_output_dir("./meep-sim-test")
+sim.set_accuracy(
+    simplify_tol=0.01,
+    eps_averaging=True,
+    verbose_interval=5.0,
+)
+sim.set_diagnostics(save_geometry=True, save_fields=True, preview_only=True)
+sim.set_output_dir(Path(__file__).parent / "meep-sim-test")
 
 # 3. Validate
 result = sim.validate_config()

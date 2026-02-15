@@ -17,6 +17,7 @@ from gsim.common.stack.materials import MaterialProperties
 from gsim.meep.base import MeepSimMixin
 from gsim.meep.models import (
     AccuracyConfig,
+    DiagnosticsConfig,
     FDTDConfig,
     DomainConfig,
     ResolutionConfig,
@@ -63,6 +64,7 @@ class MeepSim(MeepSimMixin, BaseModel):
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
     domain_config: DomainConfig = Field(default_factory=DomainConfig)
     accuracy_config: AccuracyConfig = Field(default_factory=AccuracyConfig)
+    diagnostics_config: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     verbose_interval: float = Field(default=0, ge=0)
 
     # Material overrides (optical properties)
@@ -257,6 +259,37 @@ class MeepSim(MeepSimMixin, BaseModel):
         self.verbose_interval = verbose_interval
 
     # -------------------------------------------------------------------------
+    # Diagnostics
+    # -------------------------------------------------------------------------
+
+    def set_diagnostics(
+        self,
+        *,
+        save_geometry: bool = True,
+        save_fields: bool = True,
+        save_epsilon_raw: bool = False,
+        save_animation: bool = False,
+        preview_only: bool = False,
+    ) -> None:
+        """Configure diagnostic outputs from the MEEP runner.
+
+        Args:
+            save_geometry: Save pre-run geometry cross-section plots.
+            save_fields: Save post-run field snapshot.
+            save_epsilon_raw: Save raw epsilon numpy array.
+            save_animation: Save field animation MP4 (heavy, needs ffmpeg).
+            preview_only: If True, init sim and save geometry diagnostics
+                but skip the FDTD run entirely. Fast geometry validation.
+        """
+        self.diagnostics_config = DiagnosticsConfig(
+            save_geometry=save_geometry,
+            save_fields=save_fields,
+            save_epsilon_raw=save_epsilon_raw,
+            save_animation=save_animation,
+            preview_only=preview_only,
+        )
+
+    # -------------------------------------------------------------------------
     # Source port
     # -------------------------------------------------------------------------
 
@@ -432,6 +465,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             resolution=self.resolution_config.to_dict(),
             domain=self.domain_config.to_dict(),
             accuracy=self.accuracy_config.to_dict(),
+            diagnostics=self.diagnostics_config.to_dict(),
             verbose_interval=self.verbose_interval,
             symmetries=[s.to_dict() for s in self.symmetries],
             split_chunks_evenly=self.split_chunks_evenly,
