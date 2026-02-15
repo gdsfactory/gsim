@@ -187,6 +187,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         margin_z_below: float | None = None,
         port_margin: float = 0.5,
         dpml: float = 1.0,
+        extend_ports: float = 0.0,
     ) -> None:
         """Configure simulation domain margins and PML thickness.
 
@@ -207,6 +208,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             port_margin: Margin on each side of waveguide width for mode
                 monitors/sources (um). Default 0.5.
             dpml: PML absorber thickness in um.
+            extend_ports: Length to extend waveguide ports into PML (um).
+                0 = auto-calculate as margin_xy + dpml.
         """
         default = 0.5
         base = margin if margin is not None else default
@@ -221,6 +224,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             margin_z_above=z_above,
             margin_z_below=z_below,
             port_margin=port_margin,
+            extend_ports=extend_ports,
         )
 
     # -------------------------------------------------------------------------
@@ -269,6 +273,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         save_fields: bool = True,
         save_epsilon_raw: bool = False,
         save_animation: bool = False,
+        animation_interval: float = 0.5,
         preview_only: bool = False,
     ) -> None:
         """Configure diagnostic outputs from the MEEP runner.
@@ -278,6 +283,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             save_fields: Save post-run field snapshot.
             save_epsilon_raw: Save raw epsilon numpy array.
             save_animation: Save field animation MP4 (heavy, needs ffmpeg).
+            animation_interval: MEEP time units between animation frames.
             preview_only: If True, init sim and save geometry diagnostics
                 but skip the FDTD run entirely. Fast geometry validation.
         """
@@ -286,6 +292,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             save_fields=save_fields,
             save_epsilon_raw=save_epsilon_raw,
             save_animation=save_animation,
+            animation_interval=animation_interval,
             preview_only=preview_only,
         )
 
@@ -315,8 +322,18 @@ class MeepSim(MeepSimMixin, BaseModel):
         """Set mirror symmetry planes for the simulation.
 
         Each axis with a non-None phase (+1 or -1) adds a mirror symmetry.
-        This can give 2-4x speedup when the geometry has the corresponding
-        symmetry.
+
+        .. warning::
+
+            Symmetries are **ignored** during S-parameter extraction runs.
+            MEEP's ``get_eigenmode_coefficients`` with ``add_mode_monitor``
+            produces incorrect normalization when the source monitor
+            straddles a mirror symmetry plane (~2x coefficient error).
+            This matches gplugins, which also never uses ``mp.Mirror``
+            for S-parameter extraction.
+
+            Symmetries are only applied in **preview-only** mode
+            (geometry validation, no FDTD run).
 
         Args:
             x: Phase (+1 or -1) for X mirror symmetry, or None to skip.
@@ -332,6 +349,12 @@ class MeepSim(MeepSimMixin, BaseModel):
                     )
                 entries.append(SymmetryEntry(direction=direction, phase=phase))
         self.symmetries = entries
+        if entries:
+            logger.warning(
+                "Symmetries are ignored during S-parameter extraction "
+                "(causes incorrect eigenmode normalization). They are only "
+                "applied in preview-only mode."
+            )
 
     # -------------------------------------------------------------------------
     # Validation
@@ -411,9 +434,27 @@ class MeepSim(MeepSimMixin, BaseModel):
         if self.geometry is None:
             raise ValueError("No geometry set.")
 
-        component = self.geometry.component.copy()
+        import gdsfactory as gf
 
-        # 1. Write GDS file
+        original_component = self.geometry.component.copy()
+
+        # Compute port extension length
+        extend_length = self.domain_config.extend_ports
+        if extend_length == 0.0:
+            extend_length = self.domain_config.margin_xy + self.domain_config.dpml
+
+        # Extend waveguide ports into PML region
+        original_bbox: list[float] | None = None
+        if extend_length > 0:
+            bbox = original_component.dbbox()
+            original_bbox = [bbox.left, bbox.bottom, bbox.right, bbox.top]
+            component = gf.components.extend_ports(
+                original_component, length=extend_length
+            )
+        else:
+            component = original_component
+
+        # 1. Write EXTENDED component GDS
         gds_path = self._output_dir / "layout.gds"
         component.write_gds(gds_path)
 
@@ -446,9 +487,9 @@ class MeepSim(MeepSimMixin, BaseModel):
             )
             used_materials.add(diel["material"])
 
-        # 3. Extract port info
+        # 3. Extract port info from ORIGINAL component (port centers must not change)
         port_infos = extract_port_info(
-            component, self.stack, source_port=self.source_port
+            original_component, self.stack, source_port=self.source_port
         )
 
         # 4. Resolve materials (layers + dielectrics)
@@ -457,6 +498,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         # 5. Build SimConfig
         sim_config = SimConfig(
             gds_filename="layout.gds",
+            component_bbox=original_bbox,
             layer_stack=layer_stack_entries,
             dielectrics=dielectric_entries,
             ports=[p.to_dict() for p in port_infos],

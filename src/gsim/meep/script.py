@@ -723,6 +723,71 @@ def save_field_snapshot(sim, config, cell_center):
         print(f"WARNING: field snapshot failed: {e}")
 
 
+def save_animation_frame(sim, xy_plane, frame_counter):
+    """Save a single animation frame PNG during time-stepping.
+
+    Only rank 0 writes to disk.  The figure is created once and reused
+    across frames to avoid figure handle leaks.
+
+    Returns:
+        Incremented frame counter.
+    """
+    if not HAS_MATPLOTLIB:
+        return frame_counter
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    try:
+        sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
+        ax.set_title(f"Ey  t={sim.meep_time():.2f}")
+        fig.tight_layout()
+        if mp.am_master():
+            fname = f"meep_frame_{frame_counter:04d}.png"
+            fig.savefig(fname, dpi=100)
+    except Exception as e:
+        if mp.am_master():
+            print(f"WARNING: animation frame {frame_counter} failed: {e}")
+    finally:
+        plt.close(fig)
+
+    return frame_counter + 1
+
+
+def compile_animation_mp4(fps=15):
+    """Stitch meep_frame_*.png into meep_animation.mp4 via ffmpeg.
+
+    Falls back gracefully if ffmpeg is not available — frame PNGs
+    are still kept as individual files.
+    """
+    import glob
+    import subprocess
+
+    frames = sorted(glob.glob("meep_frame_*.png"))
+    if not frames:
+        print("WARNING: No animation frames found to compile")
+        return
+
+    print(f"Compiling {len(frames)} frames into meep_animation.mp4 ...")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-framerate", str(fps),
+                "-i", "meep_frame_%04d.png",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "meep_animation.mp4",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        print("Saved meep_animation.mp4")
+    except FileNotFoundError:
+        print("WARNING: ffmpeg not found — frame PNGs saved but MP4 not created")
+    except subprocess.CalledProcessError as e:
+        print(f"WARNING: ffmpeg failed: {e.stderr.decode()[:500]}")
+        print("Frame PNGs are still available as meep_frame_*.png")
+
+
 def save_epsilon_raw(sim, config, cell_center):
     """Save raw epsilon array as .npy for XY slice at core center."""
     z_min = min(l["zmin"] for l in config["layer_stack"])
@@ -776,7 +841,15 @@ def main():
     fdtd = config["fdtd"]
 
     # Compute simulation cell from component bounds + layer z-range
-    bbox = component.dbbox()
+    # Use original component bbox if available (port extension changes GDS bbox)
+    component_bbox = config.get("component_bbox")
+    if component_bbox is not None:
+        bbox_left, bbox_bottom, bbox_right, bbox_top = component_bbox
+    else:
+        bbox = component.dbbox()
+        bbox_left, bbox_right = bbox.left, bbox.right
+        bbox_bottom, bbox_top = bbox.bottom, bbox.top
+
     z_min = min(l["zmin"] for l in config["layer_stack"])
     z_max = max(l["zmax"] for l in config["layer_stack"])
 
@@ -785,14 +858,14 @@ def main():
     margin_xy = domain.get("margin_xy", 0.5)
 
     # XY: margin_xy is gap between geometry bbox and PML
-    cell_x = (bbox.right - bbox.left) + 2 * (margin_xy + dpml)
-    cell_y = (bbox.top - bbox.bottom) + 2 * (margin_xy + dpml)
+    cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
+    cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
     # Z: margin_z_above/below is already baked into layer_stack via set_z_crop(),
     #    so only add dpml beyond the stack extent
     cell_z = (z_max - z_min) + 2 * dpml
     cell_center = mp.Vector3(
-        (bbox.right + bbox.left) / 2,
-        (bbox.top + bbox.bottom) / 2,
+        (bbox_right + bbox_left) / 2,
+        (bbox_top + bbox_bottom) / 2,
         (z_max + z_min) / 2,
     )
 
@@ -807,6 +880,20 @@ def main():
     # In preview mode, skip expensive subpixel averaging
     eps_avg = False if preview_only else accuracy.get("eps_averaging", True)
 
+    # Symmetries are NOT used for S-parameter extraction runs.
+    # MEEP's get_eigenmode_coefficients with add_mode_monitor produces
+    # incorrect normalization when the source monitor straddles a mirror
+    # symmetry plane (coefficients underestimated by ~2x).  This is
+    # consistent with gplugins which also never uses mp.Mirror for
+    # S-parameter extraction.  Symmetries are only applied in preview-only
+    # mode (geometry validation, no FDTD/S-params).
+    cfg_symmetries = config.get("symmetries", [])
+    if cfg_symmetries and not preview_only:
+        print("NOTE: Symmetries present in config but IGNORED for S-parameter "
+              "extraction (causes incorrect eigenmode normalization). "
+              "Symmetries are only used in preview-only mode.")
+    use_symmetries = build_symmetries(config) if preview_only else []
+
     sim_kwargs = dict(
         cell_size=mp.Vector3(cell_x, cell_y, cell_z),
         geometry_center=cell_center,
@@ -814,7 +901,7 @@ def main():
         sources=sources,
         resolution=resolution,
         boundary_layers=[mp.PML(dpml)],
-        symmetries=build_symmetries(config),
+        symmetries=use_symmetries,
         split_chunks_evenly=config.get("split_chunks_evenly", False),
         eps_averaging=eps_avg,
     )
@@ -862,6 +949,30 @@ def main():
             print(f"  t={sim_obj.meep_time():.2f} | wall={elapsed:.1f}s", flush=True)
         step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
+    # Animation frame capture step function
+    diag_animation = diagnostics.get("save_animation", False)
+    animation_interval = diagnostics.get("animation_interval", 0.5)
+    _frame_counter = [0]  # mutable container for closure
+
+    if diag_animation and HAS_MATPLOTLIB:
+        z_min_anim = min(l["zmin"] for l in config["layer_stack"])
+        z_max_anim = max(l["zmax"] for l in config["layer_stack"])
+        z_core_anim = (z_min_anim + z_max_anim) / 2
+        _anim_plane = mp.Volume(
+            center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
+            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+        )
+
+        def _capture_frame(sim_obj):
+            _frame_counter[0] = save_animation_frame(
+                sim_obj, _anim_plane, _frame_counter[0]
+            )
+
+        step_funcs.append(mp.at_every(animation_interval, _capture_frame))
+        print(f"Animation: capturing frames every {animation_interval} time units")
+    elif diag_animation and not HAS_MATPLOTLIB:
+        print("WARNING: save_animation=True but matplotlib not available, skipping")
+
     stop_mode = stopping.get("mode", "fixed")
 
     wall_start = time.time()
@@ -899,6 +1010,9 @@ def main():
 
     if diag_fields:
         save_field_snapshot(sim, config, cell_center)
+
+    if diag_animation and _frame_counter[0] > 0 and mp.am_master():
+        compile_animation_mp4()
 
     print("Extracting S-parameters...")
     s_params, debug_data = extract_s_params(config, sim, monitors)

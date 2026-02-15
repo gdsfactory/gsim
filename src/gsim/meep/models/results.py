@@ -103,10 +103,16 @@ class SParameterResult(BaseModel):
             ("geometry_xz", "meep_geometry_xz.png"),
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
+            ("animation", "meep_animation.mp4"),
         ]:
             img_path = path.parent / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
+
+        # Detect animation frame PNGs
+        frame_pngs = sorted(path.parent.glob("meep_frame_*.png"))
+        if frame_pngs:
+            diagnostic_images["animation_frames"] = str(path.parent)
 
         return cls(
             wavelengths=wavelengths,
@@ -149,10 +155,16 @@ class SParameterResult(BaseModel):
             ("geometry_xz", "meep_geometry_xz.png"),
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
+            ("animation", "meep_animation.mp4"),
         ]:
             img_path = directory / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
+
+        # Detect animation frame PNGs
+        frame_pngs = sorted(directory.glob("meep_frame_*.png"))
+        if frame_pngs:
+            diagnostic_images["animation_frames"] = str(directory)
 
         return cls(
             debug_info=debug_info,
@@ -170,6 +182,17 @@ class SParameterResult(BaseModel):
         for name, img_path in sorted(self.diagnostic_images.items()):
             print(f"--- {name} ---")
             display(Image(filename=img_path))
+
+    def show_animation(self) -> None:
+        """Display field animation MP4 in Jupyter."""
+        mp4_path = self.diagnostic_images.get("animation")
+        if mp4_path is None:
+            print("No animation MP4 available.")
+            return
+
+        from IPython.display import Video, display
+
+        display(Video(mp4_path, embed=True, mimetype="video/mp4"))
 
     def plot(self, db: bool = True, **kwargs: Any) -> Any:
         """Plot S-parameters vs wavelength.

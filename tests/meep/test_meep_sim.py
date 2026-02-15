@@ -600,6 +600,7 @@ class TestDomainConfig:
         assert cfg.margin_z_above == 0.5
         assert cfg.margin_z_below == 0.5
         assert cfg.port_margin == 0.5
+        assert cfg.extend_ports == 0.0
 
     def test_custom(self):
         cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)
@@ -608,6 +609,15 @@ class TestDomainConfig:
         assert cfg.margin_z_above == 0.3
         assert cfg.margin_z_below == 0.4
 
+    def test_extend_ports_custom(self):
+        cfg = DomainConfig(extend_ports=2.5)
+        assert cfg.extend_ports == 2.5
+
+    def test_extend_ports_serialization(self):
+        cfg = DomainConfig(extend_ports=3.0)
+        d = cfg.to_dict()
+        assert d["extend_ports"] == 3.0
+
     def test_to_dict(self):
         cfg = DomainConfig(dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5)
         d = cfg.to_dict()
@@ -615,6 +625,32 @@ class TestDomainConfig:
         assert d["margin_xy"] == 0.5
         assert d["margin_z_above"] == 1.0
         assert d["margin_z_below"] == 1.5
+
+
+class TestSimConfigComponentBbox:
+    """Test SimConfig.component_bbox field."""
+
+    def test_default_none(self):
+        cfg = SimConfig()
+        assert cfg.component_bbox is None
+
+    def test_with_bbox(self):
+        cfg = SimConfig(component_bbox=[-5.0, -2.0, 5.0, 2.0])
+        assert cfg.component_bbox == [-5.0, -2.0, 5.0, 2.0]
+
+    def test_json_roundtrip(self, tmp_path):
+        cfg = SimConfig(component_bbox=[-1.0, -0.5, 1.0, 0.5])
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+        assert data["component_bbox"] == [-1.0, -0.5, 1.0, 0.5]
+
+    def test_json_roundtrip_none(self, tmp_path):
+        cfg = SimConfig()
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+        assert data["component_bbox"] is None
 
 
 class TestSetDomain:
@@ -656,6 +692,16 @@ class TestSetDomain:
         assert sim.domain_config.margin_xy == 0.5
         assert sim.domain_config.margin_z_above == 3.0  # explicit wins
         assert sim.domain_config.margin_z_below == 2.0  # margin_z wins over margin
+
+    def test_set_domain_extend_ports_default(self):
+        sim = MeepSim()
+        sim.set_domain()
+        assert sim.domain_config.extend_ports == 0.0
+
+    def test_set_domain_extend_ports_custom(self):
+        sim = MeepSim()
+        sim.set_domain(extend_ports=3.0)
+        assert sim.domain_config.extend_ports == 3.0
 
     def test_domain_in_sim_config_json(self, tmp_path):
         """Verify domain dict appears in SimConfig serialization."""
@@ -1066,6 +1112,17 @@ class TestScriptDomainConfig:
         assert "build_background_slabs" in script
         assert "mp.Block" in script
         assert "mp.inf" in script
+
+    def test_script_handles_component_bbox(self):
+        """Verify the runner script uses component_bbox for cell sizing."""
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "component_bbox" in script
+        assert "bbox_left" in script
+        assert "bbox_right" in script
+        assert "bbox_top" in script
+        assert "bbox_bottom" in script
 
 
 # ---------------------------------------------------------------------------

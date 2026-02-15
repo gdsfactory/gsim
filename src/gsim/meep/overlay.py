@@ -80,6 +80,7 @@ def build_sim_overlay(
     port_data: list[PortData],
     z_span: float | None = None,
     dielectrics: list[dict[str, Any]] | None = None,
+    component_bbox: tuple[float, float, float, float] | None = None,
 ) -> SimOverlay:
     """Build a SimOverlay from geometry model, domain config, and port data.
 
@@ -89,6 +90,10 @@ def build_sim_overlay(
         port_data: List of PortData objects from port extraction.
         z_span: Port monitor z-span. If None, computed from geometry bbox.
         dielectrics: List of dielectric dicts from stack.dielectrics.
+        component_bbox: Original component bbox (xmin, ymin, xmax, ymax) before
+            port extension.  When provided, cell XY boundaries are computed from
+            this bbox instead of the geometry model bbox (which may include
+            extended waveguides).
 
     Returns:
         SimOverlay with computed cell boundaries and port overlays.
@@ -97,17 +102,25 @@ def build_sim_overlay(
     dpml = domain_config.dpml
     margin_xy = domain_config.margin_xy
 
+    # XY: use original component bbox if available (port extension changes geometry bbox)
+    if component_bbox is not None:
+        xy_min_x, xy_min_y = component_bbox[0], component_bbox[1]
+        xy_max_x, xy_max_y = component_bbox[2], component_bbox[3]
+    else:
+        xy_min_x, xy_min_y = gmin[0], gmin[1]
+        xy_max_x, xy_max_y = gmax[0], gmax[1]
+
     # XY: margin_xy is gap between geometry bbox and PML
     # Z: margin_z_above/below is already baked into the geometry bbox via set_z_crop(),
     #    so only add dpml beyond the geometry z-extent
     cell_min = (
-        gmin[0] - margin_xy - dpml,
-        gmin[1] - margin_xy - dpml,
+        xy_min_x - margin_xy - dpml,
+        xy_min_y - margin_xy - dpml,
         gmin[2] - dpml,
     )
     cell_max = (
-        gmax[0] + margin_xy + dpml,
-        gmax[1] + margin_xy + dpml,
+        xy_max_x + margin_xy + dpml,
+        xy_max_y + margin_xy + dpml,
         gmax[2] + dpml,
     )
 

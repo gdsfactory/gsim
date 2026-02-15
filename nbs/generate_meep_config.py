@@ -22,26 +22,26 @@ component = cells.ebeam_y_1550()
 sim = MeepSim()
 sim.set_geometry(component)
 sim.set_stack()
+# Domain: 0.5um margins, 1um PML, auto-extend ports into PML (margin_xy + dpml = 1.5um)
 sim.set_domain(0.5)
 sim.set_z_crop()
 sim.set_material("si", refractive_index=3.47)
 sim.set_material("SiO2", refractive_index=1.44)
 sim.set_wavelength(
     wavelength=1.55,
-    bandwidth=0.1,
+    bandwidth=0.01,
     num_freqs=11,
     run_after_sources=200,
     stop_when_dft_decayed=True,
     decay_threshold=1e-3,
 )
 sim.set_resolution(pixels_per_um=30)
-sim.set_symmetry(y=-1)
 sim.set_accuracy(
     simplify_tol=0.01,
     eps_averaging=True,
     verbose_interval=5.0,
 )
-sim.set_diagnostics(save_geometry=True, save_fields=True, preview_only=True)
+sim.set_diagnostics(save_geometry=True, save_fields=True)
 sim.set_output_dir(Path(__file__).parent / "meep-sim-test")
 
 # 3. Validate
@@ -49,9 +49,16 @@ result = sim.validate_config()
 if not result.valid:
     raise SystemExit(f"Invalid config: {result.errors}")
 
-# 4. Write config
+# 4. Write config (auto-extends waveguide ports into PML and stores original bbox)
 output_dir = sim.write_config()
 print(f"Config written to: {output_dir}")
 for f in sorted(os.listdir(output_dir)):
     size = os.path.getsize(Path(output_dir) / f)
     print(f"  {f} ({size:,} bytes)")
+
+# 5. Verify component_bbox in generated config
+import json
+
+config_data = json.loads((Path(output_dir) / "sim_config.json").read_text())
+bbox = config_data.get("component_bbox")
+print(f"\ncomponent_bbox (original, before port extension): {bbox}")

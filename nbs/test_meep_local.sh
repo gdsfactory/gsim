@@ -40,11 +40,16 @@ docker run --rm \
 echo ""
 echo "Docker log saved to $LOG_FILE"
 
-# Collect diagnostic PNGs from results
+# Collect diagnostic PNGs and animation files from results
 for PNG in "$RESULTS_DIR"/meep_*.png; do
     [ -f "$PNG" ] || continue
     cp "$PNG" "$CONFIG_OUTPUT/"
     echo "Copied $(basename "$PNG") -> $CONFIG_OUTPUT/"
+done
+for MP4 in "$RESULTS_DIR"/*.mp4; do
+    [ -f "$MP4" ] || continue
+    cp "$MP4" "$CONFIG_OUTPUT/"
+    echo "Copied $(basename "$MP4") -> $CONFIG_OUTPUT/"
 done
 
 echo ""

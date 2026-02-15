@@ -334,6 +334,10 @@ class MeepSimMixin:
         ``LayeredComponentBase`` needs gdsfactory's ``LayerStack`` for
         polygon extraction via ``DerivedLayer.get_shapes()``.
 
+        When ``domain_config.extend_ports`` is configured, the waveguide
+        ports are extended into the PML region so the visualization matches
+        what the runner will simulate.
+
         Returns:
             GeometryModel ready for visualization.
 
@@ -344,6 +348,7 @@ class MeepSimMixin:
 
         from gsim.common.geometry_model import extract_geometry_model
         from gsim.common.layered_component import LayeredComponentBase
+        from gsim.meep.models import DomainConfig
 
         if self.geometry is None:
             raise ValueError("No geometry set. Call set_geometry(component) first.")
@@ -356,9 +361,16 @@ class MeepSimMixin:
                 "Activate a PDK with a layer stack first."
             )
 
+        # Compute port extension length (same logic as write_config)
+        domain_config: DomainConfig = getattr(self, "domain_config", DomainConfig())
+        extend_length = domain_config.extend_ports
+        if extend_length == 0.0:
+            extend_length = domain_config.margin_xy + domain_config.dpml
+
         lc = LayeredComponentBase(
             component=self.geometry.component,
             layer_stack=gf_layer_stack,
+            extend_ports=extend_length,
         )
         gm = extract_geometry_model(lc)
 
@@ -455,10 +467,22 @@ class MeepSimMixin:
         except Exception:
             port_data = []
 
-        domain_config = getattr(self, "domain_config", DomainConfig())
+        domain_config: DomainConfig = getattr(self, "domain_config", DomainConfig())
+
+        # Pass original component bbox so cell boundaries are computed from
+        # the original geometry, not the port-extended geometry.
+        orig_bbox = None
+        if self.geometry is not None:
+            bbox = self.geometry.component.dbbox()
+            orig_bbox = (bbox.left, bbox.bottom, bbox.right, bbox.top)
+
         dielectrics = self.stack.dielectrics if self.stack else []
         return build_sim_overlay(
-            geometry_model, domain_config, port_data, dielectrics=dielectrics
+            geometry_model,
+            domain_config,
+            port_data,
+            dielectrics=dielectrics,
+            component_bbox=orig_bbox,
         )
 
     def plot_2d(

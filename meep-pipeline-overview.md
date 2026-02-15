@@ -25,11 +25,11 @@ Layer Parsing        Representation       Visualization
 | **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib. Port arrows on all ports (source + monitor). |
-| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries |
-| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`), geometry/field diagnostics PNG output, preview-only mode |
+| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries, component_bbox |
+| **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`), geometry/field diagnostics PNG output, preview-only mode, `component_bbox`-aware cell sizing |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
-Tests: 97 meep-specific, 155 total passing.
+Tests: 106 meep-specific passing.
 
 **Note:** The `gsim.fdtd` module (Tidy3D wrapper) was removed. MEEP is now the sole FDTD solver. The fdtd module had zero tests and zero usage outside itself. Its mode solver functionality (Waveguide, WaveguideCoupler, sweep functions) was Tidy3D-specific and not portable.
 
@@ -63,13 +63,13 @@ Solver-agnostic modules reusable by meep and palace.
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `meep/__init__.py`       | Public API: `MeepSim`, `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`, `SymmetryEntry`                                                      |
 | `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
-| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `set_diagnostics()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, diagnostics, verbose_interval, symmetries. `simulate()` calls gcloud. |
-| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig`, `SimConfig`, `PortData`, `LayerStackEntry`, `MaterialData`                |
+| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `set_diagnostics()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, diagnostics, verbose_interval, symmetries. `write_config()` auto-extends waveguide ports into PML via `gf.components.extend_ports()` and stores original bbox in `SimConfig.component_bbox`. `simulate()` calls gcloud. |
+| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig` (with `extend_ports`), `SimConfig` (with `component_bbox`), `PortData`, `LayerStackEntry`, `MaterialData` |
 | `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase. Auto-loads `meep_debug.json` into `debug_info` field and diagnostic PNGs into `diagnostic_images`. `from_directory()` for preview-only (no CSV). `show_diagnostics()` for Jupyter display. |
 | `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
 | `meep/materials.py`      | `resolve_materials()` — resolves layer material names to (n, k) via common DB.                                                                                                                                    |
-| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, `mp.Mirror` symmetries, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV + eigenmode debug log (`meep_debug.json`) via `save_debug_log()`. Server-side diagnostics: geometry cross-section PNGs (`save_geometry_diagnostics`), field snapshot (`save_field_snapshot`), raw epsilon (`save_epsilon_raw`). Preview-only mode (`preview_only` in config) skips FDTD run. |
+| `meep/script.py`         | `generate_meep_script()` — cloud runner template. Reads GDS + config, builds `mp.Block` slabs + `mp.Prism` layers, decay-based or fixed stopping, `split_chunks_evenly`, polygon simplification, configurable `eps_averaging`/`subpixel_maxeval`/`subpixel_tol`, verbose progress stepping via `mp.at_every()`, saves S-params CSV + eigenmode debug log (`meep_debug.json`) via `save_debug_log()`. Uses `component_bbox` from config for cell sizing (falls back to GDS bbox for backward compat). Server-side diagnostics: geometry cross-section PNGs (`save_geometry_diagnostics`), field snapshot (`save_field_snapshot`), raw epsilon (`save_epsilon_raw`). Preview-only mode (`preview_only` in config) skips FDTD run. **Symmetries are ignored during S-parameter extraction** (causes incorrect eigenmode normalization); only applied in preview-only mode. |
 
 ### `gsim.palace` — RF EM Simulation
 
@@ -98,7 +98,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, accuracy, diagnostics, verbose_interval, symmetries
+  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, accuracy, diagnostics, verbose_interval, symmetries, component_bbox
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -125,7 +125,7 @@ output_dir/
 
 ### Domain configuration (margins + PML + dielectric backgrounds)
 
-**Decision:** Add a `DomainConfig` model with `dpml`, `margin_xy`, `margin_z_above`, `margin_z_below`, `port_margin` fields, exposed via `sim.set_domain()`.
+**Decision:** Add a `DomainConfig` model with `dpml`, `margin_xy`, `margin_z_above`, `margin_z_below`, `port_margin`, `extend_ports` fields, exposed via `sim.set_domain()`.
 
 **Rationale:**
 
@@ -135,6 +135,7 @@ output_dir/
 - `margin_xy` is the gap between geometry bbox and PML inner edge
 - Background dielectric slabs (`stack.dielectrics`) are serialized to JSON and created as `mp.Block` objects in the runner, ensuring the entire simulation domain is filled with the correct material at each z-position (no vacuum gaps)
 - `mp.Block` slabs are placed first in the geometry list; MEEP's "later objects override" rule ensures patterned waveguide prisms take precedence
+- `extend_ports` (default 0.0 = auto) extends waveguide ports into PML via `gf.components.extend_ports()` at `write_config()` time. Auto-calculates extension length as `margin_xy + dpml`. Original component bbox is stored in `SimConfig.component_bbox` so the runner computes cell size from the original (non-extended) geometry. Port centers are extracted from the original component and remain unchanged.
 
 ### Simulation overlay visualization
 
@@ -147,6 +148,33 @@ output_dir/
 - Overlay rendering is solver-agnostic — `render2d.py` draws from generic overlay metadata
 - Source ports shown in red with arrow, monitor ports in blue with arrow, PML as semi-transparent orange
 - Dielectric background slabs shown as coloured bands in XZ/YZ views (SiO2 light blue, silicon grey, air transparent)
+
+### Waveguide port extension into PML
+
+**Decision:** Automatically extend waveguide ports through the margin+PML region at `write_config()` time using `gf.components.extend_ports()`.
+
+**Rationale:**
+
+- MEEP's PML requires waveguides to extend straight into the absorber for proper mode absorption
+- Without extension, waveguides terminate abruptly at the component boundary inside the margin/PML, creating spurious reflections that corrupt S-parameters
+- This is the same approach used by gplugins: extend GDS geometry while keeping sources/monitors at original port positions and computing cell size from the original bbox
+
+**Implementation:**
+
+- `DomainConfig.extend_ports` (default 0.0 = auto) controls the extension length
+- Auto mode computes `margin_xy + dpml` (the minimum to reach through PML)
+- `write_config()` calls `gf.components.extend_ports(original_component, length=extend_length)`
+- Original component bbox is stored in `SimConfig.component_bbox` so the runner computes cell size from the original geometry, not the extended one
+- Port centers are extracted from the original component (unchanged positions)
+- The runner falls back to `component.dbbox()` when `component_bbox` is absent (backward compat with old configs)
+
+```
+|--- PML ---|--- margin_xy ---|--- original component ---|--- margin_xy ---|--- PML ---|
+|=== extended waveguide extends through margin+PML ===========================...========|
+                               ^                         ^
+                        source/monitor             source/monitor
+                        (at original port)         (at original port)
+```
 
 ### Port z-center uses highest refractive index
 
@@ -189,12 +217,14 @@ output_dir/
 
 **Decision:** Add five performance features to reduce simulation time without sacrificing accuracy.
 
-**1. Symmetry exploitation (2-4x speedup)**
+**1. ~~Symmetry exploitation~~ (DISABLED for S-parameter runs)**
 
 - `SymmetryEntry` model with `direction` (X/Y/Z) and `phase` (+1/-1)
-- `sim.set_symmetry(y=-1)` adds `mp.Mirror` symmetries to the MEEP runner
-- MEEP only simulates half (or quarter) of the domain, mirroring the fields
-- Most photonic components (MMIs, directional couplers) have at least one mirror plane
+- `sim.set_symmetry(y=-1)` is accepted but **ignored** during S-parameter extraction
+- MEEP's `get_eigenmode_coefficients` with `add_mode_monitor` (which uses `use_symmetry=false` internally) produces incorrect normalization when the source monitor straddles a symmetry plane — the incident coefficient is underestimated by ~2x, inflating all S-parameters
+- This matches gplugins, which also never uses `mp.Mirror` for S-parameter extraction
+- Symmetries are only applied in **preview-only** mode (geometry validation, no FDTD)
+- The `set_symmetry()` API and `SymmetryEntry` model are retained for future non-S-parameter use cases
 
 **2. Stopping modes (1.5-3x speedup)**
 
@@ -265,6 +295,14 @@ output_dir/
 - `SParameterResult.from_directory()` loads preview-only results (no CSV, just debug JSON + diagnostic PNGs)
 - `result.show_diagnostics()` displays diagnostic PNGs inline in Jupyter
 
+**11. Waveguide port extension into PML (accuracy)**
+
+- `DomainConfig.extend_ports` (default 0.0 = auto) extends waveguide ports through `margin_xy + dpml` into PML at `write_config()` time
+- Uses `gf.components.extend_ports()` on the GDS component before writing
+- Original bbox stored in `SimConfig.component_bbox` for correct cell sizing in the runner
+- Prevents spurious reflections from abrupt waveguide termination inside PML
+- On by default — no user action needed for standard photonic simulations
+
 **Implementation constraint:** All configuration happens client-side via Pydantic models; the generated `run_meep.py` reads the JSON config at runtime. gsim has no meep dependency.
 
 ### Removed gsim.fdtd (Tidy3D wrapper)
@@ -291,6 +329,7 @@ output_dir/
 | MEEP's `epsilon_func` / `MaterialGrid` | Very slow startup, designed for topology optimization                                |
 | Keeping gsim.fdtd alongside gsim.meep  | Redundant FDTD modules, fdtd was unmaintained with no tests                          |
 | `run_time_factor / df` for run time    | Non-standard, fragile (div-by-zero), MEEP uses `until_after_sources` everywhere      |
+| `mp.Mirror` symmetry for S-param runs | `add_mode_monitor` uses `use_symmetry=false` internally; `get_eigenmode_coefficients` doesn't apply `S.multiplicity()` correction, so source monitors on the symmetry plane get ~2x underestimated coefficients. gplugins never uses `mp.Mirror` either. See "Symmetry and eigenmode coefficient normalization" below. |
 
 ---
 
@@ -298,6 +337,9 @@ output_dir/
 
 - **Cloud testing:** The full cloud round-trip (upload → run meep → download results) hasn't been tested end-to-end with a real cloud instance.
 - **`_build_geometry_model()` note:** Uses `gf.get_active_pdk().layer_stack` (gdsfactory's LayerStack) instead of `self.stack` (gsim's LayerStack) because `LayeredComponentBase` needs gdsfactory's type for DerivedLayer resolution.
+- **Symmetry for S-parameter speedup:** Currently disabled (see bug fix below). Two possible future approaches:
+  1. **`add_flux` + `eig_parity` path** — MEEP's `add_flux` uses `use_symmetry=true`, so `get_eigenmode_coefficients` applies `S.multiplicity()` correctly. Requires passing the correct `eig_parity` (e.g. `mp.ODD_Z+mp.EVEN_Y` for TE) which depends on polarization and symmetry phase. The MEEP mode decomposition tutorials use this approach for gratings with symmetry. Would need auto-detection of the correct parity from the symmetry config and waveguide polarization.
+  2. **gplugins-style port symmetries** — Instead of MEEP's `mp.Mirror` (which halves the compute domain), exploit device symmetry at a higher level: run fewer source ports and copy S-parameters between symmetric port pairs (e.g. S31=S21 for a Y-branch). This doesn't speed up individual simulations but reduces the number of runs needed for multi-port devices. gplugins implements this via `port_symmetries` dicts.
 
 ## Bug Fixes
 
@@ -386,6 +428,42 @@ For the ebeam_y_1550 Y-branch:
 **Fix:** Removed the `if port.is_source:` guards in `_draw_overlay_xy()`. Now ALL ports (source and monitor) show direction arrows. Source arrows remain red, monitor arrows are blue — the color is already set per-port based on `port.is_source`.
 
 **Files changed:** `common/viz/render2d.py`.
+
+### Symmetry and eigenmode coefficient normalization (CRITICAL — ~2x S-param inflation)
+
+**Problem:** When `mp.Mirror(mp.Y, phase=-1)` was used for a Y-branch simulation, S21/S31 magnitudes were ~1.35 instead of expected ~0.7. Power conservation was ~3.6 instead of ~1.0. The source port (o1, at y=0 on the symmetry plane) had its eigenmode coefficient underestimated by ~2x, inflating all S-parameters that normalize against it. S11 was unaffected since both numerator and denominator are at the same port.
+
+**Symptom:** S11 ≈ 0.10 (correct), S21 = S31 ≈ 1.35 (should be ~0.7), power conservation ≈ 3.6 (should be ~1.0). Edge frequencies blow up to S21 > 2.0.
+
+**Root cause (from MEEP source code and documentation):**
+
+1. `add_mode_monitor` internally calls `add_dft_flux` with `use_symmetry=false` (in MEEP's C++ `src/dft.cpp`). This means the DFT monitor stores fields over the full unsymmetrized domain.
+
+2. In `get_eigenmode_coefficients` (MEEP's C++ `src/mpb.cpp`), the eigenmode coefficient scaling factor `csc` uses `S.multiplicity()` only when `flux.use_symmetry` is `true`:
+   ```cpp
+   double csc = sqrt((flux.use_symmetry ? S.multiplicity() : 1.0) / abs(normfac));
+   ```
+   Since `add_mode_monitor` sets `use_symmetry=false`, the multiplicity correction is **never applied**, regardless of whether `mp.Mirror` symmetries are active in the simulation.
+
+3. When the simulation domain is halved by `mp.Mirror(mp.Y)`, the source port monitor at y=0 straddles the symmetry plane. The overlap integral between the simulated fields (reconstructed from the half-domain) and the eigenmode profile is computed correctly for the full domain, but the power normalization doesn't account for the symmetry-reduced source power. The result is that the incident coefficient at the source port is ~2x too small.
+
+4. Output port monitors (o2 at y=+2.75, o3 at y=-2.75) are entirely within one half of the domain and are not affected. Their coefficients are correct.
+
+5. Since S11 = reflected_at_o1 / incident_at_o1, and both terms are equally affected (same monitor), S11 is correct. But S21 = transmitted_at_o2 / incident_at_o1, and only the denominator is underestimated, so S21 is inflated by ~2x.
+
+**Verification:** Correcting by factor of 2: S21_true = 1.346/2 = 0.673 ≈ 1/√2 (expected for 3dB splitter). True power conservation = 3.63/4 = 0.91 (reasonable with some insertion loss).
+
+**gplugins approach:** gplugins **never uses `mp.Mirror` symmetries** for S-parameter extraction. It avoids the issue entirely. Instead, gplugins implements "port symmetries" at a higher level — copying S-parameter values between symmetric port pairs (e.g. S31=S21 for a symmetric Y-branch) to reduce the number of source ports that need separate simulation runs.
+
+**MEEP documentation notes:**
+- `add_mode_monitor` "works properly with arbitrary symmetries, but may be suboptimal because the Fourier-transformed region does not exploit the symmetry" ([Python User Interface](https://meep.readthedocs.io/en/latest/Python_User_Interface/))
+- The alternative `add_flux` path uses `use_symmetry=true` and requires explicit `eig_parity` — the MEEP mode decomposition tutorials use this for gratings with symmetry, but no tutorial combines it with multi-port S-parameter extraction
+- [Issue #957](https://github.com/NanoComp/meep/issues/957) (open) tracks better symmetry support in `get_eigenmode_coefficients`
+- The [GDSII Import tutorial](https://meep.readthedocs.io/en/latest/Python_Tutorials/GDSII_Import/) (directional coupler S-params) does not use symmetry
+
+**Fix:** The runner now ignores symmetries during S-parameter extraction (only applies them in preview-only mode). `set_symmetry()` logs a warning. Symmetry entries are still serialized to JSON for future use.
+
+**Files changed:** `meep/script.py` (runner template), `meep/sim.py` (`set_symmetry` warning), `nbs/generate_meep_config.py` (removed `set_symmetry` call), `nbs/test-meep.ipynb` (removed symmetry, updated docs). 106 tests pass.
 
 ---
 
@@ -511,7 +589,7 @@ from gsim.meep import MeepSim
 sim = MeepSim()
 sim.set_geometry(component)
 sim.set_stack()
-sim.set_domain(0.5)  # 0.5um margins (default), 1um PML
+sim.set_domain(0.5)  # 0.5um margins (default), 1um PML, auto-extends ports into PML
 sim.set_z_crop()  # crop to margin_z_above/below around core
 sim.set_material("si", refractive_index=3.47)
 sim.set_wavelength(
@@ -520,7 +598,6 @@ sim.set_wavelength(
     run_after_sources=200,       # max time cap
 )
 sim.set_resolution(pixels_per_um=40)
-sim.set_symmetry(y=-1)  # mirror symmetry (2-4x faster for symmetric components)
 sim.set_accuracy(
     simplify_tol=0.01,       # simplify dense GDS polygons (10nm tolerance)
     eps_averaging=True,       # subpixel averaging (disable for quick tests)

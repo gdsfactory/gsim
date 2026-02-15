@@ -56,6 +56,12 @@ class DomainConfig(BaseModel):
         ge=0,
         description="Margin on each side of port waveguide width for mode monitors in um",
     )
+    extend_ports: float = Field(
+        default=0.0,
+        ge=0,
+        description="Length to extend waveguide ports into PML in um. "
+        "0 = auto (margin_xy + dpml).",
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON config."""
@@ -200,6 +206,10 @@ class DiagnosticsConfig(BaseModel):
     save_animation: bool = Field(
         default=False, description="Field animation MP4 (heavy, needs ffmpeg)"
     )
+    animation_interval: float = Field(
+        default=0.5, gt=0,
+        description="MEEP time units between animation frames",
+    )
     preview_only: bool = Field(
         default=False,
         description="Init sim and save geometry diagnostics, skip FDTD run",
@@ -273,6 +283,10 @@ class SimConfig(BaseModel):
 
     gds_filename: str = Field(
         default="layout.gds", description="GDS file with 2D layout"
+    )
+    component_bbox: list[float] | None = Field(
+        default=None,
+        description="Original component bbox [xmin, ymin, xmax, ymax] before port extension.",
     )
     layer_stack: list[dict[str, Any]] = Field(default_factory=list)
     dielectrics: list[dict[str, Any]] = Field(default_factory=list)
