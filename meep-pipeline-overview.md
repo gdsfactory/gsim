@@ -25,11 +25,11 @@ Layer Parsing        Representation       Visualization
 | **1. Layer parsing** | Done   | DerivedLayer support via `LayeredComponentBase` in `common/`                  |
 | **2. 3D geometry**   | Done   | GDS-file approach — `GeometryModel` + `Prism` dataclass, no meep deps         |
 | **3. Visualization** | Done   | `common/viz/` — PyVista, Open3D+Plotly, Three.js, Matplotlib. Port arrows on all ports (source + monitor). |
-| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, resolution, domain, accuracy, verbose_interval, symmetries, component_bbox |
+| **4. Sim config**    | Done   | `SimConfig` JSON with layer_stack, ports, materials, fdtd, source, stopping, resolution, domain, accuracy, verbose_interval, diagnostics, symmetries, component_bbox |
 | **5. Cloud runner**  | Done   | `run_meep.py` reads GDS via gdsfactory, Delaunay triangulation for holes, symmetry + decay stopping, explicit eigenmode kpoint, port_margin for monitors, polygon simplification, configurable subpixel averaging, verbose progress stepping, eigenmode debug logging (`meep_debug.json`), geometry/field diagnostics PNG output, preview-only mode, `component_bbox`-aware cell sizing |
 | **6. Docker**        | Done   | `simulation-engines/meep/` — MPI-enabled pymeep, follows palace conventions   |
 
-Tests: 106 meep-specific passing.
+Tests: 118 meep-specific passing.
 
 **Note:** The `gsim.fdtd` module (Tidy3D wrapper) was removed. MEEP is now the sole FDTD solver. The fdtd module had zero tests and zero usage outside itself. Its mode solver functionality (Waveguide, WaveguideCoupler, sweep functions) was Tidy3D-specific and not portable.
 
@@ -61,10 +61,10 @@ Solver-agnostic modules reusable by meep and palace.
 
 | Module                   | Purpose                                                                                                                                                                                                           |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meep/__init__.py`       | Public API: `MeepSim`, `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SParameterResult`, `SymmetryEntry`                                                      |
-| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`, `set_source_port`). Builds `GeometryModel` + `SimOverlay` for viz.        |
-| `meep/sim.py`            | `MeepSim` — main class. `set_symmetry()`, `set_accuracy()`, `set_diagnostics()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, accuracy, diagnostics, verbose_interval, symmetries. `write_config()` auto-extends waveguide ports into PML via `gf.components.extend_ports()` and stores original bbox in `SimConfig.component_bbox`. `simulate()` calls gcloud. |
-| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig` (with `extend_ports`), `SimConfig` (with `component_bbox`), `PortData`, `LayerStackEntry`, `MaterialData` |
+| `meep/__init__.py`       | Public API: `MeepSim`, `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `DomainConfig`, `ResolutionConfig`, `SimConfig`, `SourceConfig`, `SParameterResult`, `SymmetryEntry`                                                      |
+| `meep/base.py`           | `MeepSimMixin` — fluent API (`set_geometry`, `set_stack`, `set_z_crop`, `set_wavelength`, `set_resolution`, `set_domain`, `set_material`). Builds `GeometryModel` + `SimOverlay` for viz.        |
+| `meep/sim.py`            | `MeepSim` — main class. `set_source()`, `set_stopping()`, `set_symmetry()`, `set_accuracy()`, `set_diagnostics()`, `write_config()` exports `layout.gds` + `sim_config.json` + `run_meep.py`. Serializes layer stack, dielectrics, source, stopping, accuracy, diagnostics, verbose_interval, symmetries. `write_config()` auto-extends waveguide ports into PML via `gf.components.extend_ports()` and stores original bbox in `SimConfig.component_bbox`. `simulate()` calls gcloud. Deprecated: `set_source_port()` → `set_source(port=...)`, stopping kwargs on `set_wavelength()` → `set_stopping()`. |
+| `meep/models/config.py`  | Pydantic models: `AccuracyConfig`, `DiagnosticsConfig`, `FDTDConfig`, `SourceConfig`, `StoppingConfig`, `SymmetryEntry`, `ResolutionConfig`, `DomainConfig` (with `extend_ports`), `SimConfig` (with `component_bbox`, `source`, `stopping`), `PortData`, `LayerStackEntry`, `MaterialData` |
 | `meep/models/results.py` | `SParameterResult` — parses CSV output, complex S-params from mag+phase. Auto-loads `meep_debug.json` into `debug_info` field and diagnostic PNGs into `diagnostic_images`. `from_directory()` for preview-only (no CSV). `show_diagnostics()` for Jupyter display. |
 | `meep/overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` dataclasses, `build_sim_overlay()` — visualization metadata for sim cell, PML regions, port markers, dielectric backgrounds.                                    |
 | `meep/ports.py`          | `extract_port_info()` — port center/direction/normal from gdsfactory ports. `_get_z_center()` uses highest refractive index layer.                                                                                |
@@ -98,7 +98,7 @@ Unchanged. Uses `common/stack/` for layer extraction and `common/geometry.py` fo
 
 ```
 output_dir/
-  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, resolution, domain, accuracy, diagnostics, verbose_interval, symmetries, component_bbox
+  sim_config.json    # layer_stack, dielectrics, ports, materials, fdtd, source, stopping, resolution, domain, accuracy, diagnostics, verbose_interval, symmetries, component_bbox
   layout.gds         # raw GDS file
   run_meep.py        # self-contained cloud runner script
 ```
@@ -228,12 +228,23 @@ output_dir/
 
 **2. Stopping modes (1.5-3x speedup)**
 
-- `StoppingConfig` model embedded in `FDTDConfig` with `mode="fixed"|"decay"|"dft_decay"`
+- `StoppingConfig` is now a top-level field on `MeepSim` (via `sim.set_stopping()`), serialized to `config["stopping"]` in JSON. Decoupled from `FDTDConfig` which now only holds wavelength/frequency settings.
+- `mode="fixed"|"decay"|"dft_decay"`, `max_time` (→ `run_after_sources`), `threshold` (→ `decay_by`)
 - Fixed mode: `sim.run(until_after_sources=N)` (original behavior)
 - Decay mode: `[mp.stop_when_fields_decayed(...), run_after]` list — MEEP's native OR logic stops on whichever fires first (decay or time cap)
 - DFT-decay mode: `mp.stop_when_dft_decayed(tol, minimum_run_time, maximum_run_time)` — monitors convergence of all DFT monitors (best for S-parameter extraction), has built-in min/max time bounds
+- **`dft_min_run_time` default: 100** time units — prevents false convergence on near-zero fields before the pulse has traversed the device. Must exceed `device_length * n_group` (e.g. 15um Y-branch with n_g≈4 needs ≥60 time units). Previous default of 0 caused premature stopping.
 - `resolve_decay_monitor_point()` auto-selects the first non-source port center (decay mode only)
 - `_COMPONENT_MAP` maps string names ("Ez", "Ey", ...) to MEEP field components
+- Runner reads stopping from `config["stopping"]` with fallback to `config["fdtd"]["stopping"]` for old JSON configs
+
+**2b. Source bandwidth decoupled from monitor span**
+
+- `SourceConfig` controls the Gaussian source `fwidth` and source port, serialized to `config["source"]` in JSON
+- `sim.set_source(bandwidth=None, port=None)` — `bandwidth` in wavelength um, `None` = auto
+- Auto fwidth: `max(3 * monitor_df, 0.2 * fcen)` — ensures edge frequencies receive adequate spectral power, matching gplugins' `dfcen=0.2` convention
+- Previously source `fwidth = monitor df`, which starved edge frequencies of spectral power when the monitor bandwidth was narrow, causing |S|>1 blowup at band edges
+- Runner reads `fwidth` from `config["source"]["fwidth"]` with fallback to `config["fdtd"]["df"]` for old configs
 
 **3. Reduced default margins (1.3-2x speedup)**
 
@@ -335,6 +346,7 @@ output_dir/
 
 ## Remaining Work / Known Issues
 
+- **Typed `SimConfig` + JSON schema:** `SimConfig` currently uses `dict[str, Any]` for sub-sections (fdtd, source, stopping, domain, etc.) because `write_config()` calls `.to_dict()` on each typed model and passes plain dicts. Refactor to use typed Pydantic fields directly (e.g. `fdtd: FDTDConfig` instead of `fdtd: dict`), making computed properties (`fcen`, `df`) into real fields. This would let `SimConfig.model_json_schema()` produce a fully typed JSON schema as the single source of truth, and allow storing `sim_config_schema.json` in the repo for runner-side validation.
 - **Cloud testing:** The full cloud round-trip (upload → run meep → download results) hasn't been tested end-to-end with a real cloud instance.
 - **`_build_geometry_model()` note:** Uses `gf.get_active_pdk().layer_stack` (gdsfactory's LayerStack) instead of `self.stack` (gsim's LayerStack) because `LayeredComponentBase` needs gdsfactory's type for DerivedLayer resolution.
 - **Symmetry for S-parameter speedup:** Currently disabled (see bug fix below). Two possible future approaches:
@@ -592,11 +604,9 @@ sim.set_stack()
 sim.set_domain(0.5)  # 0.5um margins (default), 1um PML, auto-extends ports into PML
 sim.set_z_crop()  # crop to margin_z_above/below around core
 sim.set_material("si", refractive_index=3.47)
-sim.set_wavelength(
-    wavelength=1.55, bandwidth=0.1,
-    stop_when_dft_decayed=True,  # DFT convergence stopping (best for S-params)
-    run_after_sources=200,       # max time cap
-)
+sim.set_wavelength(wavelength=1.55, bandwidth=0.1)
+sim.set_source()                         # auto fwidth (~3x monitor bw), auto port
+sim.set_stopping(mode="dft_decay", max_time=200, threshold=1e-3)  # best for S-params
 sim.set_resolution(pixels_per_um=40)
 sim.set_accuracy(
     simplify_tol=0.01,       # simplify dense GDS polygons (10nm tolerance)

@@ -29,14 +29,14 @@ sim.set_material("si", refractive_index=3.47)
 sim.set_material("SiO2", refractive_index=1.44)
 sim.set_wavelength(wavelength=1.55, bandwidth=0.01, num_freqs=11)
 sim.set_source()  # auto: fwidth ~3x monitor bw
-sim.set_stopping(mode="dft_decay", max_time=200, threshold=1e-3)
+sim.set_stopping(mode="dft_decay", max_time=200, threshold=1e-3, dft_min_run_time=100)
 sim.set_resolution(pixels_per_um=20)
 sim.set_accuracy(
     simplify_tol=0.01,
     eps_averaging=True,
     verbose_interval=5.0,
 )
-sim.set_diagnostics(save_geometry=True, save_fields=True)
+sim.set_diagnostics(save_geometry=True, save_fields=True, save_animation=True)
 sim.set_output_dir(Path(__file__).parent / "meep-sim-test")
 
 # 3. Validate

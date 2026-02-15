@@ -89,7 +89,11 @@ class StoppingConfig(BaseModel):
     decay_by: float = Field(default=1e-3, gt=0, lt=1)
     decay_monitor_port: str | None = Field(default=None)
     dft_min_run_time: float = Field(
-        default=0, ge=0, description="Minimum run time after sources for dft_decay mode"
+        default=100,
+        ge=0,
+        description="Minimum run time after sources for dft_decay mode. "
+        "Must exceed pulse transit time through the device to avoid "
+        "false convergence on near-zero fields at output ports.",
     )
 
 

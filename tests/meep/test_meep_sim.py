@@ -929,6 +929,11 @@ class TestSetStopping:
         assert sim.stopping_config.decay_by == 1e-3
         assert sim.stopping_config.dft_min_run_time == 10.0
 
+    def test_dft_decay_default_min_run_time(self):
+        sim = MeepSim()
+        sim.set_stopping(mode="dft_decay")
+        assert sim.stopping_config.dft_min_run_time == 100
+
     def test_decay_monitor_port(self):
         sim = MeepSim()
         sim.set_stopping(mode="decay", decay_monitor_port="o2")
@@ -984,32 +989,13 @@ class TestSetSymmetry:
 
 
 class TestSetWavelengthDecay:
-    """Test MeepSim.set_wavelength() with deprecated stopping kwargs."""
+    """Test MeepSim.set_wavelength() does not touch stopping config."""
 
     def test_fixed_default(self):
         sim = MeepSim()
         sim.set_wavelength()
-        # No stopping kwargs → no deprecation warning, stopping_config unchanged
+        # set_wavelength should not change stopping_config
         assert sim.stopping_config.mode == "fixed"
-
-    def test_decay_mode_deprecated(self):
-        sim = MeepSim()
-        with pytest.warns(DeprecationWarning, match="set_stopping"):
-            sim.set_wavelength(stop_when_decayed=True, decay_threshold=1e-4)
-        assert sim.stopping_config.mode == "decay"
-        assert sim.stopping_config.decay_by == 1e-4
-
-    def test_decay_monitor_port_deprecated(self):
-        sim = MeepSim()
-        with pytest.warns(DeprecationWarning, match="set_stopping"):
-            sim.set_wavelength(stop_when_decayed=True, decay_monitor_port="o2")
-        assert sim.stopping_config.decay_monitor_port == "o2"
-
-    def test_backward_compat_run_after_sources(self):
-        sim = MeepSim()
-        with pytest.warns(DeprecationWarning, match="set_stopping"):
-            sim.set_wavelength(run_after_sources=200.0)
-        assert sim.stopping_config.run_after_sources == 200.0
 
     def test_num_freqs_default(self):
         sim = MeepSim()

@@ -981,7 +981,7 @@ def main():
 
     if stop_mode == "dft_decay":
         decay_by = stopping.get("decay_by", 1e-3)
-        min_time = stopping.get("dft_min_run_time", 0)
+        min_time = stopping.get("dft_min_run_time", 100)
         print(f"Running simulation (dft_decay mode: tol={decay_by}, "
               f"min={min_time:.1f}, max={run_after:.1f})...")
         sim.run(

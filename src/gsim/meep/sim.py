@@ -92,15 +92,6 @@ class MeepSim(MeepSimMixin, BaseModel):
         wavelength: float = 1.55,
         bandwidth: float = 0.1,
         num_freqs: int = 11,
-        # Deprecated stopping kwargs — forwarded to set_stopping()
-        run_after_sources: float | None = None,
-        stop_when_decayed: bool = False,
-        stop_when_dft_decayed: bool = False,
-        decay_threshold: float = 1e-3,
-        decay_dt: float = 50.0,
-        decay_component: str = "Ey",
-        decay_monitor_port: str | None = None,
-        dft_min_run_time: float = 0,
     ) -> None:
         """Configure wavelength range for simulation.
 
@@ -108,50 +99,12 @@ class MeepSim(MeepSimMixin, BaseModel):
             wavelength: Center wavelength in um
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
-            run_after_sources: *Deprecated* — use ``set_stopping(max_time=...)``.
-            stop_when_decayed: *Deprecated* — use ``set_stopping(mode="decay")``.
-            stop_when_dft_decayed: *Deprecated* — use ``set_stopping(mode="dft_decay")``.
-            decay_threshold: *Deprecated* — use ``set_stopping(threshold=...)``.
-            decay_dt: *Deprecated* — use ``set_stopping(decay_dt=...)``.
-            decay_component: *Deprecated* — use ``set_stopping(decay_component=...)``.
-            decay_monitor_port: *Deprecated* — use ``set_stopping(decay_monitor_port=...)``.
-            dft_min_run_time: *Deprecated* — use ``set_stopping(dft_min_run_time=...)``.
         """
         self.fdtd_config = FDTDConfig(
             wavelength=wavelength,
             bandwidth=bandwidth,
             num_freqs=num_freqs,
         )
-
-        # Forward deprecated stopping kwargs to set_stopping()
-        has_stopping_kwargs = (
-            stop_when_decayed
-            or stop_when_dft_decayed
-            or run_after_sources is not None
-        )
-        if has_stopping_kwargs:
-            warnings.warn(
-                "Passing stopping parameters to set_wavelength() is deprecated. "
-                "Use set_stopping() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if stop_when_dft_decayed:
-                mode = "dft_decay"
-            elif stop_when_decayed:
-                mode = "decay"
-            else:
-                mode = "fixed"
-
-            self.set_stopping(
-                mode=mode,
-                max_time=run_after_sources if run_after_sources is not None else 100.0,
-                threshold=decay_threshold,
-                decay_dt=decay_dt,
-                decay_component=decay_component,
-                decay_monitor_port=decay_monitor_port,
-                dft_min_run_time=dft_min_run_time,
-            )
 
     # -------------------------------------------------------------------------
     # Source config
@@ -185,7 +138,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         decay_dt: float = 50.0,
         decay_component: str = "Ey",
         decay_monitor_port: str | None = None,
-        dft_min_run_time: float = 0,
+        dft_min_run_time: float = 100,
     ) -> None:
         """Configure when the MEEP simulation stops.
 
