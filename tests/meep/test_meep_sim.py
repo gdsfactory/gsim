@@ -50,9 +50,9 @@ class TestFDTDConfig:
         expected_df = 1.0 / wl_min - 1.0 / wl_max
         assert abs(cfg.df - expected_df) < 1e-10
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         cfg = FDTDConfig()
-        d = cfg.to_dict()
+        d = cfg.model_dump()
         assert "wavelength" in d
         assert "fcen" in d
         assert "df" in d
@@ -81,9 +81,9 @@ class TestResolutionConfig:
         cfg = ResolutionConfig(pixels_per_um=48)
         assert cfg.pixels_per_um == 48
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         cfg = ResolutionConfig()
-        d = cfg.to_dict()
+        d = cfg.model_dump()
         assert d["pixels_per_um"] == 32
 
 
@@ -92,7 +92,8 @@ class TestSimConfig:
 
     def test_to_json(self, tmp_path):
         fdtd_cfg = FDTDConfig()
-        source_cfg = SourceConfig()
+        fwidth = SourceConfig().compute_fwidth(fdtd_cfg.fcen, fdtd_cfg.df)
+        source_cfg = SourceConfig(fwidth=fwidth)
         stopping_cfg = StoppingConfig(mode="dft_decay", run_after_sources=200.0)
         cfg = SimConfig(
             gds_filename="layout.gds",
@@ -118,10 +119,10 @@ class TestSimConfig:
                 }
             ],
             materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},
-            fdtd=fdtd_cfg.to_dict(),
-            source=source_cfg.to_dict(fdtd_cfg.fcen, fdtd_cfg.df),
-            stopping=stopping_cfg.model_dump(),
-            resolution=ResolutionConfig().to_dict(),
+            fdtd=fdtd_cfg,
+            source=source_cfg,
+            stopping=stopping_cfg,
+            resolution=ResolutionConfig(),
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
@@ -158,7 +159,7 @@ class TestPortData:
         assert p.name == "o1"
         assert p.is_source
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         p = PortData(
             name="o1",
             center=[0.0, 0.0, 0.11],
@@ -167,7 +168,7 @@ class TestPortData:
             normal_axis=0,
             direction="+",
         )
-        d = p.to_dict()
+        d = p.model_dump()
         assert d["name"] == "o1"
         assert d["direction"] == "+"
 
@@ -198,7 +199,7 @@ class TestLayerStackEntry:
         )
         assert entry.sidewall_angle == 10.0
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         entry = LayerStackEntry(
             layer_name="clad",
             gds_layer=[2, 0],
@@ -206,7 +207,7 @@ class TestLayerStackEntry:
             zmax=0.5,
             material="SiO2",
         )
-        d = entry.to_dict()
+        d = entry.model_dump()
         assert d["layer_name"] == "clad"
         assert d["gds_layer"] == [2, 0]
 
@@ -296,12 +297,6 @@ class TestMeepSimMixin:
         sim = MeepSim()
         sim.set_resolution(preset="fine")
         assert sim.resolution_config.pixels_per_um == 64
-
-    def test_set_source_port(self):
-        sim = MeepSim()
-        with pytest.warns(DeprecationWarning, match="set_source_port"):
-            sim.set_source_port("o2")
-        assert sim.source_config.port == "o2"
 
     def test_write_config_requires_output_dir(self):
         sim = MeepSim()
@@ -632,12 +627,12 @@ class TestDomainConfig:
 
     def test_extend_ports_serialization(self):
         cfg = DomainConfig(extend_ports=3.0)
-        d = cfg.to_dict()
+        d = cfg.model_dump()
         assert d["extend_ports"] == 3.0
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         cfg = DomainConfig(dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5)
-        d = cfg.to_dict()
+        d = cfg.model_dump()
         assert d["dpml"] == 2.0
         assert d["margin_xy"] == 0.5
         assert d["margin_z_above"] == 1.0
@@ -727,9 +722,9 @@ class TestSetDomain:
             layer_stack=[],
             ports=[],
             materials={},
-            fdtd=FDTDConfig().to_dict(),
-            resolution=ResolutionConfig().to_dict(),
-            domain=DomainConfig(dpml=0.5, margin_xy=0.2).to_dict(),
+            fdtd=FDTDConfig(),
+            resolution=ResolutionConfig(),
+            domain=DomainConfig(dpml=0.5, margin_xy=0.2),
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
@@ -758,9 +753,9 @@ class TestSymmetryEntry:
         s = SymmetryEntry(direction="Y")
         assert s.phase == 1
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         s = SymmetryEntry(direction="Z", phase=-1)
-        d = s.to_dict()
+        d = s.model_dump()
         assert d == {"direction": "Z", "phase": -1}
 
     def test_invalid_direction(self):
@@ -809,9 +804,9 @@ class TestStoppingConfig:
 class TestFDTDConfigStopping:
     """Test that FDTDConfig no longer embeds StoppingConfig."""
 
-    def test_to_dict_excludes_stopping(self):
+    def test_model_dump_excludes_stopping(self):
         cfg = FDTDConfig()
-        d = cfg.to_dict()
+        d = cfg.model_dump()
         assert "stopping" not in d
         assert "run_after_sources" not in d
 
@@ -850,10 +845,12 @@ class TestSourceConfig:
         expected = 1.0 / wl_min - 1.0 / wl_max
         assert abs(fwidth - expected) < 1e-10
 
-    def test_to_dict(self):
+    def test_model_dump(self):
         cfg = SourceConfig(port="o1")
         fcen = 1.0 / 1.55
-        d = cfg.to_dict(fcen, 0.042)
+        fwidth = cfg.compute_fwidth(fcen, 0.042)
+        cfg_with_fwidth = cfg.model_copy(update={"fwidth": fwidth})
+        d = cfg_with_fwidth.model_dump()
         assert "fwidth" in d
         assert "port" in d
         assert d["port"] == "o1"

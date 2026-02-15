@@ -152,16 +152,14 @@ class MeepSimMixin:
             >>> sim.set_z_crop()  # keeps margin_z_above/below of material around core
         """
         from gsim.common.stack.extractor import Layer, LayerStack
-        from gsim.common.stack.materials import get_material_properties
         from gsim.meep.models import DomainConfig
+        from gsim.meep.ports import _find_highest_n_layer
 
+        self._ensure_stack()
         if self.stack is None:
-            if self._stack_kwargs:
-                self._resolve_stack()
-            else:
-                raise ValueError(
-                    "No stack configured. Call set_stack() before set_z_crop()."
-                )
+            raise ValueError(
+                "No stack configured. Call set_stack() before set_z_crop()."
+            )
 
         assert self.stack is not None  # for type checker
 
@@ -175,17 +173,7 @@ class MeepSimMixin:
                 )
             ref = self.stack.layers[reference_layer]
         else:
-            # Auto-detect: highest refractive index (same logic as port z-center)
-            best_n = 0.0
-            for layer in self.stack.layers.values():
-                props = get_material_properties(layer.material)
-                if (
-                    props is not None
-                    and props.refractive_index is not None
-                    and props.refractive_index > best_n
-                ):
-                    best_n = props.refractive_index
-                    ref = layer
+            ref, best_n = _find_highest_n_layer(self.stack)
 
             if ref is None or best_n <= 1.5:
                 raise ValueError(
@@ -273,6 +261,11 @@ class MeepSimMixin:
     # Internal helpers
     # -------------------------------------------------------------------------
 
+    def _ensure_stack(self) -> None:
+        """Lazily resolve the layer stack if not yet built."""
+        if self.stack is None and self._stack_kwargs:
+            self._resolve_stack()
+
     def _resolve_stack(self) -> LayerStack:
         """Resolve the layer stack from PDK or YAML.
 
@@ -302,9 +295,7 @@ class MeepSimMixin:
         """
         from gsim.common.stack import print_stack_table
 
-        if self.stack is None:
-            self._resolve_stack()
-
+        self._ensure_stack()
         if self.stack is not None:
             print_stack_table(self.stack)
 
@@ -316,9 +307,7 @@ class MeepSimMixin:
         """
         from gsim.common.stack import plot_stack
 
-        if self.stack is None:
-            self._resolve_stack()
-
+        self._ensure_stack()
         if self.stack is not None:
             plot_stack(self.stack)
 
@@ -451,9 +440,7 @@ class MeepSimMixin:
         if self.geometry is None:
             return None
 
-        if self.stack is None and self._stack_kwargs:
-            self._resolve_stack()
-
+        self._ensure_stack()
         if self.stack is None:
             return None
 

@@ -241,7 +241,7 @@ def resolve_decay_monitor_point(config):
     otherwise picks the first non-source port.  Falls back to
     the first port if all are sources.
     """
-    stopping = config.get("stopping", config.get("fdtd", {}).get("stopping", {}))
+    stopping = config.get("stopping", {})
     target_name = stopping.get("decay_monitor_port")
     ports = config.get("ports", [])
 
@@ -342,8 +342,7 @@ def build_sources(config):
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
-    # Source fwidth: prefer top-level source.fwidth, fallback to fdtd.df (old format)
-    fwidth = config.get("source", {}).get("fwidth", df)
+    fwidth = config["source"]["fwidth"]
     z_span = get_port_z_span(config)
     port_margin = config.get("domain", {}).get("port_margin", 0.5)
 
@@ -552,7 +551,9 @@ def extract_s_params(config, sim, monitors):
 
 
 def save_results(config, s_params, output_path="s_parameters.csv"):
-    """Save S-parameters to CSV file."""
+    """Save S-parameters to CSV file.  Only rank 0 writes."""
+    if not mp.am_master():
+        return
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
@@ -582,11 +583,13 @@ def save_results(config, s_params, output_path="s_parameters.csv"):
 
 def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
                    output_path="meep_debug.json"):
-    """Save eigenmode diagnostics as JSON for post-run analysis."""
+    """Save eigenmode diagnostics as JSON for post-run analysis.  Only rank 0 writes."""
+    if not mp.am_master():
+        return
     fdtd = config["fdtd"]
     domain = config.get("domain", {})
     resolution = config.get("resolution", {}).get("pixels_per_um", 0)
-    stopping = config.get("stopping", fdtd.get("stopping", {}))
+    stopping = config.get("stopping", {})
 
     meep_time = 0.0
     timesteps = 0
@@ -938,8 +941,8 @@ def main():
     print("Building monitors...")
     monitors = build_monitors(config, sim)
 
-    stopping = config.get("stopping", fdtd.get("stopping", {}))
-    run_after = stopping.get("run_after_sources", fdtd.get("run_after_sources", 100))
+    stopping = config.get("stopping", {})
+    run_after = stopping.get("run_after_sources", 100)
 
     # Build verbose step functions
     step_funcs = []

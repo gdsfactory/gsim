@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class SymmetryEntry(BaseModel):
@@ -20,9 +20,6 @@ class SymmetryEntry(BaseModel):
 
     direction: Literal["X", "Y", "Z"]
     phase: Literal[1, -1] = Field(default=1)
-
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
 
 
 class DomainConfig(BaseModel):
@@ -62,10 +59,6 @@ class DomainConfig(BaseModel):
         description="Length to extend waveguide ports into PML in um. "
         "0 = auto (margin_xy + dpml).",
     )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON config."""
-        return self.model_dump()
 
 
 class StoppingConfig(BaseModel):
@@ -117,6 +110,12 @@ class SourceConfig(BaseModel):
         default=None,
         description="Source port name. None = auto-select first port.",
     )
+    fwidth: float = Field(
+        default=0.0,
+        ge=0,
+        description="Computed source fwidth in frequency units. "
+        "Set automatically by write_config(); 0 = not yet computed.",
+    )
 
     def compute_fwidth(self, fcen: float, monitor_df: float) -> float:
         """Compute Gaussian source fwidth in frequency units.
@@ -139,21 +138,6 @@ class SourceConfig(BaseModel):
             return 1.0 / wl_min - 1.0 / wl_max
         return max(3 * monitor_df, 0.2 * fcen)
 
-    def to_dict(self, fcen: float, monitor_df: float) -> dict[str, Any]:
-        """Serialize to dict for JSON config.
-
-        Args:
-            fcen: Center frequency (1/um).
-            monitor_df: Monitor frequency span (1/um).
-
-        Returns:
-            Dict with ``fwidth`` and ``port`` keys.
-        """
-        return {
-            "fwidth": self.compute_fwidth(fcen, monitor_df),
-            "port": self.port,
-        }
-
 
 class FDTDConfig(BaseModel):
     """Wavelength and frequency settings for MEEP FDTD simulation.
@@ -170,11 +154,13 @@ class FDTDConfig(BaseModel):
     )
     num_freqs: int = Field(default=11, ge=1, description="Number of frequency points")
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def fcen(self) -> float:
         """Center frequency in MEEP units (1/um, since c=1)."""
         return 1.0 / self.wavelength
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def df(self) -> float:
         """Frequency width in MEEP units."""
@@ -183,16 +169,6 @@ class FDTDConfig(BaseModel):
         f_max = 1.0 / wl_min
         f_min = 1.0 / wl_max
         return f_max - f_min
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON config."""
-        return {
-            "wavelength": self.wavelength,
-            "bandwidth": self.bandwidth,
-            "num_freqs": self.num_freqs,
-            "fcen": self.fcen,
-            "df": self.df,
-        }
 
 
 class ResolutionConfig(BaseModel):
@@ -219,10 +195,6 @@ class ResolutionConfig(BaseModel):
         """Fine resolution (64 pixels/um) for production runs."""
         return cls(pixels_per_um=64)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON config."""
-        return {"pixels_per_um": self.pixels_per_um}
-
 
 class AccuracyConfig(BaseModel):
     """Controls MEEP subpixel averaging and polygon simplification.
@@ -247,10 +219,6 @@ class AccuracyConfig(BaseModel):
         default=0.0, ge=0, description="Shapely simplification tolerance in um (0=off)"
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON config."""
-        return self.model_dump()
-
 
 class DiagnosticsConfig(BaseModel):
     """Controls diagnostic outputs from the MEEP runner."""
@@ -274,9 +242,6 @@ class DiagnosticsConfig(BaseModel):
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
-
 
 class PortData(BaseModel):
     """Serializable port data for the config JSON."""
@@ -290,10 +255,6 @@ class PortData(BaseModel):
     normal_axis: int = Field(ge=0, le=1, description="0=x, 1=y")
     direction: Literal["+", "-"] = Field(description="Direction along normal axis")
     is_source: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return self.model_dump()
 
 
 class LayerStackEntry(BaseModel):
@@ -312,10 +273,6 @@ class LayerStackEntry(BaseModel):
     material: str
     sidewall_angle: float = Field(default=0.0, description="Sidewall angle in degrees")
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return self.model_dump()
-
 
 class MaterialData(BaseModel):
     """Optical material data for config JSON."""
@@ -324,10 +281,6 @@ class MaterialData(BaseModel):
 
     refractive_index: float = Field(gt=0)
     extinction_coeff: float = Field(default=0.0, ge=0)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return self.model_dump()
 
 
 class SimConfig(BaseModel):
@@ -347,21 +300,21 @@ class SimConfig(BaseModel):
         default=None,
         description="Original component bbox [xmin, ymin, xmax, ymax] before port extension.",
     )
-    layer_stack: list[dict[str, Any]] = Field(default_factory=list)
+    layer_stack: list[LayerStackEntry] = Field(default_factory=list)
     dielectrics: list[dict[str, Any]] = Field(default_factory=list)
-    ports: list[dict[str, Any]] = Field(default_factory=list)
-    materials: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    fdtd: dict[str, Any] = Field(default_factory=dict)
-    source: dict[str, Any] = Field(default_factory=dict)
-    stopping: dict[str, Any] = Field(default_factory=dict)
-    resolution: dict[str, Any] = Field(default_factory=dict)
-    domain: dict[str, Any] = Field(default_factory=dict)
-    accuracy: dict[str, Any] = Field(default_factory=dict)
+    ports: list[PortData] = Field(default_factory=list)
+    materials: dict[str, MaterialData] = Field(default_factory=dict)
+    fdtd: FDTDConfig = Field(default_factory=FDTDConfig)
+    source: SourceConfig = Field(default_factory=SourceConfig)
+    stopping: StoppingConfig = Field(default_factory=StoppingConfig)
+    resolution: ResolutionConfig = Field(default_factory=ResolutionConfig)
+    domain: DomainConfig = Field(default_factory=DomainConfig)
+    accuracy: AccuracyConfig = Field(default_factory=AccuracyConfig)
     verbose_interval: float = Field(
         default=0, ge=0, description="MEEP time units between progress prints (0=off)"
     )
-    diagnostics: dict[str, Any] = Field(default_factory=dict)
-    symmetries: list[dict[str, Any]] = Field(default_factory=list)
+    diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
+    symmetries: list[SymmetryEntry] = Field(default_factory=list)
     split_chunks_evenly: bool = Field(default=False)
 
     def to_json(self, path: str | Path) -> Path:

@@ -7,7 +7,6 @@ No local MEEP dependency — MEEP runs only on the cloud.
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -319,29 +318,6 @@ class MeepSim(MeepSimMixin, BaseModel):
         )
 
     # -------------------------------------------------------------------------
-    # Source port (deprecated)
-    # -------------------------------------------------------------------------
-
-    def set_source_port(self, name: str) -> None:
-        """Set which port is the excitation source.
-
-        .. deprecated::
-            Use ``set_source(port=name)`` instead.
-
-        Args:
-            name: Port name (must match a gdsfactory component port)
-        """
-        warnings.warn(
-            "set_source_port() is deprecated. Use set_source(port=name) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.source_config = SourceConfig(
-            bandwidth=self.source_config.bandwidth,
-            port=name,
-        )
-
-    # -------------------------------------------------------------------------
     # Symmetry
     # -------------------------------------------------------------------------
 
@@ -459,9 +435,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         if not validation.valid:
             raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
-        if self.stack is None:
-            self._resolve_stack()
-
+        self._ensure_stack()
         if self.stack is None:
             raise ValueError("Stack resolution failed.")
         if self.geometry is None:
@@ -491,19 +465,21 @@ class MeepSim(MeepSimMixin, BaseModel):
         gds_path = self._output_dir / "layout.gds"
         component.write_gds(gds_path)
 
+        from gsim.meep.models.config import LayerStackEntry
+
         # 2. Build layer stack entries from our Layer objects
         layer_stack_entries = []
         used_materials: set[str] = set()
         for layer_name, layer in self.stack.layers.items():
             layer_stack_entries.append(
-                {
-                    "layer_name": layer_name,
-                    "gds_layer": list(layer.gds_layer),
-                    "zmin": layer.zmin,
-                    "zmax": layer.zmax,
-                    "material": layer.material,
-                    "sidewall_angle": layer.sidewall_angle,
-                }
+                LayerStackEntry(
+                    layer_name=layer_name,
+                    gds_layer=list(layer.gds_layer),
+                    zmin=layer.zmin,
+                    zmax=layer.zmax,
+                    material=layer.material,
+                    sidewall_angle=layer.sidewall_angle,
+                )
             )
             used_materials.add(layer.material)
 
@@ -529,25 +505,27 @@ class MeepSim(MeepSimMixin, BaseModel):
         material_data = resolve_materials(used_materials, overrides=self.materials)
 
         # 5. Build SimConfig
-        fdtd_dict = self.fdtd_config.to_dict()
+        fwidth = self.source_config.compute_fwidth(
+            self.fdtd_config.fcen, self.fdtd_config.df
+        )
+        source_for_config = self.source_config.model_copy(update={"fwidth": fwidth})
+
         sim_config = SimConfig(
             gds_filename="layout.gds",
             component_bbox=original_bbox,
             layer_stack=layer_stack_entries,
             dielectrics=dielectric_entries,
-            ports=[p.to_dict() for p in port_infos],
-            materials={name: mat.to_dict() for name, mat in material_data.items()},
-            fdtd=fdtd_dict,
-            source=self.source_config.to_dict(
-                self.fdtd_config.fcen, self.fdtd_config.df
-            ),
-            stopping=self.stopping_config.model_dump(),
-            resolution=self.resolution_config.to_dict(),
-            domain=self.domain_config.to_dict(),
-            accuracy=self.accuracy_config.to_dict(),
-            diagnostics=self.diagnostics_config.to_dict(),
+            ports=port_infos,
+            materials=material_data,
+            fdtd=self.fdtd_config,
+            source=source_for_config,
+            stopping=self.stopping_config,
+            resolution=self.resolution_config,
+            domain=self.domain_config,
+            accuracy=self.accuracy_config,
+            diagnostics=self.diagnostics_config,
             verbose_interval=self.verbose_interval,
-            symmetries=[s.to_dict() for s in self.symmetries],
+            symmetries=self.symmetries,
             split_chunks_evenly=self.split_chunks_evenly,
         )
 

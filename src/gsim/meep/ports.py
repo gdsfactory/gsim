@@ -6,7 +6,7 @@ serializable format for the MEEP config JSON.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from gsim.meep.models.config import PortData
 
@@ -83,6 +83,33 @@ def extract_port_info(
     return ports
 
 
+def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
+    """Find the layer with the highest refractive index.
+
+    Args:
+        layer_stack: LayerStack from gsim.common
+
+    Returns:
+        (best_layer, best_n) -- (None, 0.0) if no optical data.
+    """
+    from gsim.common.stack.materials import get_material_properties
+
+    best_layer = None
+    best_n = 0.0
+
+    for layer in layer_stack.layers.values():
+        props = get_material_properties(layer.material)
+        if (
+            props is not None
+            and props.refractive_index is not None
+            and props.refractive_index > best_n
+        ):
+            best_n = props.refractive_index
+            best_layer = layer
+
+    return best_layer, best_n
+
+
 def _get_z_center(layer_stack: LayerStack) -> float:
     """Get z-center for ports from the layer stack.
 
@@ -96,21 +123,7 @@ def _get_z_center(layer_stack: LayerStack) -> float:
     Returns:
         z-center coordinate in um
     """
-    from gsim.common.stack.materials import get_material_properties
-
-    # Find layer with highest refractive index (waveguide core)
-    best_layer = None
-    best_n = 0.0
-
-    for layer in layer_stack.layers.values():
-        props = get_material_properties(layer.material)
-        if (
-            props is not None
-            and props.refractive_index is not None
-            and props.refractive_index > best_n
-        ):
-            best_n = props.refractive_index
-            best_layer = layer
+    best_layer, best_n = _find_highest_n_layer(layer_stack)
 
     if best_layer is not None and best_n > 1.5:
         return (best_layer.zmin + best_layer.zmax) / 2.0
