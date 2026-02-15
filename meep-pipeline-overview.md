@@ -513,7 +513,8 @@ meep/
 - `pymeep=*=mpi_mpich_*`, `nlopt` (conda-forge) — MPI-enabled MEEP
 
 **Entrypoint conventions** (matches palace):
-- `MEEP_NP` env var controls MPI processes (default 8)
+- `MEEP_NP` env var overrides MPI process count; otherwise auto-read from `sim_config.json` field `meep_np` (computed by `write_config()` from problem size), fallback 8
+- Entrypoint clamps NP to available physical cores (hyperthreads excluded — FDTD is memory-bandwidth-bound)
 - `OMPI_MCA` oversubscribe flags for containerized environments
 - Downloads input from `INPUT_DOWNLOAD_PRESIGNED_URL` (clears `/app/src/*` first)
 - `cd /app/src` for relative path resolution
@@ -521,6 +522,25 @@ meep/
 - Runs via `mpirun -np $NP python run_meep.py`
 - Collects outputs (csv/h5/pkl/png) to `/app/data/`
 - Uploads via `OUTPUT_UPLOAD_PRESIGNED_URL`
+
+### EC2 Instance Selection for MEEP FDTD
+
+MEEP's Yee-grid FDTD is **memory-bandwidth-bound**: each timestep reads and writes every voxel with only a few FLOP per voxel. Hyperthreading provides no benefit (threads share the same memory path), and more memory channels per socket directly translates to faster timesteps.
+
+| Instance | CPU | Phys Cores | Mem BW (approx) | $/hr (on-demand) | Notes |
+|---|---|---|---|---|---|
+| c6i.12xlarge | Intel Ice Lake | 24 | ~200 GB/s | ~$2.04 | Current default |
+| c7a.16xlarge | AMD EPYC Genoa | 32 | ~460 GB/s | ~$2.46 | Good mid-size, DDR5 12-channel |
+| c7i.16xlarge | Intel Sapphire Rapids | 32 | ~300 GB/s | ~$2.72 | DDR5 but fewer channels than AMD |
+| hpc6a.48xlarge | AMD EPYC Milan | 96 (no HT) | ~400 GB/s | ~$2.88 | Built for MPI, EFA networking |
+| hpc7a.96xlarge | AMD EPYC Genoa | 192 (no HT) | ~460 GB/s | ~$3.84 | Highest BW, 12 mem channels, EFA |
+
+**Recommendations:**
+- For typical integrated photonics problems (Y-branches, MMIs, couplers at res 20-32): **c7a.16xlarge** offers ~2x the memory bandwidth of c6i at similar cost.
+- For large problems (res 64+, >100M voxels) or batch runs: **hpc7a.96xlarge** — no hyperthreading (every core is real), highest memory bandwidth, EFA networking for future multi-node scaling.
+- The `hpc*` instances are only available in specific AZs and require placement groups for EFA, but work fine as single-node MPI without EFA.
+
+**Auto-scaling `meep_np`:** `write_config()` computes `meep_np` from problem size using `total_voxels // 200k` (clamped to `[1, max_cores]` where `max_cores=24` by default). The entrypoint clamps this to the machine's actual physical core count at runtime, so configs generated for a 24-core machine work correctly on smaller or larger instances. To change the `max_cores` ceiling for a bigger machine, pass `max_cores` to `estimate_meep_np()`.
 
 **Runner script requires PDK activation:** `gf.gpdk.PDK.activate()` is called in `load_gds_component()` because `component.get_polygons()` internally calls `get_active_pdk()`. The generic PDK is sufficient since all layer info comes from `sim_config.json`.
 
@@ -563,11 +583,11 @@ gsim receives results → SParameterResult.from_csv() or .from_directory()
 
 ```bash
 # From gsim project root:
-./nbs/test_meep_local.sh          # default 4 MPI procs
-MEEP_NP=8 ./nbs/test_meep_local.sh  # override proc count
+./nbs/test_meep_local.sh              # auto NP from sim_config.json
+MEEP_NP=8 ./nbs/test_meep_local.sh    # explicit override
 ```
 
-The script: regenerates config → copies to Docker context → rebuilds image → runs container → prints CSV results with dB summary and power conservation check.
+The script: regenerates config → copies to Docker context → rebuilds image → runs container → prints CSV results with dB summary and power conservation check. When `MEEP_NP` is not set, the entrypoint reads `meep_np` from `sim_config.json` (auto-computed by `write_config()`).
 
 **Manual:**
 

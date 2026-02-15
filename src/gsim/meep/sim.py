@@ -7,6 +7,7 @@ No local MEEP dependency — MEEP runs only on the cloud.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,36 @@ from gsim.meep.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def estimate_meep_np(
+    cell_x: float,
+    cell_y: float,
+    cell_z: float,
+    pixels_per_um: int,
+    *,
+    max_cores: int = 24,
+    min_voxels_per_proc: int = 200_000,
+) -> int:
+    """Estimate optimal MPI process count from problem size.
+
+    Args:
+        cell_x: Cell size along X in um.
+        cell_y: Cell size along Y in um.
+        cell_z: Cell size along Z in um.
+        pixels_per_um: Grid resolution (pixels per um).
+        max_cores: Maximum physical cores available (default 24 for c6i.12xlarge).
+        min_voxels_per_proc: Minimum voxels per process to keep MPI overhead < ~5%.
+
+    Returns:
+        Recommended number of MPI processes (1 to max_cores).
+    """
+    nx = math.ceil(cell_x * pixels_per_um)
+    ny = math.ceil(cell_y * pixels_per_um)
+    nz = max(1, math.ceil(cell_z * pixels_per_um))
+    total_voxels = nx * ny * nz
+    np_est = total_voxels // min_voxels_per_proc
+    return max(1, min(np_est, max_cores))
 
 
 class MeepSim(MeepSimMixin, BaseModel):
@@ -527,6 +558,31 @@ class MeepSim(MeepSimMixin, BaseModel):
             verbose_interval=self.verbose_interval,
             symmetries=self.symmetries,
             split_chunks_evenly=self.split_chunks_evenly,
+        )
+
+        # 5b. Estimate MPI process count from cell size
+        dpml = self.domain_config.dpml
+        margin_xy = self.domain_config.margin_xy
+        if original_bbox is not None:
+            bbox_w = original_bbox[2] - original_bbox[0]
+            bbox_h = original_bbox[3] - original_bbox[1]
+        else:
+            bbox = component.dbbox()
+            bbox_w = bbox.right - bbox.left
+            bbox_h = bbox.top - bbox.bottom
+        z_min = min(e.zmin for e in layer_stack_entries)
+        z_max = max(e.zmax for e in layer_stack_entries)
+        cell_x = bbox_w + 2 * (margin_xy + dpml)
+        cell_y = bbox_h + 2 * (margin_xy + dpml)
+        cell_z = (z_max - z_min) + 2 * dpml
+
+        meep_np = estimate_meep_np(
+            cell_x, cell_y, cell_z, self.resolution_config.pixels_per_um
+        )
+        sim_config.meep_np = meep_np
+        logger.info(
+            "Auto meep_np=%d (cell %.1f x %.1f x %.1f um, res %d)",
+            meep_np, cell_x, cell_y, cell_z, self.resolution_config.pixels_per_um,
         )
 
         # 6. Write JSON config

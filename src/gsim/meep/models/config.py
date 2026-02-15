@@ -316,6 +316,9 @@ class SimConfig(BaseModel):
     diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     symmetries: list[SymmetryEntry] = Field(default_factory=list)
     split_chunks_evenly: bool = Field(default=False)
+    meep_np: int = Field(
+        default=1, ge=1, description="Recommended MPI process count"
+    )
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.
