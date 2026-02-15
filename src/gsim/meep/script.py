@@ -728,33 +728,92 @@ def save_field_snapshot(sim, config, cell_center):
         print(f"WARNING: field snapshot failed: {e}")
 
 
-def save_animation_frame(sim, xy_plane, frame_counter):
-    """Save a single animation frame PNG during time-stepping.
+def save_animation_field(sim, xy_plane, frame_counter):
+    """Save raw 2D field data during time-stepping (no plotting).
 
-    Only rank 0 writes to disk.  The figure is created once and reused
-    across frames to avoid figure handle leaks.
+    Saves a compressed .npz with the Ey field array and timestamp.
+    Rendering with a globally fixed colorbar happens after sim.run().
 
     Returns:
         Incremented frame counter.
     """
-    if not HAS_MATPLOTLIB:
-        return frame_counter
+    field_data = np.real(sim.get_array(vol=xy_plane, component=mp.Ey))
+    t = sim.meep_time()
+    if mp.am_master():
+        np.savez_compressed(
+            f"meep_field_{frame_counter:04d}.npz",
+            field=field_data,
+            time=t,
+        )
+    return frame_counter + 1
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-    try:
-        sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
-        ax.set_title(f"Ey  t={sim.meep_time():.2f}")
+
+def render_animation_frames(eps_data, extent):
+    """Render saved field .npz files into PNGs with fixed global colorbar.
+
+    Two-pass: first finds the global field maximum across all frames,
+    then renders every frame with the same vmin/vmax so field decay is
+    clearly visible.
+
+    Call only on master rank after sim.run().
+    """
+    import glob
+    import os
+
+    if not HAS_MATPLOTLIB:
+        print("WARNING: matplotlib not available, .npz field files kept but not rendered")
+        return
+
+    npz_files = sorted(glob.glob("meep_field_*.npz"))
+    if not npz_files:
+        print("WARNING: No field data files found to render")
+        return
+
+    # Pass 1 — global max
+    global_max = 0.0
+    for path in npz_files:
+        d = np.load(path)
+        global_max = max(global_max, float(np.max(np.abs(d["field"]))))
+    if global_max == 0:
+        global_max = 1.0
+
+    print(f"Rendering {len(npz_files)} frames (Ey global max = {global_max:.4g}) ...")
+
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    # Pass 2 — render each frame
+    for i, path in enumerate(npz_files):
+        d = np.load(path)
+        field = d["field"]
+        t = float(d["time"])
+
+        fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+        # Epsilon background (grayscale)
+        ax.imshow(
+            eps_data.T, origin="lower", extent=extent,
+            cmap="binary", interpolation="none",
+        )
+        # Field overlay with fixed colorbar
+        im = ax.imshow(
+            field.T, origin="lower", extent=extent,
+            cmap="RdBu", interpolation="spline36", alpha=0.8,
+            vmin=-global_max, vmax=global_max,
+        )
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="4%", pad=0.06)
+        fig.colorbar(im, cax=cax, label="Ey")
+        ax.set_title(f"Ey  t={t:.2f}")
+        ax.set_xlabel("x (um)")
+        ax.set_ylabel("y (um)")
         fig.tight_layout()
-        if mp.am_master():
-            fname = f"meep_frame_{frame_counter:04d}.png"
-            fig.savefig(fname, dpi=100)
-    except Exception as e:
-        if mp.am_master():
-            print(f"WARNING: animation frame {frame_counter} failed: {e}")
-    finally:
+        fig.savefig(f"meep_frame_{i:04d}.png", dpi=150)
         plt.close(fig)
 
-    return frame_counter + 1
+    # Clean up .npz intermediates
+    for path in npz_files:
+        os.remove(path)
+
+    print(f"Rendered {len(npz_files)} frames with fixed colorbar")
 
 
 def compile_animation_mp4(fps=15):
@@ -954,12 +1013,13 @@ def main():
             print(f"  t={sim_obj.meep_time():.2f} | wall={elapsed:.1f}s", flush=True)
         step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
-    # Animation frame capture step function
+    # Animation field capture step function (raw data, no plotting yet)
     diag_animation = diagnostics.get("save_animation", False)
     animation_interval = diagnostics.get("animation_interval", 0.5)
     _frame_counter = [0]  # mutable container for closure
+    _anim_plane = None
 
-    if diag_animation and HAS_MATPLOTLIB:
+    if diag_animation:
         z_min_anim = min(l["zmin"] for l in config["layer_stack"])
         z_max_anim = max(l["zmax"] for l in config["layer_stack"])
         z_core_anim = (z_min_anim + z_max_anim) / 2
@@ -969,14 +1029,12 @@ def main():
         )
 
         def _capture_frame(sim_obj):
-            _frame_counter[0] = save_animation_frame(
+            _frame_counter[0] = save_animation_field(
                 sim_obj, _anim_plane, _frame_counter[0]
             )
 
         step_funcs.append(mp.at_every(animation_interval, _capture_frame))
-        print(f"Animation: capturing frames every {animation_interval} time units")
-    elif diag_animation and not HAS_MATPLOTLIB:
-        print("WARNING: save_animation=True but matplotlib not available, skipping")
+        print(f"Animation: saving field data every {animation_interval} time units")
 
     stop_mode = stopping.get("mode", "fixed")
 
@@ -1016,8 +1074,18 @@ def main():
     if diag_fields:
         save_field_snapshot(sim, config, cell_center)
 
-    if diag_animation and _frame_counter[0] > 0 and mp.am_master():
-        compile_animation_mp4()
+    if diag_animation and _frame_counter[0] > 0 and _anim_plane is not None:
+        # get_array is collective — all ranks must call
+        eps_data = sim.get_array(vol=_anim_plane, component=mp.Dielectric)
+        if mp.am_master():
+            _ctr = _anim_plane.center
+            _sz = _anim_plane.size
+            _extent = [
+                _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
+                _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
+            ]
+            render_animation_frames(eps_data, _extent)
+            compile_animation_mp4()
 
     print("Extracting S-parameters...")
     s_params, debug_data = extract_s_params(config, sim, monitors)
