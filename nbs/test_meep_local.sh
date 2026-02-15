@@ -13,7 +13,7 @@ SIM_ENGINE_DIR="$(cd "$GSIM_DIR/../simulation-engines/meep" && pwd)"
 CONFIG_OUTPUT="$GSIM_DIR/nbs/meep-sim-test"
 RESULTS_DIR="$(mktemp -d)"
 IMAGE_NAME="meep-local"
-MEEP_NP="${MEEP_NP:-8}"
+MEEP_NP="${MEEP_NP:-15}"
 LOG_FILE="$CONFIG_OUTPUT/docker_meep.log"
 
 cleanup() { rm -rf "$RESULTS_DIR"; }
@@ -34,6 +34,7 @@ docker build -t "$IMAGE_NAME" -f "$SIM_ENGINE_DIR/Dockerfile.local" "$SIM_ENGINE
 echo ""
 echo "=== 4. Run simulation (MEEP_NP=$MEEP_NP) ==="
 docker run --rm \
+    --shm-size=1g \
     -e MEEP_NP="$MEEP_NP" \
     -v "$RESULTS_DIR:/app/data" \
     "$IMAGE_NAME" 2>&1 | tee "$LOG_FILE"
