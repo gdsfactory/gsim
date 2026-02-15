@@ -66,7 +66,7 @@ class StoppingConfig(BaseModel):
 
     ``fixed`` mode runs for a fixed time after sources turn off.
     ``decay`` mode monitors field decay at a point and stops when the
-    fields have decayed by ``decay_by``, with ``run_after_sources`` as
+    fields have decayed by ``threshold``, with ``max_time`` as
     a numeric time cap (whichever fires first).
     ``dft_decay`` mode monitors convergence of all DFT monitors and
     stops when they stabilize, with built-in min/max time bounds.
@@ -76,10 +76,10 @@ class StoppingConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     mode: Literal["fixed", "decay", "dft_decay"] = Field(default="fixed")
-    run_after_sources: float = Field(default=100.0, gt=0)
+    max_time: float = Field(default=100.0, gt=0, serialization_alias="run_after_sources")
     decay_dt: float = Field(default=50.0, gt=0)
     decay_component: str = Field(default="Ey")
-    decay_by: float = Field(default=1e-3, gt=0, lt=1)
+    threshold: float = Field(default=1e-3, gt=0, lt=1, serialization_alias="decay_by")
     decay_monitor_port: str | None = Field(default=None)
     dft_min_run_time: float = Field(
         default=100,
@@ -139,7 +139,7 @@ class SourceConfig(BaseModel):
         return max(3 * monitor_df, 0.2 * fcen)
 
 
-class FDTDConfig(BaseModel):
+class WavelengthConfig(BaseModel):
     """Wavelength and frequency settings for MEEP FDTD simulation.
 
     MEEP uses normalized units where c = 1 and lengths are in um.
@@ -208,7 +208,7 @@ class AccuracyConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    eps_averaging: bool = Field(default=True, description="Toggle subpixel averaging")
+    eps_averaging: bool = Field(default=False, description="Toggle subpixel averaging")
     subpixel_maxeval: int = Field(
         default=0, ge=0, description="Cap on integration evaluations (0=unlimited)"
     )
@@ -240,6 +240,10 @@ class DiagnosticsConfig(BaseModel):
     preview_only: bool = Field(
         default=False,
         description="Init sim and save geometry diagnostics, skip FDTD run",
+    )
+    verbose_interval: float = Field(
+        default=0, ge=0,
+        description="MEEP time units between progress prints (0=off)",
     )
 
 
@@ -304,7 +308,9 @@ class SimConfig(BaseModel):
     dielectrics: list[dict[str, Any]] = Field(default_factory=list)
     ports: list[PortData] = Field(default_factory=list)
     materials: dict[str, MaterialData] = Field(default_factory=dict)
-    fdtd: FDTDConfig = Field(default_factory=FDTDConfig)
+    wavelength: WavelengthConfig = Field(
+        default_factory=WavelengthConfig, serialization_alias="fdtd"
+    )
     source: SourceConfig = Field(default_factory=SourceConfig)
     stopping: StoppingConfig = Field(default_factory=StoppingConfig)
     resolution: ResolutionConfig = Field(default_factory=ResolutionConfig)
@@ -331,5 +337,5 @@ class SimConfig(BaseModel):
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.model_dump(), indent=2))
+        path.write_text(json.dumps(self.model_dump(by_alias=True), indent=2))
         return path

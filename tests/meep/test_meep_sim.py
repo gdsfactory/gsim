@@ -10,6 +10,7 @@ import pytest
 
 from gsim.meep import (
     FDTDConfig,
+    WavelengthConfig,
     MeepSim,
     DomainConfig,
     ResolutionConfig,
@@ -30,28 +31,28 @@ from gsim.meep.models.config import (
 # ---------------------------------------------------------------------------
 
 
-class TestFDTDConfig:
-    """Test FDTDConfig frequency/wavelength conversion."""
+class TestWavelengthConfig:
+    """Test WavelengthConfig frequency/wavelength conversion."""
 
     def test_defaults(self):
-        cfg = FDTDConfig()
+        cfg = WavelengthConfig()
         assert cfg.wavelength == 1.55
         assert cfg.bandwidth == 0.1
         assert cfg.num_freqs == 11
 
     def test_fcen(self):
-        cfg = FDTDConfig(wavelength=1.55)
+        cfg = WavelengthConfig(wavelength=1.55)
         assert abs(cfg.fcen - 1.0 / 1.55) < 1e-10
 
     def test_df(self):
-        cfg = FDTDConfig(wavelength=1.55, bandwidth=0.1)
+        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1)
         wl_min = 1.55 - 0.05
         wl_max = 1.55 + 0.05
         expected_df = 1.0 / wl_min - 1.0 / wl_max
         assert abs(cfg.df - expected_df) < 1e-10
 
     def test_model_dump(self):
-        cfg = FDTDConfig()
+        cfg = WavelengthConfig()
         d = cfg.model_dump()
         assert "wavelength" in d
         assert "fcen" in d
@@ -60,6 +61,9 @@ class TestFDTDConfig:
         # stopping and run_after_sources are no longer in fdtd dict
         assert "stopping" not in d
         assert "run_after_sources" not in d
+
+    def test_backward_compat_alias(self):
+        assert FDTDConfig is WavelengthConfig
 
 
 class TestResolutionConfig:
@@ -91,10 +95,10 @@ class TestSimConfig:
     """Test SimConfig serialization."""
 
     def test_to_json(self, tmp_path):
-        fdtd_cfg = FDTDConfig()
-        fwidth = SourceConfig().compute_fwidth(fdtd_cfg.fcen, fdtd_cfg.df)
+        wl_cfg = WavelengthConfig()
+        fwidth = SourceConfig().compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_cfg = SourceConfig(fwidth=fwidth)
-        stopping_cfg = StoppingConfig(mode="dft_decay", run_after_sources=200.0)
+        stopping_cfg = StoppingConfig(mode="dft_decay", max_time=200.0)
         cfg = SimConfig(
             gds_filename="layout.gds",
             layer_stack=[
@@ -119,7 +123,7 @@ class TestSimConfig:
                 }
             ],
             materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},
-            fdtd=fdtd_cfg,
+            wavelength=wl_cfg,
             source=source_cfg,
             stopping=stopping_cfg,
             resolution=ResolutionConfig(),
@@ -135,7 +139,7 @@ class TestSimConfig:
         assert data["gds_filename"] == "layout.gds"
         assert data["materials"]["si"]["refractive_index"] == 3.47
         assert data["layer_stack"][0]["layer_name"] == "core"
-        # New top-level fields
+        # JSON keys use serialization aliases (fdtd, run_after_sources, decay_by)
         assert "source" in data
         assert data["source"]["fwidth"] > data["fdtd"]["df"]
         assert "stopping" in data
@@ -284,9 +288,9 @@ class TestMeepSimMixin:
     def test_set_wavelength(self):
         sim = MeepSim()
         sim.set_wavelength(wavelength=1.31, bandwidth=0.05, num_freqs=11)
-        assert sim.fdtd_config.wavelength == 1.31
-        assert sim.fdtd_config.bandwidth == 0.05
-        assert sim.fdtd_config.num_freqs == 11
+        assert sim.wavelength_config.wavelength == 1.31
+        assert sim.wavelength_config.bandwidth == 0.05
+        assert sim.wavelength_config.num_freqs == 11
 
     def test_set_resolution_direct(self):
         sim = MeepSim()
@@ -580,6 +584,7 @@ class TestImportWithoutMeep:
     def test_import_all_public_api(self):
         from gsim.meep import (
             FDTDConfig,
+            WavelengthConfig,
             MeepSim,
             DomainConfig,
             ResolutionConfig,
@@ -589,6 +594,7 @@ class TestImportWithoutMeep:
         )
 
         assert FDTDConfig is not None
+        assert WavelengthConfig is not None
         assert DomainConfig is not None
         assert MeepSim is not None
         assert ResolutionConfig is not None
@@ -678,7 +684,7 @@ class TestSetDomain:
 
     def test_set_domain_uniform(self):
         sim = MeepSim()
-        sim.set_domain(2.0)
+        sim.set_domain(margin=2.0)
         assert sim.domain_config.margin_xy == 2.0
         assert sim.domain_config.margin_z_above == 2.0
         assert sim.domain_config.margin_z_below == 2.0
@@ -700,7 +706,7 @@ class TestSetDomain:
     def test_set_domain_resolution_order(self):
         """margin_z_above/below > margin_z > margin > default."""
         sim = MeepSim()
-        sim.set_domain(0.5, margin_z=2.0, margin_z_above=3.0)
+        sim.set_domain(margin=0.5, margin_z=2.0, margin_z_above=3.0)
         assert sim.domain_config.margin_xy == 0.5
         assert sim.domain_config.margin_z_above == 3.0  # explicit wins
         assert sim.domain_config.margin_z_below == 2.0  # margin_z wins over margin
@@ -722,7 +728,7 @@ class TestSetDomain:
             layer_stack=[],
             ports=[],
             materials={},
-            fdtd=FDTDConfig(),
+            wavelength=WavelengthConfig(),
             resolution=ResolutionConfig(),
             domain=DomainConfig(dpml=0.5, margin_xy=0.2),
         )
@@ -778,34 +784,34 @@ class TestStoppingConfig:
     def test_default_is_fixed(self):
         cfg = StoppingConfig()
         assert cfg.mode == "fixed"
-        assert cfg.run_after_sources == 100.0
+        assert cfg.max_time == 100.0
         assert cfg.decay_dt == 50.0
         assert cfg.decay_component == "Ey"
-        assert cfg.decay_by == 1e-3
+        assert cfg.threshold == 1e-3
         assert cfg.decay_monitor_port is None
 
     def test_decay_mode(self):
-        cfg = StoppingConfig(mode="decay", decay_by=1e-4, decay_dt=25.0)
+        cfg = StoppingConfig(mode="decay", threshold=1e-4, decay_dt=25.0)
         assert cfg.mode == "decay"
-        assert cfg.decay_by == 1e-4
+        assert cfg.threshold == 1e-4
         assert cfg.decay_dt == 25.0
 
     def test_invalid_mode(self):
         with pytest.raises(Exception):
             StoppingConfig(mode="invalid")
 
-    def test_decay_by_bounds(self):
+    def test_threshold_bounds(self):
         with pytest.raises(Exception):
-            StoppingConfig(decay_by=0)
+            StoppingConfig(threshold=0)
         with pytest.raises(Exception):
-            StoppingConfig(decay_by=1.0)
+            StoppingConfig(threshold=1.0)
 
 
-class TestFDTDConfigStopping:
-    """Test that FDTDConfig no longer embeds StoppingConfig."""
+class TestWavelengthConfigStopping:
+    """Test that WavelengthConfig no longer embeds StoppingConfig."""
 
     def test_model_dump_excludes_stopping(self):
-        cfg = FDTDConfig()
+        cfg = WavelengthConfig()
         d = cfg.model_dump()
         assert "stopping" not in d
         assert "run_after_sources" not in d
@@ -860,9 +866,9 @@ class TestSourceConfig:
         """Auto source fwidth should always be wider than monitor df."""
         cfg = SourceConfig()
         fcen = 1.0 / 1.55
-        fdtd = FDTDConfig(wavelength=1.55, bandwidth=0.1)
-        fwidth = cfg.compute_fwidth(fcen, fdtd.df)
-        assert fwidth > fdtd.df
+        wl = WavelengthConfig(wavelength=1.55, bandwidth=0.1)
+        fwidth = cfg.compute_fwidth(fcen, wl.df)
+        assert fwidth > wl.df
 
 
 # ---------------------------------------------------------------------------
@@ -907,13 +913,13 @@ class TestSetStopping:
         sim = MeepSim()
         sim.set_stopping()
         assert sim.stopping_config.mode == "fixed"
-        assert sim.stopping_config.run_after_sources == 100.0
+        assert sim.stopping_config.max_time == 100.0
 
     def test_decay_mode(self):
         sim = MeepSim()
         sim.set_stopping(mode="decay", threshold=1e-4, decay_dt=25.0)
         assert sim.stopping_config.mode == "decay"
-        assert sim.stopping_config.decay_by == 1e-4
+        assert sim.stopping_config.threshold == 1e-4
         assert sim.stopping_config.decay_dt == 25.0
 
     def test_dft_decay_mode(self):
@@ -922,8 +928,8 @@ class TestSetStopping:
             mode="dft_decay", max_time=200.0, threshold=1e-3, dft_min_run_time=10.0
         )
         assert sim.stopping_config.mode == "dft_decay"
-        assert sim.stopping_config.run_after_sources == 200.0
-        assert sim.stopping_config.decay_by == 1e-3
+        assert sim.stopping_config.max_time == 200.0
+        assert sim.stopping_config.threshold == 1e-3
         assert sim.stopping_config.dft_min_run_time == 10.0
 
     def test_dft_decay_default_min_run_time(self):
@@ -997,7 +1003,7 @@ class TestSetWavelengthDecay:
     def test_num_freqs_default(self):
         sim = MeepSim()
         sim.set_wavelength()
-        assert sim.fdtd_config.num_freqs == 11
+        assert sim.wavelength_config.num_freqs == 11
 
 
 # ---------------------------------------------------------------------------

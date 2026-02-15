@@ -3,7 +3,7 @@
 from gsim.meep.models.config import (
     AccuracyConfig,
     DiagnosticsConfig,
-    FDTDConfig,
+    WavelengthConfig,
     LayerStackEntry,
     DomainConfig,
     MaterialData,
@@ -16,10 +16,14 @@ from gsim.meep.models.config import (
 )
 from gsim.meep.models.results import SParameterResult
 
+# Backward compatibility alias
+FDTDConfig = WavelengthConfig
+
 __all__ = [
     "AccuracyConfig",
     "DiagnosticsConfig",
     "FDTDConfig",
+    "WavelengthConfig",
     "LayerStackEntry",
     "DomainConfig",
     "MaterialData",

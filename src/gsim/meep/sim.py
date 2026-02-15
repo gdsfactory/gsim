@@ -19,7 +19,7 @@ from gsim.meep.base import MeepSimMixin
 from gsim.meep.models import (
     AccuracyConfig,
     DiagnosticsConfig,
-    FDTDConfig,
+    WavelengthConfig,
     DomainConfig,
     ResolutionConfig,
     SimConfig,
@@ -92,14 +92,13 @@ class MeepSim(MeepSimMixin, BaseModel):
     stack: LayerStack | None = None
 
     # MEEP-specific configs
-    fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
+    wavelength_config: WavelengthConfig = Field(default_factory=WavelengthConfig)
     source_config: SourceConfig = Field(default_factory=SourceConfig)
     stopping_config: StoppingConfig = Field(default_factory=StoppingConfig)
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
     domain_config: DomainConfig = Field(default_factory=DomainConfig)
     accuracy_config: AccuracyConfig = Field(default_factory=AccuracyConfig)
     diagnostics_config: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
-    verbose_interval: float = Field(default=0, ge=0)
 
     # Material overrides (optical properties)
     materials: dict[str, MaterialProperties] = Field(default_factory=dict)
@@ -130,7 +129,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
         """
-        self.fdtd_config = FDTDConfig(
+        self.wavelength_config = WavelengthConfig(
             wavelength=wavelength,
             bandwidth=bandwidth,
             num_freqs=num_freqs,
@@ -191,10 +190,10 @@ class MeepSim(MeepSimMixin, BaseModel):
         """
         self.stopping_config = StoppingConfig(
             mode=mode,
-            run_after_sources=max_time,
+            max_time=max_time,
             decay_dt=decay_dt,
             decay_component=decay_component,
-            decay_by=threshold,
+            threshold=threshold,
             decay_monitor_port=decay_monitor_port,
             dft_min_run_time=dft_min_run_time,
         )
@@ -231,8 +230,8 @@ class MeepSim(MeepSimMixin, BaseModel):
 
     def set_domain(
         self,
-        margin: float | None = None,
         *,
+        margin: float | None = None,
         margin_xy: float | None = None,
         margin_z: float | None = None,
         margin_z_above: float | None = None,
@@ -286,11 +285,11 @@ class MeepSim(MeepSimMixin, BaseModel):
     def set_accuracy(
         self,
         *,
-        eps_averaging: bool = True,
+        eps_averaging: bool = False,
         subpixel_maxeval: int = 0,
         subpixel_tol: float = 1e-4,
         simplify_tol: float = 0.0,
-        verbose_interval: float = 0,
+        verbose_interval: float | None = None,
     ) -> None:
         """Configure accuracy and performance trade-offs.
 
@@ -303,8 +302,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             simplify_tol: Shapely polygon simplification tolerance in um.
                 Reduces vertex count on dense GDS curves.  0 = no
                 simplification.
-            verbose_interval: Print progress every *interval* MEEP time
-                units during FDTD stepping.  0 = silent.
+            verbose_interval: **Deprecated** — use ``set_diagnostics(verbose_interval=...)``
+                instead. If given, sets ``diagnostics_config.verbose_interval``.
         """
         self.accuracy_config = AccuracyConfig(
             eps_averaging=eps_averaging,
@@ -312,7 +311,16 @@ class MeepSim(MeepSimMixin, BaseModel):
             subpixel_tol=subpixel_tol,
             simplify_tol=simplify_tol,
         )
-        self.verbose_interval = verbose_interval
+        if verbose_interval is not None:
+            import warnings
+
+            warnings.warn(
+                "verbose_interval in set_accuracy() is deprecated. "
+                "Use set_diagnostics(verbose_interval=...) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.diagnostics_config.verbose_interval = verbose_interval
 
     # -------------------------------------------------------------------------
     # Diagnostics
@@ -327,6 +335,7 @@ class MeepSim(MeepSimMixin, BaseModel):
         save_animation: bool = False,
         animation_interval: float = 0.5,
         preview_only: bool = False,
+        verbose_interval: float = 0,
     ) -> None:
         """Configure diagnostic outputs from the MEEP runner.
 
@@ -338,6 +347,8 @@ class MeepSim(MeepSimMixin, BaseModel):
             animation_interval: MEEP time units between animation frames.
             preview_only: If True, init sim and save geometry diagnostics
                 but skip the FDTD run entirely. Fast geometry validation.
+            verbose_interval: Print progress every *interval* MEEP time
+                units during FDTD stepping.  0 = silent.
         """
         self.diagnostics_config = DiagnosticsConfig(
             save_geometry=save_geometry,
@@ -346,6 +357,7 @@ class MeepSim(MeepSimMixin, BaseModel):
             save_animation=save_animation,
             animation_interval=animation_interval,
             preview_only=preview_only,
+            verbose_interval=verbose_interval,
         )
 
     # -------------------------------------------------------------------------
@@ -429,7 +441,7 @@ class MeepSim(MeepSimMixin, BaseModel):
                         f"Available: {port_names}"
                     )
 
-        if self.fdtd_config.bandwidth <= 0:
+        if self.wavelength_config.bandwidth <= 0:
             warnings_list.append(
                 "Bandwidth is zero; simulation will use a single frequency."
             )
@@ -537,7 +549,7 @@ class MeepSim(MeepSimMixin, BaseModel):
 
         # 5. Build SimConfig
         fwidth = self.source_config.compute_fwidth(
-            self.fdtd_config.fcen, self.fdtd_config.df
+            self.wavelength_config.fcen, self.wavelength_config.df
         )
         source_for_config = self.source_config.model_copy(update={"fwidth": fwidth})
 
@@ -548,14 +560,14 @@ class MeepSim(MeepSimMixin, BaseModel):
             dielectrics=dielectric_entries,
             ports=port_infos,
             materials=material_data,
-            fdtd=self.fdtd_config,
+            wavelength=self.wavelength_config,
             source=source_for_config,
             stopping=self.stopping_config,
             resolution=self.resolution_config,
             domain=self.domain_config,
             accuracy=self.accuracy_config,
             diagnostics=self.diagnostics_config,
-            verbose_interval=self.verbose_interval,
+            verbose_interval=self.diagnostics_config.verbose_interval,
             symmetries=self.symmetries,
             split_chunks_evenly=self.split_chunks_evenly,
         )

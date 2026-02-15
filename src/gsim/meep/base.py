@@ -237,24 +237,36 @@ class MeepSimMixin:
         *,
         refractive_index: float | None = None,
         extinction_coeff: float | None = None,
+        n: float | None = None,
+        k: float | None = None,
     ) -> None:
         """Override or add optical material properties.
 
         Args:
             name: Material name (e.g., "si", "SiO2")
-            refractive_index: Refractive index (n)
-            extinction_coeff: Extinction coefficient (k)
+            refractive_index: Refractive index. Alias: ``n``.
+            extinction_coeff: Extinction coefficient. Alias: ``k``.
+            n: Short alias for ``refractive_index``.
+            k: Short alias for ``extinction_coeff``.
 
         Example:
-            >>> sim.set_material("si", refractive_index=3.47)
+            >>> sim.set_material("si", n=3.47)
             >>> sim.set_material("SiO2", refractive_index=1.44)
         """
         from gsim.common.stack.materials import MaterialProperties
 
+        if n is not None and refractive_index is not None:
+            raise ValueError("Cannot specify both 'n' and 'refractive_index'")
+        if k is not None and extinction_coeff is not None:
+            raise ValueError("Cannot specify both 'k' and 'extinction_coeff'")
+
+        ri = n if n is not None else refractive_index
+        ec = k if k is not None else extinction_coeff
+
         self.materials[name] = MaterialProperties(
             type="dielectric",
-            refractive_index=refractive_index,
-            extinction_coeff=extinction_coeff,
+            refractive_index=ri,
+            extinction_coeff=ec,
         )
 
     # -------------------------------------------------------------------------
