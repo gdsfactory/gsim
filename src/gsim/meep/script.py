@@ -241,7 +241,7 @@ def resolve_decay_monitor_point(config):
     otherwise picks the first non-source port.  Falls back to
     the first port if all are sources.
     """
-    stopping = config.get("fdtd", {}).get("stopping", {})
+    stopping = config.get("stopping", config.get("fdtd", {}).get("stopping", {}))
     target_name = stopping.get("decay_monitor_port")
     ports = config.get("ports", [])
 
@@ -342,6 +342,8 @@ def build_sources(config):
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
+    # Source fwidth: prefer top-level source.fwidth, fallback to fdtd.df (old format)
+    fwidth = config.get("source", {}).get("fwidth", df)
     z_span = get_port_z_span(config)
     port_margin = config.get("domain", {}).get("port_margin", 0.5)
 
@@ -369,7 +371,7 @@ def build_sources(config):
             kpoint = mp.Vector3(y=1) if direction == "+" else mp.Vector3(y=-1)
 
         eig_src = mp.EigenModeSource(
-            src=mp.GaussianSource(frequency=fcen, fwidth=df),
+            src=mp.GaussianSource(frequency=fcen, fwidth=fwidth),
             center=center,
             size=mp.Vector3(*size),
             eig_band=1,
@@ -584,7 +586,7 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
     fdtd = config["fdtd"]
     domain = config.get("domain", {})
     resolution = config.get("resolution", {}).get("pixels_per_um", 0)
-    stopping = fdtd.get("stopping", {})
+    stopping = config.get("stopping", fdtd.get("stopping", {}))
 
     meep_time = 0.0
     timesteps = 0
@@ -936,8 +938,8 @@ def main():
     print("Building monitors...")
     monitors = build_monitors(config, sim)
 
-    stopping = fdtd.get("stopping", {})
-    run_after = fdtd["run_after_sources"]
+    stopping = config.get("stopping", fdtd.get("stopping", {}))
+    run_after = stopping.get("run_after_sources", fdtd.get("run_after_sources", 100))
 
     # Build verbose step functions
     step_funcs = []

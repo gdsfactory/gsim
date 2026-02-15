@@ -7,6 +7,7 @@ No local MEEP dependency — MEEP runs only on the cloud.
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from gsim.meep.models import (
     DomainConfig,
     ResolutionConfig,
     SimConfig,
+    SourceConfig,
     SParameterResult,
     StoppingConfig,
     SymmetryEntry,
@@ -61,6 +63,8 @@ class MeepSim(MeepSimMixin, BaseModel):
 
     # MEEP-specific configs
     fdtd_config: FDTDConfig = Field(default_factory=FDTDConfig)
+    source_config: SourceConfig = Field(default_factory=SourceConfig)
+    stopping_config: StoppingConfig = Field(default_factory=StoppingConfig)
     resolution_config: ResolutionConfig = Field(default_factory=ResolutionConfig)
     domain_config: DomainConfig = Field(default_factory=DomainConfig)
     accuracy_config: AccuracyConfig = Field(default_factory=AccuracyConfig)
@@ -69,9 +73,6 @@ class MeepSim(MeepSimMixin, BaseModel):
 
     # Material overrides (optical properties)
     materials: dict[str, MaterialProperties] = Field(default_factory=dict)
-
-    # Source port override
-    source_port: str | None = None
 
     # Performance options
     symmetries: list[SymmetryEntry] = Field(default_factory=list)
@@ -91,7 +92,8 @@ class MeepSim(MeepSimMixin, BaseModel):
         wavelength: float = 1.55,
         bandwidth: float = 0.1,
         num_freqs: int = 11,
-        run_after_sources: float = 100.0,
+        # Deprecated stopping kwargs — forwarded to set_stopping()
+        run_after_sources: float | None = None,
         stop_when_decayed: bool = False,
         stop_when_dft_decayed: bool = False,
         decay_threshold: float = 1e-3,
@@ -106,45 +108,112 @@ class MeepSim(MeepSimMixin, BaseModel):
             wavelength: Center wavelength in um
             bandwidth: Wavelength bandwidth in um
             num_freqs: Number of frequency points
-            run_after_sources: Time units to run after sources turn off.
-                In fixed mode this is the run time.  In decay/dft_decay
-                modes it is the maximum time cap.
-            stop_when_decayed: If True, use field-decay stopping (monitors
-                a single component at one point).
-            stop_when_dft_decayed: If True, use DFT-convergence stopping
-                (monitors all DFT monitors).  Best for S-parameter
-                extraction.  Takes precedence over ``stop_when_decayed``.
-            decay_threshold: Stop when fields/DFT decay to this fraction
-            decay_dt: Time interval between decay checks in MEEP time units
-            decay_component: Field component to monitor (e.g. "Ez", "Ey").
-                Only used in ``decay`` mode.
-            decay_monitor_port: Port name to monitor for decay. If None, the
-                first non-source port is used automatically.
-                Only used in ``decay`` mode.
-            dft_min_run_time: Minimum time after sources for ``dft_decay``
-                mode (respects Fourier uncertainty principle).
+            run_after_sources: *Deprecated* — use ``set_stopping(max_time=...)``.
+            stop_when_decayed: *Deprecated* — use ``set_stopping(mode="decay")``.
+            stop_when_dft_decayed: *Deprecated* — use ``set_stopping(mode="dft_decay")``.
+            decay_threshold: *Deprecated* — use ``set_stopping(threshold=...)``.
+            decay_dt: *Deprecated* — use ``set_stopping(decay_dt=...)``.
+            decay_component: *Deprecated* — use ``set_stopping(decay_component=...)``.
+            decay_monitor_port: *Deprecated* — use ``set_stopping(decay_monitor_port=...)``.
+            dft_min_run_time: *Deprecated* — use ``set_stopping(dft_min_run_time=...)``.
         """
-        if stop_when_dft_decayed:
-            mode = "dft_decay"
-        elif stop_when_decayed:
-            mode = "decay"
-        else:
-            mode = "fixed"
-
-        stopping = StoppingConfig(
-            mode=mode,
-            run_after_sources=run_after_sources,
-            decay_dt=decay_dt,
-            decay_component=decay_component,
-            decay_by=decay_threshold,
-            decay_monitor_port=decay_monitor_port,
-            dft_min_run_time=dft_min_run_time,
-        )
         self.fdtd_config = FDTDConfig(
             wavelength=wavelength,
             bandwidth=bandwidth,
             num_freqs=num_freqs,
-            stopping=stopping,
+        )
+
+        # Forward deprecated stopping kwargs to set_stopping()
+        has_stopping_kwargs = (
+            stop_when_decayed
+            or stop_when_dft_decayed
+            or run_after_sources is not None
+        )
+        if has_stopping_kwargs:
+            warnings.warn(
+                "Passing stopping parameters to set_wavelength() is deprecated. "
+                "Use set_stopping() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if stop_when_dft_decayed:
+                mode = "dft_decay"
+            elif stop_when_decayed:
+                mode = "decay"
+            else:
+                mode = "fixed"
+
+            self.set_stopping(
+                mode=mode,
+                max_time=run_after_sources if run_after_sources is not None else 100.0,
+                threshold=decay_threshold,
+                decay_dt=decay_dt,
+                decay_component=decay_component,
+                decay_monitor_port=decay_monitor_port,
+                dft_min_run_time=dft_min_run_time,
+            )
+
+    # -------------------------------------------------------------------------
+    # Source config
+    # -------------------------------------------------------------------------
+
+    def set_source(
+        self,
+        *,
+        bandwidth: float | None = None,
+        port: str | None = None,
+    ) -> None:
+        """Configure the excitation source.
+
+        Args:
+            bandwidth: Source Gaussian bandwidth in wavelength um.
+                ``None`` = auto (~3x monitor bandwidth or ``0.2*fcen``).
+            port: Source port name. ``None`` = auto-select first port.
+        """
+        self.source_config = SourceConfig(bandwidth=bandwidth, port=port)
+
+    # -------------------------------------------------------------------------
+    # Stopping config
+    # -------------------------------------------------------------------------
+
+    def set_stopping(
+        self,
+        *,
+        mode: str = "fixed",
+        max_time: float = 100.0,
+        threshold: float = 1e-3,
+        decay_dt: float = 50.0,
+        decay_component: str = "Ey",
+        decay_monitor_port: str | None = None,
+        dft_min_run_time: float = 0,
+    ) -> None:
+        """Configure when the MEEP simulation stops.
+
+        Args:
+            mode: ``"fixed"`` (run for ``max_time``), ``"decay"``
+                (field decay at a point), or ``"dft_decay"`` (DFT
+                convergence — best for S-parameters).
+            max_time: Time units to run after sources turn off. In
+                ``fixed`` mode this is the run time; in ``decay``/
+                ``dft_decay`` it is the maximum time cap.
+            threshold: Stop when fields/DFT decay to this fraction.
+            decay_dt: Time interval between decay checks (MEEP time
+                units).  Only used in ``decay`` mode.
+            decay_component: Field component to monitor (e.g. ``"Ey"``).
+                Only used in ``decay`` mode.
+            decay_monitor_port: Port name to monitor for decay. ``None``
+                = auto-select first non-source port.  Only in ``decay``.
+            dft_min_run_time: Minimum time after sources for ``dft_decay``
+                mode (respects Fourier uncertainty principle).
+        """
+        self.stopping_config = StoppingConfig(
+            mode=mode,
+            run_after_sources=max_time,
+            decay_dt=decay_dt,
+            decay_component=decay_component,
+            decay_by=threshold,
+            decay_monitor_port=decay_monitor_port,
+            dft_min_run_time=dft_min_run_time,
         )
 
     # -------------------------------------------------------------------------
@@ -297,16 +366,27 @@ class MeepSim(MeepSimMixin, BaseModel):
         )
 
     # -------------------------------------------------------------------------
-    # Source port
+    # Source port (deprecated)
     # -------------------------------------------------------------------------
 
     def set_source_port(self, name: str) -> None:
         """Set which port is the excitation source.
 
+        .. deprecated::
+            Use ``set_source(port=name)`` instead.
+
         Args:
             name: Port name (must match a gdsfactory component port)
         """
-        self.source_port = name
+        warnings.warn(
+            "set_source_port() is deprecated. Use set_source(port=name) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.source_config = SourceConfig(
+            bandwidth=self.source_config.bandwidth,
+            port=name,
+        )
 
     # -------------------------------------------------------------------------
     # Symmetry
@@ -381,11 +461,11 @@ class MeepSim(MeepSimMixin, BaseModel):
             ports = list(self.geometry.component.ports)
             if not ports:
                 errors.append("Component has no ports.")
-            elif self.source_port is not None:
+            elif self.source_config.port is not None:
                 port_names = [p.name for p in ports]
-                if self.source_port not in port_names:
+                if self.source_config.port not in port_names:
                     errors.append(
-                        f"Source port '{self.source_port}' not found. "
+                        f"Source port '{self.source_config.port}' not found. "
                         f"Available: {port_names}"
                     )
 
@@ -489,13 +569,14 @@ class MeepSim(MeepSimMixin, BaseModel):
 
         # 3. Extract port info from ORIGINAL component (port centers must not change)
         port_infos = extract_port_info(
-            original_component, self.stack, source_port=self.source_port
+            original_component, self.stack, source_port=self.source_config.port
         )
 
         # 4. Resolve materials (layers + dielectrics)
         material_data = resolve_materials(used_materials, overrides=self.materials)
 
         # 5. Build SimConfig
+        fdtd_dict = self.fdtd_config.to_dict()
         sim_config = SimConfig(
             gds_filename="layout.gds",
             component_bbox=original_bbox,
@@ -503,7 +584,11 @@ class MeepSim(MeepSimMixin, BaseModel):
             dielectrics=dielectric_entries,
             ports=[p.to_dict() for p in port_infos],
             materials={name: mat.to_dict() for name, mat in material_data.items()},
-            fdtd=self.fdtd_config.to_dict(),
+            fdtd=fdtd_dict,
+            source=self.source_config.to_dict(
+                self.fdtd_config.fcen, self.fdtd_config.df
+            ),
+            stopping=self.stopping_config.model_dump(),
             resolution=self.resolution_config.to_dict(),
             domain=self.domain_config.to_dict(),
             accuracy=self.accuracy_config.to_dict(),

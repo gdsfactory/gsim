@@ -27,15 +27,10 @@ sim.set_domain(0.5)
 sim.set_z_crop()
 sim.set_material("si", refractive_index=3.47)
 sim.set_material("SiO2", refractive_index=1.44)
-sim.set_wavelength(
-    wavelength=1.55,
-    bandwidth=0.01,
-    num_freqs=11,
-    run_after_sources=200,
-    stop_when_dft_decayed=True,
-    decay_threshold=1e-3,
-)
-sim.set_resolution(pixels_per_um=30)
+sim.set_wavelength(wavelength=1.55, bandwidth=0.01, num_freqs=11)
+sim.set_source()  # auto: fwidth ~3x monitor bw
+sim.set_stopping(mode="dft_decay", max_time=200, threshold=1e-3)
+sim.set_resolution(pixels_per_um=20)
 sim.set_accuracy(
     simplify_tol=0.01,
     eps_averaging=True,

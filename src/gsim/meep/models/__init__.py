@@ -10,6 +10,7 @@ from gsim.meep.models.config import (
     PortData,
     ResolutionConfig,
     SimConfig,
+    SourceConfig,
     StoppingConfig,
     SymmetryEntry,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",
+    "SourceConfig",
     "StoppingConfig",
     "SymmetryEntry",
 ]

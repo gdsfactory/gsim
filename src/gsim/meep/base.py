@@ -461,8 +461,9 @@ class MeepSimMixin:
             from gsim.meep.ports import extract_port_info
 
             component = self.geometry.component.copy()
+            _sc = getattr(self, "source_config", None)
             port_data = extract_port_info(
-                component, self.stack, source_port=getattr(self, "source_port", None)
+                component, self.stack, source_port=getattr(_sc, "port", None)
             )
         except Exception:
             port_data = []

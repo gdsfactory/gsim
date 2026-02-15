@@ -93,6 +93,64 @@ class StoppingConfig(BaseModel):
     )
 
 
+class SourceConfig(BaseModel):
+    """Source excitation configuration.
+
+    Controls the Gaussian source bandwidth and which port is excited.
+    When ``bandwidth`` is ``None`` (auto), ``compute_fwidth`` returns a
+    bandwidth ~3x wider than the monitor frequency span (matching
+    gplugins' ``dfcen=0.2`` convention) so edge frequencies receive
+    adequate spectral power.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    bandwidth: float | None = Field(
+        default=None,
+        description="Source Gaussian bandwidth in wavelength um. None = auto (~3x monitor bw).",
+    )
+    port: str | None = Field(
+        default=None,
+        description="Source port name. None = auto-select first port.",
+    )
+
+    def compute_fwidth(self, fcen: float, monitor_df: float) -> float:
+        """Compute Gaussian source fwidth in frequency units.
+
+        When auto (bandwidth=None), returns ``max(3 * monitor_df, 0.2 * fcen)``
+        to ensure edge frequencies have enough spectral power.
+
+        Args:
+            fcen: Center frequency (1/um).
+            monitor_df: Monitor frequency span (1/um).
+
+        Returns:
+            Source fwidth in frequency units (1/um).
+        """
+        if self.bandwidth is not None:
+            # Convert wavelength bandwidth to frequency bandwidth
+            wl_center = 1.0 / fcen
+            wl_min = wl_center - self.bandwidth / 2
+            wl_max = wl_center + self.bandwidth / 2
+            return 1.0 / wl_min - 1.0 / wl_max
+        return max(3 * monitor_df, 0.2 * fcen)
+
+    def to_dict(self, fcen: float, monitor_df: float) -> dict[str, Any]:
+        """Serialize to dict for JSON config.
+
+        Args:
+            fcen: Center frequency (1/um).
+            monitor_df: Monitor frequency span (1/um).
+
+        Returns:
+            Dict with ``fwidth`` and ``port`` keys.
+        """
+        return {
+            "fwidth": self.compute_fwidth(fcen, monitor_df),
+            "port": self.port,
+        }
+
+
 class FDTDConfig(BaseModel):
     """Wavelength and frequency settings for MEEP FDTD simulation.
 
@@ -107,7 +165,6 @@ class FDTDConfig(BaseModel):
         default=0.1, ge=0, description="Wavelength bandwidth in um"
     )
     num_freqs: int = Field(default=11, ge=1, description="Number of frequency points")
-    stopping: StoppingConfig = Field(default_factory=StoppingConfig)
 
     @property
     def fcen(self) -> float:
@@ -131,8 +188,6 @@ class FDTDConfig(BaseModel):
             "num_freqs": self.num_freqs,
             "fcen": self.fcen,
             "df": self.df,
-            "run_after_sources": self.stopping.run_after_sources,
-            "stopping": self.stopping.model_dump(),
         }
 
 
@@ -293,6 +348,8 @@ class SimConfig(BaseModel):
     ports: list[dict[str, Any]] = Field(default_factory=list)
     materials: dict[str, dict[str, Any]] = Field(default_factory=dict)
     fdtd: dict[str, Any] = Field(default_factory=dict)
+    source: dict[str, Any] = Field(default_factory=dict)
+    stopping: dict[str, Any] = Field(default_factory=dict)
     resolution: dict[str, Any] = Field(default_factory=dict)
     domain: dict[str, Any] = Field(default_factory=dict)
     accuracy: dict[str, Any] = Field(default_factory=dict)

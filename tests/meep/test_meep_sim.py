@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import warnings
 
 import pytest
 
@@ -13,6 +14,7 @@ from gsim.meep import (
     DomainConfig,
     ResolutionConfig,
     SimConfig,
+    SourceConfig,
     SParameterResult,
     SymmetryEntry,
 )
@@ -36,8 +38,6 @@ class TestFDTDConfig:
         assert cfg.wavelength == 1.55
         assert cfg.bandwidth == 0.1
         assert cfg.num_freqs == 11
-        assert cfg.stopping.mode == "fixed"
-        assert cfg.stopping.run_after_sources == 100.0
 
     def test_fcen(self):
         cfg = FDTDConfig(wavelength=1.55)
@@ -57,6 +57,9 @@ class TestFDTDConfig:
         assert "fcen" in d
         assert "df" in d
         assert "num_freqs" in d
+        # stopping and run_after_sources are no longer in fdtd dict
+        assert "stopping" not in d
+        assert "run_after_sources" not in d
 
 
 class TestResolutionConfig:
@@ -88,6 +91,9 @@ class TestSimConfig:
     """Test SimConfig serialization."""
 
     def test_to_json(self, tmp_path):
+        fdtd_cfg = FDTDConfig()
+        source_cfg = SourceConfig()
+        stopping_cfg = StoppingConfig(mode="dft_decay", run_after_sources=200.0)
         cfg = SimConfig(
             gds_filename="layout.gds",
             layer_stack=[
@@ -112,7 +118,9 @@ class TestSimConfig:
                 }
             ],
             materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},
-            fdtd=FDTDConfig().to_dict(),
+            fdtd=fdtd_cfg.to_dict(),
+            source=source_cfg.to_dict(fdtd_cfg.fcen, fdtd_cfg.df),
+            stopping=stopping_cfg.model_dump(),
             resolution=ResolutionConfig().to_dict(),
         )
         path = tmp_path / "config.json"
@@ -126,6 +134,12 @@ class TestSimConfig:
         assert data["gds_filename"] == "layout.gds"
         assert data["materials"]["si"]["refractive_index"] == 3.47
         assert data["layer_stack"][0]["layer_name"] == "core"
+        # New top-level fields
+        assert "source" in data
+        assert data["source"]["fwidth"] > data["fdtd"]["df"]
+        assert "stopping" in data
+        assert data["stopping"]["mode"] == "dft_decay"
+        assert data["stopping"]["run_after_sources"] == 200.0
 
 
 class TestPortData:
@@ -285,8 +299,9 @@ class TestMeepSimMixin:
 
     def test_set_source_port(self):
         sim = MeepSim()
-        sim.set_source_port("o2")
-        assert sim.source_port == "o2"
+        with pytest.warns(DeprecationWarning, match="set_source_port"):
+            sim.set_source_port("o2")
+        assert sim.source_config.port == "o2"
 
     def test_write_config_requires_output_dir(self):
         sim = MeepSim()
@@ -574,6 +589,7 @@ class TestImportWithoutMeep:
             DomainConfig,
             ResolutionConfig,
             SimConfig,
+            SourceConfig,
             SParameterResult,
         )
 
@@ -583,6 +599,7 @@ class TestImportWithoutMeep:
         assert ResolutionConfig is not None
         assert SParameterResult is not None
         assert SimConfig is not None
+        assert SourceConfig is not None
 
 
 # ---------------------------------------------------------------------------
@@ -790,19 +807,132 @@ class TestStoppingConfig:
 
 
 class TestFDTDConfigStopping:
-    """Test FDTDConfig with embedded StoppingConfig."""
+    """Test that FDTDConfig no longer embeds StoppingConfig."""
 
-    def test_to_dict_includes_stopping(self):
+    def test_to_dict_excludes_stopping(self):
         cfg = FDTDConfig()
         d = cfg.to_dict()
-        assert "stopping" in d
-        assert d["stopping"]["mode"] == "fixed"
+        assert "stopping" not in d
+        assert "run_after_sources" not in d
 
-    def test_backward_compat_run_after_sources(self):
-        cfg = FDTDConfig(stopping=StoppingConfig(run_after_sources=200.0))
-        d = cfg.to_dict()
-        assert d["run_after_sources"] == 200.0
-        assert d["stopping"]["run_after_sources"] == 200.0
+
+# ---------------------------------------------------------------------------
+# SourceConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestSourceConfig:
+    """Test SourceConfig model."""
+
+    def test_defaults(self):
+        cfg = SourceConfig()
+        assert cfg.bandwidth is None
+        assert cfg.port is None
+
+    def test_auto_fwidth(self):
+        """Auto fwidth should be max(3*monitor_df, 0.2*fcen)."""
+        cfg = SourceConfig()
+        fcen = 1.0 / 1.55
+        monitor_df = 0.042  # typical for 0.1um bandwidth at 1550nm
+        fwidth = cfg.compute_fwidth(fcen, monitor_df)
+        expected = max(3 * monitor_df, 0.2 * fcen)
+        assert abs(fwidth - expected) < 1e-10
+        assert fwidth > monitor_df  # always wider than monitor
+
+    def test_explicit_bandwidth(self):
+        """Explicit wavelength bandwidth converted to frequency."""
+        cfg = SourceConfig(bandwidth=0.3)
+        fcen = 1.0 / 1.55
+        fwidth = cfg.compute_fwidth(fcen, 0.042)
+        # Should convert 0.3um wavelength bw to freq bw
+        wl_min = 1.55 - 0.15
+        wl_max = 1.55 + 0.15
+        expected = 1.0 / wl_min - 1.0 / wl_max
+        assert abs(fwidth - expected) < 1e-10
+
+    def test_to_dict(self):
+        cfg = SourceConfig(port="o1")
+        fcen = 1.0 / 1.55
+        d = cfg.to_dict(fcen, 0.042)
+        assert "fwidth" in d
+        assert "port" in d
+        assert d["port"] == "o1"
+        assert d["fwidth"] > 0
+
+    def test_auto_fwidth_wider_than_monitor(self):
+        """Auto source fwidth should always be wider than monitor df."""
+        cfg = SourceConfig()
+        fcen = 1.0 / 1.55
+        fdtd = FDTDConfig(wavelength=1.55, bandwidth=0.1)
+        fwidth = cfg.compute_fwidth(fcen, fdtd.df)
+        assert fwidth > fdtd.df
+
+
+# ---------------------------------------------------------------------------
+# set_source tests
+# ---------------------------------------------------------------------------
+
+
+class TestSetSource:
+    """Test MeepSim.set_source() API."""
+
+    def test_default(self):
+        sim = MeepSim()
+        assert sim.source_config.bandwidth is None
+        assert sim.source_config.port is None
+
+    def test_set_port(self):
+        sim = MeepSim()
+        sim.set_source(port="o2")
+        assert sim.source_config.port == "o2"
+
+    def test_set_bandwidth(self):
+        sim = MeepSim()
+        sim.set_source(bandwidth=0.3)
+        assert sim.source_config.bandwidth == 0.3
+
+    def test_set_both(self):
+        sim = MeepSim()
+        sim.set_source(bandwidth=0.3, port="o1")
+        assert sim.source_config.bandwidth == 0.3
+        assert sim.source_config.port == "o1"
+
+
+# ---------------------------------------------------------------------------
+# set_stopping tests
+# ---------------------------------------------------------------------------
+
+
+class TestSetStopping:
+    """Test MeepSim.set_stopping() API."""
+
+    def test_fixed_default(self):
+        sim = MeepSim()
+        sim.set_stopping()
+        assert sim.stopping_config.mode == "fixed"
+        assert sim.stopping_config.run_after_sources == 100.0
+
+    def test_decay_mode(self):
+        sim = MeepSim()
+        sim.set_stopping(mode="decay", threshold=1e-4, decay_dt=25.0)
+        assert sim.stopping_config.mode == "decay"
+        assert sim.stopping_config.decay_by == 1e-4
+        assert sim.stopping_config.decay_dt == 25.0
+
+    def test_dft_decay_mode(self):
+        sim = MeepSim()
+        sim.set_stopping(
+            mode="dft_decay", max_time=200.0, threshold=1e-3, dft_min_run_time=10.0
+        )
+        assert sim.stopping_config.mode == "dft_decay"
+        assert sim.stopping_config.run_after_sources == 200.0
+        assert sim.stopping_config.decay_by == 1e-3
+        assert sim.stopping_config.dft_min_run_time == 10.0
+
+    def test_decay_monitor_port(self):
+        sim = MeepSim()
+        sim.set_stopping(mode="decay", decay_monitor_port="o2")
+        assert sim.stopping_config.decay_monitor_port == "o2"
 
 
 # ---------------------------------------------------------------------------
@@ -854,28 +984,32 @@ class TestSetSymmetry:
 
 
 class TestSetWavelengthDecay:
-    """Test MeepSim.set_wavelength() with decay parameters."""
+    """Test MeepSim.set_wavelength() with deprecated stopping kwargs."""
 
     def test_fixed_default(self):
         sim = MeepSim()
         sim.set_wavelength()
-        assert sim.fdtd_config.stopping.mode == "fixed"
+        # No stopping kwargs → no deprecation warning, stopping_config unchanged
+        assert sim.stopping_config.mode == "fixed"
 
-    def test_decay_mode(self):
+    def test_decay_mode_deprecated(self):
         sim = MeepSim()
-        sim.set_wavelength(stop_when_decayed=True, decay_threshold=1e-4)
-        assert sim.fdtd_config.stopping.mode == "decay"
-        assert sim.fdtd_config.stopping.decay_by == 1e-4
+        with pytest.warns(DeprecationWarning, match="set_stopping"):
+            sim.set_wavelength(stop_when_decayed=True, decay_threshold=1e-4)
+        assert sim.stopping_config.mode == "decay"
+        assert sim.stopping_config.decay_by == 1e-4
 
-    def test_decay_monitor_port(self):
+    def test_decay_monitor_port_deprecated(self):
         sim = MeepSim()
-        sim.set_wavelength(stop_when_decayed=True, decay_monitor_port="o2")
-        assert sim.fdtd_config.stopping.decay_monitor_port == "o2"
+        with pytest.warns(DeprecationWarning, match="set_stopping"):
+            sim.set_wavelength(stop_when_decayed=True, decay_monitor_port="o2")
+        assert sim.stopping_config.decay_monitor_port == "o2"
 
     def test_backward_compat_run_after_sources(self):
         sim = MeepSim()
-        sim.set_wavelength(run_after_sources=200.0)
-        assert sim.fdtd_config.stopping.run_after_sources == 200.0
+        with pytest.warns(DeprecationWarning, match="set_stopping"):
+            sim.set_wavelength(run_after_sources=200.0)
+        assert sim.stopping_config.run_after_sources == 200.0
 
     def test_num_freqs_default(self):
         sim = MeepSim()
