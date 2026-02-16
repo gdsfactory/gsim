@@ -20,6 +20,7 @@ Cloud dependencies: meep, gdsfactory, numpy, scipy, shapely
 import csv
 import cmath
 import json
+import logging
 import math
 import sys
 import time
@@ -34,6 +35,9 @@ try:
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("meep_runner")
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +294,9 @@ def build_geometry(config, materials):
         if height <= 0:
             continue
 
-        polygons = extract_layer_polygons(component, gds_layer, simplify_tol=simplify_tol)
+        polygons = extract_layer_polygons(
+            component, gds_layer, simplify_tol=simplify_tol,
+        )
 
         for polygon in polygons:
             if polygon.is_empty or not polygon.is_valid:
@@ -322,7 +328,7 @@ def build_geometry(config, materials):
                 )
                 geometry.append(prism)
 
-    print(f"  Total vertices across all prisms: {total_vertices}")
+    logger.info("Total vertices across all prisms: %d", total_vertices)
     return geometry, component
 
 
@@ -460,7 +466,11 @@ def extract_s_params(config, sim, monitors):
     df = fdtd["df"]
     freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
 
-    debug_data = {"eigenmode_info": {}, "raw_coefficients": {}, "incident_coefficients": {}}
+    debug_data = {
+        "eigenmode_info": {},
+        "raw_coefficients": {},
+        "incident_coefficients": {},
+    }
 
     def _incoming_idx(direction):
         """Alpha index for the incoming (incident) mode at a port."""
@@ -530,9 +540,14 @@ def extract_s_params(config, sim, monitors):
             if port_i != source_port:
                 debug_data["eigenmode_info"][port_i] = _collect_eigenmode_debug(
                     port_i, ob, freqs)
+                nf = len(freqs)
                 debug_data["raw_coefficients"][port_i] = {
-                    "forward_mag": [float(abs(ob.alpha[0, k, 0])) for k in range(len(freqs))],
-                    "backward_mag": [float(abs(ob.alpha[0, k, 1])) for k in range(len(freqs))],
+                    "forward_mag": [
+                        float(abs(ob.alpha[0, k, 0])) for k in range(nf)
+                    ],
+                    "backward_mag": [
+                        float(abs(ob.alpha[0, k, 1])) for k in range(nf)
+                    ],
                 }
 
             # Outgoing direction: reflected at source port, transmitted at output ports
@@ -578,7 +593,7 @@ def save_results(config, s_params, output_path="s_parameters.csv"):
                 row[f"{name}_phase"] = f"{cmath.phase(val) * 180 / cmath.pi:.4f}"
             writer.writerow(row)
 
-    print(f"S-parameters saved to {output_path}")
+    logger.info("S-parameters saved to %s", output_path)
 
 
 def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
@@ -617,7 +632,7 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
 
     with open(output_path, "w") as f:
         json.dump(log, f, indent=2)
-    print(f"Debug log saved to {output_path}")
+    logger.info("Debug log saved to %s", output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +642,7 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
 def save_geometry_diagnostics(sim, config, cell_center):
     """Save geometry cross-section plots showing epsilon, sources, monitors, PML."""
     if not HAS_MATPLOTLIB:
-        print("WARNING: matplotlib not available, skipping geometry diagnostics")
+        logger.warning("matplotlib not available, skipping geometry diagnostics")
         return
     if not mp.am_master():
         # plot2D is collective — all ranks call it, only master saves
@@ -653,10 +668,10 @@ def save_geometry_diagnostics(sim, config, cell_center):
         fig.tight_layout()
         if mp.am_master():
             fig.savefig("meep_geometry_xy.png", dpi=150)
-            print("Saved meep_geometry_xy.png")
+            logger.info("Saved meep_geometry_xy.png")
         plt.close(fig)
     except Exception as e:
-        print(f"WARNING: XY geometry plot failed: {e}")
+        logger.warning("XY geometry plot failed: %s", e)
 
     # For 3D sims: XZ and YZ cross-sections
     if sim.cell_size.z > 0:
@@ -674,10 +689,10 @@ def save_geometry_diagnostics(sim, config, cell_center):
             fig.tight_layout()
             if mp.am_master():
                 fig.savefig("meep_geometry_xz.png", dpi=150)
-                print("Saved meep_geometry_xz.png")
+                logger.info("Saved meep_geometry_xz.png")
             plt.close(fig)
         except Exception as e:
-            print(f"WARNING: XZ geometry plot failed: {e}")
+            logger.warning("XZ geometry plot failed: %s", e)
 
         # YZ at x=center
         try:
@@ -693,16 +708,16 @@ def save_geometry_diagnostics(sim, config, cell_center):
             fig.tight_layout()
             if mp.am_master():
                 fig.savefig("meep_geometry_yz.png", dpi=150)
-                print("Saved meep_geometry_yz.png")
+                logger.info("Saved meep_geometry_yz.png")
             plt.close(fig)
         except Exception as e:
-            print(f"WARNING: YZ geometry plot failed: {e}")
+            logger.warning("YZ geometry plot failed: %s", e)
 
 
 def save_field_snapshot(sim, config, cell_center):
     """Save post-run field snapshot (Ey overlaid on epsilon)."""
     if not HAS_MATPLOTLIB:
-        print("WARNING: matplotlib not available, skipping field snapshot")
+        logger.warning("matplotlib not available, skipping field snapshot")
         return
 
     z_min = min(l["zmin"] for l in config["layer_stack"])
@@ -722,10 +737,10 @@ def save_field_snapshot(sim, config, cell_center):
         fig.tight_layout()
         if mp.am_master():
             fig.savefig("meep_fields_xy.png", dpi=150)
-            print("Saved meep_fields_xy.png")
+            logger.info("Saved meep_fields_xy.png")
         plt.close(fig)
     except Exception as e:
-        print(f"WARNING: field snapshot failed: {e}")
+        logger.warning("Field snapshot failed: %s", e)
 
 
 def save_animation_field(sim, xy_plane, frame_counter):
@@ -761,12 +776,14 @@ def render_animation_frames(eps_data, extent):
     import os
 
     if not HAS_MATPLOTLIB:
-        print("WARNING: matplotlib not available, .npz field files kept but not rendered")
+        logger.warning(
+            "matplotlib not available, .npz field files kept but not rendered"
+        )
         return
 
     npz_files = sorted(glob.glob("meep_field_*.npz"))
     if not npz_files:
-        print("WARNING: No field data files found to render")
+        logger.warning("No field data files found to render")
         return
 
     # Pass 1 — global max
@@ -777,7 +794,10 @@ def render_animation_frames(eps_data, extent):
     if global_max == 0:
         global_max = 1.0
 
-    print(f"Rendering {len(npz_files)} frames (Ey global max = {global_max:.4g}) ...")
+    logger.info(
+        "Rendering %d frames (Ey global max = %.4g) ...",
+        len(npz_files), global_max,
+    )
 
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -813,7 +833,7 @@ def render_animation_frames(eps_data, extent):
     for path in npz_files:
         os.remove(path)
 
-    print(f"Rendered {len(npz_files)} frames with fixed colorbar")
+    logger.info("Rendered %d frames with fixed colorbar", len(npz_files))
 
 
 def compile_animation_mp4(fps=15):
@@ -827,10 +847,10 @@ def compile_animation_mp4(fps=15):
 
     frames = sorted(glob.glob("meep_frame_*.png"))
     if not frames:
-        print("WARNING: No animation frames found to compile")
+        logger.warning("No animation frames found to compile")
         return
 
-    print(f"Compiling {len(frames)} frames into meep_animation.mp4 ...")
+    logger.info("Compiling %d frames into meep_animation.mp4 ...", len(frames))
     try:
         subprocess.run(
             [
@@ -844,12 +864,12 @@ def compile_animation_mp4(fps=15):
             check=True,
             capture_output=True,
         )
-        print("Saved meep_animation.mp4")
+        logger.info("Saved meep_animation.mp4")
     except FileNotFoundError:
-        print("WARNING: ffmpeg not found — frame PNGs saved but MP4 not created")
+        logger.warning("ffmpeg not found — frame PNGs saved but MP4 not created")
     except subprocess.CalledProcessError as e:
-        print(f"WARNING: ffmpeg failed: {e.stderr.decode()[:500]}")
-        print("Frame PNGs are still available as meep_frame_*.png")
+        logger.warning("ffmpeg failed: %s", e.stderr.decode()[:500])
+        logger.info("Frame PNGs are still available as meep_frame_*.png")
 
 
 def save_epsilon_raw(sim, config, cell_center):
@@ -866,9 +886,9 @@ def save_epsilon_raw(sim, config, cell_center):
         eps_data = sim.get_array(vol=xy_plane, component=mp.Dielectric)
         if mp.am_master():
             np.save("meep_epsilon_xy.npy", eps_data)
-            print(f"Saved meep_epsilon_xy.npy (shape={eps_data.shape})")
+            logger.info("Saved meep_epsilon_xy.npy (shape=%s)", eps_data.shape)
     except Exception as e:
-        print(f"WARNING: epsilon raw save failed: {e}")
+        logger.warning("Epsilon raw save failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -880,25 +900,28 @@ def main():
     config_path = "%%CONFIG_FILENAME%%"
     config = load_config(config_path)
 
-    print("Building materials...")
+    logger.info("Building materials...")
     materials = build_materials(config)
 
-    print("Building background dielectric slabs...")
+    logger.info("Building background dielectric slabs...")
     background_slabs = build_background_slabs(config, materials)
-    print(f"  Created {len(background_slabs)} background slabs")
+    logger.info("Created %d background slabs", len(background_slabs))
 
-    print("Building geometry from GDS + layer stack...")
+    logger.info("Building geometry from GDS + layer stack...")
     geometry, component = build_geometry(config, materials)
-    print(f"  Created {len(geometry)} prisms from {len(config['layer_stack'])} layers")
+    logger.info(
+        "Created %d prisms from %d layers",
+        len(geometry), len(config['layer_stack']),
+    )
 
     # Background slabs first, then patterned prisms (later objects take precedence)
     geometry = background_slabs + geometry
 
-    print("Building sources...")
+    logger.info("Building sources...")
     sources = build_sources(config)
 
     if not sources:
-        print("ERROR: No source port found in config", file=sys.stderr)
+        logger.error("No source port found in config")
         sys.exit(1)
 
     resolution = config["resolution"]["pixels_per_um"]
@@ -933,9 +956,9 @@ def main():
         (z_max + z_min) / 2,
     )
 
-    print(f"Cell size: {cell_x:.2f} x {cell_y:.2f} x {cell_z:.2f} um")
-    print(f"PML: {dpml:.2f} um, margin_xy: {margin_xy:.2f}")
-    print(f"Resolution: {resolution} pixels/um")
+    logger.info("Cell size: %.2f x %.2f x %.2f um", cell_x, cell_y, cell_z)
+    logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
+    logger.info("Resolution: %s pixels/um", resolution)
 
     accuracy = config.get("accuracy", {})
     diagnostics = config.get("diagnostics", {})
@@ -953,9 +976,9 @@ def main():
     # mode (geometry validation, no FDTD/S-params).
     cfg_symmetries = config.get("symmetries", [])
     if cfg_symmetries and not preview_only:
-        print("NOTE: Symmetries present in config but IGNORED for S-parameter "
-              "extraction (causes incorrect eigenmode normalization). "
-              "Symmetries are only used in preview-only mode.")
+        logger.info("Symmetries present in config but IGNORED for S-parameter "
+                     "extraction (causes incorrect eigenmode normalization). "
+                     "Symmetries are only used in preview-only mode.")
     use_symmetries = build_symmetries(config) if preview_only else []
 
     sim_kwargs = dict(
@@ -983,7 +1006,7 @@ def main():
     diag_epsilon = diagnostics.get("save_epsilon_raw", False)
 
     if diag_geometry or diag_epsilon or preview_only:
-        print("Initializing simulation for diagnostics...")
+        logger.info("Initializing simulation for diagnostics...")
         sim.init_sim()
         if diag_geometry or preview_only:
             save_geometry_diagnostics(sim, config, cell_center)
@@ -991,13 +1014,13 @@ def main():
             save_epsilon_raw(sim, config, cell_center)
 
     if preview_only:
-        print("MEEP_PREVIEW_ONLY=1 — skipping simulation run.")
+        logger.info("MEEP_PREVIEW_ONLY=1 — skipping simulation run.")
         save_debug_log(config, {}, {"_meep_time": 0, "_timesteps": 0,
                                     "_cell_size": [cell_x, cell_y, cell_z]})
-        print("Preview complete.")
+        logger.info("Preview complete.")
         sys.exit(0)
 
-    print("Building monitors...")
+    logger.info("Building monitors...")
     monitors = build_monitors(config, sim)
 
     stopping = config.get("stopping", {})
@@ -1010,7 +1033,7 @@ def main():
         _wall_start = time.time()
         def _verbose_print(sim_obj):
             elapsed = time.time() - _wall_start
-            print(f"  t={sim_obj.meep_time():.2f} | wall={elapsed:.1f}s", flush=True)
+            logger.info("t=%.2f | wall=%.1fs", sim_obj.meep_time(), elapsed)
         step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
     # Animation field capture step function (raw data, no plotting yet)
@@ -1034,7 +1057,10 @@ def main():
             )
 
         step_funcs.append(mp.at_every(animation_interval, _capture_frame))
-        print(f"Animation: saving field data every {animation_interval} time units")
+        logger.info(
+            "Animation: saving field data every %s time units",
+            animation_interval,
+        )
 
     stop_mode = stopping.get("mode", "fixed")
 
@@ -1043,8 +1069,11 @@ def main():
     if stop_mode == "dft_decay":
         decay_by = stopping.get("decay_by", 1e-3)
         min_time = stopping.get("dft_min_run_time", 100)
-        print(f"Running simulation (dft_decay mode: tol={decay_by}, "
-              f"min={min_time:.1f}, max={run_after:.1f})...")
+        logger.info(
+            "Running simulation (dft_decay mode: tol=%s, "
+            "min=%.1f, max=%.1f)...",
+            decay_by, min_time, run_after,
+        )
         sim.run(
             *step_funcs,
             until_after_sources=mp.stop_when_dft_decayed(
@@ -1059,14 +1088,14 @@ def main():
         comp = _COMPONENT_MAP.get(comp_name, mp.Ey)
         decay_by = stopping.get("decay_by", 1e-3)
         monitor_pt = resolve_decay_monitor_point(config)
-        print(f"Running simulation (decay mode: component={comp_name}, "
-              f"dt={dt}, decay_by={decay_by}, cap={run_after:.1f})...")
+        logger.info("Running simulation (decay mode: component=%s, dt=%s, "
+                     "decay_by=%s, cap=%.1f)...", comp_name, dt, decay_by, run_after)
 
         # Decay condition + numeric time cap (list = OR logic, first wins)
         decay_fn = mp.stop_when_fields_decayed(dt, comp, monitor_pt, decay_by)
         sim.run(*step_funcs, until_after_sources=[decay_fn, run_after])
     else:
-        print(f"Running simulation (until_after_sources={run_after:.1f})...")
+        logger.info("Running simulation (until_after_sources=%.1f)...", run_after)
         sim.run(*step_funcs, until_after_sources=run_after)
 
     wall_seconds = time.time() - wall_start
@@ -1087,7 +1116,7 @@ def main():
             render_animation_frames(eps_data, _extent)
             compile_animation_mp4()
 
-    print("Extracting S-parameters...")
+    logger.info("Extracting S-parameters...")
     s_params, debug_data = extract_s_params(config, sim, monitors)
 
     # Attach simulation metadata to debug_data
@@ -1097,7 +1126,7 @@ def main():
 
     save_results(config, s_params)
     save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
-    print("Done!")
+    logger.info("Done!")
 
 
 if __name__ == "__main__":

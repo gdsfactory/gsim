@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 
 class SParameterResult(BaseModel):
@@ -91,10 +95,8 @@ class SParameterResult(BaseModel):
         debug_info: dict[str, Any] = {}
         debug_path = path.parent / "meep_debug.json"
         if debug_path.exists():
-            try:
+            with contextlib.suppress(json.JSONDecodeError, OSError):
                 debug_info = json.loads(debug_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
 
         # Auto-detect diagnostic PNGs
         diagnostic_images: dict[str, str] = {}
@@ -144,10 +146,8 @@ class SParameterResult(BaseModel):
         debug_info: dict[str, Any] = {}
         debug_path = directory / "meep_debug.json"
         if debug_path.exists():
-            try:
+            with contextlib.suppress(json.JSONDecodeError, OSError):
                 debug_info = json.loads(debug_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
 
         diagnostic_images: dict[str, str] = {}
         for key, filename in [
@@ -176,18 +176,20 @@ class SParameterResult(BaseModel):
         from IPython.display import Image, display
 
         if not self.diagnostic_images:
-            print("No diagnostic images available.")
+            logger.info("No diagnostic images available.")
             return
 
         for name, img_path in sorted(self.diagnostic_images.items()):
-            print(f"--- {name} ---")
+            if not img_path.endswith((".png", ".jpg", ".jpeg", ".gif")):
+                continue  # skip video/directories; use show_animation() for MP4
+            logger.info("--- %s ---", name)
             display(Image(filename=img_path))
 
     def show_animation(self) -> None:
         """Display field animation MP4 in Jupyter."""
         mp4_path = self.diagnostic_images.get("animation")
         if mp4_path is None:
-            print("No animation MP4 available.")
+            logger.info("No animation MP4 available.")
             return
 
         from IPython.display import Video, display
@@ -207,19 +209,19 @@ class SParameterResult(BaseModel):
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots()
+        plt.close(fig)  # prevent double display in notebooks
 
+        ylabel = "|S| (dB)" if db else "|S|"
         for name, values in self.s_params.items():
             magnitudes = [abs(v) for v in values]
             if db:
                 import math
 
                 y_vals = [20 * math.log10(m) if m > 0 else -100 for m in magnitudes]
-                ylabel = "|S| (dB)"
             else:
                 y_vals = magnitudes
-                ylabel = "|S|"
 
-            ax.plot(self.wavelengths, y_vals, label=name, **kwargs)
+            ax.plot(self.wavelengths, y_vals, ".-", label=name, **kwargs)
 
         ax.set_xlabel("Wavelength (um)")
         ax.set_ylabel(ylabel)
