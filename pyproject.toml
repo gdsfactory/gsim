@@ -57,7 +57,8 @@ dev = [
   "ty>=0.0.13"
 ]
 docs = [
-  "ihp-gdsfactory>=0.1.4"
+  "ihp-gdsfactory>=0.1.4",
+  "ubcpdk @ git+https://github.com/gdsfactory/ubc.git"
 ]
 
 [[tool.bver.file]]
@@ -71,6 +72,9 @@ src = "src/gsim/__init__.py"
 
 [tool.bver.git]
 commit-template = "Release {new-version}"
+
+[tool.codespell]
+ignore-words-list = "doubleclick"
 
 [tool.mypy]
 mypy_path = ["src"]
@@ -90,6 +94,16 @@ disallow_untyped_defs = false
 # (e.g., gmsh, plotly). Keep mypy strict overall, but relax it here so
 # contributors aren't blocked by large refactors during early development.
 module = "gsim.palace.*"
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+check_untyped_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call", "var-annotated", "assignment"]
+disallow_any_generics = false
+disallow_untyped_defs = false
+# The MEEP subpackage wraps cloud-only MEEP simulation. Relaxed mypy
+# to match the Palace approach during early development.
+module = "gsim.meep.*"
 warn_return_any = false
 
 [[tool.mypy.overrides]]
@@ -198,6 +212,11 @@ select = ["ALL"]
   "INP001",  # implicit-namespace-package
   "PERF401"  # use-list-extend (keeping for readability)
 ]
+"nbs/*.py" = [
+  "EXE001",  # shebang-present-but-not-executable
+  "INP001",  # implicit-namespace-package
+  "T201"  # print (natural in scripts)
+]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations
   "ARG001",  # unused-function-argument
@@ -220,6 +239,7 @@ select = ["ALL"]
   "PLC0415",  # allow imports inside tests
   "PT011",  # pytest-raises-too-broad
   "S101",  # assert
+  "SLF001",  # private-member-access (testing internal state)
   "T201"  # print
 ]
 
@@ -228,3 +248,23 @@ convention = "google"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ty.analysis]
+# Optional runtime dependencies that are not always installed locally
+allowed-unresolved-imports = ["open3d", "open3d.**", "meep", "meep.**"]
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+possibly-missing-attribute = "ignore"
+
+[tool.ty.rules]
+missing-argument = "ignore"
+possibly-missing-attribute = "ignore"
+# Suppress rules that generate many false-positives in this codebase
+# (optional deps, third-party stubs, matplotlib Axes|None, etc.)
+unused-ignore-comment = "ignore"
+
+[tool.ty.src]
+include = ["src"]

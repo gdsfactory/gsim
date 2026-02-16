@@ -5,6 +5,7 @@ of gdsfactory+.
 
 Currently includes:
     - palace: Palace EM simulation API
+    - meep: MEEP photonic FDTD simulation API
 """
 
 from __future__ import annotations
