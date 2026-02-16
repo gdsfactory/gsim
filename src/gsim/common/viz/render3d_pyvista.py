@@ -254,16 +254,17 @@ def _create_prism_mesh(
     top_vertices: np.ndarray,
     prism: Prism | None = None,
 ) -> Any:
-    """Create a PyVista mesh from base/top 3D vertices, with hole support."""
-    if (
-        prism is not None
-        and prism.original_polygon is not None
-        and hasattr(prism.original_polygon, "interiors")
-        and prism.original_polygon.interiors
-    ):
-        return _create_prism_mesh_with_holes(
-            prism.original_polygon, base_vertices, top_vertices
+    """Create a PyVista mesh from base/top 3D vertices, with hole/concave support."""
+    if prism is not None and prism.original_polygon is not None:
+        poly = prism.original_polygon
+        has_holes = hasattr(poly, "interiors") and poly.interiors
+        is_concave = (
+            not has_holes
+            and hasattr(poly, "convex_hull")
+            and poly.convex_hull.area > poly.area * 1.001
         )
+        if has_holes or is_concave:
+            return _create_prism_mesh_with_holes(poly, base_vertices, top_vertices)
 
     n = len(base_vertices)
     all_verts = np.vstack([base_vertices, top_vertices])
