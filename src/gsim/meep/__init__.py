@@ -34,10 +34,11 @@ from gsim.meep.models import (
     # Config models used by Simulation.write_config()
     WavelengthConfig,
 )
-from gsim.meep.simulation import Simulation
+from gsim.meep.simulation import BuildResult, Simulation
 
 __all__ = [
     "FDTD",
+    "BuildResult",
     "DFTDecay",
     "Domain",
     "DomainConfig",

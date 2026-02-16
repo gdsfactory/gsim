@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,26 @@ from gsim.meep.models.api import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# BuildResult
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BuildResult:
+    """Result of :meth:`Simulation.build_config` — single source of truth.
+
+    Attributes:
+        config: Full serializable SimConfig.
+        component: Extended component (what meep actually simulates).
+        original_component: Original component before port extension.
+    """
+
+    config: Any  # SimConfig
+    component: Any  # gdsfactory Component (extended)
+    original_component: Any  # gdsfactory Component (original)
 
 
 # ---------------------------------------------------------------------------
@@ -385,28 +406,25 @@ class Simulation(BaseModel):
         return overrides
 
     # -------------------------------------------------------------------------
-    # write_config
+    # build_config — single source of truth
     # -------------------------------------------------------------------------
 
-    def write_config(self, output_dir: str | Path) -> Path:
-        """Serialize simulation config to output directory.
+    def build_config(self) -> BuildResult:
+        """Build the complete simulation config (single source of truth).
 
-        Args:
-            output_dir: Directory to write layout.gds, sim_config.json, run_meep.py.
+        All computation — validation, stack resolution, z-crop, port
+        extension, material resolution, MPI estimation — happens here.
+        Both :meth:`write_config` and the viz methods consume this output.
 
         Returns:
-            Path to the output directory.
+            BuildResult with SimConfig, extended component, and original.
 
         Raises:
             ValueError: If config is invalid.
         """
         from gsim.meep.materials import resolve_materials
-        from gsim.meep.models.config import LayerStackEntry, SimConfig
+        from gsim.meep.models.config import LayerStackEntry, SimConfig, SymmetryEntry
         from gsim.meep.ports import extract_port_info
-        from gsim.meep.script import generate_meep_script
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         validation = self.validate_config()
         if not validation.valid:
@@ -452,10 +470,6 @@ class Simulation(BaseModel):
         else:
             component = original_component
 
-        # Write extended component GDS
-        gds_path = output_dir / "layout.gds"
-        component.write_gds(gds_path)
-
         # Build layer stack entries
         layer_stack_entries = []
         used_materials: set[str] = set()
@@ -500,8 +514,6 @@ class Simulation(BaseModel):
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
         # Translate domain.symmetries → SymmetryEntry for config
-        from gsim.meep.models.config import SymmetryEntry
-
         symmetry_entries = [
             SymmetryEntry(direction=s.direction, phase=s.phase)
             for s in self.domain.symmetries
@@ -567,9 +579,43 @@ class Simulation(BaseModel):
             resolution_cfg.pixels_per_um,
         )
 
+        return BuildResult(
+            config=sim_config,
+            component=component,
+            original_component=original_component,
+        )
+
+    # -------------------------------------------------------------------------
+    # write_config
+    # -------------------------------------------------------------------------
+
+    def write_config(self, output_dir: str | Path) -> Path:
+        """Serialize simulation config to output directory.
+
+        Thin wrapper around :meth:`build_config` — writes GDS, JSON, and
+        the runner script.
+
+        Args:
+            output_dir: Directory to write layout.gds, sim_config.json, run_meep.py.
+
+        Returns:
+            Path to the output directory.
+
+        Raises:
+            ValueError: If config is invalid.
+        """
+        from gsim.meep.script import generate_meep_script
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        result = self.build_config()
+
+        # Write extended component GDS
+        result.component.write_gds(output_dir / "layout.gds")
+
         # Write JSON config
-        config_path = output_dir / "sim_config.json"
-        sim_config.to_json(config_path)
+        result.config.to_json(output_dir / "sim_config.json")
 
         # Write runner script
         script_path = output_dir / "run_meep.py"
@@ -583,18 +629,24 @@ class Simulation(BaseModel):
     # run
     # -------------------------------------------------------------------------
 
-    def run(self, output_dir: str | Path, *, verbose: bool = True) -> Any:
+    def run(self, output_dir: str | Path | None = None, *, verbose: bool = True) -> Any:
         """Run MEEP simulation on the cloud.
 
         Args:
             output_dir: Directory to write config and download results.
+                If None, a temporary directory is created automatically.
             verbose: Print progress info.
 
         Returns:
             SParameterResult with parsed S-parameters.
         """
+        import tempfile
+
         from gsim.gcloud import run_simulation
         from gsim.meep.models.results import SParameterResult
+
+        if output_dir is None:
+            output_dir = Path(tempfile.mkdtemp(prefix="meep_"))
 
         output_dir = self.write_config(output_dir)
 
@@ -618,40 +670,42 @@ class Simulation(BaseModel):
     def plot_2d(self, **kwargs: Any) -> Any:
         """Plot 2D cross-sections of the geometry.
 
+        Uses :meth:`build_config` so the plot shows exactly what meep
+        processes — including extended ports and PML boundaries.
+
         Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_2d`.
         """
         from gsim.meep.viz import plot_2d
 
-        self._ensure_stack()
-        self._apply_z_crop()
-
-        if self.geometry.component is None:
-            raise ValueError("No component set. Assign sim.geometry.component first.")
+        result = self.build_config()
 
         return plot_2d(
-            component=self.geometry.component,
+            component=result.component,
             stack=self.geometry.stack,
-            domain_config=self._domain_config(),
-            source_port=self.source.port,
+            domain_config=result.config.domain,
+            source_port=result.config.source.port,
+            extend_ports_length=0,
+            port_data=result.config.ports,
+            component_bbox=result.config.component_bbox,
             **kwargs,
         )
 
     def plot_3d(self, **kwargs: Any) -> Any:
         """Plot 3D visualization of the geometry.
 
+        Uses :meth:`build_config` so the plot shows exactly what meep
+        processes — including extended ports.
+
         Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_3d`.
         """
         from gsim.meep.viz import plot_3d
 
-        self._ensure_stack()
-        self._apply_z_crop()
-
-        if self.geometry.component is None:
-            raise ValueError("No component set. Assign sim.geometry.component first.")
+        result = self.build_config()
 
         return plot_3d(
-            component=self.geometry.component,
+            component=result.component,
             stack=self.geometry.stack,
-            domain_config=self._domain_config(),
+            domain_config=result.config.domain,
+            extend_ports_length=0,
             **kwargs,
         )

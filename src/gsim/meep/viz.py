@@ -28,6 +28,7 @@ def build_geometry_model(
     component: Component,
     stack: LayerStack | None,
     domain_config: DomainConfig,
+    extend_ports_length: float | None = None,
 ) -> GeometryModel:
     """Build a GeometryModel from a component + stack for visualization.
 
@@ -43,6 +44,10 @@ def build_geometry_model(
         component: gdsfactory Component to visualize.
         stack: gsim LayerStack (used for z-crop clipping). May be None.
         domain_config: Domain configuration for port extension length.
+        extend_ports_length: Override port extension length. Pass ``0``
+            when the component has already been extended by
+            :meth:`Simulation.build_config`. ``None`` (default) computes
+            the length from *domain_config* as before.
 
     Returns:
         GeometryModel ready for visualization.
@@ -62,10 +67,14 @@ def build_geometry_model(
             "Active PDK has no layer_stack. Activate a PDK with a layer stack first."
         )
 
-    # Compute port extension length (same logic as write_config)
-    extend_length = domain_config.extend_ports
-    if extend_length == 0.0:
-        extend_length = domain_config.margin_xy + domain_config.dpml
+    # Compute port extension length
+    if extend_ports_length is not None:
+        extend_length = extend_ports_length
+    else:
+        # Default: same logic as build_config
+        extend_length = domain_config.extend_ports
+        if extend_length == 0.0:
+            extend_length = domain_config.margin_xy + domain_config.dpml
 
     lc = LayeredComponentBase(
         component=component,
@@ -145,15 +154,22 @@ def build_overlay(
     stack: LayerStack | None,
     domain_config: DomainConfig,
     source_port: str | None = None,
+    port_data: list | None = None,
+    component_bbox: list[float] | tuple[float, ...] | None = None,
 ) -> Any:
     """Build a SimOverlay from config, if stack is available.
 
     Args:
         geometry_model: The geometry model (for bbox).
-        component: Original component (for bbox and port extraction).
+        component: Component (for bbox and port extraction fallback).
         stack: gsim LayerStack (needed for dielectrics). May be None.
         domain_config: Domain configuration.
         source_port: Source port name (or None for auto).
+        port_data: Pre-computed port data from :meth:`Simulation.build_config`.
+            When provided, skips port extraction (avoids duplicate work).
+        component_bbox: Original component bbox ``[xmin, ymin, xmax, ymax]``
+            from :meth:`Simulation.build_config`. When provided, cell
+            boundaries are computed from this instead of ``component.dbbox()``.
 
     Returns:
         SimOverlay or None if stack isn't configured.
@@ -163,18 +179,27 @@ def build_overlay(
     if stack is None:
         return None
 
-    try:
-        from gsim.meep.ports import extract_port_info
+    # Use pre-computed port data or extract from component
+    if port_data is None:
+        try:
+            from gsim.meep.ports import extract_port_info
 
-        comp_copy = component.copy()
-        port_data = extract_port_info(comp_copy, stack, source_port=source_port)
-    except Exception:
-        port_data = []
+            comp_copy = component.copy()
+            port_data = extract_port_info(comp_copy, stack, source_port=source_port)
+        except Exception:
+            port_data = []
 
-    # Pass original component bbox so cell boundaries are computed from
-    # the original geometry, not the port-extended geometry.
-    bbox = component.dbbox()
-    orig_bbox = (bbox.left, bbox.bottom, bbox.right, bbox.top)
+    # Use pre-computed component bbox or extract from component
+    if component_bbox is not None:
+        orig_bbox = (
+            component_bbox[0],
+            component_bbox[1],
+            component_bbox[2],
+            component_bbox[3],
+        )
+    else:
+        bbox = component.dbbox()
+        orig_bbox = (bbox.left, bbox.bottom, bbox.right, bbox.top)
 
     dielectrics = stack.dielectrics if stack else []
     return build_sim_overlay(
@@ -196,6 +221,7 @@ def plot_3d(
     stack: LayerStack | None,
     domain_config: DomainConfig,
     backend: str = "open3d",
+    extend_ports_length: float | None = None,
     **kwargs: Any,
 ) -> Any:
     """Create interactive 3D visualization of MEEP geometry.
@@ -205,6 +231,8 @@ def plot_3d(
         stack: gsim LayerStack (may be None).
         domain_config: Domain configuration.
         backend: "open3d" (Jupyter/VS Code) or "pyvista" (desktop).
+        extend_ports_length: Override port extension length (pass 0 if
+            the component is already extended).
         **kwargs: Extra args forwarded to the backend renderer.
 
     Returns:
@@ -212,7 +240,9 @@ def plot_3d(
     """
     from gsim.common.viz import plot_prisms_3d, plot_prisms_3d_open3d
 
-    gm = build_geometry_model(component, stack, domain_config)
+    gm = build_geometry_model(
+        component, stack, domain_config, extend_ports_length=extend_ports_length
+    )
     if backend == "pyvista":
         return plot_prisms_3d(gm, **kwargs)
     if backend == "open3d":
@@ -231,6 +261,9 @@ def plot_2d(
     ax: plt.Axes | None = None,
     legend: bool = True,
     slices: str = "z",
+    extend_ports_length: float | None = None,
+    port_data: list | None = None,
+    component_bbox: list[float] | tuple[float, ...] | None = None,
 ) -> plt.Axes | None:
     """Plot 2D cross-sections of the MEEP geometry.
 
@@ -245,12 +278,27 @@ def plot_2d(
         ax: Axes to draw on. If None, a new figure is created.
         legend: Whether to show the legend.
         slices: Slice direction(s) — "x", "y", "z", or combinations.
+        extend_ports_length: Override port extension length (pass 0 if
+            the component is already extended).
+        port_data: Pre-computed port data (skips re-extraction).
+        component_bbox: Original component bbox ``[xmin, ymin, xmax, ymax]``
+            (for correct cell boundary computation with extended ports).
 
     Returns:
         ``plt.Axes`` when *ax* was provided, otherwise ``None``.
     """
     from gsim.common.viz import plot_prism_slices
 
-    gm = build_geometry_model(component, stack, domain_config)
-    overlay = build_overlay(gm, component, stack, domain_config, source_port)
+    gm = build_geometry_model(
+        component, stack, domain_config, extend_ports_length=extend_ports_length
+    )
+    overlay = build_overlay(
+        gm,
+        component,
+        stack,
+        domain_config,
+        source_port,
+        port_data=port_data,
+        component_bbox=component_bbox,
+    )
     return plot_prism_slices(gm, x, y, z, ax, legend, slices, overlay=overlay)
