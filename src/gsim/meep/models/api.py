@@ -7,7 +7,7 @@ in ``Simulation.write_config()``.
 
 from __future__ import annotations
 
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,7 +53,7 @@ class Material(BaseModel):
 
 
 class ModeSource(BaseModel):
-    """Mode source excitation."""
+    """Mode source excitation and spectral measurement window."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -66,26 +66,16 @@ class ModeSource(BaseModel):
         gt=0,
         description="Center wavelength in um",
     )
-    bandwidth: float | None = Field(
-        default=None,
-        description="Source Gaussian bandwidth in wavelength um. None = auto (~3x monitor bw).",
+    bandwidth: float = Field(
+        default=0.1,
+        ge=0,
+        description="Measurement wavelength bandwidth in um",
     )
-
-
-# ---------------------------------------------------------------------------
-# Monitor
-# ---------------------------------------------------------------------------
-
-
-class ModeMonitor(BaseModel):
-    """Mode monitor for S-parameter extraction at a port."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    port: str = Field(description="Port name (required)")
-    wavelength: float = Field(default=1.55, gt=0, description="Center wavelength in um")
-    bandwidth: float = Field(default=0.1, ge=0, description="Wavelength bandwidth in um")
-    num_freqs: int = Field(default=11, ge=1, description="Number of frequency points")
+    num_freqs: int = Field(
+        default=11,
+        ge=1,
+        description="Number of frequency points",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +83,17 @@ class ModeMonitor(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class Symmetry(BaseModel):
+    """Mirror symmetry plane."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    direction: Literal["X", "Y", "Z"]
+    phase: Literal[1, -1] = Field(default=1)
+
+
 class Domain(BaseModel):
-    """Computational domain sizing: PML + margins."""
+    """Computational domain sizing: PML + margins + symmetries."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -119,6 +118,10 @@ class Domain(BaseModel):
         default=0.0,
         ge=0,
         description="Length to extend waveguide ports into PML in um. 0 = auto (margin + pml).",
+    )
+    symmetries: list[Symmetry] = Field(
+        default_factory=list,
+        description="Mirror symmetry planes. Not yet used in production runs.",
     )
 
 
@@ -168,7 +171,7 @@ class DFTDecay(BaseModel):
 
 
 class FDTD(BaseModel):
-    """Solver numerics: resolution, stopping, subpixel."""
+    """Solver numerics: resolution, stopping, subpixel, diagnostics."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -189,17 +192,7 @@ class FDTD(BaseModel):
         description="Shapely simplification tolerance in um (0=off)",
     )
 
-
-# ---------------------------------------------------------------------------
-# Diagnostics
-# ---------------------------------------------------------------------------
-
-
-class Diagnostics(BaseModel):
-    """Output control for diagnostic plots, fields, animations."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
+    # Diagnostics — output control for plots, fields, animations
     save_geometry: bool = Field(default=True)
     save_fields: bool = Field(default=True)
     save_epsilon_raw: bool = Field(default=False)

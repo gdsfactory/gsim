@@ -22,30 +22,29 @@ sim = meep.Simulation()
 sim.geometry.component = ybranch
 sim.geometry.z_crop = "auto"
 sim.materials = {"si": 3.47, "SiO2": 1.44}       # float shorthand → Material(n=...)
-sim.source = meep.ModeSource()                      # auto fwidth, auto port
-sim.monitors = [
-    meep.ModeMonitor(port="o1", wavelength=1.55, bandwidth=0.1),
-    meep.ModeMonitor(port="o2", wavelength=1.55, bandwidth=0.1),
-]
+sim.source.wavelength = 1.55
+sim.source.bandwidth = 0.1
+sim.source.num_freqs = 11
+sim.monitors = ["o1", "o2"]                          # just port names
 sim.domain = meep.Domain(pml=1.0, margin=0.5)
 sim.solver = meep.FDTD(
     resolution=32,
     stopping=meep.DFTDecay(threshold=1e-3, min_time=100),
     simplify_tol=0.01,
+    save_geometry=True,
+    save_fields=True,
 )
-sim.diagnostics = meep.Diagnostics(save_geometry=True, save_fields=True)
-sim.output_dir = "./meep-sim"
 sim.plot_2d(slices="xyz")
-result = sim.run()
+result = sim.run("./meep-sim")
 ```
 
 ### Design principles
 
-- **6 typed physics objects** — `Geometry`, `Material`, `ModeSource`, `ModeMonitor`, `Domain`, `FDTD` — assigned to a `Simulation` container. No ordering dependencies.
+- **6 typed physics objects** — `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD` + `monitors: list[str]` — assigned to a `Simulation` container. No ordering dependencies.
 - **Field-by-field or whole-object assignment** — `sim.source.port = "o1"` or `sim.source = ModeSource(port="o1")`.
 - **Float shorthand for materials** — `{"si": 3.47}` auto-normalizes to `Material(n=3.47)` via validator.
 - **Typed stopping variants** — `FixedTime`, `FieldDecay`, `DFTDecay` instead of string `mode`.
-- **Monitors define wavelength** — `WavelengthConfig` derived from monitors (all must share same wl/bw/nfreq). Fallback to source wavelength.
+- **Source defines spectral window** — `WavelengthConfig` derived from `ModeSource.wavelength/bandwidth/num_freqs`. Monitors are just port name strings.
 - **JSON contract unchanged** — `write_config()` translates new API → existing `SimConfig` → JSON. Runner template untouched.
 - **Legacy `MeepSim`** kept for backward compat (imperative builder pattern with `set_*()` methods).
 
@@ -54,9 +53,9 @@ result = sim.run()
 | Old issue | Resolution |
 |---|---|
 | `FDTDConfig` misnamed | `WavelengthConfig` (renamed in Step 1), monitors now define wavelength directly |
-| Sources/monitors invisible | Explicit `ModeSource` and `ModeMonitor` objects |
-| `set_accuracy()` conflates concerns | Split into `FDTD` (subpixel, simplify) and `Diagnostics` (verbose, save) |
-| `verbose_interval` homeless | Lives in `Diagnostics` |
+| Sources/monitors invisible | Explicit `ModeSource` (with spectral window) + `monitors: list[str]` |
+| `set_accuracy()` conflates concerns | `FDTD` holds solver numerics + diagnostics (subpixel, simplify, save, verbose) |
+| `verbose_interval` homeless | Lives in `FDTD` |
 | Builder ordering dependencies | Declarative — assign in any order, resolved at `write_config()` |
 | Stopping uses MEEP-internal names | `DFTDecay(threshold=, min_time=)` — physicist-friendly |
 | `set_domain(0.5)` positional arg | `Domain(margin=0.5)` — all keyword |
@@ -70,8 +69,8 @@ result = sim.run()
 | Module | Purpose |
 |---|---|
 | `__init__.py` | Exports: `Simulation`, `MeepSim`, all model classes |
-| `models/api.py` | Declarative models: `Geometry`, `Material`, `ModeSource`, `ModeMonitor`, `Domain`, `FixedTime`, `FieldDecay`, `DFTDecay`, `FDTD`, `Diagnostics` |
-| `simulation.py` | `Simulation` container — `write_config()` (translates to `SimConfig`), `run()`, `validate_config()`, `plot_2d()`/`plot_3d()` |
+| `models/api.py` | Declarative models: `Geometry`, `Material`, `ModeSource`, `Domain`, `FixedTime`, `FieldDecay`, `DFTDecay`, `FDTD` |
+| `simulation.py` | `Simulation` container — `write_config(output_dir)` (translates to `SimConfig`), `run(output_dir)`, `validate_config()`, `plot_2d()`/`plot_3d()` |
 | `sim.py` | Legacy `MeepSim` — imperative builder, backward compat |
 | `base.py` | `MeepSimMixin` — shared viz, stack resolution, z-crop, material helpers |
 | `models/config.py` | `SimConfig` + all sub-configs (JSON serialization layer) |
@@ -109,8 +108,8 @@ Solver-agnostic: `LayeredComponentBase`, `GeometryModel`/`Prism`, `LayerStack`, 
 
 ### Medium-term
 
-- [ ] **Custom monitors** — `ModeMonitor` is port-based only. Add `FieldMonitor(center, size)` and `FluxMonitor` for custom measurement locations.
-- [ ] **Per-port margin/mode_index** — `port_margin` is global in `Domain`. Could move to per-monitor control via `ModeMonitor(margin=0.5, mode_index=1)`.
+- [ ] **Custom monitors** — Monitors are port-name strings only. Add `FieldMonitor(center, size)` and `FluxMonitor` for custom measurement locations.
+- [ ] **Per-port margin/mode_index** — `port_margin` is global in `Domain`. Could add per-port control for margin and higher-order modes.
 - [ ] **Typed boundaries** — Only PML today. Add `Periodic`, `Bloch`, `PEC`, `PMC` per-axis boundary specs.
 - [ ] **Mesh refinement regions** — Single global `resolution`. Add local refinement for thin features.
 - [ ] **Dispersive materials** — `Material(n, k)` is non-dispersive. Add Sellmeier/Lorentz/Drude support.

@@ -14,17 +14,14 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.meep.models.api import (
     DFTDecay,
-    Diagnostics,
     Domain,
     FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
     Material,
-    ModeMonitor,
     ModeSource,
 )
-from gsim.meep.models.config import SymmetryEntry
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +41,9 @@ class Simulation(BaseModel):
         sim.geometry.stack = stack
         sim.materials = {"si": 3.47, "sio2": 1.44}
         sim.source.port = "o1"
-        sim.monitors = [meep.ModeMonitor(port="o1"), meep.ModeMonitor(port="o2")]
+        sim.monitors = ["o1", "o2"]
         sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
-        result = sim.run()
+        result = sim.run("./meep-sim")
     """
 
     model_config = ConfigDict(
@@ -57,12 +54,9 @@ class Simulation(BaseModel):
     geometry: Geometry = Field(default_factory=Geometry)
     materials: dict[str, float | Material] = Field(default_factory=dict)
     source: ModeSource = Field(default_factory=ModeSource)
-    monitors: list[ModeMonitor] = Field(default_factory=list)
+    monitors: list[str] = Field(default_factory=list)
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
-    diagnostics: Diagnostics = Field(default_factory=Diagnostics)
-    symmetries: list[SymmetryEntry] = Field(default_factory=list)
-    output_dir: Path | None = None
 
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -136,26 +130,12 @@ class Simulation(BaseModel):
             # Validate monitor port names
             if ports and self.monitors:
                 port_names = [p.name for p in ports]
-                for mon in self.monitors:
-                    if mon.port not in port_names:
+                for mon_port in self.monitors:
+                    if mon_port not in port_names:
                         errors.append(
-                            f"Monitor port '{mon.port}' not found. "
+                            f"Monitor port '{mon_port}' not found. "
                             f"Available: {port_names}"
                         )
-
-        # Validate monitors share same wavelength/bandwidth
-        if len(self.monitors) > 1:
-            wl0 = self.monitors[0].wavelength
-            bw0 = self.monitors[0].bandwidth
-            nf0 = self.monitors[0].num_freqs
-            for i, mon in enumerate(self.monitors[1:], 1):
-                if mon.wavelength != wl0 or mon.bandwidth != bw0 or mon.num_freqs != nf0:
-                    errors.append(
-                        f"All monitors must share the same wavelength/bandwidth/num_freqs. "
-                        f"Monitor 0 has ({wl0}, {bw0}, {nf0}), "
-                        f"monitor {i} has ({mon.wavelength}, {mon.bandwidth}, {mon.num_freqs})."
-                    )
-                    break
 
         if self.geometry.stack is None:
             warnings_list.append(
@@ -258,20 +238,13 @@ class Simulation(BaseModel):
     # -------------------------------------------------------------------------
 
     def _wavelength_config(self) -> Any:
-        """Derive WavelengthConfig from monitors or source."""
+        """Derive WavelengthConfig from source."""
         from gsim.meep.models.config import WavelengthConfig
 
-        if self.monitors:
-            mon = self.monitors[0]
-            return WavelengthConfig(
-                wavelength=mon.wavelength,
-                bandwidth=mon.bandwidth,
-                num_freqs=mon.num_freqs,
-            )
         return WavelengthConfig(
             wavelength=self.source.wavelength,
-            bandwidth=0.1,
-            num_freqs=11,
+            bandwidth=self.source.bandwidth,
+            num_freqs=self.source.num_freqs,
         )
 
     def _source_config(self) -> Any:
@@ -279,7 +252,7 @@ class Simulation(BaseModel):
         from gsim.meep.models.config import SourceConfig
 
         return SourceConfig(
-            bandwidth=self.source.bandwidth,
+            bandwidth=None,
             port=self.source.port,
         )
 
@@ -339,17 +312,17 @@ class Simulation(BaseModel):
         )
 
     def _diagnostics_config(self) -> Any:
-        """Translate Diagnostics → DiagnosticsConfig."""
+        """Translate FDTD diagnostic fields → DiagnosticsConfig."""
         from gsim.meep.models.config import DiagnosticsConfig
 
         return DiagnosticsConfig(
-            save_geometry=self.diagnostics.save_geometry,
-            save_fields=self.diagnostics.save_fields,
-            save_epsilon_raw=self.diagnostics.save_epsilon_raw,
-            save_animation=self.diagnostics.save_animation,
-            animation_interval=self.diagnostics.animation_interval,
-            preview_only=self.diagnostics.preview_only,
-            verbose_interval=self.diagnostics.verbose_interval,
+            save_geometry=self.solver.save_geometry,
+            save_fields=self.solver.save_fields,
+            save_epsilon_raw=self.solver.save_epsilon_raw,
+            save_animation=self.solver.save_animation,
+            animation_interval=self.solver.animation_interval,
+            preview_only=self.solver.preview_only,
+            verbose_interval=self.solver.verbose_interval,
         )
 
     def _material_overrides(self) -> dict[str, Any]:
@@ -369,16 +342,17 @@ class Simulation(BaseModel):
     # write_config
     # -------------------------------------------------------------------------
 
-    def write_config(self) -> Path:
+    def write_config(self, output_dir: str | Path) -> Path:
         """Serialize simulation config to output directory.
 
-        Writes layout.gds, sim_config.json, and run_meep.py.
+        Args:
+            output_dir: Directory to write layout.gds, sim_config.json, run_meep.py.
 
         Returns:
             Path to the output directory.
 
         Raises:
-            ValueError: If output_dir not set or config is invalid.
+            ValueError: If config is invalid.
         """
         from gsim.meep.materials import resolve_materials
         from gsim.meep.models.config import LayerStackEntry, SimConfig
@@ -386,12 +360,8 @@ class Simulation(BaseModel):
         from gsim.meep.script import generate_meep_script
         from gsim.meep.sim import estimate_meep_np
 
-        if self.output_dir is None:
-            raise ValueError(
-                "Output directory not set. Assign sim.output_dir first."
-            )
-
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         validation = self.validate_config()
         if not validation.valid:
@@ -446,7 +416,7 @@ class Simulation(BaseModel):
             component = original_component
 
         # Write extended component GDS
-        gds_path = self.output_dir / "layout.gds"
+        gds_path = output_dir / "layout.gds"
         component.write_gds(gds_path)
 
         # Build layer stack entries
@@ -490,6 +460,22 @@ class Simulation(BaseModel):
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
+        # Translate domain.symmetries → SymmetryEntry for legacy config
+        from gsim.meep.models.config import SymmetryEntry
+
+        symmetry_entries = [
+            SymmetryEntry(direction=s.direction, phase=s.phase)
+            for s in self.domain.symmetries
+        ]
+        if symmetry_entries:
+            import warnings
+
+            warnings.warn(
+                "Symmetries are not yet used in production S-parameter runs "
+                "(only applied in preview-only mode).",
+                stacklevel=2,
+            )
+
         # Build SimConfig
         sim_config = SimConfig(
             gds_filename="layout.gds",
@@ -506,7 +492,7 @@ class Simulation(BaseModel):
             accuracy=accuracy_cfg,
             diagnostics=diagnostics_cfg,
             verbose_interval=diagnostics_cfg.verbose_interval,
-            symmetries=self.symmetries,
+            symmetries=symmetry_entries,
         )
 
         # Estimate MPI process count
@@ -535,25 +521,27 @@ class Simulation(BaseModel):
         )
 
         # Write JSON config
-        config_path = self.output_dir / "sim_config.json"
+        config_path = output_dir / "sim_config.json"
         sim_config.to_json(config_path)
 
         # Write runner script
-        script_path = self.output_dir / "run_meep.py"
+        script_path = output_dir / "run_meep.py"
         script_content = generate_meep_script(config_filename="sim_config.json")
         script_path.write_text(script_content)
 
-        logger.info("Config written to %s", self.output_dir)
-        return self.output_dir
+        logger.info("Config written to %s", output_dir)
+        return output_dir
 
     # -------------------------------------------------------------------------
     # run
     # -------------------------------------------------------------------------
 
-    def run(self, *, verbose: bool = True) -> Any:
+    def run(self, output_dir: str | Path, *, verbose: bool = True) -> Any:
         """Run MEEP simulation on the cloud.
 
-        Writes config, uploads, waits, downloads, and parses S-parameters.
+        Args:
+            output_dir: Directory to write config and download results.
+            verbose: Print progress info.
 
         Returns:
             SParameterResult with parsed S-parameters.
@@ -561,13 +549,10 @@ class Simulation(BaseModel):
         from gsim.gcloud import run_simulation
         from gsim.meep.models.results import SParameterResult
 
-        self.write_config()
-
-        if self.output_dir is None:
-            raise ValueError("Output directory not set.")
+        output_dir = self.write_config(output_dir)
 
         results = run_simulation(
-            self.output_dir,
+            output_dir,
             job_type="meep",
             verbose=verbose,
         )
@@ -598,7 +583,7 @@ class Simulation(BaseModel):
         legacy.domain_config = self._domain_config()
         legacy.source_config = self._source_config()
         legacy.materials = self._material_overrides()
-        legacy._output_dir = self.output_dir
+        legacy._output_dir = None
         legacy._stack_kwargs = self._stack_kwargs.copy()
         return legacy
 

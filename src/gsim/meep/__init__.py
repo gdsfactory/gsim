@@ -11,9 +11,9 @@ Declarative API example::
     sim = meep.Simulation()
     sim.geometry.component = ybranch
     sim.source.port = "o1"
-    sim.monitors = [meep.ModeMonitor(port="o1"), meep.ModeMonitor(port="o2")]
+    sim.monitors = ["o1", "o2"]
     sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
-    result = sim.run()
+    result = sim.run("./meep-sim")
 
 Legacy API example::
 
@@ -32,15 +32,14 @@ Legacy API example::
 from gsim.meep.models import (
     # New declarative API models
     DFTDecay,
-    Diagnostics,
     Domain,
     FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
     Material,
-    ModeMonitor,
     ModeSource,
+    Symmetry,
     # Legacy config models
     AccuracyConfig,
     DiagnosticsConfig,
@@ -59,16 +58,15 @@ from gsim.meep.simulation import Simulation
 __all__ = [
     # New declarative API
     "DFTDecay",
-    "Diagnostics",
     "Domain",
     "FDTD",
     "FieldDecay",
     "FixedTime",
     "Geometry",
     "Material",
-    "ModeMonitor",
     "ModeSource",
     "Simulation",
+    "Symmetry",
     # Legacy
     "AccuracyConfig",
     "DiagnosticsConfig",

@@ -6,18 +6,16 @@ import pytest
 
 from gsim.meep import (
     DFTDecay,
-    Diagnostics,
     Domain,
     FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
     Material,
-    ModeMonitor,
     ModeSource,
     Simulation,
+    Symmetry,
 )
-from gsim.meep.models.config import SymmetryEntry
 
 
 # ---------------------------------------------------------------------------
@@ -44,33 +42,20 @@ class TestMaterial:
             Material(n=1.5, k=-0.1)
 
 
-class TestModeMonitor:
-    def test_defaults(self):
-        m = ModeMonitor(port="o1")
-        assert m.port == "o1"
-        assert m.wavelength == 1.55
-        assert m.bandwidth == 0.1
-        assert m.num_freqs == 11
-
-    def test_custom(self):
-        m = ModeMonitor(port="o2", wavelength=1.31, bandwidth=0.05, num_freqs=21)
-        assert m.wavelength == 1.31
-        assert m.bandwidth == 0.05
-        assert m.num_freqs == 21
-
-
 class TestModeSource:
     def test_defaults(self):
         s = ModeSource()
         assert s.port is None
         assert s.wavelength == 1.55
-        assert s.bandwidth is None
+        assert s.bandwidth == 0.1
+        assert s.num_freqs == 11
 
     def test_custom(self):
-        s = ModeSource(port="o1", wavelength=1.31, bandwidth=0.3)
+        s = ModeSource(port="o1", wavelength=1.31, bandwidth=0.05, num_freqs=21)
         assert s.port == "o1"
         assert s.wavelength == 1.31
-        assert s.bandwidth == 0.3
+        assert s.bandwidth == 0.05
+        assert s.num_freqs == 21
 
 
 class TestDomain:
@@ -82,12 +67,19 @@ class TestDomain:
         assert d.margin_z_below == 0.5
         assert d.port_margin == 0.5
         assert d.extend_ports == 0.0
+        assert d.symmetries == []
 
     def test_custom(self):
         d = Domain(pml=0.5, margin=0.2, port_margin=0.3)
         assert d.pml == 0.5
         assert d.margin == 0.2
         assert d.port_margin == 0.3
+
+    def test_symmetries(self):
+        d = Domain(symmetries=[Symmetry(direction="Y", phase=-1)])
+        assert len(d.symmetries) == 1
+        assert d.symmetries[0].direction == "Y"
+        assert d.symmetries[0].phase == -1
 
 
 class TestStoppingVariants:
@@ -134,14 +126,20 @@ class TestFDTD:
         assert f.resolution == 64
 
 
-class TestDiagnostics:
+class TestFDTDDiagnostics:
     def test_defaults(self):
-        d = Diagnostics()
-        assert d.save_geometry is True
-        assert d.save_fields is True
-        assert d.save_animation is False
-        assert d.preview_only is False
-        assert d.verbose_interval == 0
+        f = FDTD()
+        assert f.save_geometry is True
+        assert f.save_fields is True
+        assert f.save_animation is False
+        assert f.preview_only is False
+        assert f.verbose_interval == 0
+
+    def test_custom(self):
+        f = FDTD(save_animation=True, verbose_interval=5.0, preview_only=True)
+        assert f.save_animation is True
+        assert f.verbose_interval == 5.0
+        assert f.preview_only is True
 
 
 # ---------------------------------------------------------------------------
@@ -249,28 +247,14 @@ class TestValidation:
         result = sim.validate_config()
         assert any("No stack" in w for w in result.warnings)
 
-    def test_monitor_wavelength_mismatch(self):
+    def test_string_monitors(self):
         sim = Simulation()
-        sim.monitors = [
-            ModeMonitor(port="o1", wavelength=1.55),
-            ModeMonitor(port="o2", wavelength=1.31),
-        ]
-        result = sim.validate_config()
-        assert any("same wavelength" in e for e in result.errors)
+        sim.monitors = ["o1", "o2", "o3"]
+        assert sim.monitors == ["o1", "o2", "o3"]
 
-    def test_monitors_same_wavelength_ok(self):
+    def test_write_config_requires_output_dir(self):
         sim = Simulation()
-        sim.monitors = [
-            ModeMonitor(port="o1", wavelength=1.55),
-            ModeMonitor(port="o2", wavelength=1.55),
-        ]
-        result = sim.validate_config()
-        # Should not have a wavelength mismatch error
-        assert not any("same wavelength" in e for e in result.errors)
-
-    def test_output_dir_required(self):
-        sim = Simulation()
-        with pytest.raises(ValueError, match="Output directory not set"):
+        with pytest.raises(TypeError):
             sim.write_config()
 
 
@@ -280,21 +264,20 @@ class TestValidation:
 
 
 class TestWavelengthDerivation:
-    def test_from_monitors(self):
+    def test_from_source_defaults(self):
         sim = Simulation()
-        sim.monitors = [ModeMonitor(port="o1", wavelength=1.31, bandwidth=0.05, num_freqs=21)]
+        wl = sim._wavelength_config()
+        assert wl.wavelength == 1.55
+        assert wl.bandwidth == 0.1
+        assert wl.num_freqs == 11
+
+    def test_from_source_custom(self):
+        sim = Simulation()
+        sim.source = ModeSource(wavelength=1.31, bandwidth=0.05, num_freqs=21)
         wl = sim._wavelength_config()
         assert wl.wavelength == 1.31
         assert wl.bandwidth == 0.05
         assert wl.num_freqs == 21
-
-    def test_fallback_to_source(self):
-        sim = Simulation()
-        sim.source = ModeSource(wavelength=1.31)
-        wl = sim._wavelength_config()
-        assert wl.wavelength == 1.31
-        assert wl.bandwidth == 0.1  # default fallback
-        assert wl.num_freqs == 11
 
 
 # ---------------------------------------------------------------------------
@@ -353,15 +336,15 @@ class TestConfigTranslation:
 
     def test_source_translation(self):
         sim = Simulation()
-        sim.source = ModeSource(port="o1", bandwidth=0.3)
+        sim.source = ModeSource(port="o1", bandwidth=0.05)
         cfg = sim._source_config()
         assert cfg.port == "o1"
-        assert cfg.bandwidth == 0.3
+        assert cfg.bandwidth is None  # always auto fwidth
 
     def test_diagnostics_translation(self):
         sim = Simulation()
-        sim.diagnostics.save_animation = True
-        sim.diagnostics.preview_only = True
+        sim.solver.save_animation = True
+        sim.solver.preview_only = True
         cfg = sim._diagnostics_config()
         assert cfg.save_animation is True
         assert cfg.preview_only is True
@@ -376,24 +359,23 @@ class TestImports:
     def test_import_all_new_api(self):
         from gsim.meep import (
             DFTDecay,
-            Diagnostics,
             Domain,
             FDTD,
             FieldDecay,
             FixedTime,
             Geometry,
             Material,
-            ModeMonitor,
             ModeSource,
             Simulation,
+            Symmetry,
         )
 
         assert all(
             cls is not None
             for cls in [
-                DFTDecay, Diagnostics, Domain, FDTD, FieldDecay,
-                FixedTime, Geometry, Material, ModeMonitor, ModeSource,
-                Simulation,
+                DFTDecay, Domain, FDTD, FieldDecay,
+                FixedTime, Geometry, Material, ModeSource,
+                Simulation, Symmetry,
             ]
         )
 
