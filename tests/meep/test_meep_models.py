@@ -1,29 +1,27 @@
-"""Tests for MEEP simulation module."""
+"""Tests for MEEP config models, ports, materials, script generation, and overlays."""
 
 from __future__ import annotations
 
 import ast
 import json
-import warnings
 
 import pytest
+from pydantic import ValidationError
 
 from gsim.meep import (
-    FDTDConfig,
-    WavelengthConfig,
-    MeepSim,
     DomainConfig,
     ResolutionConfig,
     SimConfig,
     SourceConfig,
     SParameterResult,
-    SymmetryEntry,
+    WavelengthConfig,
 )
 from gsim.meep.models.config import (
     LayerStackEntry,
     MaterialData,
     PortData,
     StoppingConfig,
+    SymmetryEntry,
 )
 
 # ---------------------------------------------------------------------------
@@ -62,9 +60,6 @@ class TestWavelengthConfig:
         assert "stopping" not in d
         assert "run_after_sources" not in d
 
-    def test_backward_compat_alias(self):
-        assert FDTDConfig is WavelengthConfig
-
 
 class TestResolutionConfig:
     """Test ResolutionConfig presets."""
@@ -101,7 +96,7 @@ class TestSimConfig:
         stopping_cfg = StoppingConfig(mode="dft_decay", max_time=200.0)
         cfg = SimConfig(
             gds_filename="layout.gds",
-            layer_stack=[
+            layer_stack=[  # ty: ignore[invalid-argument-type]
                 {
                     "layer_name": "core",
                     "gds_layer": [1, 0],
@@ -111,7 +106,7 @@ class TestSimConfig:
                     "sidewall_angle": 0.0,
                 }
             ],
-            ports=[
+            ports=[  # ty: ignore[invalid-argument-type]
                 {
                     "name": "o1",
                     "center": [0, 0, 0.11],
@@ -122,7 +117,7 @@ class TestSimConfig:
                     "is_source": True,
                 }
             ],
-            materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},
+            materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},  # ty: ignore[invalid-argument-type]
             wavelength=wl_cfg,
             source=source_cfg,
             stopping=stopping_cfg,
@@ -227,85 +222,6 @@ class TestMaterialData:
     def test_with_extinction(self):
         m = MaterialData(refractive_index=3.47, extinction_coeff=0.01)
         assert m.extinction_coeff == 0.01
-
-
-# ---------------------------------------------------------------------------
-# MeepSim validation tests
-# ---------------------------------------------------------------------------
-
-
-class TestMeepSimValidation:
-    """Test MeepSim validation logic."""
-
-    def test_missing_geometry(self):
-        sim = MeepSim()
-        result = sim.validate_config()
-        assert not result.valid
-        assert any("No component set" in e for e in result.errors)
-
-    def test_no_stack_warning(self):
-        sim = MeepSim()
-        result = sim.validate_config()
-        assert any("No stack configured" in w for w in result.warnings)
-
-
-# ---------------------------------------------------------------------------
-# Mixin method tests
-# ---------------------------------------------------------------------------
-
-
-class TestMeepSimMixin:
-    """Test mixin methods on MeepSim."""
-
-    def test_set_output_dir(self, tmp_path):
-        sim = MeepSim()
-        sim.set_output_dir(tmp_path / "test-meep")
-        assert sim.output_dir == tmp_path / "test-meep"
-        assert sim.output_dir.exists()
-
-    def test_set_stack(self):
-        sim = MeepSim()
-        sim.set_stack(air_above=2.0)
-        assert sim._stack_kwargs["air_above"]
-
-    def test_set_stack_default_air_above(self):
-        """Photonic default air_above should be 1.0 (not 200 like RF)."""
-        sim = MeepSim()
-        sim.set_stack()
-        assert sim._stack_kwargs["air_above"]
-
-    def test_set_material(self):
-        sim = MeepSim()
-        sim.set_material("si", refractive_index=3.47)
-        assert "si" in sim.materials
-        assert sim.materials["si"].refractive_index == 3.47
-
-    def test_set_material_with_extinction(self):
-        sim = MeepSim()
-        sim.set_material("custom", refractive_index=2.0, extinction_coeff=0.01)
-        assert sim.materials["custom"].extinction_coeff == 0.01
-
-    def test_set_wavelength(self):
-        sim = MeepSim()
-        sim.set_wavelength(wavelength=1.31, bandwidth=0.05, num_freqs=11)
-        assert sim.wavelength_config.wavelength == 1.31
-        assert sim.wavelength_config.bandwidth == 0.05
-        assert sim.wavelength_config.num_freqs == 11
-
-    def test_set_resolution_direct(self):
-        sim = MeepSim()
-        sim.set_resolution(pixels_per_um=48)
-        assert sim.resolution_config.pixels_per_um == 48
-
-    def test_set_resolution_preset(self):
-        sim = MeepSim()
-        sim.set_resolution(preset="fine")
-        assert sim.resolution_config.pixels_per_um == 64
-
-    def test_write_config_requires_output_dir(self):
-        sim = MeepSim()
-        with pytest.raises(ValueError, match="Output directory not set"):
-            sim.write_config()
 
 
 # ---------------------------------------------------------------------------
@@ -568,39 +484,31 @@ class TestLayerSidewallAngle:
 
 
 # ---------------------------------------------------------------------------
-# Integration test: import without meep
+# Import test
 # ---------------------------------------------------------------------------
 
 
 class TestImportWithoutMeep:
     """Verify module imports work without meep installed."""
 
-    def test_import_meep_sim(self):
-        from gsim.meep import MeepSim
-
-        sim = MeepSim()
-        assert sim.geometry is None
-
     def test_import_all_public_api(self):
         from gsim.meep import (
-            FDTDConfig,
-            WavelengthConfig,
-            MeepSim,
             DomainConfig,
             ResolutionConfig,
             SimConfig,
+            Simulation,
             SourceConfig,
             SParameterResult,
+            WavelengthConfig,
         )
 
-        assert FDTDConfig is not None
         assert WavelengthConfig is not None
         assert DomainConfig is not None
-        assert MeepSim is not None
         assert ResolutionConfig is not None
         assert SParameterResult is not None
         assert SimConfig is not None
         assert SourceConfig is not None
+        assert Simulation is not None
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +529,9 @@ class TestDomainConfig:
         assert cfg.extend_ports == 0.0
 
     def test_custom(self):
-        cfg = DomainConfig(dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4)
+        cfg = DomainConfig(
+            dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4
+        )
         assert cfg.dpml == 0.5
         assert cfg.margin_xy == 0.2
         assert cfg.margin_z_above == 0.3
@@ -637,7 +547,9 @@ class TestDomainConfig:
         assert d["extend_ports"] == 3.0
 
     def test_model_dump(self):
-        cfg = DomainConfig(dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5)
+        cfg = DomainConfig(
+            dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5
+        )
         d = cfg.model_dump()
         assert d["dpml"] == 2.0
         assert d["margin_xy"] == 0.5
@@ -671,58 +583,10 @@ class TestSimConfigComponentBbox:
         assert data["component_bbox"] is None
 
 
-class TestSetDomain:
-    """Test MeepSim.set_domain() API."""
-
-    def test_set_domain_defaults(self):
-        sim = MeepSim()
-        sim.set_domain()
-        assert sim.domain_config.dpml == 1.0
-        assert sim.domain_config.margin_xy == 0.5
-        assert sim.domain_config.margin_z_above == 0.5
-        assert sim.domain_config.margin_z_below == 0.5
-
-    def test_set_domain_uniform(self):
-        sim = MeepSim()
-        sim.set_domain(margin=2.0)
-        assert sim.domain_config.margin_xy == 2.0
-        assert sim.domain_config.margin_z_above == 2.0
-        assert sim.domain_config.margin_z_below == 2.0
-
-    def test_set_domain_per_axis(self):
-        sim = MeepSim()
-        sim.set_domain(margin_xy=0.5, margin_z_above=2.0, margin_z_below=1.0, dpml=0.5)
-        assert sim.domain_config.dpml == 0.5
-        assert sim.domain_config.margin_xy == 0.5
-        assert sim.domain_config.margin_z_above == 2.0
-        assert sim.domain_config.margin_z_below == 1.0
-
-    def test_set_domain_margin_z_shorthand(self):
-        sim = MeepSim()
-        sim.set_domain(margin_z=3.0)
-        assert sim.domain_config.margin_z_above == 3.0
-        assert sim.domain_config.margin_z_below == 3.0
-
-    def test_set_domain_resolution_order(self):
-        """margin_z_above/below > margin_z > margin > default."""
-        sim = MeepSim()
-        sim.set_domain(margin=0.5, margin_z=2.0, margin_z_above=3.0)
-        assert sim.domain_config.margin_xy == 0.5
-        assert sim.domain_config.margin_z_above == 3.0  # explicit wins
-        assert sim.domain_config.margin_z_below == 2.0  # margin_z wins over margin
-
-    def test_set_domain_extend_ports_default(self):
-        sim = MeepSim()
-        sim.set_domain()
-        assert sim.domain_config.extend_ports == 0.0
-
-    def test_set_domain_extend_ports_custom(self):
-        sim = MeepSim()
-        sim.set_domain(extend_ports=3.0)
-        assert sim.domain_config.extend_ports == 3.0
+class TestDomainInSimConfig:
+    """Test domain serialization in SimConfig JSON."""
 
     def test_domain_in_sim_config_json(self, tmp_path):
-        """Verify domain dict appears in SimConfig serialization."""
         cfg = SimConfig(
             gds_filename="layout.gds",
             layer_stack=[],
@@ -734,7 +598,6 @@ class TestSetDomain:
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
-        import json
 
         data = json.loads(path.read_text())
         assert "domain" in data
@@ -765,12 +628,12 @@ class TestSymmetryEntry:
         assert d == {"direction": "Z", "phase": -1}
 
     def test_invalid_direction(self):
-        with pytest.raises(Exception):
-            SymmetryEntry(direction="W")
+        with pytest.raises(ValidationError):
+            SymmetryEntry(direction="W")  # ty: ignore[invalid-argument-type]
 
     def test_invalid_phase(self):
-        with pytest.raises(Exception):
-            SymmetryEntry(direction="X", phase=2)
+        with pytest.raises(ValidationError):
+            SymmetryEntry(direction="X", phase=2)  # ty: ignore[invalid-argument-type]
 
 
 # ---------------------------------------------------------------------------
@@ -797,13 +660,13 @@ class TestStoppingConfig:
         assert cfg.decay_dt == 25.0
 
     def test_invalid_mode(self):
-        with pytest.raises(Exception):
-            StoppingConfig(mode="invalid")
+        with pytest.raises(ValidationError):
+            StoppingConfig(mode="invalid")  # ty: ignore[invalid-argument-type]
 
     def test_threshold_bounds(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StoppingConfig(threshold=0)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             StoppingConfig(threshold=1.0)
 
 
@@ -869,141 +732,6 @@ class TestSourceConfig:
         wl = WavelengthConfig(wavelength=1.55, bandwidth=0.1)
         fwidth = cfg.compute_fwidth(fcen, wl.df)
         assert fwidth > wl.df
-
-
-# ---------------------------------------------------------------------------
-# set_source tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetSource:
-    """Test MeepSim.set_source() API."""
-
-    def test_default(self):
-        sim = MeepSim()
-        assert sim.source_config.bandwidth is None
-        assert sim.source_config.port is None
-
-    def test_set_port(self):
-        sim = MeepSim()
-        sim.set_source(port="o2")
-        assert sim.source_config.port == "o2"
-
-    def test_set_bandwidth(self):
-        sim = MeepSim()
-        sim.set_source(bandwidth=0.3)
-        assert sim.source_config.bandwidth == 0.3
-
-    def test_set_both(self):
-        sim = MeepSim()
-        sim.set_source(bandwidth=0.3, port="o1")
-        assert sim.source_config.bandwidth == 0.3
-        assert sim.source_config.port == "o1"
-
-
-# ---------------------------------------------------------------------------
-# set_stopping tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetStopping:
-    """Test MeepSim.set_stopping() API."""
-
-    def test_fixed_default(self):
-        sim = MeepSim()
-        sim.set_stopping()
-        assert sim.stopping_config.mode == "fixed"
-        assert sim.stopping_config.max_time == 100.0
-
-    def test_decay_mode(self):
-        sim = MeepSim()
-        sim.set_stopping(mode="decay", threshold=1e-4, decay_dt=25.0)
-        assert sim.stopping_config.mode == "decay"
-        assert sim.stopping_config.threshold == 1e-4
-        assert sim.stopping_config.decay_dt == 25.0
-
-    def test_dft_decay_mode(self):
-        sim = MeepSim()
-        sim.set_stopping(
-            mode="dft_decay", max_time=200.0, threshold=1e-3, dft_min_run_time=10.0
-        )
-        assert sim.stopping_config.mode == "dft_decay"
-        assert sim.stopping_config.max_time == 200.0
-        assert sim.stopping_config.threshold == 1e-3
-        assert sim.stopping_config.dft_min_run_time == 10.0
-
-    def test_dft_decay_default_min_run_time(self):
-        sim = MeepSim()
-        sim.set_stopping(mode="dft_decay")
-        assert sim.stopping_config.dft_min_run_time == 100
-
-    def test_decay_monitor_port(self):
-        sim = MeepSim()
-        sim.set_stopping(mode="decay", decay_monitor_port="o2")
-        assert sim.stopping_config.decay_monitor_port == "o2"
-
-
-# ---------------------------------------------------------------------------
-# set_symmetry tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetSymmetry:
-    """Test MeepSim.set_symmetry() API."""
-
-    def test_default_empty(self):
-        sim = MeepSim()
-        assert sim.symmetries == []
-
-    def test_single_symmetry(self):
-        sim = MeepSim()
-        sim.set_symmetry(y=-1)
-        assert len(sim.symmetries) == 1
-        assert sim.symmetries[0].direction == "Y"
-        assert sim.symmetries[0].phase == -1
-
-    def test_multiple_symmetries(self):
-        sim = MeepSim()
-        sim.set_symmetry(x=1, y=-1)
-        assert len(sim.symmetries) == 2
-
-    def test_replace_symmetries(self):
-        sim = MeepSim()
-        sim.set_symmetry(x=1)
-        sim.set_symmetry(y=-1)
-        assert len(sim.symmetries) == 1
-        assert sim.symmetries[0].direction == "Y"
-
-    def test_clear_symmetries(self):
-        sim = MeepSim()
-        sim.set_symmetry(x=1)
-        sim.set_symmetry()
-        assert sim.symmetries == []
-
-    def test_invalid_phase(self):
-        sim = MeepSim()
-        with pytest.raises(ValueError, match="Phase for X must be"):
-            sim.set_symmetry(x=2)
-
-
-# ---------------------------------------------------------------------------
-# set_wavelength decay tests
-# ---------------------------------------------------------------------------
-
-
-class TestSetWavelengthDecay:
-    """Test MeepSim.set_wavelength() does not touch stopping config."""
-
-    def test_fixed_default(self):
-        sim = MeepSim()
-        sim.set_wavelength()
-        # set_wavelength should not change stopping_config
-        assert sim.stopping_config.mode == "fixed"
-
-    def test_num_freqs_default(self):
-        sim = MeepSim()
-        sim.set_wavelength()
-        assert sim.wavelength_config.num_freqs == 11
 
 
 # ---------------------------------------------------------------------------
@@ -1131,7 +859,9 @@ class TestOverlay:
             bbox=((-2.0, -1.0, 0.0), (2.0, 1.0, 0.22)),
         )
 
-        domain_cfg = DomainConfig(dpml=1.0, margin_xy=0.5, margin_z_above=0.0, margin_z_below=0.0)
+        domain_cfg = DomainConfig(
+            dpml=1.0, margin_xy=0.5, margin_z_above=0.0, margin_z_below=0.0
+        )
 
         port_data = [
             PortData(
@@ -1375,7 +1105,9 @@ class TestRender2dOverlay:
             dpml=1.0,
             ports=[],
             dielectrics=[
-                DielectricOverlay(name="substrate", material="silicon", zmin=-1.0, zmax=0.0),
+                DielectricOverlay(
+                    name="substrate", material="silicon", zmin=-1.0, zmax=0.0
+                ),
                 DielectricOverlay(name="oxide", material="SiO2", zmin=0.0, zmax=1.22),
             ],
         )

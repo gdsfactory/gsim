@@ -211,6 +211,11 @@ select = ["ALL"]
   "INP001",  # implicit-namespace-package
   "PERF401"  # use-list-extend (keeping for readability)
 ]
+"nbs/*.py" = [
+  "EXE001",  # shebang-present-but-not-executable
+  "INP001",  # implicit-namespace-package
+  "T201"  # print (natural in scripts)
+]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations
   "ARG001",  # unused-function-argument

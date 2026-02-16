@@ -1,9 +1,9 @@
 """MEEP simulation models."""
 
 from gsim.meep.models.api import (
+    FDTD,
     DFTDecay,
     Domain,
-    FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
@@ -14,9 +14,8 @@ from gsim.meep.models.api import (
 from gsim.meep.models.config import (
     AccuracyConfig,
     DiagnosticsConfig,
-    WavelengthConfig,
-    LayerStackEntry,
     DomainConfig,
+    LayerStackEntry,
     MaterialData,
     PortData,
     ResolutionConfig,
@@ -24,6 +23,7 @@ from gsim.meep.models.config import (
     SourceConfig,
     StoppingConfig,
     SymmetryEntry,
+    WavelengthConfig,
 )
 from gsim.meep.models.results import SParameterResult
 
@@ -31,29 +31,27 @@ from gsim.meep.models.results import SParameterResult
 FDTDConfig = WavelengthConfig
 
 __all__ = [
-    # New declarative API models
-    "DFTDecay",
-    "Domain",
     "FDTD",
+    "AccuracyConfig",
+    "DFTDecay",
+    "DiagnosticsConfig",
+    "Domain",
+    "DomainConfig",
+    "FDTDConfig",
     "FieldDecay",
     "FixedTime",
     "Geometry",
-    "Material",
-    "ModeSource",
-    "Symmetry",
-    # Legacy config models
-    "AccuracyConfig",
-    "DiagnosticsConfig",
-    "FDTDConfig",
-    "WavelengthConfig",
     "LayerStackEntry",
-    "DomainConfig",
+    "Material",
     "MaterialData",
+    "ModeSource",
     "PortData",
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",
     "SourceConfig",
     "StoppingConfig",
+    "Symmetry",
     "SymmetryEntry",
+    "WavelengthConfig",
 ]

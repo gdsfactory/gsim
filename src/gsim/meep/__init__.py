@@ -1,10 +1,10 @@
 """MEEP photonic FDTD simulation module.
 
-Provides both a declarative API (``Simulation``) and the legacy fluent
-API (``MeepSim``) for configuring and running MEEP FDTD simulations
-on the GDSFactory+ cloud. No local MEEP installation required.
+Provides a declarative API (``Simulation``) for configuring and running
+MEEP FDTD simulations on the GDSFactory+ cloud. No local MEEP
+installation required.
 
-Declarative API example::
+Example::
 
     from gsim import meep
 
@@ -14,69 +14,43 @@ Declarative API example::
     sim.monitors = ["o1", "o2"]
     sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
     result = sim.run("./meep-sim")
-
-Legacy API example::
-
-    from gsim.meep import MeepSim
-
-    sim = MeepSim()
-    sim.set_geometry(component)
-    sim.set_stack()
-    sim.set_material("si", refractive_index=3.47)
-    sim.set_wavelength(wavelength=1.55, bandwidth=0.1)
-    sim.set_resolution(pixels_per_um=32)
-    sim.set_output_dir("./meep-sim")
-    result = sim.simulate()
 """
 
 from gsim.meep.models import (
-    # New declarative API models
+    FDTD,
     DFTDecay,
     Domain,
-    FDTD,
+    DomainConfig,
     FieldDecay,
     FixedTime,
     Geometry,
     Material,
     ModeSource,
-    Symmetry,
-    # Legacy config models
-    AccuracyConfig,
-    DiagnosticsConfig,
-    FDTDConfig,
-    WavelengthConfig,
-    DomainConfig,
     ResolutionConfig,
     SimConfig,
     SourceConfig,
     SParameterResult,
-    SymmetryEntry,
+    Symmetry,
+    # Config models used by Simulation.write_config()
+    WavelengthConfig,
 )
-from gsim.meep.sim import MeepSim
 from gsim.meep.simulation import Simulation
 
 __all__ = [
-    # New declarative API
+    "FDTD",
     "DFTDecay",
     "Domain",
-    "FDTD",
+    "DomainConfig",
     "FieldDecay",
     "FixedTime",
     "Geometry",
     "Material",
     "ModeSource",
-    "Simulation",
-    "Symmetry",
-    # Legacy
-    "AccuracyConfig",
-    "DiagnosticsConfig",
-    "FDTDConfig",
-    "WavelengthConfig",
-    "DomainConfig",
-    "MeepSim",
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",
+    "Simulation",
     "SourceConfig",
-    "SymmetryEntry",
+    "Symmetry",
+    "WavelengthConfig",
 ]

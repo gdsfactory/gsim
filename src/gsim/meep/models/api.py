@@ -7,10 +7,9 @@ in ``Simulation.write_config()``.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------------------------------------------------------------------------
 # Geometry
@@ -112,12 +111,12 @@ class Domain(BaseModel):
     port_margin: float = Field(
         default=0.5,
         ge=0,
-        description="Margin on each side of port waveguide width for mode monitors in um",
+        description="Margin on each side of port width for monitors (um)",
     )
     extend_ports: float = Field(
         default=0.0,
         ge=0,
-        description="Length to extend waveguide ports into PML in um. 0 = auto (margin + pml).",
+        description="Extend ports into PML (um). 0 = auto (margin + pml).",
     )
     symmetries: list[Symmetry] = Field(
         default_factory=list,
@@ -176,9 +175,7 @@ class FDTD(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
-    stopping: Union[FixedTime, FieldDecay, DFTDecay] = Field(
-        default_factory=FixedTime
-    )
+    stopping: FixedTime | FieldDecay | DFTDecay = Field(default_factory=FixedTime)
     subpixel: bool = Field(default=False, description="Toggle subpixel averaging")
     subpixel_maxeval: int = Field(
         default=0, ge=0, description="Cap on integration evaluations (0=unlimited)"

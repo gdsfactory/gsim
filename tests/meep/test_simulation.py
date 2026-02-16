@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from gsim.meep import (
+    FDTD,
     DFTDecay,
     Domain,
-    FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
@@ -16,7 +17,6 @@ from gsim.meep import (
     Simulation,
     Symmetry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Model construction & defaults
@@ -34,11 +34,11 @@ class TestMaterial:
         assert m.k == 0.01
 
     def test_n_must_be_positive(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             Material(n=0)
 
     def test_k_must_be_non_negative(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             Material(n=1.5, k=-0.1)
 
 
@@ -161,7 +161,7 @@ class TestMaterialNormalization:
         assert sim.materials["si"].k == 0.01
 
     def test_dict_shorthand(self):
-        sim = Simulation(materials={"si": {"n": 3.47, "k": 0.01}})
+        sim = Simulation(materials={"si": {"n": 3.47, "k": 0.01}})  # ty: ignore[invalid-argument-type]
         assert isinstance(sim.materials["si"], Material)
         assert sim.materials["si"].n == 3.47
 
@@ -358,12 +358,11 @@ class TestConfigTranslation:
 class TestImports:
     def test_import_all_new_api(self):
         from gsim.meep import (
+            FDTD,
             DFTDecay,
             Domain,
-            FDTD,
             FieldDecay,
             FixedTime,
-            Geometry,
             Material,
             ModeSource,
             Simulation,
@@ -373,17 +372,18 @@ class TestImports:
         assert all(
             cls is not None
             for cls in [
-                DFTDecay, Domain, FDTD, FieldDecay,
-                FixedTime, Geometry, Material, ModeSource,
-                Simulation, Symmetry,
+                DFTDecay,
+                Domain,
+                FDTD,
+                FieldDecay,
+                FixedTime,
+                Geometry,
+                Material,
+                ModeSource,
+                Simulation,
+                Symmetry,
             ]
         )
-
-    def test_legacy_still_importable(self):
-        from gsim.meep import MeepSim, FDTDConfig, WavelengthConfig
-
-        assert MeepSim is not None
-        assert FDTDConfig is WavelengthConfig
 
     def test_simulation_instantiation(self):
         sim = Simulation()

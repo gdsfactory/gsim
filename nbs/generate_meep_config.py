@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
 """Generate MEEP simulation config for ebeam_y_1550.
 
 Equivalent to the test-meep.ipynb notebook but as a simple script.
 Outputs layout.gds, sim_config.json, and run_meep.py to ./meep-sim-test/.
 """
 
-import os
 from pathlib import Path
 
 from ubcpdk import PDK, cells
@@ -33,7 +31,6 @@ sim.monitors = ["o1", "o2", "o3"]
 sim.solver.resolution = 20
 sim.solver.stopping = meep.DFTDecay(max_time=200, threshold=1e-3, min_time=100)
 sim.solver.simplify_tol = 0.01
-sim.solver.subpixel = True
 sim.solver.save_geometry = True
 sim.solver.save_fields = True
 sim.solver.save_animation = True
@@ -45,6 +42,5 @@ if not result.valid:
 
 output_dir = sim.write_config(Path(__file__).parent / "meep-sim-test")
 print(f"Config written to: {output_dir}")
-for f in sorted(os.listdir(output_dir)):
-    size = os.path.getsize(Path(output_dir) / f)
-    print(f"  {f} ({size:,} bytes)")
+for p in sorted(Path(output_dir).iterdir()):
+    print(f"  {p.name} ({p.stat().st_size:,} bytes)")

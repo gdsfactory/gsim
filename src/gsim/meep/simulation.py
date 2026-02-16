@@ -7,15 +7,16 @@ Translates the user-facing declarative API objects into the existing
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.meep.models.api import (
+    FDTD,
     DFTDecay,
     Domain,
-    FDTD,
     FieldDecay,
     FixedTime,
     Geometry,
@@ -24,6 +25,41 @@ from gsim.meep.models.api import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Utility
+# ---------------------------------------------------------------------------
+
+
+def estimate_meep_np(
+    cell_x: float,
+    cell_y: float,
+    cell_z: float,
+    pixels_per_um: int,
+    *,
+    max_cores: int = 24,
+    min_voxels_per_proc: int = 200_000,
+) -> int:
+    """Estimate optimal MPI process count from problem size.
+
+    Args:
+        cell_x: Cell size along X in um.
+        cell_y: Cell size along Y in um.
+        cell_z: Cell size along Z in um.
+        pixels_per_um: Grid resolution (pixels per um).
+        max_cores: Maximum physical cores available (default 24 for c6i.12xlarge).
+        min_voxels_per_proc: Minimum voxels per process to keep MPI overhead < ~5%.
+
+    Returns:
+        Recommended number of MPI processes (1 to max_cores).
+    """
+    nx = math.ceil(cell_x * pixels_per_um)
+    ny = math.ceil(cell_y * pixels_per_um)
+    nz = max(1, math.ceil(cell_z * pixels_per_um))
+    total_voxels = nx * ny * nz
+    np_est = total_voxels // min_voxels_per_proc
+    return max(1, min(np_est, max_cores))
 
 
 class Simulation(BaseModel):
@@ -68,7 +104,8 @@ class Simulation(BaseModel):
     @field_validator("materials", mode="before")
     @classmethod
     def _normalize_materials(
-        cls, v: dict[str, float | Material | dict],
+        cls,
+        v: dict[str, float | Material | dict],
     ) -> dict[str, float | Material]:
         """Accept float shorthand: ``{"si": 3.47}`` → ``Material(n=3.47)``."""
         out: dict[str, float | Material] = {}
@@ -111,9 +148,7 @@ class Simulation(BaseModel):
         warnings_list: list[str] = []
 
         if self.geometry.component is None:
-            errors.append(
-                "No component set. Assign sim.geometry.component first."
-            )
+            errors.append("No component set. Assign sim.geometry.component first.")
 
         if self.geometry.component is not None:
             ports = list(self.geometry.component.ports)
@@ -130,12 +165,11 @@ class Simulation(BaseModel):
             # Validate monitor port names
             if ports and self.monitors:
                 port_names = [p.name for p in ports]
-                for mon_port in self.monitors:
-                    if mon_port not in port_names:
-                        errors.append(
-                            f"Monitor port '{mon_port}' not found. "
-                            f"Available: {port_names}"
-                        )
+                errors.extend(
+                    f"Monitor port '{m}' not found. Available: {port_names}"
+                    for m in self.monitors
+                    if m not in port_names
+                )
 
         if self.geometry.stack is None:
             warnings_list.append(
@@ -152,21 +186,29 @@ class Simulation(BaseModel):
 
     def _ensure_stack(self) -> None:
         """Lazily resolve the layer stack if not yet built."""
-        if self.geometry.stack is None and self._stack_kwargs:
-            from gsim.common.stack import get_stack
+        if self.geometry.stack is not None:
+            return
 
+        from gsim.common.stack import get_stack
+
+        if self._stack_kwargs:
             yaml_path = self._stack_kwargs.pop("yaml_path", None)
-            self.geometry.stack = get_stack(
-                yaml_path=yaml_path, **self._stack_kwargs
-            )
+            self.geometry.stack = get_stack(yaml_path=yaml_path, **self._stack_kwargs)
             self._stack_kwargs["yaml_path"] = yaml_path
+        else:
+            # Fall back to active PDK defaults
+            self.geometry.stack = get_stack()
 
     # -------------------------------------------------------------------------
     # Internal: z-crop
     # -------------------------------------------------------------------------
 
     def _apply_z_crop(self) -> None:
-        """Apply z-crop to the stack if geometry.z_crop is set."""
+        """Apply z-crop to the stack if geometry.z_crop is set.
+
+        Only applies once per stack — after cropping, sets z_crop to None
+        to prevent double-cropping on subsequent calls.
+        """
         if self.geometry.z_crop is None:
             return
 
@@ -218,11 +260,13 @@ class Simulation(BaseModel):
         for diel in stack.dielectrics:
             if diel["zmax"] <= z_lo or diel["zmin"] >= z_hi:
                 continue
-            cropped_dielectrics.append({
-                **diel,
-                "zmin": max(diel["zmin"], z_lo),
-                "zmax": min(diel["zmax"], z_hi),
-            })
+            cropped_dielectrics.append(
+                {
+                    **diel,
+                    "zmin": max(diel["zmin"], z_lo),
+                    "zmax": min(diel["zmax"], z_hi),
+                }
+            )
 
         self.geometry.stack = LayerStack(
             pdk_name=stack.pdk_name,
@@ -232,9 +276,11 @@ class Simulation(BaseModel):
             dielectrics=cropped_dielectrics,
             simulation=stack.simulation,
         )
+        # Mark as applied by clearing the z_crop setting
+        self.geometry.z_crop = None
 
     # -------------------------------------------------------------------------
-    # Internal: translate to legacy config objects
+    # Internal: translate to config objects
     # -------------------------------------------------------------------------
 
     def _wavelength_config(self) -> Any:
@@ -326,7 +372,7 @@ class Simulation(BaseModel):
         )
 
     def _material_overrides(self) -> dict[str, Any]:
-        """Convert materials dict → MaterialProperties overrides for resolve_materials."""
+        """Convert materials dict to MaterialProperties overrides."""
         from gsim.common.stack.materials import MaterialProperties
 
         overrides: dict[str, MaterialProperties] = {}
@@ -358,25 +404,16 @@ class Simulation(BaseModel):
         from gsim.meep.models.config import LayerStackEntry, SimConfig
         from gsim.meep.ports import extract_port_info
         from gsim.meep.script import generate_meep_script
-        from gsim.meep.sim import estimate_meep_np
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         validation = self.validate_config()
         if not validation.valid:
-            raise ValueError(
-                "Invalid configuration:\n" + "\n".join(validation.errors)
-            )
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         # Resolve stack
         self._ensure_stack()
-        if self.geometry.stack is None:
-            # Try PDK default
-            from gsim.common.stack import get_stack
-
-            self.geometry.stack = get_stack()
-
         if self.geometry.stack is None:
             raise ValueError("Stack resolution failed.")
         if self.geometry.component is None:
@@ -390,7 +427,7 @@ class Simulation(BaseModel):
         original_component = self.geometry.component.copy()
         stack = self.geometry.stack
 
-        # Build legacy config objects
+        # Build config objects
         domain_cfg = self._domain_config()
         wl_cfg = self._wavelength_config()
         source_cfg = self._source_config()
@@ -438,12 +475,14 @@ class Simulation(BaseModel):
         # Build dielectric entries
         dielectric_entries = []
         for diel in stack.dielectrics:
-            dielectric_entries.append({
-                "name": diel["name"],
-                "zmin": diel["zmin"],
-                "zmax": diel["zmax"],
-                "material": diel["material"],
-            })
+            dielectric_entries.append(
+                {
+                    "name": diel["name"],
+                    "zmin": diel["zmin"],
+                    "zmax": diel["zmax"],
+                    "material": diel["material"],
+                }
+            )
             used_materials.add(diel["material"])
 
         # Extract port info from original component
@@ -460,7 +499,7 @@ class Simulation(BaseModel):
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
-        # Translate domain.symmetries → SymmetryEntry for legacy config
+        # Translate domain.symmetries → SymmetryEntry for config
         from gsim.meep.models.config import SymmetryEntry
 
         symmetry_entries = [
@@ -511,13 +550,21 @@ class Simulation(BaseModel):
         cell_y = bbox_h + 2 * (margin_xy + dpml)
         cell_z = (z_max - z_min) + 2 * dpml
 
-        meep_np = estimate_meep_np(
+        _meep_np_est = estimate_meep_np(
             cell_x, cell_y, cell_z, resolution_cfg.pixels_per_um
         )
+        # TODO: use _meep_np_est once Batch vCPU allocation is passed to the
+        # container (lscpu reports host cores, not container vCPUs → OOM).
+        meep_np = 2
         sim_config.meep_np = meep_np
         logger.info(
-            "Auto meep_np=%d (cell %.1f x %.1f x %.1f um, res %d)",
-            meep_np, cell_x, cell_y, cell_z, resolution_cfg.pixels_per_um,
+            "meep_np=%d (estimated %d, cell %.1f x %.1f x %.1f um, res %d)",
+            meep_np,
+            _meep_np_est,
+            cell_x,
+            cell_y,
+            cell_z,
+            resolution_cfg.pixels_per_um,
         )
 
         # Write JSON config
@@ -565,32 +612,46 @@ class Simulation(BaseModel):
         return SParameterResult()
 
     # -------------------------------------------------------------------------
-    # Visualization delegation
+    # Visualization
     # -------------------------------------------------------------------------
 
-    def _to_legacy_sim(self) -> Any:
-        """Build a MeepSim equivalent for visualization delegation."""
-        from gsim.meep.sim import MeepSim
-
-        legacy = MeepSim()
-        legacy.geometry = (
-            __import__("gsim.common", fromlist=["Geometry"])
-            .Geometry(component=self.geometry.component)
-            if self.geometry.component is not None
-            else None
-        )
-        legacy.stack = self.geometry.stack
-        legacy.domain_config = self._domain_config()
-        legacy.source_config = self._source_config()
-        legacy.materials = self._material_overrides()
-        legacy._output_dir = None
-        legacy._stack_kwargs = self._stack_kwargs.copy()
-        return legacy
-
     def plot_2d(self, **kwargs: Any) -> Any:
-        """Plot 2D cross-sections (delegates to MeepSim visualization)."""
-        return self._to_legacy_sim().plot_2d(**kwargs)
+        """Plot 2D cross-sections of the geometry.
+
+        Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_2d`.
+        """
+        from gsim.meep.viz import plot_2d
+
+        self._ensure_stack()
+        self._apply_z_crop()
+
+        if self.geometry.component is None:
+            raise ValueError("No component set. Assign sim.geometry.component first.")
+
+        return plot_2d(
+            component=self.geometry.component,
+            stack=self.geometry.stack,
+            domain_config=self._domain_config(),
+            source_port=self.source.port,
+            **kwargs,
+        )
 
     def plot_3d(self, **kwargs: Any) -> Any:
-        """Plot 3D visualization (delegates to MeepSim visualization)."""
-        return self._to_legacy_sim().plot_3d(**kwargs)
+        """Plot 3D visualization of the geometry.
+
+        Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_3d`.
+        """
+        from gsim.meep.viz import plot_3d
+
+        self._ensure_stack()
+        self._apply_z_crop()
+
+        if self.geometry.component is None:
+            raise ValueError("No component set. Assign sim.geometry.component first.")
+
+        return plot_3d(
+            component=self.geometry.component,
+            stack=self.geometry.stack,
+            domain_config=self._domain_config(),
+            **kwargs,
+        )

@@ -346,30 +346,56 @@ def _plot_single_prism_slice(
                 ax.add_patch(rect)
 
         elif x is not None:
-            rect = Rectangle(
-                (bbox[0][1], bbox[0][2]),
-                bbox[1][1] - bbox[0][1],
-                bbox[1][2] - bbox[0][2],
-                facecolor=fc,
-                edgecolor="k",
-                linewidth=0.5,
-                label=name,
-                zorder=layer_zorder,
+            # Intersect each prism polygon with the x=const plane
+            # to get actual y-ranges, then draw rectangles in YZ
+            drawn = _draw_prism_cross_sections(
+                ax,
+                geometry_model,
+                name,
+                "x",
+                x,
+                fc,
+                layer_zorder,
             )
-            ax.add_patch(rect)
+            if not drawn:
+                # Fallback to bbox if no prism data
+                rect = Rectangle(
+                    (bbox[0][1], bbox[0][2]),
+                    bbox[1][1] - bbox[0][1],
+                    bbox[1][2] - bbox[0][2],
+                    facecolor=fc,
+                    edgecolor="k",
+                    linewidth=0.5,
+                    label=name,
+                    zorder=layer_zorder,
+                )
+                ax.add_patch(rect)
 
         elif y is not None:
-            rect = Rectangle(
-                (bbox[0][0], bbox[0][2]),
-                bbox[1][0] - bbox[0][0],
-                bbox[1][2] - bbox[0][2],
-                facecolor=fc,
-                edgecolor="k",
-                linewidth=0.5,
-                label=name,
-                zorder=layer_zorder,
+            # Intersect each prism polygon with the y=const plane
+            # to get actual x-ranges, then draw rectangles in XZ
+            drawn = _draw_prism_cross_sections(
+                ax,
+                geometry_model,
+                name,
+                "y",
+                y,
+                fc,
+                layer_zorder,
             )
-            ax.add_patch(rect)
+            if not drawn:
+                # Fallback to bbox if no prism data
+                rect = Rectangle(
+                    (bbox[0][0], bbox[0][2]),
+                    bbox[1][0] - bbox[0][0],
+                    bbox[1][2] - bbox[0][2],
+                    facecolor=fc,
+                    edgecolor="k",
+                    linewidth=0.5,
+                    label=name,
+                    zorder=layer_zorder,
+                )
+                ax.add_patch(rect)
 
     # Axis labels and simulation-box outline
     size = list(geometry_model.size)
@@ -438,6 +464,111 @@ def _plot_single_prism_slice(
 
 
 # ---------------------------------------------------------------------------
+# Prism cross-section helpers (for x/y slice views)
+# ---------------------------------------------------------------------------
+
+
+def _draw_prism_cross_sections(
+    ax: plt.Axes,
+    geometry_model: GeometryModel,
+    layer_name: str,
+    slice_axis: str,
+    slice_coord: float,
+    fc: Any,
+    layer_zorder: float,
+) -> bool:
+    """Intersect prism polygons with a slice plane, draw rectangles.
+
+    For a y-slice at y=y0, each prism polygon is intersected with the
+    line y=y0 to find x-segments. Each segment becomes a rectangle in
+    XZ space: (x_start, z_base) to (x_end, z_top).
+
+    For an x-slice at x=x0, similarly finds y-segments → YZ rectangles.
+
+    Returns True if at least one patch was drawn.
+    """
+    from shapely.geometry import LineString, MultiLineString
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    if layer_name not in geometry_model.prisms:
+        return False
+
+    prisms = geometry_model.prisms[layer_name]
+    if not prisms:
+        return False
+
+    drawn = False
+    first = True
+
+    for prism in prisms:
+        poly = ShapelyPolygon(prism.vertices)
+        if poly.is_empty or not poly.is_valid:
+            continue
+
+        # Build a long line through the polygon at the slice coordinate
+        bounds = poly.bounds  # (minx, miny, maxx, maxy)
+        margin = 1.0
+        if slice_axis == "y":
+            line = LineString(
+                [
+                    (bounds[0] - margin, slice_coord),
+                    (bounds[2] + margin, slice_coord),
+                ]
+            )
+        else:  # x-slice
+            line = LineString(
+                [
+                    (slice_coord, bounds[1] - margin),
+                    (slice_coord, bounds[3] + margin),
+                ]
+            )
+
+        intersection = poly.intersection(line)
+        if intersection.is_empty:
+            continue
+
+        # Collect line segments from the intersection
+        segments = []
+        if isinstance(intersection, LineString):
+            segments.append(intersection)
+        elif isinstance(intersection, MultiLineString):
+            segments.extend(intersection.geoms)
+
+        for seg in segments:
+            coords = list(seg.coords)
+            if len(coords) < 2:
+                continue
+
+            if slice_axis == "y":
+                # XZ view: horizontal axis = x, vertical = z
+                h_vals = [c[0] for c in coords]
+                h_min, h_max = min(h_vals), max(h_vals)
+            else:
+                # YZ view: horizontal axis = y, vertical = z
+                h_vals = [c[1] for c in coords]
+                h_min, h_max = min(h_vals), max(h_vals)
+
+            if h_max - h_min < 1e-9:
+                continue
+
+            rect = Rectangle(
+                (h_min, prism.z_base),
+                h_max - h_min,
+                prism.z_top - prism.z_base,
+                facecolor=fc,
+                edgecolor="k",
+                linewidth=0.5,
+                label=layer_name if first else None,
+                zorder=layer_zorder,
+            )
+            ax.add_patch(rect)
+            drawn = True
+            first = False
+
+    return drawn
+
+
+# ---------------------------------------------------------------------------
 # Overlay drawing
 # ---------------------------------------------------------------------------
 
@@ -476,9 +607,9 @@ def _draw_overlay(
         if z is not None:
             _draw_dielectrics_xy(ax, dielectrics, z, cmin, cmax)
         elif x is not None:
-            _draw_dielectrics_side(ax, dielectrics, cmin[1], cmax[1], axis="yz")
+            _draw_dielectrics_side(ax, dielectrics, cmin[1], cmax[1], "yz")
         elif y is not None:
-            _draw_dielectrics_side(ax, dielectrics, cmin[0], cmax[0], axis="xz")
+            _draw_dielectrics_side(ax, dielectrics, cmin[0], cmax[0], "xz")
 
     if z is not None:
         _draw_overlay_xy(ax, cmin, cmax, pml, overlay.ports)
@@ -755,7 +886,7 @@ def _draw_dielectrics_side(
     dielectrics: list,
     h_min: float,
     h_max: float,
-    axis: str = "xz",
+    _axis: str = "xz",
 ) -> None:
     """Draw dielectric background bands for a side view (XZ or YZ).
 
