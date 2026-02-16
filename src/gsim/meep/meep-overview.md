@@ -30,7 +30,8 @@ sim.monitors = ["o1", "o2"]
 sim.domain.pml = 1.0
 sim.domain.margin = 0.5
 sim.solver.resolution = 32
-sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
+sim.solver.stopping = "dft_decay"
+sim.solver.max_time = 200
 sim.solver.simplify_tol = 0.01
 sim.solver.save_geometry = True
 sim.solver.save_fields = True
@@ -43,7 +44,7 @@ result = sim.run("./meep-sim")
 - **6 typed physics objects** -- `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD` + `monitors: list[str]` -- assigned to a `Simulation` container. No ordering dependencies.
 - **Attribute style or constructor style** -- `sim.source.port = "o1"` or `sim.source = ModeSource(port="o1")`. Both work via Pydantic `validate_assignment=True`.
 - **Float shorthand for materials** -- `{"si": 3.47}` auto-normalizes to `Material(n=3.47)` via validator.
-- **Typed stopping variants** -- `FixedTime`, `FieldDecay`, `DFTDecay` instead of string `mode`.
+- **Flat stopping fields** -- `stopping` mode string + flat fields (`max_time`, `stopping_threshold`, etc.) on `FDTD`.
 - **Source defines spectral window** -- `WavelengthConfig` derived from `ModeSource.wavelength/bandwidth/num_freqs`. Monitors are just port name strings.
 - **JSON contract unchanged** -- `write_config()` translates new API -> existing `SimConfig` -> JSON. Runner template untouched.
 
@@ -53,18 +54,18 @@ result = sim.run("./meep-sim")
 
 ### `gsim.meep` -- Public API
 
-| Module              | Purpose                                                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`       | Exports: `Simulation`, all model classes                                                                                      |
-| `models/api.py`     | Declarative models: `Geometry`, `Material`, `ModeSource`, `Domain`, `FixedTime`, `FieldDecay`, `DFTDecay`, `FDTD`, `Symmetry` |
-| `simulation.py`     | `Simulation` container -- `write_config()`, `run()`, `validate_config()`, `plot_2d()`/`plot_3d()`, `estimate_meep_np()`       |
-| `viz.py`            | Standalone viz helpers -- `build_geometry_model()`, `plot_2d()`, `plot_3d()` (calls `common/viz`)                             |
-| `models/config.py`  | `SimConfig` + all sub-configs (JSON serialization layer)                                                                      |
-| `models/results.py` | `SParameterResult` -- CSV + debug JSON + diagnostic PNGs                                                                      |
-| `ports.py`          | `extract_port_info()` -- port center/direction/normal from gdsfactory                                                         |
-| `materials.py`      | `resolve_materials()` -- material names -> (n, k) via common DB                                                               |
-| `script.py`         | `generate_meep_script()` -- cloud runner template (string in Python)                                                          |
-| `overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` -- viz metadata                                                            |
+| Module              | Purpose                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`       | Exports: `Simulation`, all model classes                                                                                |
+| `models/api.py`     | Declarative models: `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD`, `Symmetry`                                  |
+| `simulation.py`     | `Simulation` container -- `write_config()`, `run()`, `validate_config()`, `plot_2d()`/`plot_3d()`, `estimate_meep_np()` |
+| `viz.py`            | Standalone viz helpers -- `build_geometry_model()`, `plot_2d()`, `plot_3d()` (calls `common/viz`)                       |
+| `models/config.py`  | `SimConfig` + all sub-configs (JSON serialization layer)                                                                |
+| `models/results.py` | `SParameterResult` -- CSV + debug JSON + diagnostic PNGs                                                                |
+| `ports.py`          | `extract_port_info()` -- port center/direction/normal from gdsfactory                                                   |
+| `materials.py`      | `resolve_materials()` -- material names -> (n, k) via common DB                                                         |
+| `script.py`         | `generate_meep_script()` -- cloud runner template (string in Python)                                                    |
+| `overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` -- viz metadata                                                      |
 
 ### `gsim.common` -- Shared infrastructure
 

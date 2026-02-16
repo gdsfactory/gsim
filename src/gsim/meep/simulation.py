@@ -16,10 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.meep.models.api import (
     FDTD,
-    DFTDecay,
     Domain,
-    FieldDecay,
-    FixedTime,
     Geometry,
     Material,
     ModeSource,
@@ -99,7 +96,8 @@ class Simulation(BaseModel):
         sim.materials = {"si": 3.47, "sio2": 1.44}
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
+        sim.solver.stopping = "dft_decay"
+        sim.solver.max_time = 200
         result = sim.run("./meep-sim")
     """
 
@@ -324,29 +322,19 @@ class Simulation(BaseModel):
         )
 
     def _stopping_config(self) -> Any:
-        """Translate stopping variant → StoppingConfig."""
+        """Translate FDTD stopping fields → StoppingConfig."""
         from gsim.meep.models.config import StoppingConfig
 
-        s = self.solver.stopping
-        if isinstance(s, FixedTime):
-            return StoppingConfig(mode="fixed", max_time=s.max_time)
-        if isinstance(s, FieldDecay):
-            return StoppingConfig(
-                mode="decay",
-                max_time=s.max_time,
-                threshold=s.threshold,
-                decay_component=s.component,
-                decay_dt=s.dt,
-                decay_monitor_port=s.monitor_port,
-            )
-        if isinstance(s, DFTDecay):
-            return StoppingConfig(
-                mode="dft_decay",
-                max_time=s.max_time,
-                threshold=s.threshold,
-                dft_min_run_time=s.min_time,
-            )
-        raise TypeError(f"Unknown stopping type: {type(s)}")
+        s = self.solver
+        return StoppingConfig(
+            mode=s.stopping,
+            max_time=s.max_time,
+            threshold=s.stopping_threshold,
+            dft_min_run_time=s.stopping_min_time,
+            decay_component=s.stopping_component,
+            decay_dt=s.stopping_dt,
+            decay_monitor_port=s.stopping_monitor_port,
+        )
 
     def _domain_config(self) -> Any:
         """Translate Domain → DomainConfig."""

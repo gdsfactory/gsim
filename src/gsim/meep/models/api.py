@@ -125,46 +125,6 @@ class Domain(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Stopping variants
-# ---------------------------------------------------------------------------
-
-
-class FixedTime(BaseModel):
-    """Run for a fixed time after sources turn off."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    max_time: float = Field(default=100.0, gt=0)
-
-
-class FieldDecay(BaseModel):
-    """Stop when field amplitude decays at a monitor point."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    max_time: float = Field(default=100.0, gt=0)
-    threshold: float = Field(default=1e-3, gt=0, lt=1)
-    component: str = Field(default="Ey")
-    dt: float = Field(default=50.0, gt=0)
-    monitor_port: str | None = Field(default=None)
-
-
-class DFTDecay(BaseModel):
-    """Stop when all DFT monitors converge. Best for S-parameters."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    max_time: float = Field(default=100.0, gt=0)
-    threshold: float = Field(default=1e-3, gt=0, lt=1)
-    min_time: float = Field(
-        default=100.0,
-        ge=0,
-        description="Minimum run time after sources. "
-        "Must exceed pulse transit time through the device.",
-    )
-
-
-# ---------------------------------------------------------------------------
 # FDTD solver
 # ---------------------------------------------------------------------------
 
@@ -175,7 +135,31 @@ class FDTD(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
-    stopping: FixedTime | FieldDecay | DFTDecay = Field(default_factory=FixedTime)
+
+    # Stopping criteria (flat fields instead of variant classes)
+    stopping: Literal["fixed", "decay", "dft_decay"] = Field(
+        default="dft_decay",
+        description="Stopping mode: fixed time, field decay, or DFT convergence",
+    )
+    max_time: float = Field(
+        default=200.0, gt=0, description="Max run time after sources (um/c)"
+    )
+    stopping_threshold: float = Field(
+        default=1e-3, gt=0, lt=1, description="Decay/convergence threshold"
+    )
+    stopping_min_time: float = Field(
+        default=100.0, ge=0, description="Min run time for dft_decay mode"
+    )
+    stopping_component: str = Field(
+        default="Ey", description="Field component for decay mode"
+    )
+    stopping_dt: float = Field(
+        default=50.0, gt=0, description="Decay measurement window for decay mode"
+    )
+    stopping_monitor_port: str | None = Field(
+        default=None, description="Port to monitor for decay mode"
+    )
+
     subpixel: bool = Field(default=False, description="Toggle subpixel averaging")
     subpixel_maxeval: int = Field(
         default=0, ge=0, description="Cap on integration evaluations (0=unlimited)"

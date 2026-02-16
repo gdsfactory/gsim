@@ -12,17 +12,15 @@ Example::
     sim.geometry.component = ybranch
     sim.source.port = "o1"
     sim.monitors = ["o1", "o2"]
-    sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
+    sim.solver.stopping = "dft_decay"
+    sim.solver.max_time = 200
     result = sim.run("./meep-sim")
 """
 
 from gsim.meep.models import (
     FDTD,
-    DFTDecay,
     Domain,
     DomainConfig,
-    FieldDecay,
-    FixedTime,
     Geometry,
     Material,
     ModeSource,
@@ -39,11 +37,8 @@ from gsim.meep.simulation import BuildResult, Simulation
 __all__ = [
     "FDTD",
     "BuildResult",
-    "DFTDecay",
     "Domain",
     "DomainConfig",
-    "FieldDecay",
-    "FixedTime",
     "Geometry",
     "Material",
     "ModeSource",

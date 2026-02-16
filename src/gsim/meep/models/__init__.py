@@ -2,10 +2,7 @@
 
 from gsim.meep.models.api import (
     FDTD,
-    DFTDecay,
     Domain,
-    FieldDecay,
-    FixedTime,
     Geometry,
     Material,
     ModeSource,
@@ -33,13 +30,10 @@ FDTDConfig = WavelengthConfig
 __all__ = [
     "FDTD",
     "AccuracyConfig",
-    "DFTDecay",
     "DiagnosticsConfig",
     "Domain",
     "DomainConfig",
     "FDTDConfig",
-    "FieldDecay",
-    "FixedTime",
     "Geometry",
     "LayerStackEntry",
     "Material",

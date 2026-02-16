@@ -7,10 +7,7 @@ from pydantic import ValidationError
 
 from gsim.meep import (
     FDTD,
-    DFTDecay,
     Domain,
-    FieldDecay,
-    FixedTime,
     Geometry,
     Material,
     ModeSource,
@@ -82,44 +79,53 @@ class TestDomain:
         assert d.symmetries[0].phase == -1
 
 
-class TestStoppingVariants:
-    def test_fixed_time_defaults(self):
-        s = FixedTime()
-        assert s.max_time == 100.0
+class TestStoppingFields:
+    def test_defaults(self):
+        f = FDTD()
+        assert f.stopping == "dft_decay"
+        assert f.max_time == 200.0
+        assert f.stopping_threshold == 1e-3
+        assert f.stopping_min_time == 100.0
+        assert f.stopping_component == "Ey"
+        assert f.stopping_dt == 50.0
+        assert f.stopping_monitor_port is None
 
-    def test_field_decay_defaults(self):
-        s = FieldDecay()
-        assert s.max_time == 100.0
-        assert s.threshold == 1e-3
-        assert s.component == "Ey"
-        assert s.dt == 50.0
-        assert s.monitor_port is None
+    def test_fixed_mode(self):
+        f = FDTD(stopping="fixed", max_time=100)
+        assert f.stopping == "fixed"
+        assert f.max_time == 100
 
-    def test_dft_decay_defaults(self):
-        s = DFTDecay()
-        assert s.max_time == 100.0
-        assert s.threshold == 1e-3
-        assert s.min_time == 100.0
+    def test_decay_mode(self):
+        f = FDTD(stopping="decay", stopping_threshold=1e-4, stopping_dt=25)
+        assert f.stopping == "decay"
+        assert f.stopping_threshold == 1e-4
+        assert f.stopping_dt == 25
 
     def test_dft_decay_custom(self):
-        s = DFTDecay(max_time=200, threshold=1e-4, min_time=80)
-        assert s.max_time == 200
-        assert s.threshold == 1e-4
-        assert s.min_time == 80
+        f = FDTD(max_time=300, stopping_threshold=1e-4, stopping_min_time=80)
+        assert f.stopping == "dft_decay"
+        assert f.max_time == 300
+        assert f.stopping_threshold == 1e-4
+        assert f.stopping_min_time == 80
+
+    def test_invalid_mode(self):
+        with pytest.raises(ValidationError):
+            FDTD(stopping="invalid")  # ty: ignore[invalid-argument-type]
 
 
 class TestFDTD:
     def test_defaults(self):
         f = FDTD()
         assert f.resolution == 32
-        assert isinstance(f.stopping, FixedTime)
+        assert f.stopping == "dft_decay"
+        assert f.max_time == 200.0
         assert f.subpixel is False
         assert f.simplify_tol == 0.0
 
-    def test_with_dft_decay(self):
-        f = FDTD(stopping=DFTDecay(threshold=1e-4))
-        assert isinstance(f.stopping, DFTDecay)
-        assert f.stopping.threshold == 1e-4
+    def test_with_custom_stopping(self):
+        f = FDTD(stopping="decay", stopping_threshold=1e-4)
+        assert f.stopping == "decay"
+        assert f.stopping_threshold == 1e-4
 
     def test_resolution_custom(self):
         f = FDTD(resolution=64)
@@ -200,9 +206,10 @@ class TestFieldAssignment:
 
     def test_solver_stopping_replace(self):
         sim = Simulation()
-        sim.solver.stopping = DFTDecay(threshold=1e-4, min_time=80)
-        assert isinstance(sim.solver.stopping, DFTDecay)
-        assert sim.solver.stopping.threshold == 1e-4
+        sim.solver.stopping = "decay"
+        sim.solver.stopping_threshold = 1e-4
+        assert sim.solver.stopping == "decay"
+        assert sim.solver.stopping_threshold == 1e-4
 
     def test_geometry_component(self):
         sim = Simulation()
@@ -225,9 +232,9 @@ class TestWholeObjectAssignment:
 
     def test_solver(self):
         sim = Simulation()
-        sim.solver = FDTD(resolution=64, stopping=DFTDecay())
+        sim.solver = FDTD(resolution=64, stopping="dft_decay")
         assert sim.solver.resolution == 64
-        assert isinstance(sim.solver.stopping, DFTDecay)
+        assert sim.solver.stopping == "dft_decay"
 
 
 # ---------------------------------------------------------------------------
@@ -288,14 +295,18 @@ class TestWavelengthDerivation:
 class TestConfigTranslation:
     def test_stopping_fixed(self):
         sim = Simulation()
-        sim.solver.stopping = FixedTime(max_time=200)
+        sim.solver.stopping = "fixed"
+        sim.solver.max_time = 200
         cfg = sim._stopping_config()
         assert cfg.mode == "fixed"
         assert cfg.max_time == 200
 
-    def test_stopping_field_decay(self):
+    def test_stopping_decay(self):
         sim = Simulation()
-        sim.solver.stopping = FieldDecay(threshold=1e-4, dt=25, monitor_port="o2")
+        sim.solver.stopping = "decay"
+        sim.solver.stopping_threshold = 1e-4
+        sim.solver.stopping_dt = 25
+        sim.solver.stopping_monitor_port = "o2"
         cfg = sim._stopping_config()
         assert cfg.mode == "decay"
         assert cfg.threshold == 1e-4
@@ -304,7 +315,10 @@ class TestConfigTranslation:
 
     def test_stopping_dft_decay(self):
         sim = Simulation()
-        sim.solver.stopping = DFTDecay(max_time=200, threshold=1e-4, min_time=80)
+        sim.solver.stopping = "dft_decay"
+        sim.solver.max_time = 200
+        sim.solver.stopping_threshold = 1e-4
+        sim.solver.stopping_min_time = 80
         cfg = sim._stopping_config()
         assert cfg.mode == "dft_decay"
         assert cfg.max_time == 200
@@ -359,10 +373,7 @@ class TestImports:
     def test_import_all_new_api(self):
         from gsim.meep import (
             FDTD,
-            DFTDecay,
             Domain,
-            FieldDecay,
-            FixedTime,
             Material,
             ModeSource,
             Simulation,
@@ -372,11 +383,8 @@ class TestImports:
         assert all(
             cls is not None
             for cls in [
-                DFTDecay,
                 Domain,
                 FDTD,
-                FieldDecay,
-                FixedTime,
                 Geometry,
                 Material,
                 ModeSource,
