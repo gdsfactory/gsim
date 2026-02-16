@@ -22,18 +22,18 @@ sim = meep.Simulation()
 sim.geometry.component = ybranch
 sim.geometry.z_crop = "auto"
 sim.materials = {"si": 3.47, "SiO2": 1.44}       # float shorthand → Material(n=...)
+sim.source.port = "o1"
 sim.source.wavelength = 1.55
 sim.source.bandwidth = 0.1
 sim.source.num_freqs = 11
 sim.monitors = ["o1", "o2"]                          # just port names
-sim.domain = meep.Domain(pml=1.0, margin=0.5)
-sim.solver = meep.FDTD(
-    resolution=32,
-    stopping=meep.DFTDecay(threshold=1e-3, min_time=100),
-    simplify_tol=0.01,
-    save_geometry=True,
-    save_fields=True,
-)
+sim.domain.pml = 1.0
+sim.domain.margin = 0.5
+sim.solver.resolution = 32
+sim.solver.stopping = meep.DFTDecay(threshold=1e-3, min_time=100)
+sim.solver.simplify_tol = 0.01
+sim.solver.save_geometry = True
+sim.solver.save_fields = True
 sim.plot_2d(slices="xyz")
 result = sim.run("./meep-sim")
 ```
@@ -41,7 +41,7 @@ result = sim.run("./meep-sim")
 ### Design principles
 
 - **6 typed physics objects** — `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD` + `monitors: list[str]` — assigned to a `Simulation` container. No ordering dependencies.
-- **Field-by-field or whole-object assignment** — `sim.source.port = "o1"` or `sim.source = ModeSource(port="o1")`.
+- **Attribute style or constructor style** — `sim.source.port = "o1"` (attribute, preferred) or `sim.source = ModeSource(port="o1")` (constructor). Both work via Pydantic `validate_assignment=True`.
 - **Float shorthand for materials** — `{"si": 3.47}` auto-normalizes to `Material(n=3.47)` via validator.
 - **Typed stopping variants** — `FixedTime`, `FieldDecay`, `DFTDecay` instead of string `mode`.
 - **Source defines spectral window** — `WavelengthConfig` derived from `ModeSource.wavelength/bandwidth/num_freqs`. Monitors are just port name strings.
