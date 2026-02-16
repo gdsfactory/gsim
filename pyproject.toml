@@ -57,7 +57,8 @@ dev = [
   "ty>=0.0.13"
 ]
 docs = [
-  "ihp-gdsfactory>=0.1.4"
+  "ihp-gdsfactory>=0.1.4",
+  "ubcpdk @ git+https://github.com/gdsfactory/ubc.git"
 ]
 
 [[tool.bver.file]]
