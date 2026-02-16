@@ -1,5 +1,17 @@
 """MEEP simulation models."""
 
+from gsim.meep.models.api import (
+    DFTDecay,
+    Diagnostics,
+    Domain,
+    FDTD,
+    FieldDecay,
+    FixedTime,
+    Geometry,
+    Material,
+    ModeMonitor,
+    ModeSource,
+)
 from gsim.meep.models.config import (
     AccuracyConfig,
     DiagnosticsConfig,
@@ -20,6 +32,18 @@ from gsim.meep.models.results import SParameterResult
 FDTDConfig = WavelengthConfig
 
 __all__ = [
+    # New declarative API models
+    "DFTDecay",
+    "Diagnostics",
+    "Domain",
+    "FDTD",
+    "FieldDecay",
+    "FixedTime",
+    "Geometry",
+    "Material",
+    "ModeMonitor",
+    "ModeSource",
+    # Legacy config models
     "AccuracyConfig",
     "DiagnosticsConfig",
     "FDTDConfig",

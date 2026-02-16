@@ -11,34 +11,43 @@ from pathlib import Path
 import gdsfactory as gf
 from ubcpdk import PDK, cells
 
-from gsim.meep import MeepSim
+from gsim import meep
 
 PDK.activate()
 
 # 1. Create component
 component = cells.ebeam_y_1550()
 
-# 2. Configure simulation
-sim = MeepSim()
-sim.set_geometry(component)
-sim.set_stack()
-# Domain: 0.5um margins, 1um PML, auto-extend ports into PML (margin_xy + dpml = 1.5um)
-sim.set_domain(margin=0.5)
-sim.set_z_crop()
-sim.set_material("si", refractive_index=3.47)
-sim.set_material("SiO2", refractive_index=1.44)
-sim.set_wavelength(wavelength=1.55, bandwidth=0.01, num_freqs=11)
-sim.set_source()  # auto: fwidth ~3x monitor bw
-sim.set_stopping(mode="dft_decay", max_time=200, threshold=1e-3, dft_min_run_time=100)
-sim.set_resolution(pixels_per_um=20)
-sim.set_accuracy(
+# 2. Configure simulation (declarative API)
+sim = meep.Simulation()
+sim.geometry.component = component
+sim.geometry.stack = None  # resolved from active PDK
+sim.geometry.z_crop = "auto"
+
+sim.materials = {"si": 3.47, "SiO2": 1.44}
+
+sim.source = meep.ModeSource()  # auto: fwidth ~3x monitor bw, auto port
+
+sim.monitors = [
+    meep.ModeMonitor(port="o1", wavelength=1.55, bandwidth=0.01, num_freqs=11),
+    meep.ModeMonitor(port="o2", wavelength=1.55, bandwidth=0.01, num_freqs=11),
+    meep.ModeMonitor(port="o3", wavelength=1.55, bandwidth=0.01, num_freqs=11),
+]
+
+# Domain: 0.5um margins, 1um PML, auto-extend ports into PML (margin + pml = 1.5um)
+sim.domain = meep.Domain(pml=1.0, margin=0.5)
+
+sim.solver = meep.FDTD(
+    resolution=20,
+    stopping=meep.DFTDecay(max_time=200, threshold=1e-3, min_time=100),
     simplify_tol=0.01,
-    eps_averaging=False,
 )
-sim.set_diagnostics(
+
+sim.diagnostics = meep.Diagnostics(
     save_geometry=True, save_fields=True, save_animation=True, verbose_interval=5.0
 )
-sim.set_output_dir(Path(__file__).parent / "meep-sim-test")
+
+sim.output_dir = Path(__file__).parent / "meep-sim-test"
 
 # 3. Validate
 result = sim.validate_config()
