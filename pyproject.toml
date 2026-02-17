@@ -54,7 +54,7 @@ dev = [
   "towncrier>=24.0.0",
   "vega-datasets>=0.9.0",
   "nbstripout>=0.8.1",
-  "ty>=0.0.13"
+  "ty>=0.0.15"
 ]
 docs = [
   "ihp-gdsfactory>=0.1.4",
