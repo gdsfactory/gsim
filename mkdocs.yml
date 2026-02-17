@@ -21,6 +21,7 @@ nav:
   - examples:
       - Simple Example: nbs/example.md
       - MEEP Y-Branch: nbs/meep_ybranch.md
+      - MEEP Ring Coupler: nbs/meep_ring_coupler.md
       - Palace CPW: nbs/palace_demo_cpw.md
       - Palace Microstrip: nbs/palace_demo_microstrip.md
   - api reference:
