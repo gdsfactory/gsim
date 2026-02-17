@@ -32,25 +32,23 @@ from gsim.meep.models.config import (
 class TestWavelengthConfig:
     """Test WavelengthConfig frequency/wavelength conversion."""
 
-    def test_defaults(self):
-        cfg = WavelengthConfig()
-        assert cfg.wavelength == 1.55
-        assert cfg.bandwidth == 0.1
-        assert cfg.num_freqs == 11
+    def test_requires_all_fields(self):
+        with pytest.raises(ValidationError):
+            WavelengthConfig()
 
     def test_fcen(self):
-        cfg = WavelengthConfig(wavelength=1.55)
+        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         assert abs(cfg.fcen - 1.0 / 1.55) < 1e-10
 
     def test_df(self):
-        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1)
+        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         wl_min = 1.55 - 0.05
         wl_max = 1.55 + 0.05
         expected_df = 1.0 / wl_min - 1.0 / wl_max
         assert abs(cfg.df - expected_df) < 1e-10
 
     def test_model_dump(self):
-        cfg = WavelengthConfig()
+        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         d = cfg.model_dump()
         assert "wavelength" in d
         assert "fcen" in d
@@ -81,7 +79,7 @@ class TestResolutionConfig:
         assert cfg.pixels_per_um == 48
 
     def test_model_dump(self):
-        cfg = ResolutionConfig()
+        cfg = ResolutionConfig(pixels_per_um=32)
         d = cfg.model_dump()
         assert d["pixels_per_um"] == 32
 
@@ -90,12 +88,25 @@ class TestSimConfig:
     """Test SimConfig serialization."""
 
     def test_to_json(self, tmp_path):
-        wl_cfg = WavelengthConfig()
+        wl_cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         fwidth = SourceConfig().compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_cfg = SourceConfig(fwidth=fwidth)
-        stopping_cfg = StoppingConfig(mode="dft_decay", max_time=200.0)
+        stopping_cfg = StoppingConfig(
+            mode="dft_decay",
+            max_time=200.0,
+            decay_dt=50.0,
+            decay_component="Ey",
+            threshold=0.05,
+            dft_min_run_time=100,
+        )
+        from gsim.meep.models.config import (
+            AccuracyConfig,
+            DiagnosticsConfig,
+        )
+
         cfg = SimConfig(
             gds_filename="layout.gds",
+            verbose_interval=0,
             layer_stack=[  # ty: ignore[invalid-argument-type]
                 {
                     "layer_name": "core",
@@ -121,7 +132,32 @@ class TestSimConfig:
             wavelength=wl_cfg,
             source=source_cfg,
             stopping=stopping_cfg,
-            resolution=ResolutionConfig(),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=1.0,
+                margin_xy=0.5,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            dielectrics=[],
+            symmetries=[],
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
@@ -519,18 +555,18 @@ class TestImportWithoutMeep:
 class TestDomainConfig:
     """Test DomainConfig model."""
 
-    def test_defaults(self):
-        cfg = DomainConfig()
-        assert cfg.dpml == 1.0
-        assert cfg.margin_xy == 0.5
-        assert cfg.margin_z_above == 0.5
-        assert cfg.margin_z_below == 0.5
-        assert cfg.port_margin == 0.5
-        assert cfg.extend_ports == 0.0
+    def test_requires_all_fields(self):
+        with pytest.raises(ValidationError):
+            DomainConfig()
 
     def test_custom(self):
         cfg = DomainConfig(
-            dpml=0.5, margin_xy=0.2, margin_z_above=0.3, margin_z_below=0.4
+            dpml=0.5,
+            margin_xy=0.2,
+            margin_z_above=0.3,
+            margin_z_below=0.4,
+            port_margin=0.5,
+            extend_ports=0.0,
         )
         assert cfg.dpml == 0.5
         assert cfg.margin_xy == 0.2
@@ -538,17 +574,36 @@ class TestDomainConfig:
         assert cfg.margin_z_below == 0.4
 
     def test_extend_ports_custom(self):
-        cfg = DomainConfig(extend_ports=2.5)
+        cfg = DomainConfig(
+            dpml=1.0,
+            margin_xy=0.5,
+            margin_z_above=0.5,
+            margin_z_below=0.5,
+            port_margin=0.5,
+            extend_ports=2.5,
+        )
         assert cfg.extend_ports == 2.5
 
     def test_extend_ports_serialization(self):
-        cfg = DomainConfig(extend_ports=3.0)
+        cfg = DomainConfig(
+            dpml=1.0,
+            margin_xy=0.5,
+            margin_z_above=0.5,
+            margin_z_below=0.5,
+            port_margin=0.5,
+            extend_ports=3.0,
+        )
         d = cfg.model_dump()
         assert d["extend_ports"] == 3.0
 
     def test_model_dump(self):
         cfg = DomainConfig(
-            dpml=2.0, margin_xy=0.5, margin_z_above=1.0, margin_z_below=1.5
+            dpml=2.0,
+            margin_xy=0.5,
+            margin_z_above=1.0,
+            margin_z_below=1.5,
+            port_margin=0.5,
+            extend_ports=0.0,
         )
         d = cfg.model_dump()
         assert d["dpml"] == 2.0
@@ -560,23 +615,71 @@ class TestDomainConfig:
 class TestSimConfigComponentBbox:
     """Test SimConfig.component_bbox field."""
 
-    def test_default_none(self):
-        cfg = SimConfig()
+    @pytest.fixture
+    def _sim_kwargs(self):
+        from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
+
+        return dict(
+            gds_filename="layout.gds",
+            verbose_interval=0,
+            layer_stack=[],
+            dielectrics=[],
+            ports=[],
+            materials={},
+            wavelength=WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11),
+            source=SourceConfig(),
+            stopping=StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            ),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=1.0,
+                margin_xy=0.5,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            symmetries=[],
+        )
+
+    def test_default_none(self, _sim_kwargs):
+        cfg = SimConfig(**_sim_kwargs)
         assert cfg.component_bbox is None
 
-    def test_with_bbox(self):
-        cfg = SimConfig(component_bbox=[-5.0, -2.0, 5.0, 2.0])
+    def test_with_bbox(self, _sim_kwargs):
+        cfg = SimConfig(**_sim_kwargs, component_bbox=[-5.0, -2.0, 5.0, 2.0])
         assert cfg.component_bbox == [-5.0, -2.0, 5.0, 2.0]
 
-    def test_json_roundtrip(self, tmp_path):
-        cfg = SimConfig(component_bbox=[-1.0, -0.5, 1.0, 0.5])
+    def test_json_roundtrip(self, tmp_path, _sim_kwargs):
+        cfg = SimConfig(**_sim_kwargs, component_bbox=[-1.0, -0.5, 1.0, 0.5])
         path = tmp_path / "config.json"
         cfg.to_json(path)
         data = json.loads(path.read_text())
         assert data["component_bbox"] == [-1.0, -0.5, 1.0, 0.5]
 
-    def test_json_roundtrip_none(self, tmp_path):
-        cfg = SimConfig()
+    def test_json_roundtrip_none(self, tmp_path, _sim_kwargs):
+        cfg = SimConfig(**_sim_kwargs)
         path = tmp_path / "config.json"
         cfg.to_json(path)
         data = json.loads(path.read_text())
@@ -587,14 +690,50 @@ class TestDomainInSimConfig:
     """Test domain serialization in SimConfig JSON."""
 
     def test_domain_in_sim_config_json(self, tmp_path):
+        from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
+
         cfg = SimConfig(
             gds_filename="layout.gds",
+            verbose_interval=0,
             layer_stack=[],
+            dielectrics=[],
             ports=[],
             materials={},
-            wavelength=WavelengthConfig(),
-            resolution=ResolutionConfig(),
-            domain=DomainConfig(dpml=0.5, margin_xy=0.2),
+            wavelength=WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11),
+            source=SourceConfig(),
+            stopping=StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            ),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=0.5,
+                margin_xy=0.2,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            symmetries=[],
         )
         path = tmp_path / "config.json"
         cfg.to_json(path)
@@ -618,9 +757,9 @@ class TestSymmetryEntry:
         assert s.direction == "X"
         assert s.phase == -1
 
-    def test_default_phase(self):
-        s = SymmetryEntry(direction="Y")
-        assert s.phase == 1
+    def test_requires_phase(self):
+        with pytest.raises(ValidationError):
+            SymmetryEntry(direction="Y")
 
     def test_model_dump(self):
         s = SymmetryEntry(direction="Z", phase=-1)
@@ -644,43 +783,121 @@ class TestSymmetryEntry:
 class TestStoppingConfig:
     """Test StoppingConfig model."""
 
-    def test_default_is_fixed(self):
-        cfg = StoppingConfig()
-        assert cfg.mode == "fixed"
-        assert cfg.max_time == 100.0
-        assert cfg.decay_dt == 50.0
-        assert cfg.decay_component == "Ey"
-        assert cfg.threshold == 0.05
-        assert cfg.decay_monitor_port is None
+    def test_requires_all_fields(self):
+        with pytest.raises(ValidationError):
+            StoppingConfig()
 
     def test_field_decay_mode(self):
-        cfg = StoppingConfig(mode="field_decay", threshold=1e-4, decay_dt=25.0)
+        cfg = StoppingConfig(
+            mode="field_decay",
+            threshold=1e-4,
+            decay_dt=25.0,
+            max_time=100.0,
+            decay_component="Ey",
+            dft_min_run_time=100,
+        )
         assert cfg.mode == "field_decay"
         assert cfg.threshold == 1e-4
         assert cfg.decay_dt == 25.0
 
     def test_energy_decay_mode(self):
-        cfg = StoppingConfig(mode="energy_decay", decay_dt=100, threshold=1e-4)
+        cfg = StoppingConfig(
+            mode="energy_decay",
+            decay_dt=100,
+            threshold=1e-4,
+            max_time=100.0,
+            decay_component="Ey",
+            dft_min_run_time=100,
+        )
         assert cfg.mode == "energy_decay"
         assert cfg.decay_dt == 100
         assert cfg.threshold == 1e-4
 
     def test_invalid_mode(self):
         with pytest.raises(ValidationError):
-            StoppingConfig(mode="invalid")  # ty: ignore[invalid-argument-type]
+            StoppingConfig(  # ty: ignore[invalid-argument-type]
+                mode="invalid",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            )
 
     def test_threshold_bounds(self):
         with pytest.raises(ValidationError):
-            StoppingConfig(threshold=0)
+            StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0,
+                dft_min_run_time=100,
+            )
         with pytest.raises(ValidationError):
-            StoppingConfig(threshold=1.0)
+            StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=1.0,
+                dft_min_run_time=100,
+            )
+
+    def test_wall_time_max_default(self):
+        cfg = StoppingConfig(
+            mode="fixed",
+            max_time=100.0,
+            decay_dt=50.0,
+            decay_component="Ey",
+            threshold=0.05,
+            dft_min_run_time=100,
+        )
+        assert cfg.wall_time_max == 0.0
+
+    def test_wall_time_max_set(self):
+        cfg = StoppingConfig(
+            mode="field_decay",
+            max_time=200.0,
+            decay_dt=50.0,
+            decay_component="Ey",
+            threshold=0.05,
+            dft_min_run_time=100,
+            wall_time_max=3600,
+        )
+        assert cfg.wall_time_max == 3600
+
+    def test_wall_time_max_serialized(self):
+        cfg = StoppingConfig(
+            mode="fixed",
+            max_time=100.0,
+            decay_dt=50.0,
+            decay_component="Ey",
+            threshold=0.05,
+            dft_min_run_time=100,
+            wall_time_max=1800,
+        )
+        data = cfg.model_dump()
+        assert data["wall_time_max"] == 1800
+
+    def test_wall_time_max_negative_rejected(self):
+        with pytest.raises(ValidationError):
+            StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+                wall_time_max=-1,
+            )
 
 
 class TestWavelengthConfigStopping:
     """Test that WavelengthConfig no longer embeds StoppingConfig."""
 
     def test_model_dump_excludes_stopping(self):
-        cfg = WavelengthConfig()
+        cfg = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         d = cfg.model_dump()
         assert "stopping" not in d
         assert "run_after_sources" not in d
@@ -735,7 +952,7 @@ class TestSourceConfig:
         """Auto source fwidth should always be wider than monitor df."""
         cfg = SourceConfig()
         fcen = 1.0 / 1.55
-        wl = WavelengthConfig(wavelength=1.55, bandwidth=0.1)
+        wl = WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11)
         fwidth = cfg.compute_fwidth(fcen, wl.df)
         assert fwidth > wl.df
 
@@ -873,7 +1090,12 @@ class TestOverlay:
         )
 
         domain_cfg = DomainConfig(
-            dpml=1.0, margin_xy=0.5, margin_z_above=0.0, margin_z_below=0.0
+            dpml=1.0,
+            margin_xy=0.5,
+            margin_z_above=0.0,
+            margin_z_below=0.0,
+            port_margin=0.5,
+            extend_ports=0.0,
         )
 
         port_data = [
@@ -932,7 +1154,14 @@ class TestOverlay:
             bbox=((-2.0, -1.0, -1.0), (2.0, 1.0, 1.22)),
         )
 
-        domain_cfg = DomainConfig(dpml=1.0, margin_xy=0.5)
+        domain_cfg = DomainConfig(
+            dpml=1.0,
+            margin_xy=0.5,
+            margin_z_above=0.5,
+            margin_z_below=0.5,
+            port_margin=0.5,
+            extend_ports=0.0,
+        )
         dielectrics = [
             {"name": "substrate", "material": "silicon", "zmin": -1.0, "zmax": 0.0},
             {"name": "oxide", "material": "SiO2", "zmin": 0.0, "zmax": 1.22},
@@ -989,6 +1218,22 @@ class TestScriptDomainConfig:
         assert "bbox_right" in script
         assert "bbox_top" in script
         assert "bbox_bottom" in script
+
+    def test_script_contains_wall_time_cap(self):
+        """Verify runner script has wall-clock time cap logic."""
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "_make_wall_time_cap" in script
+        assert "wall_time_max" in script
+
+    def test_script_wall_time_all_modes(self):
+        """Wall-clock cap should be wired into all 4 stopping modes."""
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        # Each mode branch should reference _make_wall_time_cap
+        assert script.count("_make_wall_time_cap") >= 4
 
 
 # ---------------------------------------------------------------------------

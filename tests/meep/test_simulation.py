@@ -250,12 +250,30 @@ class TestFieldAssignment:
         assert f.stopping_threshold == 1e-4
         assert f.stopping_monitor_port == "o2"
 
-    def test_stop_after(self):
+    def test_stop_after_sources(self):
         f = FDTD()
-        result = f.stop_after(time=500)
+        result = f.stop_after_sources(time=500)
         assert result is f
         assert f.stopping == "fixed"
         assert f.max_time == 500
+
+    def test_wall_time_max_default(self):
+        f = FDTD()
+        assert f.wall_time_max == 0.0
+
+    def test_stop_after_walltime(self):
+        f = FDTD()
+        result = f.stop_after_walltime(seconds=3600)
+        assert result is f
+        assert f.wall_time_max == 3600
+
+    def test_wall_time_max_orthogonal(self):
+        """wall_time_max can be combined with any stopping mode."""
+        f = FDTD()
+        f.stop_when_fields_decayed(dt=50, decay_by=0.05)
+        f.stop_after_walltime(seconds=1800)
+        assert f.stopping == "field_decay"
+        assert f.wall_time_max == 1800
 
     def test_geometry_component(self):
         sim = Simulation()

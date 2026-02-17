@@ -189,6 +189,12 @@ class FDTD(BaseModel):
     stopping_monitor_port: str | None = Field(
         default=None, description="Port to monitor for field_decay mode"
     )
+    wall_time_max: float = Field(
+        default=0.0,
+        ge=0,
+        description="Wall-clock time limit in seconds (0=unlimited). "
+        "Orthogonal safety net — stops the sim if real time exceeds this.",
+    )
 
     subpixel: bool = Field(default=False, description="Toggle subpixel averaging")
     subpixel_maxeval: int = Field(
@@ -270,8 +276,8 @@ class FDTD(BaseModel):
         self.stopping_monitor_port = monitor_port
         return self
 
-    def stop_after(self, time: float) -> FDTD:
-        """Run for a fixed time after sources turn off.
+    def stop_after_sources(self, time: float) -> FDTD:
+        """Run for a fixed sim-time after sources turn off.
 
         Args:
             time: Run time after sources in MEEP time units (um/c).
@@ -281,6 +287,22 @@ class FDTD(BaseModel):
         """
         self.stopping = "fixed"
         self.max_time = time
+        return self
+
+    def stop_after_walltime(self, seconds: float) -> FDTD:
+        """Set a wall-clock time limit (safety net).
+
+        This is orthogonal to the sim-time stopping mode — it caps
+        how long the FDTD run is allowed to take in real (wall) seconds.
+        Combine with any other stopping method.
+
+        Args:
+            seconds: Maximum wall-clock seconds for the FDTD run.
+
+        Returns:
+            self (for fluent chaining).
+        """
+        self.wall_time_max = seconds
         return self
 
     def __call__(self, **kwargs: Any) -> FDTD:

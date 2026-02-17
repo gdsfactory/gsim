@@ -334,6 +334,7 @@ class Simulation(BaseModel):
             decay_component=s.stopping_component,
             decay_dt=s.stopping_dt,
             decay_monitor_port=s.stopping_monitor_port,
+            wall_time_max=s.wall_time_max,
         )
 
     def _domain_config(self) -> Any:

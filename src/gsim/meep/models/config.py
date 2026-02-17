@@ -19,7 +19,7 @@ class SymmetryEntry(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     direction: Literal["X", "Y", "Z"]
-    phase: Literal[1, -1] = Field(default=1)
+    phase: Literal[1, -1]
 
 
 class DomainConfig(BaseModel):
@@ -38,23 +38,21 @@ class DomainConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    dpml: float = Field(default=1.0, ge=0, description="PML thickness in um")
+    dpml: float = Field(ge=0, description="PML thickness in um")
     margin_xy: float = Field(
-        default=0.5, ge=0, description="XY margin between geometry and PML in um"
+        ge=0, description="XY margin between geometry and PML in um"
     )
     margin_z_above: float = Field(
-        default=0.5, ge=0, description="Z margin above core kept by set_z_crop in um"
+        ge=0, description="Z margin above core kept by set_z_crop in um"
     )
     margin_z_below: float = Field(
-        default=0.5, ge=0, description="Z margin below core kept by set_z_crop in um"
+        ge=0, description="Z margin below core kept by set_z_crop in um"
     )
     port_margin: float = Field(
-        default=0.5,
         ge=0,
         description="Margin on each side of port width for monitors (um)",
     )
     extend_ports: float = Field(
-        default=0.0,
         ge=0,
         description="Length to extend waveguide ports into PML in um. "
         "0 = auto (margin_xy + dpml).",
@@ -83,22 +81,23 @@ class StoppingConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    mode: Literal["fixed", "field_decay", "dft_decay", "energy_decay"] = Field(
-        default="fixed"
-    )
-    max_time: float = Field(
-        default=100.0, gt=0, serialization_alias="run_after_sources"
-    )
-    decay_dt: float = Field(default=50.0, gt=0)
-    decay_component: str = Field(default="Ey")
-    threshold: float = Field(default=0.05, gt=0, lt=1, serialization_alias="decay_by")
+    mode: Literal["fixed", "field_decay", "dft_decay", "energy_decay"]
+    max_time: float = Field(gt=0, serialization_alias="run_after_sources")
+    decay_dt: float = Field(gt=0)
+    decay_component: str
+    threshold: float = Field(gt=0, lt=1, serialization_alias="decay_by")
     decay_monitor_port: str | None = Field(default=None)
     dft_min_run_time: float = Field(
-        default=100,
         ge=0,
         description="Minimum absolute sim time for dft_decay mode (not "
         "time-after-sources). Must exceed pulse transit time through the "
         "device to avoid false convergence on near-zero fields.",
+    )
+    wall_time_max: float = Field(
+        default=0.0,
+        ge=0,
+        description="Wall-clock time limit in seconds (0=unlimited). "
+        "Orthogonal safety net for all stopping modes.",
     )
 
 
@@ -162,11 +161,9 @@ class WavelengthConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    wavelength: float = Field(default=1.55, gt=0, description="Center wavelength in um")
-    bandwidth: float = Field(
-        default=0.1, ge=0, description="Wavelength bandwidth in um"
-    )
-    num_freqs: int = Field(default=11, ge=1, description="Number of frequency points")
+    wavelength: float = Field(gt=0, description="Center wavelength in um")
+    bandwidth: float = Field(ge=0, description="Wavelength bandwidth in um")
+    num_freqs: int = Field(ge=1, description="Number of frequency points")
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -190,9 +187,7 @@ class ResolutionConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    pixels_per_um: int = Field(
-        default=32, ge=4, description="Grid pixels per micrometer"
-    )
+    pixels_per_um: int = Field(ge=4, description="Grid pixels per micrometer")
 
     @classmethod
     def coarse(cls) -> ResolutionConfig:
@@ -222,15 +217,13 @@ class AccuracyConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    eps_averaging: bool = Field(default=False, description="Toggle subpixel averaging")
+    eps_averaging: bool = Field(description="Toggle subpixel averaging")
     subpixel_maxeval: int = Field(
-        default=0, ge=0, description="Cap on integration evaluations (0=unlimited)"
+        ge=0, description="Cap on integration evaluations (0=unlimited)"
     )
-    subpixel_tol: float = Field(
-        default=1e-4, gt=0, description="Subpixel integration tolerance"
-    )
+    subpixel_tol: float = Field(gt=0, description="Subpixel integration tolerance")
     simplify_tol: float = Field(
-        default=0.0, ge=0, description="Shapely simplification tolerance in um (0=off)"
+        ge=0, description="Shapely simplification tolerance in um (0=off)"
     )
 
 
@@ -239,27 +232,20 @@ class DiagnosticsConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    save_geometry: bool = Field(
-        default=True, description="Pre-run geometry cross-section plots"
-    )
-    save_fields: bool = Field(default=True, description="Post-run field snapshot")
-    save_epsilon_raw: bool = Field(
-        default=False, description="Raw epsilon .npy (advanced)"
-    )
+    save_geometry: bool = Field(description="Pre-run geometry cross-section plots")
+    save_fields: bool = Field(description="Post-run field snapshot")
+    save_epsilon_raw: bool = Field(description="Raw epsilon .npy (advanced)")
     save_animation: bool = Field(
-        default=False, description="Field animation MP4 (heavy, needs ffmpeg)"
+        description="Field animation MP4 (heavy, needs ffmpeg)"
     )
     animation_interval: float = Field(
-        default=0.5,
         gt=0,
         description="MEEP time units between animation frames",
     )
     preview_only: bool = Field(
-        default=False,
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )
     verbose_interval: float = Field(
-        default=0,
         ge=0,
         description="MEEP time units between progress prints (0=off)",
     )
@@ -315,32 +301,28 @@ class SimConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    gds_filename: str = Field(
-        default="layout.gds", description="GDS file with 2D layout"
-    )
+    gds_filename: str = Field(description="GDS file with 2D layout")
     component_bbox: list[float] | None = Field(
         default=None,
         description=(
             "Original component bbox [xmin, ymin, xmax, ymax] before port extension."
         ),
     )
-    layer_stack: list[LayerStackEntry] = Field(default_factory=list)
-    dielectrics: list[dict[str, Any]] = Field(default_factory=list)
-    ports: list[PortData] = Field(default_factory=list)
-    materials: dict[str, MaterialData] = Field(default_factory=dict)
-    wavelength: WavelengthConfig = Field(
-        default_factory=WavelengthConfig, serialization_alias="fdtd"
-    )
-    source: SourceConfig = Field(default_factory=SourceConfig)
-    stopping: StoppingConfig = Field(default_factory=StoppingConfig)
-    resolution: ResolutionConfig = Field(default_factory=ResolutionConfig)
-    domain: DomainConfig = Field(default_factory=DomainConfig)
-    accuracy: AccuracyConfig = Field(default_factory=AccuracyConfig)
+    layer_stack: list[LayerStackEntry]
+    dielectrics: list[dict[str, Any]]
+    ports: list[PortData]
+    materials: dict[str, MaterialData]
+    wavelength: WavelengthConfig = Field(serialization_alias="fdtd")
+    source: SourceConfig
+    stopping: StoppingConfig
+    resolution: ResolutionConfig
+    domain: DomainConfig
+    accuracy: AccuracyConfig
     verbose_interval: float = Field(
-        default=0, ge=0, description="MEEP time units between progress prints (0=off)"
+        ge=0, description="MEEP time units between progress prints (0=off)"
     )
-    diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
-    symmetries: list[SymmetryEntry] = Field(default_factory=list)
+    diagnostics: DiagnosticsConfig
+    symmetries: list[SymmetryEntry]
     split_chunks_evenly: bool = Field(default=False)
     meep_np: int = Field(default=1, ge=1, description="Recommended MPI process count")
 
