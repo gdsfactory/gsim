@@ -13,8 +13,10 @@ import numpy as np
 from gsim.common.geometry_model import GeometryModel, Prism
 from gsim.common.viz._colors import generate_layer_colors_with_opacity
 from gsim.common.viz._mesh_helpers import (
+    collect_triangular_prism_geometry,
     prism_base_top_vertices,
     simulation_box_corners,
+    triangulate_polygon_with_holes,
 )
 
 try:
@@ -120,23 +122,58 @@ def plot_prisms_3d_open3d(
         cx = cy = cz = 0.0
         rs = 10.0
 
+    # Standard camera views for view buttons
+    d = 2.0  # distance multiplier for orthographic views
+    _views = {
+        "Iso": dict(eye=dict(x=1.5, y=1.5, z=1.5)),
+        "Top": dict(eye=dict(x=0, y=0, z=d), up=dict(x=0, y=1, z=0)),
+        "Front": dict(eye=dict(x=0, y=-d, z=0), up=dict(x=0, y=0, z=1)),
+        "Right": dict(eye=dict(x=d, y=0, z=0), up=dict(x=0, y=0, z=1)),
+    }
+    view_buttons = [
+        dict(
+            label=name,
+            method="relayout",
+            args=[
+                {
+                    "scene.camera.eye": cam["eye"],
+                    "scene.camera.up": cam.get("up", dict(x=0, y=0, z=1)),
+                    "scene.camera.center": dict(x=0, y=0, z=0),
+                }
+            ],
+        )
+        for name, cam in _views.items()
+    ]
+
     fig.update_layout(
         scene=dict(
             xaxis_title="X (um)",
             yaxis_title="Y (um)",
             zaxis_title="Z (um)",
-            aspectmode="data",
+            aspectmode="cube",
             camera=dict(
                 eye=dict(x=1.5, y=1.5, z=1.5),
                 center=dict(x=0, y=0, z=0),
-                projection=dict(type="perspective"),
+                projection=dict(type="orthographic"),
             ),
             xaxis=dict(range=[cx - rs * 0.6, cx + rs * 0.6]),
             yaxis=dict(range=[cy - rs * 0.6, cy + rs * 0.6]),
             zaxis=dict(range=[cz - rs * 0.6, cz + rs * 0.6]),
         ),
-        title="3D Geometry Visualization",
+        title="",
         dragmode="orbit",
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="down",
+                x=0.01,
+                y=0.99,
+                xanchor="left",
+                yanchor="top",
+                bgcolor="rgba(255,255,255,0.8)",
+                buttons=view_buttons,
+            ),
+        ],
         **kwargs,
     )
 
@@ -199,16 +236,15 @@ def _convert_prisms_to_open3d(
 
 def _merge_triangular_prisms_o3d(prisms: list[Prism]) -> Any:
     """Merge many triangular prisms into one Open3D mesh for performance."""
-    all_vertices: list[np.ndarray] = []
+    result = collect_triangular_prism_geometry(prisms)
+    if result is None:
+        return None
+
+    combined, prism_offsets = result
+    n = 3  # triangular prisms
     all_triangles: list[list[int]] = []
-    offset = 0
 
-    for prism in prisms:
-        base, top = prism_base_top_vertices(prism)
-        verts = np.vstack([base, top])
-        all_vertices.append(verts)
-        n = len(base)
-
+    for offset in prism_offsets:
         # bottom
         all_triangles.append([offset, offset + 2, offset + 1])
         # top
@@ -219,16 +255,11 @@ def _merge_triangular_prisms_o3d(prisms: list[Prism]) -> Any:
             all_triangles.append([offset + i, offset + ni, offset + ni + n])
             all_triangles.append([offset + i, offset + ni + n, offset + i + n])
 
-        offset += len(verts)
-
-    if all_vertices:
-        combined = np.vstack(all_vertices)
-        mesh = o3d.geometry.TriangleMesh()
-        mesh.vertices = o3d.utility.Vector3dVector(combined)
-        mesh.triangles = o3d.utility.Vector3iVector(all_triangles)
-        mesh.compute_vertex_normals()
-        return mesh
-    return None
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(combined)
+    mesh.triangles = o3d.utility.Vector3iVector(all_triangles)
+    mesh.compute_vertex_normals()
+    return mesh
 
 
 def _create_prism_mesh_o3d(
@@ -273,62 +304,26 @@ def _create_prism_mesh_with_holes_o3d(
     top_vertices: np.ndarray,
 ) -> Any:
     """Create Open3D mesh from a Shapely polygon with holes via Delaunay."""
-    try:
-        import shapely.geometry as sg
-        from scipy.spatial import Delaunay
-    except ImportError:
-        return _create_prism_mesh_o3d(base_vertices, top_vertices)
-
-    all_points: list[tuple[float, float]] = []
-    boundary_segments: list[list[int]] = []
-
-    exterior_coords = list(shapely_polygon.exterior.coords[:-1])
-    start_idx = 0
-    all_points.extend(exterior_coords)
-    boundary_segments = [
-        [start_idx + i, start_idx + (i + 1) % len(exterior_coords)]
-        for i in range(len(exterior_coords))
-    ]
-
-    for interior in shapely_polygon.interiors:
-        interior_coords = list(interior.coords[:-1])
-        start_idx = len(all_points)
-        all_points.extend(interior_coords)
-        boundary_segments.extend(
-            [start_idx + i, start_idx + (i + 1) % len(interior_coords)]
-            for i in range(len(interior_coords))
-        )
-
-    if len(all_points) < 3:
-        return _create_prism_mesh_o3d(base_vertices, top_vertices)
-
-    points_2d = np.array(all_points)
-    tri = Delaunay(points_2d)
-
-    valid_triangles = [
-        simplex
-        for simplex in tri.simplices
-        if shapely_polygon.contains(sg.Point(*np.mean(points_2d[simplex], axis=0)))
-    ]
-
-    if not valid_triangles:
-        return _create_prism_mesh_o3d(base_vertices, top_vertices)
-
     z_base = base_vertices[0, 2] if len(base_vertices) > 0 else 0
     z_top = top_vertices[0, 2] if len(top_vertices) > 0 else z_base + 1
 
-    verts_3d: list[list[float]] = [[pt[0], pt[1], z_base] for pt in points_2d] + [
-        [pt[0], pt[1], z_top] for pt in points_2d
-    ]
+    result = triangulate_polygon_with_holes(shapely_polygon, z_base, z_top)
+    if result is None:
+        return _create_prism_mesh_o3d(base_vertices, top_vertices)
 
-    n_pts = len(points_2d)
+    verts_3d, valid_triangles, boundary_segments = result
+    n_pts = len(verts_3d) // 2
+
+    # bottom triangles
     faces_3d: list[list[int]] = [
         [tri_idx[0], tri_idx[1], tri_idx[2]] for tri_idx in valid_triangles
     ]
+    # top triangles (reversed winding)
     faces_3d.extend(
         [tri_idx[0] + n_pts, tri_idx[2] + n_pts, tri_idx[1] + n_pts]
         for tri_idx in valid_triangles
     )
+    # side quads (2 tris each)
     for seg in boundary_segments:
         i, j = seg
         faces_3d.append([i, j, j + n_pts])

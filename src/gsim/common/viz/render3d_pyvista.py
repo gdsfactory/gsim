@@ -12,7 +12,9 @@ import numpy as np
 from gsim.common.geometry_model import GeometryModel, Prism
 from gsim.common.viz._colors import generate_layer_colors
 from gsim.common.viz._mesh_helpers import (
+    collect_triangular_prism_geometry,
     prism_base_top_vertices,
+    triangulate_polygon_with_holes,
 )
 
 try:
@@ -215,16 +217,15 @@ def _convert_prisms_to_meshes(
 
 def _merge_triangular_prisms(prisms: list[Prism]) -> Any:
     """Merge many triangular prisms into one PyVista mesh for performance."""
-    all_vertices: list[np.ndarray] = []
+    result = collect_triangular_prism_geometry(prisms)
+    if result is None:
+        return None
+
+    combined, prism_offsets = result
+    n = 3  # triangular prisms
     all_faces: list[int] = []
-    offset = 0
 
-    for prism in prisms:
-        base, top = prism_base_top_vertices(prism)
-        verts = np.vstack([base, top])
-        all_vertices.append(verts)
-        n = len(base)
-
+    for offset in prism_offsets:
         # bottom face
         all_faces.extend([3, offset + 2, offset + 1, offset + 0])
         # top face
@@ -233,20 +234,10 @@ def _merge_triangular_prisms(prisms: list[Prism]) -> Any:
         for i in range(n):
             ni = (i + 1) % n
             all_faces.extend(
-                [
-                    4,
-                    offset + i,
-                    offset + ni,
-                    offset + ni + n,
-                    offset + i + n,
-                ]
+                [4, offset + i, offset + ni, offset + ni + n, offset + i + n]
             )
-        offset += len(verts)
 
-    if all_vertices:
-        combined = np.vstack(all_vertices)
-        return pv.PolyData(combined, all_faces)
-    return None
+    return pv.PolyData(combined, all_faces)
 
 
 def _create_prism_mesh(
@@ -288,68 +279,24 @@ def _create_prism_mesh_with_holes(
     top_vertices: np.ndarray,
 ) -> Any:
     """Create PyVista mesh from a Shapely polygon with holes using Delaunay."""
-    try:
-        import shapely.geometry as sg
-        from scipy.spatial import Delaunay
-    except ImportError:
-        return _create_prism_mesh(base_vertices, top_vertices)
-
-    all_points: list[tuple[float, float]] = []
-    boundary_segments: list[list[int]] = []
-
-    exterior_coords = list(shapely_polygon.exterior.coords[:-1])
-    start_idx = 0
-    all_points.extend(exterior_coords)
-    boundary_segments = [
-        [start_idx + i, start_idx + (i + 1) % len(exterior_coords)]
-        for i in range(len(exterior_coords))
-    ]
-
-    for interior in shapely_polygon.interiors:
-        interior_coords = list(interior.coords[:-1])
-        start_idx = len(all_points)
-        all_points.extend(interior_coords)
-        boundary_segments.extend(
-            [start_idx + i, start_idx + (i + 1) % len(interior_coords)]
-            for i in range(len(interior_coords))
-        )
-
-    if len(all_points) < 3:
-        return _create_prism_mesh(base_vertices, top_vertices)
-
-    points_2d = np.array(all_points)
-    tri = Delaunay(points_2d)
-
-    valid_triangles = [
-        simplex
-        for simplex in tri.simplices
-        if shapely_polygon.contains(sg.Point(*np.mean(points_2d[simplex], axis=0)))
-    ]
-
-    if not valid_triangles:
-        return _create_prism_mesh(base_vertices, top_vertices)
-
     z_base = base_vertices[0, 2] if len(base_vertices) > 0 else 0
     z_top = top_vertices[0, 2] if len(top_vertices) > 0 else z_base + 1
 
-    verts_3d: list[list[float]] = [[pt[0], pt[1], z_base] for pt in points_2d] + [
-        [pt[0], pt[1], z_top] for pt in points_2d
-    ]
+    result = triangulate_polygon_with_holes(shapely_polygon, z_base, z_top)
+    if result is None:
+        return _create_prism_mesh(base_vertices, top_vertices)
 
-    n_pts = len(points_2d)
+    verts_3d, valid_triangles, boundary_segments = result
+    n_pts = len(verts_3d) // 2
     faces_pv: list[int] = []
 
+    # bottom triangles
     for tri_idx in valid_triangles:
         faces_pv.extend([3, tri_idx[0], tri_idx[1], tri_idx[2]])
+    # top triangles (reversed winding)
     for tri_idx in valid_triangles:
-        faces_pv.extend(
-            [
-                3,
-                tri_idx[0] + n_pts,
-                tri_idx[2] + n_pts,
-                tri_idx[1] + n_pts,
-            ]
-        )
+        faces_pv.extend([3, tri_idx[0] + n_pts, tri_idx[2] + n_pts, tri_idx[1] + n_pts])
+    # side quads
     for seg in boundary_segments:
         i, j = seg
         faces_pv.extend([4, i, j, j + n_pts, i + n_pts])

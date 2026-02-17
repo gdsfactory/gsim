@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import yaml
-from gdsfactory.technology import LayerLevel
 from gdsfactory.technology import LayerStack as GfLayerStack
 from pydantic import BaseModel, ConfigDict, Field
 
+from gsim.common.stack._layer_utils import classify_layer_type, get_gds_layer_tuple
 from gsim.common.stack.materials import (
     MATERIALS_DB,
     get_material_properties,
@@ -279,87 +279,6 @@ class LayerStack(BaseModel):
         return yaml_str
 
 
-def _get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int]:
-    """Extract GDS layer tuple from LayerLevel."""
-    layer: Any = layer_level.layer
-
-    if isinstance(layer, tuple):
-        return (int(layer[0]), int(layer[1]))
-
-    if isinstance(layer, int):
-        return (int(layer), 0)
-
-    if hasattr(layer, "layer"):
-        inner = layer.layer
-        if hasattr(inner, "layer") and hasattr(inner, "datatype"):
-            return (int(inner.layer), int(inner.datatype))  # type: ignore[arg-type]
-        if isinstance(inner, int):
-            datatype = getattr(layer, "datatype", 0)
-            return (int(inner), int(datatype) if datatype else 0)
-        if hasattr(inner, "layer"):
-            innermost = inner.layer
-            if isinstance(innermost, int):
-                datatype = getattr(inner, "datatype", 0)
-                return (int(innermost), int(datatype) if datatype else 0)
-
-    if hasattr(layer, "layer") and hasattr(layer, "datatype"):
-        return (int(layer.layer), int(layer.datatype))  # type: ignore[arg-type]
-
-    if hasattr(layer, "value"):
-        if isinstance(layer.value, tuple):
-            return (int(layer.value[0]), int(layer.value[1]))  # type: ignore[arg-type]
-        if isinstance(layer.value, int):
-            return (int(layer.value), 0)
-
-    if isinstance(layer, str):
-        if "/" in layer:
-            parts = layer.split("/")
-            return (int(parts[0]), int(parts[1]))
-        return (0, 0)
-
-    try:
-        return (int(layer), 0)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        logger.warning("Could not parse layer %s, using (0, 0)", layer)
-        return (0, 0)
-
-
-def _classify_layer_type(
-    layer_name: str, material: str
-) -> Literal["conductor", "via", "dielectric", "substrate"]:
-    """Classify a layer as conductor, via, dielectric, or substrate."""
-    name_lower = layer_name.lower()
-    material_lower = material.lower()
-
-    if "via" in name_lower:
-        return "via"
-
-    if any(
-        m in name_lower for m in ["metal", "topmetal", "m1", "m2", "m3", "m4", "m5"]
-    ):
-        return "conductor"
-
-    if "substrate" in name_lower or name_lower == "sub":
-        return "substrate"
-
-    props = get_material_properties(material)
-    if props:
-        if props.type == "conductor":
-            return "conductor"
-        if props.type == "semiconductor" and "substrate" in name_lower:
-            return "substrate"
-        if props.type == "dielectric":
-            return "dielectric"
-
-    if material_lower in ["aluminum", "copper", "tungsten", "gold", "al", "cu", "w"]:
-        return "conductor"
-
-    if "poly" in name_lower:
-        return "conductor"
-
-    return "dielectric"
-
-
 def extract_layer_stack(
     gf_layer_stack: GfLayerStack,
     pdk_name: str = "unknown",
@@ -392,8 +311,8 @@ def extract_layer_stack(
         thickness = layer_level.thickness if layer_level.thickness is not None else 0.0
         zmax = zmin + thickness
         material = layer_level.material or "unknown"
-        gds_layer = _get_gds_layer_tuple(layer_level)
-        layer_type = _classify_layer_type(layer_name, material)
+        gds_layer = get_gds_layer_tuple(layer_level) or (0, 0)
+        layer_type = classify_layer_type(layer_name, material)
         sidewall_angle = getattr(layer_level, "sidewall_angle", 0.0) or 0.0
 
         if layer_type == "substrate" and not include_substrate:

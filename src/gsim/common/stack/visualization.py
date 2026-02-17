@@ -7,11 +7,11 @@ thicknesses, and layer numbers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import plotly.graph_objects as go
-from gdsfactory.technology import LayerLevel
 from gdsfactory.technology import LayerStack as GfLayerStack
+
+from gsim.common.stack._layer_utils import classify_layer_type, get_gds_layer_tuple
 
 
 @dataclass
@@ -25,52 +25,6 @@ class StackLayer:
     material: str | None = None
     gds_layer: int | None = None
     layer_type: str = "conductor"  # conductor, via, dielectric, substrate
-
-
-def _get_gds_layer_number(layer_level: LayerLevel) -> int | None:
-    """Extract GDS layer number from LayerLevel."""
-    layer: Any = layer_level.layer
-
-    # Handle tuple
-    if isinstance(layer, tuple):
-        return int(layer[0])
-
-    # Handle int
-    if isinstance(layer, int):
-        return int(layer)
-
-    # Handle LogicalLayer or enum with nested layer
-    if hasattr(layer, "layer"):
-        inner = layer.layer
-        if hasattr(inner, "layer"):
-            return int(inner.layer)  # type: ignore[arg-type]
-        if isinstance(inner, int):
-            return int(inner)
-
-    # Handle enum with value
-    if hasattr(layer, "value"):
-        if isinstance(layer.value, tuple):
-            return int(layer.value[0])  # type: ignore[arg-type]
-        return int(layer.value)  # type: ignore[arg-type]
-
-    return None
-
-
-def _classify_layer(name: str) -> str:
-    """Classify layer type based on name."""
-    name_lower = name.lower()
-
-    if "via" in name_lower or "cont" in name_lower:
-        return "via"
-    if "substrate" in name_lower or name_lower == "sub":
-        return "substrate"
-    if any(
-        m in name_lower
-        for m in ["metal", "topmetal", "m1", "m2", "m3", "m4", "m5", "poly", "active"]
-    ):
-        return "conductor"
-
-    return "dielectric"
 
 
 def parse_layer_stack(layer_stack: GfLayerStack) -> list[StackLayer]:
@@ -89,8 +43,9 @@ def parse_layer_stack(layer_stack: GfLayerStack) -> list[StackLayer]:
         thickness = level.thickness if level.thickness is not None else 0.0
         zmax = zmin + thickness
         material = level.material or None
-        gds_layer = _get_gds_layer_number(level)
-        layer_type = _classify_layer(name)
+        tup = get_gds_layer_tuple(level)
+        gds_layer = tup[0] if tup else None
+        layer_type = classify_layer_type(name)
 
         layers.append(
             StackLayer(

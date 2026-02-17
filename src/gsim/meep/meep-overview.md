@@ -19,34 +19,24 @@ GDS + PDK  ──►  3D Geometry  ──►  Client Viz  ──►  SimConfig J
 from gsim import meep
 
 sim = meep.Simulation()
-sim.geometry.component = ybranch
-sim.geometry.z_crop = "auto"
+sim.geometry(component=ybranch, z_crop="auto")
 sim.materials = {"si": 3.47, "SiO2": 1.44}       # float shorthand
-sim.source.port = "o1"
-sim.source.wavelength = 1.55
-sim.source.bandwidth = 0.1
-sim.source.num_freqs = 11
+sim.source(port="o1", wavelength=1.55, bandwidth=0.1, num_freqs=11)
 sim.monitors = ["o1", "o2"]
-sim.domain.pml = 1.0
-sim.domain.margin = 0.5
-sim.solver.resolution = 32
-sim.solver.stopping = "dft_decay"
-sim.solver.max_time = 200
-sim.solver.simplify_tol = 0.01
-sim.solver.save_geometry = True
-sim.solver.save_fields = True
+sim.domain(pml=1.0, margin=0.5)
+sim.solver(resolution=32, simplify_tol=0.01)
 sim.plot_2d(slices="xyz")
-result = sim.run("./meep-sim")
+result = sim.run()
 ```
 
 ### Design principles
 
 - **6 typed physics objects** -- `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD` + `monitors: list[str]` -- assigned to a `Simulation` container. No ordering dependencies.
-- **Attribute style or constructor style** -- `sim.source.port = "o1"` or `sim.source = ModeSource(port="o1")`. Both work via Pydantic `validate_assignment=True`.
+- **Callable, attribute, or constructor style** -- `sim.source(port="o1")` (callable), `sim.source.port = "o1"` (attribute), or `sim.source = ModeSource(port="o1")` (constructor). All work via Pydantic `validate_assignment=True`.
 - **Float shorthand for materials** -- `{"si": 3.47}` auto-normalizes to `Material(n=3.47)` via validator.
-- **Flat stopping fields** -- `stopping` mode string + flat fields (`max_time`, `stopping_threshold`, etc.) on `FDTD`.
+- **Flat stopping fields + method API** -- `stopping` mode string (`energy_decay`/`dft_decay`/`decay`/`fixed`) + flat fields on `FDTD`, plus convenience methods (`stop_when_energy_decayed()`, `stop_when_dft_decayed()`, `stop_when_fields_decayed()`, `stop_after()`). `StoppingConfig.mode` now includes `energy_decay`.
 - **Source defines spectral window** -- `WavelengthConfig` derived from `ModeSource.wavelength/bandwidth/num_freqs`. Monitors are just port name strings.
-- **JSON contract unchanged** -- `write_config()` translates new API -> existing `SimConfig` -> JSON. Runner template untouched.
+- **JSON contract** -- `write_config()` translates new API -> existing `SimConfig` -> JSON. `StoppingConfig.mode` extended with `"energy_decay"` (runner updated to handle it).
 
 ---
 
@@ -54,24 +44,31 @@ result = sim.run("./meep-sim")
 
 ### `gsim.meep` -- Public API
 
-| Module              | Purpose                                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`       | Exports: `Simulation`, all model classes                                                                                |
-| `models/api.py`     | Declarative models: `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD`, `Symmetry`                                  |
-| `simulation.py`     | `Simulation` container -- `write_config()`, `run()`, `validate_config()`, `plot_2d()`/`plot_3d()`, `estimate_meep_np()` |
-| `viz.py`            | Standalone viz helpers -- `build_geometry_model()`, `plot_2d()`, `plot_3d()` (calls `common/viz`)                       |
-| `models/config.py`  | `SimConfig` + all sub-configs (JSON serialization layer)                                                                |
-| `models/results.py` | `SParameterResult` -- CSV + debug JSON + diagnostic PNGs                                                                |
-| `ports.py`          | `extract_port_info()` -- port center/direction/normal from gdsfactory                                                   |
-| `materials.py`      | `resolve_materials()` -- material names -> (n, k) via common DB                                                         |
-| `script.py`         | `generate_meep_script()` -- cloud runner template (string in Python)                                                    |
-| `overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` -- viz metadata                                                      |
+| Module              | Purpose                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`       | Exports: `Simulation`, all model classes                                                                                                                              |
+| `models/api.py`     | Declarative models: `Geometry`, `Material`, `ModeSource`, `Domain`, `FDTD`, `Symmetry`. All except `Material`/`Symmetry` have `__call__(**kwargs)` for fluent updates |
+| `simulation.py`     | `Simulation` container -- `write_config()`, `run()`, `validate_config()`, `plot_2d()`/`plot_3d()`, `estimate_meep_np()`                                               |
+| `viz.py`            | Standalone viz helpers -- `build_geometry_model()`, `plot_2d()`, `plot_3d()` (calls `common/viz`)                                                                     |
+| `models/config.py`  | `SimConfig` + all sub-configs (JSON serialization layer)                                                                                                              |
+| `models/results.py` | `SParameterResult` -- CSV + debug JSON + diagnostic PNGs                                                                                                              |
+| `ports.py`          | `extract_port_info()` -- port center/direction/normal from gdsfactory                                                                                                 |
+| `materials.py`      | `resolve_materials()` -- material names -> (n, k) via common DB                                                                                                       |
+| `script.py`         | `generate_meep_script()` -- cloud runner template (string in Python)                                                                                                  |
+| `overlay.py`        | `SimOverlay` + `PortOverlay` + `DielectricOverlay` -- viz metadata                                                                                                    |
 
 ### `gsim.common` -- Shared infrastructure
 
-Solver-agnostic: `LayeredComponentBase`, `GeometryModel`/`Prism`, `LayerStack`, `MaterialProperties`, `viz/` (Matplotlib 2D, PyVista/Open3D/Three.js 3D).
+Solver-agnostic: `LayeredComponentBase`, `GeometryModel`/`Prism`, `LayerStack`, `ValidationResult`, `viz/` (Matplotlib 2D, PyVista/Open3D 3D).
+
+Key sub-modules:
+
+- `stack/_layer_utils.py` — shared `get_gds_layer_tuple()` and `classify_layer_type()` (used by both `extractor` and `visualization`)
+- `viz/_mesh_helpers.py` — shared Delaunay triangulation (`triangulate_polygon_with_holes`) and batch prism geometry (`collect_triangular_prism_geometry`), used by both PyVista and Open3D renderers
 
 ### Visualization pipeline
+
+3D backends: PyVista (desktop) and Open3D+Plotly (Jupyter, with view buttons for Iso/Top/Front/Right). Three.js backend removed.
 
 ```
 Simulation.plot_2d()
@@ -96,7 +93,8 @@ Simulation.plot_2d()
 - **Z-crop** -- Auto-crops stack around core layer. Full UBC stack is 15um; cropped to ~1.5um (massive compute savings).
 - **Port extension into PML** -- `gf.components.extend_ports()` at `write_config()` time. Original bbox stored in `SimConfig.component_bbox` for correct cell sizing.
 - **Symmetries disabled for S-params** -- `add_mode_monitor` uses `use_symmetry=false` internally; `get_eigenmode_coefficients` doesn't apply `S.multiplicity()`. Source port coefficients underestimated ~2x. gplugins also never uses `mp.Mirror`.
-- **`dft_min_run_time` default 100** -- Prevents false convergence before pulse traverses device. Must exceed `device_length * n_group`.
+- **`energy_decay` default stopping** -- `dft_decay` suffers from false early convergence (DFTs can converge on near-zero fields). `energy_decay` monitors total field energy and waits for it to peak then decay — more robust for directional couplers and similar devices. Runner uses `mp.stop_when_energy_decayed(dt, decay_by)` with a `_make_time_cap(max_time)` as a secondary callable in the `until_after_sources` list (OR logic). The `decay` mode also uses `_make_time_cap` instead of passing a raw float to `until_after_sources`.
+- **`dft_min_run_time` is absolute sim time** -- Not time-after-sources. With a broadband source turning off at ~t=78 and min_run_time=100, DFT checking starts at t=100 (only ~22 units after source ends). Must exceed `device_length * n_group`.
 - **Stack resolved lazily** -- `_ensure_stack()` falls back to `get_stack()` (active PDK defaults) when no explicit stack kwargs are set. Same path for `write_config()` and viz.
 
 ---

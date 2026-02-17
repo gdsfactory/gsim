@@ -6,6 +6,8 @@ These operate on generic Prism objects and produce numpy vertex/face arrays
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from gsim.common.geometry_model import GeometryModel, Prism
@@ -72,3 +74,99 @@ def simulation_box_corners(
     ]
 
     return points, lines
+
+
+# ---------------------------------------------------------------------------
+# Shared Delaunay triangulation for polygons with holes / concave polygons
+# ---------------------------------------------------------------------------
+
+
+def triangulate_polygon_with_holes(
+    shapely_polygon: Any,
+    z_base: float,
+    z_top: float,
+) -> tuple[np.ndarray, list[np.ndarray], list[list[int]]] | None:
+    """Triangulate a Shapely polygon (possibly with holes) via Delaunay.
+
+    Returns:
+        ``(verts_3d, valid_triangles, boundary_segments)`` where
+        *verts_3d* is (2*N, 3) — bottom then top copies of the 2D points,
+        *valid_triangles* is a list of index-triplet arrays (into the first
+        N points), and *boundary_segments* is a list of ``[i, j]`` pairs.
+        Returns ``None`` when triangulation fails.
+    """
+    try:
+        import shapely.geometry as sg
+        from scipy.spatial import Delaunay
+    except ImportError:
+        return None
+
+    all_points: list[tuple[float, float]] = []
+    boundary_segments: list[list[int]] = []
+
+    exterior_coords = list(shapely_polygon.exterior.coords[:-1])
+    start_idx = 0
+    all_points.extend(exterior_coords)
+    boundary_segments = [
+        [start_idx + i, start_idx + (i + 1) % len(exterior_coords)]
+        for i in range(len(exterior_coords))
+    ]
+
+    for interior in shapely_polygon.interiors:
+        interior_coords = list(interior.coords[:-1])
+        start_idx = len(all_points)
+        all_points.extend(interior_coords)
+        boundary_segments.extend(
+            [start_idx + i, start_idx + (i + 1) % len(interior_coords)]
+            for i in range(len(interior_coords))
+        )
+
+    if len(all_points) < 3:
+        return None
+
+    points_2d = np.array(all_points)
+    tri = Delaunay(points_2d)
+
+    valid_triangles = [
+        simplex
+        for simplex in tri.simplices
+        if shapely_polygon.contains(sg.Point(*np.mean(points_2d[simplex], axis=0)))
+    ]
+
+    if not valid_triangles:
+        return None
+
+    verts_3d = np.array(
+        [[pt[0], pt[1], z_base] for pt in points_2d]
+        + [[pt[0], pt[1], z_top] for pt in points_2d]
+    )
+
+    return verts_3d, valid_triangles, boundary_segments
+
+
+def collect_triangular_prism_geometry(
+    prisms: list[Prism],
+) -> tuple[np.ndarray, list[int]] | None:
+    """Collect vertices from many triangular prisms for batch meshing.
+
+    Returns:
+        ``(combined_vertices, prism_offsets)`` where *combined_vertices*
+        is (M, 3) and *prism_offsets[i]* is the vertex offset of the
+        *i*-th prism in that array.  Returns ``None`` if *prisms* is empty.
+    """
+    all_vertices: list[np.ndarray] = []
+    prism_offsets: list[int] = []
+    offset = 0
+
+    for prism in prisms:
+        base, top = prism_base_top_vertices(prism)
+        verts = np.vstack([base, top])
+        all_vertices.append(verts)
+        prism_offsets.append(offset)
+        offset += len(verts)
+
+    if not all_vertices:
+        return None
+
+    combined = np.vstack(all_vertices)
+    return combined, prism_offsets

@@ -6,7 +6,6 @@ and do **not** depend on any solver (meep, tidy3d, etc.).
 3D backends:
     - PyVista  (desktop, ``plot_prisms_3d``)
     - Open3D + Plotly  (Jupyter, ``plot_prisms_3d_open3d``)
-    - Three.js / FastAPI  (browser, ``serve_threejs_visualization``)
 
 2D backends:
     - matplotlib  (``plot_prism_slices``)
@@ -18,7 +17,6 @@ from gsim.common.viz.render3d import (
     export_3d_mesh,
     plot_prisms_3d,
     plot_prisms_3d_open3d,
-    serve_threejs_visualization,
 )
 
 __all__ = [
@@ -27,5 +25,4 @@ __all__ = [
     "plot_prism_slices",
     "plot_prisms_3d",
     "plot_prisms_3d_open3d",
-    "serve_threejs_visualization",
 ]

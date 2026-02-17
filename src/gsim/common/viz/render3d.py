@@ -12,12 +12,10 @@ from gsim.common.viz.render3d_pyvista import (
     export_3d_mesh,
     plot_prisms_3d,
 )
-from gsim.common.viz.render3d_threejs import serve_threejs_visualization
 
 __all__ = [
     "create_web_export",
     "export_3d_mesh",
     "plot_prisms_3d",
     "plot_prisms_3d_open3d",
-    "serve_threejs_visualization",
 ]

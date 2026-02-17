@@ -238,6 +238,22 @@ _COMPONENT_MAP = {
 }
 
 
+def _make_time_cap(cap):
+    """Wrap a numeric time cap as a callable for until_after_sources lists.
+
+    When until_after_sources receives a list, every element must be callable.
+    This wraps a float (time units) into a function that returns True once
+    ``cap`` time units have elapsed since the first call (i.e. after sources
+    turn off).
+    """
+    _t0 = [None]
+    def _check(sim_obj):
+        if _t0[0] is None:
+            _t0[0] = sim_obj.meep_time()
+        return (sim_obj.meep_time() - _t0[0]) >= cap
+    return _check
+
+
 def resolve_decay_monitor_point(config):
     """Return center mp.Vector3 for decay monitoring.
 
@@ -1082,6 +1098,16 @@ def main():
                 maximum_run_time=run_after,
             ),
         )
+    elif stop_mode == "energy_decay":
+        dt = stopping.get("decay_dt", 50.0)
+        decay_by = stopping.get("decay_by", 1e-3)
+        logger.info(
+            "Running simulation (energy_decay mode: dt=%s, "
+            "decay_by=%s, cap=%.1f)...",
+            dt, decay_by, run_after,
+        )
+        energy_fn = mp.stop_when_energy_decayed(dt=dt, decay_by=decay_by)
+        sim.run(*step_funcs, until_after_sources=[energy_fn, _make_time_cap(run_after)])
     elif stop_mode == "decay":
         dt = stopping.get("decay_dt", 50.0)
         comp_name = stopping.get("decay_component", "Ey")
@@ -1093,7 +1119,7 @@ def main():
 
         # Decay condition + numeric time cap (list = OR logic, first wins)
         decay_fn = mp.stop_when_fields_decayed(dt, comp, monitor_pt, decay_by)
-        sim.run(*step_funcs, until_after_sources=[decay_fn, run_after])
+        sim.run(*step_funcs, until_after_sources=[decay_fn, _make_time_cap(run_after)])
     else:
         logger.info("Running simulation (until_after_sources=%.1f)...", run_after)
         sim.run(*step_funcs, until_after_sources=run_after)

@@ -82,8 +82,8 @@ class TestDomain:
 class TestStoppingFields:
     def test_defaults(self):
         f = FDTD()
-        assert f.stopping == "dft_decay"
-        assert f.max_time == 200.0
+        assert f.stopping == "energy_decay"
+        assert f.max_time == 2000.0
         assert f.stopping_threshold == 1e-3
         assert f.stopping_min_time == 100.0
         assert f.stopping_component == "Ey"
@@ -102,11 +102,22 @@ class TestStoppingFields:
         assert f.stopping_dt == 25
 
     def test_dft_decay_custom(self):
-        f = FDTD(max_time=300, stopping_threshold=1e-4, stopping_min_time=80)
+        f = FDTD(
+            stopping="dft_decay",
+            max_time=300,
+            stopping_threshold=1e-4,
+            stopping_min_time=80,
+        )
         assert f.stopping == "dft_decay"
         assert f.max_time == 300
         assert f.stopping_threshold == 1e-4
         assert f.stopping_min_time == 80
+
+    def test_energy_decay_mode(self):
+        f = FDTD(stopping="energy_decay", stopping_dt=100, stopping_threshold=1e-4)
+        assert f.stopping == "energy_decay"
+        assert f.stopping_dt == 100
+        assert f.stopping_threshold == 1e-4
 
     def test_invalid_mode(self):
         with pytest.raises(ValidationError):
@@ -117,8 +128,8 @@ class TestFDTD:
     def test_defaults(self):
         f = FDTD()
         assert f.resolution == 32
-        assert f.stopping == "dft_decay"
-        assert f.max_time == 200.0
+        assert f.stopping == "energy_decay"
+        assert f.max_time == 2000.0
         assert f.subpixel is False
         assert f.simplify_tol == 0.0
 
@@ -211,10 +222,83 @@ class TestFieldAssignment:
         assert sim.solver.stopping == "decay"
         assert sim.solver.stopping_threshold == 1e-4
 
+    def test_stop_when_energy_decayed(self):
+        f = FDTD()
+        result = f.stop_when_energy_decayed(dt=100, decay_by=1e-4)
+        assert result is f
+        assert f.stopping == "energy_decay"
+        assert f.stopping_dt == 100
+        assert f.stopping_threshold == 1e-4
+
+    def test_stop_when_dft_decayed(self):
+        f = FDTD()
+        result = f.stop_when_dft_decayed(tol=1e-4, min_time=200)
+        assert result is f
+        assert f.stopping == "dft_decay"
+        assert f.stopping_threshold == 1e-4
+        assert f.stopping_min_time == 200
+
+    def test_stop_when_fields_decayed(self):
+        f = FDTD()
+        result = f.stop_when_fields_decayed(
+            dt=25, component="Hz", decay_by=1e-4, monitor_port="o2"
+        )
+        assert result is f
+        assert f.stopping == "decay"
+        assert f.stopping_dt == 25
+        assert f.stopping_component == "Hz"
+        assert f.stopping_threshold == 1e-4
+        assert f.stopping_monitor_port == "o2"
+
+    def test_stop_after(self):
+        f = FDTD()
+        result = f.stop_after(time=500)
+        assert result is f
+        assert f.stopping == "fixed"
+        assert f.max_time == 500
+
     def test_geometry_component(self):
         sim = Simulation()
         sim.geometry.component = "placeholder"
         assert sim.geometry.component == "placeholder"
+
+
+class TestCallableAPI:
+    def test_source_callable(self):
+        sim = Simulation()
+        result = sim.source(port="o1", wavelength=1.31, bandwidth=0.05)
+        assert result is sim.source
+        assert sim.source.port == "o1"
+        assert sim.source.wavelength == 1.31
+        assert sim.source.bandwidth == 0.05
+
+    def test_domain_callable(self):
+        sim = Simulation()
+        sim.domain(pml=0.5, margin=0.2)
+        assert sim.domain.pml == 0.5
+        assert sim.domain.margin == 0.2
+
+    def test_geometry_callable(self):
+        sim = Simulation()
+        sim.geometry(component="placeholder", z_crop="auto")
+        assert sim.geometry.component == "placeholder"
+        assert sim.geometry.z_crop == "auto"
+
+    def test_solver_callable(self):
+        sim = Simulation()
+        sim.solver(resolution=64, simplify_tol=0.01)
+        assert sim.solver.resolution == 64
+        assert sim.solver.simplify_tol == 0.01
+
+    def test_callable_validation(self):
+        sim = Simulation()
+        with pytest.raises(ValidationError):
+            sim.solver(resolution=1)  # ge=4
+
+    def test_callable_invalid_field(self):
+        sim = Simulation()
+        with pytest.raises(ValidationError):
+            sim.source(nonexistent_field="value")
 
 
 class TestWholeObjectAssignment:
@@ -324,6 +408,14 @@ class TestConfigTranslation:
         assert cfg.max_time == 200
         assert cfg.threshold == 1e-4
         assert cfg.dft_min_run_time == 80
+
+    def test_stopping_energy_decay(self):
+        sim = Simulation()
+        sim.solver.stop_when_energy_decayed(dt=100, decay_by=1e-4)
+        cfg = sim._stopping_config()
+        assert cfg.mode == "energy_decay"
+        assert cfg.decay_dt == 100
+        assert cfg.threshold == 1e-4
 
     def test_domain_translation(self):
         sim = Simulation()

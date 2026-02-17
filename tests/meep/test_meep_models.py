@@ -659,6 +659,12 @@ class TestStoppingConfig:
         assert cfg.threshold == 1e-4
         assert cfg.decay_dt == 25.0
 
+    def test_energy_decay_mode(self):
+        cfg = StoppingConfig(mode="energy_decay", decay_dt=100, threshold=1e-4)
+        assert cfg.mode == "energy_decay"
+        assert cfg.decay_dt == 100
+        assert cfg.threshold == 1e-4
+
     def test_invalid_mode(self):
         with pytest.raises(ValidationError):
             StoppingConfig(mode="invalid")  # ty: ignore[invalid-argument-type]
@@ -782,6 +788,13 @@ class TestScriptDecay:
         assert "_COMPONENT_MAP" in script
         assert "mp.Ez" in script
         assert "mp.Ey" in script
+
+    def test_script_has_stop_when_energy_decayed(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "stop_when_energy_decayed" in script
+        assert "energy_decay" in script
 
     def test_script_valid_python(self):
         from gsim.meep.script import generate_meep_script

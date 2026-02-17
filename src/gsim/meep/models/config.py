@@ -33,7 +33,7 @@ class DomainConfig(BaseModel):
     Cell size formula:
         cell_x = bbox_width  + 2*(margin_xy + dpml)
         cell_y = bbox_height + 2*(margin_xy + dpml)
-        cell_z = z_extent + 2*dpml          (z-margins baked into z_extent via set_z_crop)
+        cell_z = z_extent + 2*dpml  (z-margins baked into z_extent)
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -51,7 +51,7 @@ class DomainConfig(BaseModel):
     port_margin: float = Field(
         default=0.5,
         ge=0,
-        description="Margin on each side of port waveguide width for mode monitors in um",
+        description="Margin on each side of port width for monitors (um)",
     )
     extend_ports: float = Field(
         default=0.0,
@@ -64,19 +64,31 @@ class DomainConfig(BaseModel):
 class StoppingConfig(BaseModel):
     """Controls when the MEEP simulation stops.
 
-    ``fixed`` mode runs for a fixed time after sources turn off.
+    ``energy_decay`` mode (recommended) monitors total electromagnetic
+    energy in the cell and stops when it decays by ``threshold`` from
+    its peak.  Robust against false early convergence.
+
+    ``dft_decay`` mode monitors convergence of all DFT monitors and
+    stops when they stabilize.  ``dft_min_run_time`` is an *absolute*
+    sim time (not time-after-sources) — with a broadband source turning
+    off at ~t=78, a min_run_time=100 starts checking at t=100, only ~22
+    time units after the source ends.
+
     ``decay`` mode monitors field decay at a point and stops when the
     fields have decayed by ``threshold``, with ``max_time`` as
     a numeric time cap (whichever fires first).
-    ``dft_decay`` mode monitors convergence of all DFT monitors and
-    stops when they stabilize, with built-in min/max time bounds.
-    Best for S-parameter extraction.
+
+    ``fixed`` mode runs for a fixed time after sources turn off.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    mode: Literal["fixed", "decay", "dft_decay"] = Field(default="fixed")
-    max_time: float = Field(default=100.0, gt=0, serialization_alias="run_after_sources")
+    mode: Literal["fixed", "decay", "dft_decay", "energy_decay"] = Field(
+        default="fixed"
+    )
+    max_time: float = Field(
+        default=100.0, gt=0, serialization_alias="run_after_sources"
+    )
     decay_dt: float = Field(default=50.0, gt=0)
     decay_component: str = Field(default="Ey")
     threshold: float = Field(default=1e-3, gt=0, lt=1, serialization_alias="decay_by")
@@ -84,9 +96,9 @@ class StoppingConfig(BaseModel):
     dft_min_run_time: float = Field(
         default=100,
         ge=0,
-        description="Minimum run time after sources for dft_decay mode. "
-        "Must exceed pulse transit time through the device to avoid "
-        "false convergence on near-zero fields at output ports.",
+        description="Minimum absolute sim time for dft_decay mode (not "
+        "time-after-sources). Must exceed pulse transit time through the "
+        "device to avoid false convergence on near-zero fields.",
     )
 
 
@@ -104,7 +116,9 @@ class SourceConfig(BaseModel):
 
     bandwidth: float | None = Field(
         default=None,
-        description="Source Gaussian bandwidth in wavelength um. None = auto (~3x monitor bw).",
+        description=(
+            "Source Gaussian bandwidth in wavelength um. None = auto (~3x monitor bw)."
+        ),
     )
     port: str | None = Field(
         default=None,
@@ -225,7 +239,9 @@ class DiagnosticsConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    save_geometry: bool = Field(default=True, description="Pre-run geometry cross-section plots")
+    save_geometry: bool = Field(
+        default=True, description="Pre-run geometry cross-section plots"
+    )
     save_fields: bool = Field(default=True, description="Post-run field snapshot")
     save_epsilon_raw: bool = Field(
         default=False, description="Raw epsilon .npy (advanced)"
@@ -234,7 +250,8 @@ class DiagnosticsConfig(BaseModel):
         default=False, description="Field animation MP4 (heavy, needs ffmpeg)"
     )
     animation_interval: float = Field(
-        default=0.5, gt=0,
+        default=0.5,
+        gt=0,
         description="MEEP time units between animation frames",
     )
     preview_only: bool = Field(
@@ -242,7 +259,8 @@ class DiagnosticsConfig(BaseModel):
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )
     verbose_interval: float = Field(
-        default=0, ge=0,
+        default=0,
+        ge=0,
         description="MEEP time units between progress prints (0=off)",
     )
 
@@ -302,7 +320,9 @@ class SimConfig(BaseModel):
     )
     component_bbox: list[float] | None = Field(
         default=None,
-        description="Original component bbox [xmin, ymin, xmax, ymax] before port extension.",
+        description=(
+            "Original component bbox [xmin, ymin, xmax, ymax] before port extension."
+        ),
     )
     layer_stack: list[LayerStackEntry] = Field(default_factory=list)
     dielectrics: list[dict[str, Any]] = Field(default_factory=list)
@@ -322,9 +342,7 @@ class SimConfig(BaseModel):
     diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     symmetries: list[SymmetryEntry] = Field(default_factory=list)
     split_chunks_evenly: bool = Field(default=False)
-    meep_np: int = Field(
-        default=1, ge=1, description="Recommended MPI process count"
-    )
+    meep_np: int = Field(default=1, ge=1, description="Recommended MPI process count")
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.
