@@ -155,19 +155,20 @@ class FDTD(BaseModel):
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
 
     # Stopping criteria (flat fields instead of variant classes)
-    stopping: Literal["fixed", "decay", "dft_decay", "energy_decay"] = Field(
-        default="energy_decay",
+    stopping: Literal["fixed", "field_decay", "dft_decay", "energy_decay"] = Field(
+        default="field_decay",
         description=(
-            "Stopping mode: 'energy_decay' (recommended) monitors total field "
-            "energy decay; 'dft_decay' waits for DFT convergence; 'decay' "
-            "monitors a field component at a point; 'fixed' runs for max_time."
+            "Stopping mode: 'field_decay' (recommended, matches MEEP tutorials) "
+            "monitors a field component at a point; 'energy_decay' monitors "
+            "total field energy; 'dft_decay' waits for DFT convergence; "
+            "'fixed' runs for max_time."
         ),
     )
     max_time: float = Field(
         default=2000.0, gt=0, description="Max run time after sources (um/c)"
     )
     stopping_threshold: float = Field(
-        default=1e-3, gt=0, lt=1, description="Decay/convergence threshold"
+        default=0.05, gt=0, lt=1, description="Decay/convergence threshold"
     )
     stopping_min_time: float = Field(
         default=100.0,
@@ -178,15 +179,15 @@ class FDTD(BaseModel):
         ),
     )
     stopping_component: str = Field(
-        default="Ey", description="Field component for decay mode"
+        default="Ey", description="Field component for field_decay mode"
     )
     stopping_dt: float = Field(
         default=50.0,
         gt=0,
-        description="Decay measurement window for decay/energy_decay modes",
+        description="Decay measurement window for field_decay/energy_decay modes",
     )
     stopping_monitor_port: str | None = Field(
-        default=None, description="Port to monitor for decay mode"
+        default=None, description="Port to monitor for field_decay mode"
     )
 
     subpixel: bool = Field(default=False, description="Toggle subpixel averaging")
@@ -205,7 +206,7 @@ class FDTD(BaseModel):
     # -- Convenience methods for stopping configuration --
 
     def stop_when_energy_decayed(
-        self, dt: float = 50.0, decay_by: float = 1e-3
+        self, dt: float = 50.0, decay_by: float = 0.05
     ) -> FDTD:
         """Stop when total field energy in the cell decays (recommended).
 
@@ -215,7 +216,7 @@ class FDTD(BaseModel):
 
         Args:
             dt: Time window between energy checks (MEEP time units).
-            decay_by: Fractional energy decay threshold (e.g. 1e-3 = 0.1%).
+            decay_by: Fractional energy decay threshold (e.g. 0.05 = 5%).
 
         Returns:
             self (for fluent chaining).
@@ -244,21 +245,25 @@ class FDTD(BaseModel):
         self,
         dt: float = 50.0,
         component: str = "Ey",
-        decay_by: float = 1e-3,
+        decay_by: float = 0.05,
         monitor_port: str | None = None,
     ) -> FDTD:
-        """Stop when a field component decays at a point.
+        """Stop when a field component decays at a point (recommended).
+
+        Matches the standard MEEP tutorial stopping condition.  Monitors
+        |component|² at a point and stops when it decays by ``decay_by``
+        from its peak value.
 
         Args:
             dt: Decay measurement time window.
             component: Field component name (e.g. "Ey", "Hz").
-            decay_by: Fractional decay threshold.
+            decay_by: Fractional decay threshold (e.g. 0.05 = 5%).
             monitor_port: Port to monitor (None = first non-source port).
 
         Returns:
             self (for fluent chaining).
         """
-        self.stopping = "decay"
+        self.stopping = "field_decay"
         self.stopping_dt = dt
         self.stopping_component = component
         self.stopping_threshold = decay_by

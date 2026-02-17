@@ -64,9 +64,13 @@ class DomainConfig(BaseModel):
 class StoppingConfig(BaseModel):
     """Controls when the MEEP simulation stops.
 
-    ``energy_decay`` mode (recommended) monitors total electromagnetic
-    energy in the cell and stops when it decays by ``threshold`` from
-    its peak.  Robust against false early convergence.
+    ``field_decay`` mode (recommended, matches MEEP tutorials) monitors
+    a field component at a point and stops when |component|² decays by
+    ``threshold`` from its peak, with ``max_time`` as a numeric time cap
+    (whichever fires first).
+
+    ``energy_decay`` mode monitors total electromagnetic energy in the
+    cell and stops when it decays by ``threshold`` from its peak.
 
     ``dft_decay`` mode monitors convergence of all DFT monitors and
     stops when they stabilize.  ``dft_min_run_time`` is an *absolute*
@@ -74,16 +78,12 @@ class StoppingConfig(BaseModel):
     off at ~t=78, a min_run_time=100 starts checking at t=100, only ~22
     time units after the source ends.
 
-    ``decay`` mode monitors field decay at a point and stops when the
-    fields have decayed by ``threshold``, with ``max_time`` as
-    a numeric time cap (whichever fires first).
-
     ``fixed`` mode runs for a fixed time after sources turn off.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    mode: Literal["fixed", "decay", "dft_decay", "energy_decay"] = Field(
+    mode: Literal["fixed", "field_decay", "dft_decay", "energy_decay"] = Field(
         default="fixed"
     )
     max_time: float = Field(
@@ -91,7 +91,7 @@ class StoppingConfig(BaseModel):
     )
     decay_dt: float = Field(default=50.0, gt=0)
     decay_component: str = Field(default="Ey")
-    threshold: float = Field(default=1e-3, gt=0, lt=1, serialization_alias="decay_by")
+    threshold: float = Field(default=0.05, gt=0, lt=1, serialization_alias="decay_by")
     decay_monitor_port: str | None = Field(default=None)
     dft_min_run_time: float = Field(
         default=100,

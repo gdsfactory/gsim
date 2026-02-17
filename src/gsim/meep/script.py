@@ -1100,7 +1100,7 @@ def main():
         )
     elif stop_mode == "energy_decay":
         dt = stopping.get("decay_dt", 50.0)
-        decay_by = stopping.get("decay_by", 1e-3)
+        decay_by = stopping.get("decay_by", 0.05)
         logger.info(
             "Running simulation (energy_decay mode: dt=%s, "
             "decay_by=%s, cap=%.1f)...",
@@ -1108,13 +1108,13 @@ def main():
         )
         energy_fn = mp.stop_when_energy_decayed(dt=dt, decay_by=decay_by)
         sim.run(*step_funcs, until_after_sources=[energy_fn, _make_time_cap(run_after)])
-    elif stop_mode == "decay":
+    elif stop_mode == "field_decay":
         dt = stopping.get("decay_dt", 50.0)
         comp_name = stopping.get("decay_component", "Ey")
         comp = _COMPONENT_MAP.get(comp_name, mp.Ey)
-        decay_by = stopping.get("decay_by", 1e-3)
+        decay_by = stopping.get("decay_by", 0.05)
         monitor_pt = resolve_decay_monitor_point(config)
-        logger.info("Running simulation (decay mode: component=%s, dt=%s, "
+        logger.info("Running simulation (field_decay mode: component=%s, dt=%s, "
                      "decay_by=%s, cap=%.1f)...", comp_name, dt, decay_by, run_after)
 
         # Decay condition + numeric time cap (list = OR logic, first wins)

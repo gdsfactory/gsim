@@ -650,12 +650,12 @@ class TestStoppingConfig:
         assert cfg.max_time == 100.0
         assert cfg.decay_dt == 50.0
         assert cfg.decay_component == "Ey"
-        assert cfg.threshold == 1e-3
+        assert cfg.threshold == 0.05
         assert cfg.decay_monitor_port is None
 
-    def test_decay_mode(self):
-        cfg = StoppingConfig(mode="decay", threshold=1e-4, decay_dt=25.0)
-        assert cfg.mode == "decay"
+    def test_field_decay_mode(self):
+        cfg = StoppingConfig(mode="field_decay", threshold=1e-4, decay_dt=25.0)
+        assert cfg.mode == "field_decay"
         assert cfg.threshold == 1e-4
         assert cfg.decay_dt == 25.0
 

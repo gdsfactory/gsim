@@ -82,9 +82,9 @@ class TestDomain:
 class TestStoppingFields:
     def test_defaults(self):
         f = FDTD()
-        assert f.stopping == "energy_decay"
+        assert f.stopping == "field_decay"
         assert f.max_time == 2000.0
-        assert f.stopping_threshold == 1e-3
+        assert f.stopping_threshold == 0.05
         assert f.stopping_min_time == 100.0
         assert f.stopping_component == "Ey"
         assert f.stopping_dt == 50.0
@@ -95,9 +95,9 @@ class TestStoppingFields:
         assert f.stopping == "fixed"
         assert f.max_time == 100
 
-    def test_decay_mode(self):
-        f = FDTD(stopping="decay", stopping_threshold=1e-4, stopping_dt=25)
-        assert f.stopping == "decay"
+    def test_field_decay_mode(self):
+        f = FDTD(stopping="field_decay", stopping_threshold=1e-4, stopping_dt=25)
+        assert f.stopping == "field_decay"
         assert f.stopping_threshold == 1e-4
         assert f.stopping_dt == 25
 
@@ -128,14 +128,14 @@ class TestFDTD:
     def test_defaults(self):
         f = FDTD()
         assert f.resolution == 32
-        assert f.stopping == "energy_decay"
+        assert f.stopping == "field_decay"
         assert f.max_time == 2000.0
         assert f.subpixel is False
         assert f.simplify_tol == 0.0
 
     def test_with_custom_stopping(self):
-        f = FDTD(stopping="decay", stopping_threshold=1e-4)
-        assert f.stopping == "decay"
+        f = FDTD(stopping="field_decay", stopping_threshold=1e-4)
+        assert f.stopping == "field_decay"
         assert f.stopping_threshold == 1e-4
 
     def test_resolution_custom(self):
@@ -217,9 +217,9 @@ class TestFieldAssignment:
 
     def test_solver_stopping_replace(self):
         sim = Simulation()
-        sim.solver.stopping = "decay"
+        sim.solver.stopping = "field_decay"
         sim.solver.stopping_threshold = 1e-4
-        assert sim.solver.stopping == "decay"
+        assert sim.solver.stopping == "field_decay"
         assert sim.solver.stopping_threshold == 1e-4
 
     def test_stop_when_energy_decayed(self):
@@ -244,7 +244,7 @@ class TestFieldAssignment:
             dt=25, component="Hz", decay_by=1e-4, monitor_port="o2"
         )
         assert result is f
-        assert f.stopping == "decay"
+        assert f.stopping == "field_decay"
         assert f.stopping_dt == 25
         assert f.stopping_component == "Hz"
         assert f.stopping_threshold == 1e-4
@@ -385,14 +385,14 @@ class TestConfigTranslation:
         assert cfg.mode == "fixed"
         assert cfg.max_time == 200
 
-    def test_stopping_decay(self):
+    def test_stopping_field_decay(self):
         sim = Simulation()
-        sim.solver.stopping = "decay"
+        sim.solver.stopping = "field_decay"
         sim.solver.stopping_threshold = 1e-4
         sim.solver.stopping_dt = 25
         sim.solver.stopping_monitor_port = "o2"
         cfg = sim._stopping_config()
-        assert cfg.mode == "decay"
+        assert cfg.mode == "field_decay"
         assert cfg.threshold == 1e-4
         assert cfg.decay_dt == 25
         assert cfg.decay_monitor_port == "o2"
