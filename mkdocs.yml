@@ -18,12 +18,13 @@ extra_css:
 
 nav:
   - home: index.md
-  - examples:
-      - Simple Example: nbs/example.md
-      - MEEP Y-Branch: nbs/meep_ybranch.md
-      - MEEP Ring Coupler: nbs/meep_ring_coupler.md
-      - Palace CPW: nbs/palace_demo_cpw.md
-      - Palace Microstrip: nbs/palace_demo_microstrip.md
+  - Meep:
+      - Y-Branch: nbs/meep_ybranch.md
+      - Ring Coupler: nbs/meep_ring_coupler.md
+      - Directional Coupler: nbs/meep_dc.md
+  - Palace:
+      - CPW: nbs/palace_demo_cpw.md
+      - Microstrip: nbs/palace_demo_microstrip.md
   - api reference:
       - gsim.palace: api.md
 
