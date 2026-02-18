@@ -670,7 +670,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     ) -> dict[str, Path]:
         """Run simulation on GDSFactory+ cloud.
 
-        Requires mesh() and write_config() to be called first.
+        Requires mesh() to be called first. Automatically calls
+        write_config() if config.json hasn't been written yet.
 
         Config files are uploaded, then moved into a structured
         ``sim-data-{job_name}/input/`` directory. Results are downloaded
@@ -683,8 +684,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             Dict mapping result filenames to local paths
 
         Raises:
-            ValueError: If output_dir not set
-            FileNotFoundError: If mesh or config files don't exist
+            ValueError: If output_dir not set or mesh not generated
             RuntimeError: If simulation fails
 
         Example:
@@ -695,6 +695,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        # Auto-generate config.json if not already written
+        config_path = self._output_dir / "config.json"
+        if not config_path.exists():
+            self.write_config()
 
         result = run_simulation(
             config_dir=self._output_dir,
