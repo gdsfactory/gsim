@@ -1,7 +1,7 @@
 dist:
   uv run python -m build --wheel
 
-dev: bver
+dev:
   uv venv --python 3.12 --clear
   uv sync --all-extras
   uv pip install -e .

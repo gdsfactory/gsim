@@ -46,7 +46,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         >>> sim.set_electrostatic()
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
-        >>> results = sim.simulate()
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -371,7 +371,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Simulation
     # -------------------------------------------------------------------------
 
-    def simulate(
+    def run(
         self,
         output_dir: str | Path | None = None,
         *,

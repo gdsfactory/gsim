@@ -45,7 +45,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         >>> sim.set_eigenmode(num_modes=10, target=50e9)
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
-        >>> results = sim.simulate()
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -530,7 +530,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Simulation
     # -------------------------------------------------------------------------
 
-    def simulate(
+    def run(
         self,
         output_dir: str | Path | None = None,
         *,

@@ -21,6 +21,10 @@ class MaterialProperties(BaseModel):
     permittivity: float | None = Field(default=None, ge=1.0)  # relative permittivity
     loss_tangent: float | None = Field(default=None, ge=0, le=1)
 
+    # Optical properties (for photonic simulation, e.g. MEEP)
+    refractive_index: float | None = Field(default=None, gt=0)
+    extinction_coeff: float | None = Field(default=None, ge=0)
+
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary for YAML output."""
         d: dict[str, object] = {"type": self.type}
@@ -30,6 +34,10 @@ class MaterialProperties(BaseModel):
             d["permittivity"] = self.permittivity
         if self.loss_tangent is not None:
             d["loss_tangent"] = self.loss_tangent
+        if self.refractive_index is not None:
+            d["refractive_index"] = self.refractive_index
+        if self.extinction_coeff is not None:
+            d["extinction_coeff"] = self.extinction_coeff
         return d
 
     @classmethod
@@ -44,6 +52,24 @@ class MaterialProperties(BaseModel):
         """Create a dielectric material."""
         return cls(
             type="dielectric", permittivity=permittivity, loss_tangent=loss_tangent
+        )
+
+    @classmethod
+    def optical(
+        cls,
+        refractive_index: float,
+        extinction_coeff: float = 0.0,
+    ) -> MaterialProperties:
+        """Create a material with optical properties for photonic simulation.
+
+        Args:
+            refractive_index: Refractive index (n)
+            extinction_coeff: Extinction coefficient (k), default 0
+        """
+        return cls(
+            type="dielectric",
+            refractive_index=refractive_index,
+            extinction_coeff=extinction_coeff,
         )
 
 
@@ -82,6 +108,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=4.1,  # Matches gds2palace IHP SG13G2
         loss_tangent=0.0,
+        refractive_index=1.44,
     ),
     "passive": MaterialProperties(
         type="dielectric",
@@ -92,6 +119,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=7.5,
         loss_tangent=0.001,
+        refractive_index=2.0,
     ),
     "polyimide": MaterialProperties(
         type="dielectric",
@@ -102,22 +130,26 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=1.0,
         loss_tangent=0.0,
+        refractive_index=1.0,
     ),
     "vacuum": MaterialProperties(
         type="dielectric",
         permittivity=1.0,
         loss_tangent=0.0,
+        refractive_index=1.0,
     ),
     # Semiconductors (conductivity values from gds2palace IHP SG13G2)
     "silicon": MaterialProperties(
         type="semiconductor",
         permittivity=11.9,
         conductivity=2.0,  # ~50 Ω·cm substrate (matches gds2palace)
+        refractive_index=3.47,
     ),
     "si": MaterialProperties(
         type="semiconductor",
         permittivity=11.9,
         conductivity=2.0,
+        refractive_index=3.47,
     ),
 }
 

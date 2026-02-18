@@ -22,7 +22,7 @@ Usage:
 
     # Generate mesh and run
     sim.mesh("./sim", preset="fine")
-    results = sim.simulate()
+    results = sim.run()
 """
 
 from __future__ import annotations

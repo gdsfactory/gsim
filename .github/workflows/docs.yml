@@ -6,14 +6,36 @@ on:
       - main
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
-  pull_request:
+  workflow_dispatch:
 
 env:
   GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
 
 jobs:
-  run-notebooks:
+  # Discover all notebooks and output as JSON array for the matrix
+  list-notebooks:
     runs-on: ubuntu-latest
+    outputs:
+      notebooks: ${{ steps.find.outputs.notebooks }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Find notebooks
+        id: find
+        run: |
+          nbs=$(find nbs -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" | sort | jq -Rsc 'split("\n") | map(select(. != ""))')
+          echo "notebooks=$nbs" >> "$GITHUB_OUTPUT"
+
+  # Run each notebook in parallel
+  run-notebook:
+    runs-on: ubuntu-latest
+    needs: list-notebooks
+    strategy:
+      matrix:
+        notebook: ${{ fromJson(needs.list-notebooks.outputs.notebooks) }}
+      fail-fast: false
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -29,24 +51,22 @@ jobs:
         run: just dev
       - name: Create ipykernel
         run: uv run --no-sync python -m ipykernel install --user --name gsim
-      - name: Run notebooks
+      - name: Run notebook
         run: |
-          for nb in $(find nbs -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" | sort); do
-            dir=$(dirname "$nb")
-            filename=$(basename "$nb")
-            (cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim)
-          done
-      - name: Upload executed notebooks
+          dir=$(dirname "${{ matrix.notebook }}")
+          filename=$(basename "${{ matrix.notebook }}")
+          cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim
+      - name: Upload executed notebook
         uses: actions/upload-artifact@v4
         with:
-          name: nbs
-          path: nbs
+          name: nb-${{ hashFiles(matrix.notebook) }}
+          path: ${{ matrix.notebook }}
           retention-days: 1
 
   build:
     name: Build Docs
     runs-on: ubuntu-latest
-    needs: run-notebooks
+    needs: run-notebook
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -68,7 +88,8 @@ jobs:
       - name: Download all notebook artifacts
         uses: actions/download-artifact@v4
         with:
-          name: nbs
+          pattern: nb-*
+          merge-multiple: true
           path: nbs
       - name: Build docs
         run: |

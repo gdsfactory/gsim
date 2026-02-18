@@ -3,6 +3,8 @@ site_url: https://gdsfactory.com/gsim
 site_description: Simulations API for GDSFactory
 site_author: GDSFactory
 copyright: Copyright © 2026, GDSFactory
+repo_url: https://github.com/gdsfactory/gsim
+repo_name: gdsfactory/gsim
 
 theme:
   name: shadcn
@@ -16,10 +18,14 @@ extra_css:
 
 nav:
   - home: index.md
-  - examples:
-      - Simple Example: nbs/example.md
-      - Palace CPW: nbs/palace_demo_cpw.md
-      - Palace Microstrip: nbs/palace_demo_microstrip.md
+  - Meep:
+      - Y-Branch: nbs/meep_ybranch.md
+      - Ring Coupler: nbs/meep_ring_coupler.md
+      - Directional Coupler: nbs/meep_dc.md
+      - Crossing: nbs/meep_crossing.md
+  - Palace:
+      - CPW: nbs/palace_demo_cpw.md
+      - Microstrip: nbs/palace_demo_microstrip.md
   - api reference:
       - gsim.palace: api.md
 
