@@ -11,7 +11,7 @@ Example::
     sim = meep.Simulation()
     sim.geometry(component=ybranch, z_crop="auto")
     sim.materials = {"si": 3.47, "SiO2": 1.44}
-    sim.source(port="o1", wavelength=1.55, bandwidth=0.01, num_freqs=11)
+    sim.source(port="o1", wavelength=1.55, wavelength_span=0.01, num_freqs=11)
     sim.monitors = ["o1", "o2"]
     sim.domain(pml=1.0, margin=0.5)
     sim.solver(resolution=32, simplify_tol=0.01)

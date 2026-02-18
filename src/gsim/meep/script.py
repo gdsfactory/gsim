@@ -375,22 +375,35 @@ def get_port_z_span(config):
 
 
 def build_sources(config):
-    """Build MEEP source from config port data."""
+    """Build MEEP source from config port data.
+
+    The source is offset from the port center by ``source_port_offset``
+    along the propagation direction (into the device).  This separates
+    the soft source from the port monitor so eigenmode coefficients
+    measure the true incident amplitude rather than half of it.
+    """
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     fwidth = config["source"]["fwidth"]
     z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
+    source_port_offset = config["domain"].get("source_port_offset", 0.1)
 
     sources = []
     for port in config["ports"]:
         if not port["is_source"]:
             continue
 
-        center = mp.Vector3(*port["center"])
+        # Offset source center into the device along propagation direction
+        center_list = list(port["center"])
         normal_axis = port["normal_axis"]
         direction = port["direction"]
+        if direction == "+":
+            center_list[normal_axis] += source_port_offset
+        else:
+            center_list[normal_axis] -= source_port_offset
+        center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
         transverse_axis = 1 - normal_axis
@@ -421,18 +434,45 @@ def build_sources(config):
 
 
 def build_monitors(config, sim):
-    """Build mode monitors at all ports and return flux regions."""
+    """Build mode monitors at all ports and return flux regions.
+
+    The source-port monitor is offset further into the device (past
+    the source) by ``source_port_offset + distance_source_to_monitors``
+    so the forward-going mode from the source passes through it at
+    full amplitude.  This matches the gplugins approach.
+    """
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     nfreq = fdtd["num_freqs"]
     z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
+    source_port_offset = config["domain"].get("source_port_offset", 0.1)
+    distance_source_to_monitors = config["domain"].get(
+        "distance_source_to_monitors", 0.2
+    )
 
     monitors = {}
     for port in config["ports"]:
-        center = mp.Vector3(*port["center"])
+        center_list = list(port["center"])
         normal_axis = port["normal_axis"]
+        direction = port["direction"]
+
+        # All monitors shift inward from port center (matches gplugins):
+        #   source-port monitor: source_port_offset + distance_source_to_monitors
+        #   non-source monitors: source_port_offset
+        if port["is_source"]:
+            offset = source_port_offset + distance_source_to_monitors
+        else:
+            offset = source_port_offset
+
+        if offset > 0:
+            if direction == "+":
+                center_list[normal_axis] += offset
+            else:
+                center_list[normal_axis] -= offset
+
+        center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
         transverse_axis = 1 - normal_axis

@@ -44,14 +44,14 @@ class TestModeSource:
         s = ModeSource()
         assert s.port is None
         assert s.wavelength == 1.55
-        assert s.bandwidth == 0.1
+        assert s.wavelength_span == 0.1
         assert s.num_freqs == 11
 
     def test_custom(self):
-        s = ModeSource(port="o1", wavelength=1.31, bandwidth=0.05, num_freqs=21)
+        s = ModeSource(port="o1", wavelength=1.31, wavelength_span=0.05, num_freqs=21)
         assert s.port == "o1"
         assert s.wavelength == 1.31
-        assert s.bandwidth == 0.05
+        assert s.wavelength_span == 0.05
         assert s.num_freqs == 21
 
 
@@ -64,6 +64,8 @@ class TestDomain:
         assert d.margin_z_below == 0.5
         assert d.port_margin == 0.5
         assert d.extend_ports == 0.0
+        assert d.source_port_offset == 0.1
+        assert d.distance_source_to_monitors == 0.2
         assert d.symmetries == []
 
     def test_custom(self):
@@ -284,11 +286,11 @@ class TestFieldAssignment:
 class TestCallableAPI:
     def test_source_callable(self):
         sim = Simulation()
-        result = sim.source(port="o1", wavelength=1.31, bandwidth=0.05)
+        result = sim.source(port="o1", wavelength=1.31, wavelength_span=0.05)
         assert result is sim.source
         assert sim.source.port == "o1"
         assert sim.source.wavelength == 1.31
-        assert sim.source.bandwidth == 0.05
+        assert sim.source.wavelength_span == 0.05
 
     def test_domain_callable(self):
         sim = Simulation()
@@ -382,7 +384,7 @@ class TestWavelengthDerivation:
 
     def test_from_source_custom(self):
         sim = Simulation()
-        sim.source = ModeSource(wavelength=1.31, bandwidth=0.05, num_freqs=21)
+        sim.source = ModeSource(wavelength=1.31, wavelength_span=0.05, num_freqs=21)
         wl = sim._wavelength_config()
         assert wl.wavelength == 1.31
         assert wl.bandwidth == 0.05
@@ -443,6 +445,8 @@ class TestConfigTranslation:
         assert cfg.margin_xy == 0.3
         assert cfg.margin_z_above == 1.0
         assert cfg.margin_z_below == 0.8
+        assert cfg.source_port_offset == 0.1
+        assert cfg.distance_source_to_monitors == 0.2
 
     def test_resolution_translation(self):
         sim = Simulation()
@@ -460,7 +464,7 @@ class TestConfigTranslation:
 
     def test_source_translation(self):
         sim = Simulation()
-        sim.source = ModeSource(port="o1", bandwidth=0.05)
+        sim.source = ModeSource(port="o1")
         cfg = sim._source_config()
         assert cfg.port == "o1"
         assert cfg.bandwidth is None  # always auto fwidth

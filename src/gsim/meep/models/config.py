@@ -57,6 +57,15 @@ class DomainConfig(BaseModel):
         description="Length to extend waveguide ports into PML in um. "
         "0 = auto (margin_xy + dpml).",
     )
+    source_port_offset: float = Field(
+        ge=0,
+        description="Distance to offset source from port center into device (um).",
+    )
+    distance_source_to_monitors: float = Field(
+        ge=0,
+        description="Distance between source and its port monitor (um). "
+        "Source-port monitor is placed this far past the source into the device.",
+    )
 
 
 class StoppingConfig(BaseModel):

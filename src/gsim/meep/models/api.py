@@ -71,10 +71,11 @@ class ModeSource(BaseModel):
         gt=0,
         description="Center wavelength in um",
     )
-    bandwidth: float = Field(
+    wavelength_span: float = Field(
         default=0.1,
         ge=0,
-        description="Measurement wavelength bandwidth in um",
+        description="Wavelength span of the measurement frequency grid in um. "
+        "Together with num_freqs, sets the spacing between monitor frequency points.",
     )
     num_freqs: int = Field(
         default=11,
@@ -129,6 +130,19 @@ class Domain(BaseModel):
         default=0.0,
         ge=0,
         description="Extend ports into PML (um). 0 = auto (margin + pml).",
+    )
+    source_port_offset: float = Field(
+        default=0.1,
+        ge=0,
+        description="Distance to offset source from port center into device (um). "
+        "Matches gplugins port_source_offset.",
+    )
+    distance_source_to_monitors: float = Field(
+        default=0.2,
+        ge=0,
+        description="Distance between source and its port monitor (um). "
+        "The source-port monitor is placed this far past the source, "
+        "deeper into the device. Matches gplugins distance_source_to_monitors.",
     )
     symmetries: list[Symmetry] = Field(
         default_factory=list,

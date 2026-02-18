@@ -7,15 +7,19 @@ Usage:
     from gsim import gcloud
 
     # Run simulation (uploads, starts, waits, downloads)
-    results = gcloud.run_simulation("./sim", job_type="palace")
+    result = gcloud.run_simulation("./sim", job_type="palace")
+    print(result.sim_dir)   # palace_abc123/
+    print(result.files)     # {"port-S.csv": Path(...), ...}
 
     # Or use solver-specific wrappers:
     from gsim import palace as pa
-    results = pa.run_simulation("./sim")
+    result = pa.run_simulation("./sim")
 """
 
 from __future__ import annotations
 
+import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +28,38 @@ from gdsfactoryplus import sim
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Literal
+
+
+@dataclass
+class RunResult:
+    """Result of a cloud simulation run.
+
+    Attributes:
+        sim_dir: Root directory (``{job_type}_{job_name}/``).
+        files: Flat mapping of filename → Path inside ``output/``.
+        job_name: Cloud job identifier.
+    """
+
+    sim_dir: Path
+    files: dict[str, Path] = field(default_factory=dict)
+    job_name: str = ""
+
+
+def _flatten_results(raw_results: dict) -> dict[str, Path]:
+    """Flatten gdsfactoryplus download results to a filename → Path dict.
+
+    The SDK may return directories (extracted archives) or individual files.
+    This walks everything and returns a flat mapping.
+    """
+    flat: dict[str, Path] = {}
+    for result_path in raw_results.values():
+        if result_path.is_dir():
+            for file_path in result_path.rglob("*"):
+                if file_path.is_file() and not file_path.name.startswith("."):
+                    flat[file_path.name] = file_path
+        else:
+            flat[result_path.name] = result_path
+    return flat
 
 
 def _handle_failed_job(job, output_dir: Path, verbose: bool) -> None:
@@ -54,16 +90,7 @@ def _handle_failed_job(job, output_dir: Path, verbose: bool) -> None:
                 print("Downloading logs from failed job...")  # noqa: T201
 
             raw_results = sim.download_results(job, output_dir=output_dir)
-
-            # Flatten results to find all files
-            all_files: dict[str, Path] = {}
-            for result_path in raw_results.values():
-                if result_path.is_dir():
-                    for file_path in result_path.rglob("*"):
-                        if file_path.is_file() and not file_path.name.startswith("."):
-                            all_files[file_path.name] = file_path
-                else:
-                    all_files[result_path.name] = result_path
+            all_files = _flatten_results(raw_results)
 
             # Look for log files and display them
             log_files = ["palace.log", "stdout.log", "stderr.log", "output.log"]
@@ -109,48 +136,55 @@ def upload_simulation_dir(input_dir: str | Path, job_type: str):
 
 
 def run_simulation(
-    output_dir: str | Path,
+    config_dir: str | Path,
     job_type: Literal["palace", "meep"] = "palace",
     verbose: bool = True,
     on_started: Callable | None = None,
-) -> dict[str, Path]:
+    parent_dir: str | Path | None = None,
+) -> RunResult:
     """Run a simulation on GDSFactory+ cloud.
 
     This function handles the complete workflow:
-    1. Uploads simulation files
+    1. Uploads simulation files from *config_dir*
     2. Starts the simulation job
-    3. Waits for completion
-    4. Downloads results
+    3. Creates a structured directory ``sim-data-{job_name}/``
+       with ``input/`` (config files) and ``output/`` (results) sub-dirs
+    4. Waits for completion
+    5. Downloads results into ``output/``
 
     Args:
-        output_dir: Directory containing the simulation files
-        job_type: Type of simulation (default: "palace")
-        verbose: Print progress messages (default True)
-        on_started: Optional callback called with job object when simulation starts
+        config_dir: Directory containing the simulation config files.
+        job_type: Type of simulation (default: "palace").
+        verbose: Print progress messages (default True).
+        on_started: Optional callback called with job object when simulation starts.
+        parent_dir: Where to create the sim directory.
+            Defaults to the current working directory.
 
     Returns:
-        Dict mapping result filename to local Path.
+        RunResult with sim_dir, files dict, and job_name.
 
     Raises:
         RuntimeError: If simulation fails
 
     Example:
-        >>> results = gcloud.run_simulation("./sim", job_type="palace")
+        >>> result = gcloud.run_simulation("./sim", job_type="palace")
         Uploading simulation... done
         Job started: palace-abc123
         Waiting for completion... done (2m 34s)
         Downloading results... done
+        >>> print(result.sim_dir)
+        sim-data-palace-abc123/
     """
-    output_dir = Path(output_dir)
+    config_dir = Path(config_dir)
 
-    if not output_dir.exists():
-        raise FileNotFoundError(f"Output directory not found: {output_dir}")
+    if not config_dir.exists():
+        raise FileNotFoundError(f"Config directory not found: {config_dir}")
 
     # Upload
     if verbose:
         print("Uploading simulation... ", end="", flush=True)  # noqa: T201
 
-    pre_job = upload_simulation_dir(output_dir, job_type)
+    pre_job = upload_simulation_dir(config_dir, job_type)
 
     if verbose:
         print("done")  # noqa: T201
@@ -164,6 +198,20 @@ def run_simulation(
     if on_started:
         on_started(job)
 
+    # Create structured directory
+    root = Path(parent_dir) if parent_dir else Path.cwd()
+    sim_dir = root / f"sim-data-{job.job_name}"
+    input_dir = sim_dir / "input"
+    output_dir = sim_dir / "output"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Move config files into input/
+    for item in list(config_dir.iterdir()):
+        shutil.move(str(item), str(input_dir / item.name))
+    # Remove now-empty config_dir (may fail if it was CWD, etc.)
+    shutil.rmtree(config_dir, ignore_errors=True)
+
     # Wait
     finished_job = sim.wait_for_simulation(job)
 
@@ -171,29 +219,14 @@ def run_simulation(
     if finished_job.exit_code != 0:
         _handle_failed_job(finished_job, output_dir, verbose)
 
-    # Download
-    raw_results = sim.download_results(
-        finished_job, output_dir=f"sim-data-{finished_job.job_name}"
-    )
+    # Download into output/
+    raw_results = sim.download_results(finished_job, output_dir=output_dir)
+    files = _flatten_results(raw_results)
 
-    # Flatten results: gdsfactoryplus returns extracted directories,
-    # but we want a dict of filename -> Path for individual files
-    results: dict[str, Path] = {}
-    for result_path in raw_results.values():
-        if result_path.is_dir():
-            # Recursively find all files in the extracted directory
-            for file_path in result_path.rglob("*"):
-                if file_path.is_file() and not file_path.name.startswith("."):
-                    results[file_path.name] = file_path
-        else:
-            results[result_path.name] = result_path
+    if verbose and files:
+        print(f"Downloaded {len(files)} files to {output_dir}")  # noqa: T201
 
-    if verbose and results:
-        # Find common parent directory for display
-        first_path = next(iter(results.values()))
-        print(f"Downloaded {len(results)} files to {first_path.parent}")  # noqa: T201
-
-    return results
+    return RunResult(sim_dir=sim_dir, files=files, job_name=job.job_name)
 
 
 def print_job_summary(job) -> None:

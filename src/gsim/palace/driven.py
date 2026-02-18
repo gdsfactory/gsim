@@ -46,7 +46,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         >>> sim.add_cpw_port("P3", "P4", layer="topmetal2", length=5.0)
         >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
         >>> sim.mesh("./sim", preset="default")
-        >>> results = sim.simulate()
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -663,7 +663,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Simulation
     # -------------------------------------------------------------------------
 
-    def simulate(
+    def run(
         self,
         *,
         verbose: bool = True,
@@ -671,6 +671,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         """Run simulation on GDSFactory+ cloud.
 
         Requires mesh() and write_config() to be called first.
+
+        Config files are uploaded, then moved into a structured
+        ``sim-data-{job_name}/input/`` directory. Results are downloaded
+        to ``sim-data-{job_name}/output/``.
 
         Args:
             verbose: Print progress messages
@@ -684,7 +688,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             RuntimeError: If simulation fails
 
         Example:
-            >>> results = sim.simulate()
+            >>> results = sim.run()
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
         from gsim.gcloud import run_simulation
@@ -692,15 +696,14 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
 
-        output_dir = self._output_dir
-
-        return run_simulation(
-            output_dir,
+        result = run_simulation(
+            config_dir=self._output_dir,
             job_type="palace",
             verbose=verbose,
         )
+        return result.files
 
-    def simulate_local(
+    def run_local(
         self,
         *,
         verbose: bool = True,

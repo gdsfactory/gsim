@@ -98,7 +98,7 @@ class Simulation(BaseModel):
         sim.monitors = ["o1", "o2"]
         sim.solver.stopping = "dft_decay"
         sim.solver.max_time = 200
-        result = sim.run("./meep-sim")
+        result = sim.run()  # creates sim-data-{job_name}/ in CWD
     """
 
     model_config = ConfigDict(
@@ -308,7 +308,7 @@ class Simulation(BaseModel):
 
         return WavelengthConfig(
             wavelength=self.source.wavelength,
-            bandwidth=self.source.bandwidth,
+            bandwidth=self.source.wavelength_span,
             num_freqs=self.source.num_freqs,
         )
 
@@ -348,6 +348,8 @@ class Simulation(BaseModel):
             margin_z_below=self.domain.margin_z_below,
             port_margin=self.domain.port_margin,
             extend_ports=self.domain.extend_ports,
+            source_port_offset=self.domain.source_port_offset,
+            distance_source_to_monitors=self.domain.distance_source_to_monitors,
         )
 
     def _resolution_config(self) -> Any:
@@ -618,12 +620,21 @@ class Simulation(BaseModel):
     # run
     # -------------------------------------------------------------------------
 
-    def run(self, output_dir: str | Path | None = None, *, verbose: bool = True) -> Any:
+    def run(
+        self,
+        parent_dir: str | Path | None = None,
+        *,
+        verbose: bool = True,
+    ) -> Any:
         """Run MEEP simulation on the cloud.
 
+        Config files are written to a temporary directory, uploaded, then
+        moved into a structured ``sim-data-{job_name}/input/`` directory.
+        Results are downloaded to ``sim-data-{job_name}/output/``.
+
         Args:
-            output_dir: Directory to write config and download results.
-                If None, a temporary directory is created automatically.
+            parent_dir: Where to create the sim directory.
+                Defaults to the current working directory.
             verbose: Print progress info.
 
         Returns:
@@ -634,18 +645,23 @@ class Simulation(BaseModel):
         from gsim.gcloud import run_simulation
         from gsim.meep.models.results import SParameterResult
 
-        if output_dir is None:
-            output_dir = Path(tempfile.mkdtemp(prefix="meep_"))
+        tmp = Path(tempfile.mkdtemp(prefix="meep_"))
+        try:
+            self.write_config(tmp)
+            result = run_simulation(
+                config_dir=tmp,
+                job_type="meep",
+                verbose=verbose,
+                parent_dir=parent_dir,
+            )
+        except Exception:
+            # Clean up temp dir on failure (run_simulation moves it on success)
+            import shutil
 
-        output_dir = self.write_config(output_dir)
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
 
-        results = run_simulation(
-            output_dir,
-            job_type="meep",
-            verbose=verbose,
-        )
-
-        csv_path = results.get("s_parameters.csv")
+        csv_path = result.files.get("s_parameters.csv")
         if csv_path is not None:
             return SParameterResult.from_csv(csv_path)
 

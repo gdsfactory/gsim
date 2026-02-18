@@ -140,6 +140,8 @@ class TestSimConfig:
                 margin_z_below=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
             ),
             accuracy=AccuracyConfig(
                 eps_averaging=False,
@@ -567,6 +569,8 @@ class TestDomainConfig:
             margin_z_below=0.4,
             port_margin=0.5,
             extend_ports=0.0,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
         assert cfg.dpml == 0.5
         assert cfg.margin_xy == 0.2
@@ -581,6 +585,8 @@ class TestDomainConfig:
             margin_z_below=0.5,
             port_margin=0.5,
             extend_ports=2.5,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
         assert cfg.extend_ports == 2.5
 
@@ -592,6 +598,8 @@ class TestDomainConfig:
             margin_z_below=0.5,
             port_margin=0.5,
             extend_ports=3.0,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
         d = cfg.model_dump()
         assert d["extend_ports"] == 3.0
@@ -604,6 +612,8 @@ class TestDomainConfig:
             margin_z_below=1.5,
             port_margin=0.5,
             extend_ports=0.0,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
         d = cfg.model_dump()
         assert d["dpml"] == 2.0
@@ -644,6 +654,8 @@ class TestSimConfigComponentBbox:
                 margin_z_below=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
             ),
             accuracy=AccuracyConfig(
                 eps_averaging=False,
@@ -717,6 +729,8 @@ class TestDomainInSimConfig:
                 margin_z_below=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
             ),
             accuracy=AccuracyConfig(
                 eps_averaging=False,
@@ -1096,6 +1110,8 @@ class TestOverlay:
             margin_z_below=0.0,
             port_margin=0.5,
             extend_ports=0.0,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
 
         port_data = [
@@ -1161,6 +1177,8 @@ class TestOverlay:
             margin_z_below=0.5,
             port_margin=0.5,
             extend_ports=0.0,
+            source_port_offset=0.1,
+            distance_source_to_monitors=0.2,
         )
         dielectrics = [
             {"name": "substrate", "material": "silicon", "zmin": -1.0, "zmax": 0.0},
