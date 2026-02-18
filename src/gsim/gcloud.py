@@ -18,6 +18,8 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -212,8 +214,17 @@ def run_simulation(
     # Remove now-empty config_dir (may fail if it was CWD, etc.)
     shutil.rmtree(config_dir, ignore_errors=True)
 
-    # Wait
-    finished_job = sim.wait_for_simulation(job)
+    # Wait (suppress per-poll prints from gdsfactoryplus SDK)
+    with contextlib.redirect_stdout(io.StringIO()):
+        finished_job = sim.wait_for_simulation(job)
+    if verbose:
+        created = finished_job.created_at.strftime("%H:%M:%S")
+        from datetime import datetime
+
+        now = datetime.now(finished_job.created_at.tzinfo).strftime("%H:%M:%S")
+        print(  # noqa: T201
+            f"Created: {created} | Now: {now} | Status: {finished_job.status.value}"
+        )
 
     # Check status
     if finished_job.exit_code != 0:
