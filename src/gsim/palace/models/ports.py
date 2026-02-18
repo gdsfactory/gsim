@@ -85,7 +85,7 @@ class CPWPortConfig(BaseModel):
     @property
     def effective_name(self) -> str:
         """Get the effective port name."""
-        return self.name if self.name else f"cpw_{self.lower}"
+        return self.name or f"cpw_{self.lower}"
 
 
 class TerminalConfig(BaseModel):
