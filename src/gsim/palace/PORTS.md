@@ -1,6 +1,7 @@
 # Palace Port Types Explained
 
-This document explains how ports work in gds2palace/Palace and how to define them for different transmission line configurations.
+This document explains how ports work in gds2palace/Palace and how to define them for different transmission line
+configurations.
 
 ## Port Types Overview
 
@@ -31,7 +32,8 @@ This document explains how ports work in gds2palace/Palace and how to define the
       ════════════════  ← Metal3
 ```
 
-Note: "Via port" does NOT mean a port on via structures. It's named this way because it spans the vertical gap between layers, similar to how a via connects layers.
+Note: "Via port" does NOT mean a port on via structures. It's named this way because it spans the vertical gap between
+layers, similar to how a via connects layers.
 
 ## How Palace Lumped Ports Work
 
@@ -40,7 +42,8 @@ A lumped port is a **2D surface** with:
 - `R` = impedance (typically 50Ω)
 - `Direction` = positive current flow direction (X, Y, Z, -X, -Y, -Z)
 
-Palace integrates the E-field across this surface to compute voltage. The port acts as a lumped resistor connected between whatever conductors touch the port surface.
+Palace integrates the E-field across this surface to compute voltage. The port acts as a lumped resistor connected
+between whatever conductors touch the port surface.
 
 ## GDS Port Geometry
 
@@ -143,7 +146,7 @@ ports = extract_ports(c, stack)
 A lumped port is essentially a **virtual VNA probe**. To compute S-parameters, Palace needs:
 
 1. **Voltage** = potential difference between two conductors
-2. **Current** = flow between those conductors
+1. **Current** = flow between those conductors
 
 Palace computes these by:
 
@@ -211,8 +214,8 @@ This generates a multi-element lumped port in Palace:
 ## Key Points
 
 1. **One port = one rectangle** defining the port surface
-2. **Port must touch both signal and ground** - it's the bridge between them
-3. **Direction** tells Palace the positive current flow direction
-4. **In-plane ports** need actual area (rectangle), not just a line
-5. **Via ports** are for vertical connections between layers
-6. **CPW ports** need two elements with opposite directions
+1. **Port must touch both signal and ground** - it's the bridge between them
+1. **Direction** tells Palace the positive current flow direction
+1. **In-plane ports** need actual area (rectangle), not just a line
+1. **Via ports** are for vertical connections between layers
+1. **CPW ports** need two elements with opposite directions

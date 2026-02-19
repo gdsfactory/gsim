@@ -1,11 +1,9 @@
 name: Release
-
 on:
   push:
     tags:
       - "[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
-
 jobs:
   build:
     name: Build wheel and sdist
@@ -25,7 +23,6 @@ jobs:
         with:
           name: dist
           path: dist/*
-
   release:
     name: Release
     runs-on: ubuntu-latest

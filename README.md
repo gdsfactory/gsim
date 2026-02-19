@@ -6,7 +6,9 @@
 
 ## Overview
 
-gsim connects GDSFactory layout designs to multiple EM solvers for photonic and electronic simulation. It handles geometry extraction, mesh generation, port configuration, and cloud execution so you can go from GDS to S-parameters with minimal boilerplate.
+gsim connects GDSFactory layout designs to multiple EM solvers for photonic and electronic simulation. It handles
+geometry extraction, mesh generation, port configuration, and cloud execution so you can go from GDS to S-parameters
+with minimal boilerplate.
 
 ## Solvers
 
