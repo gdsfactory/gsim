@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from gsim.meep import (
     FDTD,
     Domain,
+    FiberSource,
     Geometry,
     Material,
     ModeSource,
@@ -513,3 +514,138 @@ class TestImports:
         assert sim.materials == {}
         assert sim.monitors == []
         assert sim.solver.resolution == 32
+
+
+# ---------------------------------------------------------------------------
+# FiberSource model tests
+# ---------------------------------------------------------------------------
+
+
+class TestFiberSource:
+    def test_defaults(self):
+        s = FiberSource()
+        assert s.wavelength == 1.55
+        assert s.wavelength_span == 0.1
+        assert s.num_freqs == 11
+        assert s.beam_waist == 5.2
+        assert s.angle_theta == 10.0
+        assert s.angle_phi == 0.0
+        assert s.polarization == "TE"
+        assert s.position is None
+        assert s.z_offset == 1.0
+        assert s.direction == "down"
+
+    def test_custom(self):
+        s = FiberSource(
+            wavelength=1.31,
+            beam_waist=4.5,
+            angle_theta=15.0,
+            polarization="TM",
+            z_offset=2.0,
+            direction="up",
+        )
+        assert s.wavelength == 1.31
+        assert s.beam_waist == 4.5
+        assert s.angle_theta == 15.0
+        assert s.polarization == "TM"
+        assert s.z_offset == 2.0
+        assert s.direction == "up"
+
+    def test_callable_api(self):
+        s = FiberSource()
+        result = s(beam_waist=4.0, angle_theta=8.0)
+        assert result is s
+        assert s.beam_waist == 4.0
+        assert s.angle_theta == 8.0
+
+    def test_beam_waist_positive(self):
+        with pytest.raises(ValidationError):
+            FiberSource(beam_waist=0)
+
+    def test_angle_theta_bounds(self):
+        with pytest.raises(ValidationError):
+            FiberSource(angle_theta=90.0)
+        with pytest.raises(ValidationError):
+            FiberSource(angle_theta=-1.0)
+
+    def test_z_offset_positive(self):
+        with pytest.raises(ValidationError):
+            FiberSource(z_offset=0)
+
+    def test_position_custom(self):
+        s = FiberSource(position=[1.0, 2.0])
+        assert s.position == [1.0, 2.0]
+
+
+class TestFiberSourceSimulation:
+    """Test FiberSource integration with Simulation."""
+
+    def test_source_assignment(self):
+        sim = Simulation()
+        sim.source = FiberSource(beam_waist=5.2, angle_theta=10.0)
+        assert isinstance(sim.source, FiberSource)
+        assert sim.source.beam_waist == 5.2
+
+    def test_source_default_is_mode(self):
+        sim = Simulation()
+        assert isinstance(sim.source, ModeSource)
+
+    def test_validate_fiber_skips_port_check(self):
+        """FiberSource validation should not require a source port."""
+        sim = Simulation()
+        sim.source = FiberSource()
+        # Validation still fails because no component, but not due to source port
+        result = sim.validate_config()
+        assert not result.valid
+        assert any("No component" in e for e in result.errors)
+        assert not any("Source port" in e for e in result.errors)
+
+    def test_wavelength_config_from_fiber(self):
+        sim = Simulation()
+        sim.source = FiberSource(wavelength=1.31, wavelength_span=0.05, num_freqs=21)
+        wl = sim._wavelength_config()
+        assert wl.wavelength == 1.31
+        assert wl.bandwidth == 0.05
+        assert wl.num_freqs == 21
+
+    def test_fiber_z_position_uses_core_layer(self):
+        """z_position should reference core (highest n) layer, not topmost layer."""
+        from gsim.common.stack.extractor import Layer, LayerStack
+
+        # Create a stack with core at z=0..0.22 and metal at z=1.8..2.5
+        stack = LayerStack(
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+                "metal": Layer(
+                    name="metal",
+                    gds_layer=(12, 0),
+                    zmin=1.8,
+                    zmax=2.5,
+                    thickness=0.7,
+                    material="Aluminum",
+                    layer_type="conductor",
+                ),
+            }
+        )
+        sim = Simulation()
+        sim.source = FiberSource(z_offset=2.0, direction="down", position=[0.0, 0.0])
+        cfg = sim._fiber_source_config(stack)
+        # z_position should be core_top + z_offset = 0.22 + 2.0 = 2.22
+        # NOT metal_top + z_offset = 2.5 + 2.0 = 4.5
+        assert cfg.z_position == pytest.approx(2.22, abs=0.01)
+
+    def test_fiber_validation_warns_z_offset(self):
+        """Warn when z_offset >= margin_z_above."""
+        sim = Simulation()
+        sim.source = FiberSource(z_offset=5.0)
+        sim.domain(margin_z_above=3.0)
+        result = sim.validate_config()
+        assert any("z_offset" in w for w in result.warnings)

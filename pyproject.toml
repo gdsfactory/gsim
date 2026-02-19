@@ -76,7 +76,7 @@ src = "src/gsim/__init__.py"
 commit-template = "Release {new-version}"
 
 [tool.codespell]
-ignore-words-list = "doubleclick"
+ignore-words-list = "doubleclick,TE"
 
 [tool.mypy]
 mypy_path = ["src"]

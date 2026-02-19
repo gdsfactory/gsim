@@ -9,7 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from gsim.meep import (
+    CouplingResult,
     DomainConfig,
+    FiberSourceConfig,
     ResolutionConfig,
     SimConfig,
     SourceConfig,
@@ -1409,3 +1411,314 @@ class TestRender2dOverlay:
         assert "oxide" in patch_labels
 
         plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# FiberSourceConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestFiberSourceConfig:
+    """Test FiberSourceConfig model."""
+
+    def test_creation(self):
+        cfg = FiberSourceConfig(
+            beam_waist=5.2,
+            angle_theta=10.0,
+            angle_phi=0.0,
+            polarization="TE",
+            direction="down",
+            position=[0.0, 0.0],
+            z_position=1.5,
+            fwidth=0.13,
+        )
+        assert cfg.source_type == "fiber"
+        assert cfg.beam_waist == 5.2
+        assert cfg.angle_theta == 10.0
+        assert cfg.z_position == 1.5
+        assert cfg.fwidth == 0.13
+
+    def test_model_dump(self):
+        cfg = FiberSourceConfig(
+            beam_waist=5.2,
+            angle_theta=10.0,
+            angle_phi=0.0,
+            polarization="TE",
+            direction="down",
+            position=[0.0, 0.0],
+            z_position=1.5,
+            fwidth=0.13,
+        )
+        d = cfg.model_dump()
+        assert d["source_type"] == "fiber"
+        assert d["beam_waist"] == 5.2
+        assert d["z_position"] == 1.5
+
+    def test_source_type_discriminator(self):
+        """SourceConfig and FiberSourceConfig have distinct source_type."""
+        mode_cfg = SourceConfig()
+        assert mode_cfg.source_type == "mode"
+
+        fiber_cfg = FiberSourceConfig(
+            beam_waist=5.2,
+            angle_theta=10.0,
+            angle_phi=0.0,
+            polarization="TE",
+            direction="down",
+            position=[0.0, 0.0],
+            z_position=1.5,
+            fwidth=0.13,
+        )
+        assert fiber_cfg.source_type == "fiber"
+
+
+# ---------------------------------------------------------------------------
+# CouplingResult tests
+# ---------------------------------------------------------------------------
+
+
+class TestCouplingResult:
+    """Test CouplingResult model."""
+
+    def test_empty_result(self):
+        result = CouplingResult()
+        assert result.wavelengths == []
+        assert result.coupling_efficiency == {}
+
+    def test_from_csv(self, tmp_path):
+        csv_path = tmp_path / "coupling_efficiency.csv"
+        csv_path.write_text(
+            "wavelength,o1,o2\n"
+            "1.500000,0.25000000,0.01000000\n"
+            "1.550000,0.30000000,0.00500000\n"
+        )
+
+        result = CouplingResult.from_csv(csv_path)
+        assert len(result.wavelengths) == 2
+        assert "o1" in result.coupling_efficiency
+        assert "o2" in result.coupling_efficiency
+        assert len(result.coupling_efficiency["o1"]) == 2
+        assert abs(result.coupling_efficiency["o1"][0] - 0.25) < 1e-6
+        assert abs(result.coupling_efficiency["o2"][1] - 0.005) < 1e-6
+
+    def test_peak_ce(self):
+        import math
+
+        result = CouplingResult(
+            wavelengths=[1.5, 1.55],
+            coupling_efficiency={
+                "o1": [0.25, 0.30],
+                "o2": [0.01, 0.005],
+            },
+        )
+        peaks = result.peak_ce
+        assert abs(peaks["o1"] - 10 * math.log10(0.30)) < 1e-6
+        assert abs(peaks["o2"] - 10 * math.log10(0.01)) < 1e-6
+
+    def test_plot(self):
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+
+        result = CouplingResult(
+            wavelengths=[1.5, 1.55],
+            coupling_efficiency={"o1": [0.25, 0.30]},
+        )
+        fig = result.plot(db=True)
+        assert fig is not None
+
+    def test_plot_linear(self):
+        import matplotlib as mpl
+
+        mpl.use("Agg")
+
+        result = CouplingResult(
+            wavelengths=[1.5, 1.55],
+            coupling_efficiency={"o1": [0.25, 0.30]},
+        )
+        fig = result.plot(db=False)
+        assert fig is not None
+
+
+# ---------------------------------------------------------------------------
+# Script fiber source tests
+# ---------------------------------------------------------------------------
+
+
+class TestScriptFiberSource:
+    """Test that the runner script includes fiber source support."""
+
+    def test_script_has_gaussian_beam(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "GaussianBeamSource" in script
+
+    def test_script_has_fiber_source_builder(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "build_fiber_source" in script
+
+    def test_script_has_incident_flux(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "build_incident_flux_monitor" in script
+        assert "add_flux" in script
+
+    def test_script_has_coupling_efficiency(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "extract_coupling_efficiency" in script
+        assert "save_ce_results" in script
+
+    def test_script_branches_on_source_type(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "source_type" in script
+        assert '"fiber"' in script
+
+    def test_script_still_valid_python(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        ast.parse(script)
+
+
+# ---------------------------------------------------------------------------
+# SimConfig with FiberSourceConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestSimConfigFiberSource:
+    """Test SimConfig accepts FiberSourceConfig via discriminated union."""
+
+    def test_json_roundtrip_fiber_source(self, tmp_path):
+        from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
+
+        fiber_cfg = FiberSourceConfig(
+            beam_waist=5.2,
+            angle_theta=10.0,
+            angle_phi=0.0,
+            polarization="TE",
+            direction="down",
+            position=[0.0, 0.0],
+            z_position=1.5,
+            fwidth=0.13,
+        )
+
+        cfg = SimConfig(
+            gds_filename="layout.gds",
+            verbose_interval=0,
+            layer_stack=[],
+            dielectrics=[],
+            ports=[],
+            materials={},
+            wavelength=WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11),
+            source=fiber_cfg,
+            stopping=StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            ),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=1.0,
+                margin_xy=0.5,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            symmetries=[],
+        )
+
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+
+        assert data["source"]["source_type"] == "fiber"
+        assert data["source"]["beam_waist"] == 5.2
+        assert data["source"]["angle_theta"] == 10.0
+        assert data["source"]["z_position"] == 1.5
+
+    def test_json_roundtrip_mode_source(self, tmp_path):
+        """Existing mode source still works with the discriminated union."""
+        from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
+
+        mode_cfg = SourceConfig()
+
+        cfg = SimConfig(
+            gds_filename="layout.gds",
+            verbose_interval=0,
+            layer_stack=[],
+            dielectrics=[],
+            ports=[],
+            materials={},
+            wavelength=WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11),
+            source=mode_cfg,
+            stopping=StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            ),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=1.0,
+                margin_xy=0.5,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            symmetries=[],
+        )
+
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+
+        assert data["source"]["source_type"] == "mode"

@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from gsim.meep.models.api import (
     FDTD,
     Domain,
+    FiberSource,
     Geometry,
     Material,
     ModeSource,
@@ -108,7 +109,7 @@ class Simulation(BaseModel):
 
     geometry: Geometry = Field(default_factory=Geometry)
     materials: dict[str, float | Material] = Field(default_factory=dict)
-    source: ModeSource = Field(default_factory=ModeSource)
+    source: ModeSource | FiberSource = Field(default_factory=ModeSource)
     monitors: list[str] = Field(default_factory=list)
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
@@ -173,7 +174,7 @@ class Simulation(BaseModel):
             ports = list(self.geometry.component.ports)
             if not ports:
                 errors.append("Component has no ports.")
-            elif self.source.port is not None:
+            elif isinstance(self.source, ModeSource) and self.source.port is not None:
                 port_names = [p.name for p in ports]
                 if self.source.port not in port_names:
                     errors.append(
@@ -193,6 +194,18 @@ class Simulation(BaseModel):
         if self.geometry.stack is None:
             warnings_list.append(
                 "No stack configured. Will use active PDK with defaults."
+            )
+
+        # Fiber source: warn if z_offset is large relative to margin_z_above
+        if (
+            isinstance(self.source, FiberSource)
+            and self.source.z_offset >= self.domain.margin_z_above
+        ):
+            warnings_list.append(
+                f"FiberSource z_offset ({self.source.z_offset}) >= "
+                f"margin_z_above ({self.domain.margin_z_above}). "
+                f"Consider increasing margin_z_above to ensure the "
+                f"source is well within the simulation cell."
             )
 
         return ValidationResult(
@@ -316,9 +329,68 @@ class Simulation(BaseModel):
         """Translate ModeSource → SourceConfig."""
         from gsim.meep.models.config import SourceConfig
 
+        if not isinstance(self.source, ModeSource):
+            raise TypeError("_source_config() requires ModeSource")
         return SourceConfig(
             bandwidth=None,
             port=self.source.port,
+        )
+
+    def _fiber_source_config(self, stack: Any) -> Any:
+        """Translate FiberSource → FiberSourceConfig.
+
+        Resolves position (auto-center on component bbox) and computes
+        absolute z from stack top + z_offset.
+        """
+        from gsim.meep.models.config import FiberSourceConfig
+
+        if not isinstance(self.source, FiberSource):
+            raise TypeError("_fiber_source_config() requires FiberSource")
+
+        src = self.source
+
+        # Resolve position: auto = component bbox center
+        if src.position is not None:
+            position = list(src.position)
+        else:
+            bbox = self.geometry.component.dbbox()
+            position = [
+                (bbox.left + bbox.right) / 2.0,
+                (bbox.bottom + bbox.top) / 2.0,
+            ]
+
+        # Compute absolute z from core layer top + offset.
+        # Use the highest-n layer (waveguide core) as reference, NOT the
+        # topmost layer (which could be a metal far above the grating).
+        from gsim.meep.ports import _find_highest_n_layer
+
+        core_layer, _ = _find_highest_n_layer(stack)
+        if core_layer is not None:
+            z_ref_top = core_layer.zmax
+            z_ref_bottom = core_layer.zmin
+        else:
+            # Fallback: use full stack extent
+            z_ref_top = max(layer.zmax for layer in stack.layers.values())
+            z_ref_bottom = min(layer.zmin for layer in stack.layers.values())
+
+        if src.direction == "down":
+            z_position = z_ref_top + src.z_offset
+        else:
+            z_position = z_ref_bottom - src.z_offset
+
+        # Compute fwidth
+        wl_cfg = self._wavelength_config()
+        fwidth = max(3 * wl_cfg.df, 0.2 * wl_cfg.fcen)
+
+        return FiberSourceConfig(
+            beam_waist=src.beam_waist,
+            angle_theta=src.angle_theta,
+            angle_phi=src.angle_phi,
+            polarization=src.polarization,
+            direction=src.direction,
+            position=position,
+            z_position=z_position,
+            fwidth=fwidth,
         )
 
     def _stopping_config(self) -> Any:
@@ -439,7 +511,11 @@ class Simulation(BaseModel):
         # Build config objects
         domain_cfg = self._domain_config()
         wl_cfg = self._wavelength_config()
-        source_cfg = self._source_config()
+        is_fiber = isinstance(self.source, FiberSource)
+        if is_fiber:
+            source_cfg = self._fiber_source_config(stack)
+        else:
+            source_cfg = self._source_config()
         stopping_cfg = self._stopping_config()
         resolution_cfg = self._resolution_config()
         accuracy_cfg = self._accuracy_config()
@@ -491,18 +567,24 @@ class Simulation(BaseModel):
             used_materials.add(diel["material"])
 
         # Extract port info from original component
-        port_infos = extract_port_info(
-            original_component, stack, source_port=source_cfg.port
-        )
+        if is_fiber:
+            port_infos = extract_port_info(original_component, stack, mark_source=False)
+        else:
+            port_infos = extract_port_info(
+                original_component, stack, source_port=source_cfg.port
+            )
 
         # Resolve materials
         material_data = resolve_materials(
             used_materials, overrides=self._material_overrides()
         )
 
-        # Compute source fwidth
-        fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
-        source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
+        # Compute source fwidth (for mode source only; fiber already has fwidth)
+        if is_fiber:
+            source_for_config = source_cfg
+        else:
+            fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
+            source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
         # Translate domain.symmetries → SymmetryEntry for config
         symmetry_entries = [
@@ -638,12 +720,14 @@ class Simulation(BaseModel):
             verbose: Print progress info.
 
         Returns:
-            SParameterResult with parsed S-parameters.
+            SParameterResult or CouplingResult depending on source type.
         """
         import tempfile
 
         from gsim.gcloud import run_simulation
-        from gsim.meep.models.results import SParameterResult
+        from gsim.meep.models.results import CouplingResult, SParameterResult
+
+        is_fiber = isinstance(self.source, FiberSource)
 
         tmp = Path(tempfile.mkdtemp(prefix="meep_"))
         try:
@@ -660,6 +744,13 @@ class Simulation(BaseModel):
 
             shutil.rmtree(tmp, ignore_errors=True)
             raise
+
+        if is_fiber:
+            csv_path = result.files.get("coupling_efficiency.csv")
+            if csv_path is not None:
+                return CouplingResult.from_csv(csv_path)
+            logger.warning("No coupling_efficiency.csv found in results")
+            return CouplingResult()
 
         csv_path = result.files.get("s_parameters.csv")
         if csv_path is not None:
@@ -688,7 +779,7 @@ class Simulation(BaseModel):
             component=result.component,
             stack=self.geometry.stack,
             domain_config=result.config.domain,
-            source_port=result.config.source.port,
+            source_port=getattr(result.config.source, "port", None),
             extend_ports_length=0,
             port_data=result.config.ports,
             component_bbox=result.config.component_bbox,
