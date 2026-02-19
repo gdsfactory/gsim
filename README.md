@@ -34,8 +34,7 @@ For development (requires [uv](https://docs.astral.sh/uv/)):
 ```bash
 git clone https://github.com/gdsfactory/gsim
 cd gsim
-uv sync --all-groups --extra docs
-uv pip install -e .
+uv sync --dev
 ```
 
 Or use the justfile:

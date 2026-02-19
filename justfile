@@ -3,7 +3,7 @@ dist:
 
 dev:
   uv venv --python 3.12 --clear
-  uv sync --all-groups --extra docs
+  uv sync --dev
   uv pip install -e .
   uvx pre-commit install
 
