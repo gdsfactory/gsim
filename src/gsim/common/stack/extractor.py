@@ -83,9 +83,11 @@ class ValidationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     def __bool__(self) -> bool:
+        """Returns True if the validation passed, False otherwise."""
         return self.valid
 
     def __str__(self) -> str:
+        """Returns a formatted string representation of the validation results."""
         lines = []
         if self.valid:
             lines.append("Stack validation: PASSED")

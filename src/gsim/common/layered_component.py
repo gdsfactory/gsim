@@ -53,6 +53,7 @@ class LayeredComponentBase(BaseModel):
     slice_stack: tuple[int, int | None] = (0, None)
 
     def __hash__(self) -> int:
+        """Returns a stable hash for the model using its JSON representation."""
         if not hasattr(self, "_hash"):
             dump = str.encode(self.model_dump_json())
             object.__setattr__(self, "_hash", int(md5(dump).hexdigest()[:15], 16))
@@ -100,6 +101,7 @@ class LayeredComponentBase(BaseModel):
 
     @cached_property
     def _gds_bbox(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Returns the 2D bounding box of the GDS component including padding."""
         c = gf.components.extend_ports(
             self.component, length=self.extend_ports + self.pad_xy_inner
         )

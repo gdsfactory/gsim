@@ -627,6 +627,7 @@ class TestSimConfigComponentBbox:
 
     @pytest.fixture
     def sim_kwargs(self):
+        """Returns default keyword arguments for SimConfig."""
         from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
 
         return dict(

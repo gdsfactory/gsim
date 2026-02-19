@@ -21,6 +21,8 @@ from gsim.meep import (
 
 
 class TestMaterial:
+    """Tests for the Material model."""
+
     def test_basic(self):
         m = Material(n=3.47)
         assert m.n == 3.47
@@ -40,6 +42,8 @@ class TestMaterial:
 
 
 class TestModeSource:
+    """Tests for the ModeSource model."""
+
     def test_defaults(self):
         s = ModeSource()
         assert s.port is None
@@ -56,6 +60,8 @@ class TestModeSource:
 
 
 class TestDomain:
+    """Tests for the Domain model."""
+
     def test_defaults(self):
         d = Domain()
         assert d.pml == 1.0
@@ -82,6 +88,8 @@ class TestDomain:
 
 
 class TestStoppingFields:
+    """Tests for the FDTD stopping criteria."""
+
     def test_defaults(self):
         f = FDTD()
         assert f.stopping == "field_decay"
@@ -127,6 +135,8 @@ class TestStoppingFields:
 
 
 class TestFDTD:
+    """Tests for the FDTD model."""
+
     def test_defaults(self):
         f = FDTD()
         assert f.resolution == 32
@@ -146,6 +156,8 @@ class TestFDTD:
 
 
 class TestFDTDDiagnostics:
+    """Tests for the FDTD diagnostics settings."""
+
     def test_defaults(self):
         f = FDTD()
         assert f.save_geometry is True
@@ -167,6 +179,8 @@ class TestFDTDDiagnostics:
 
 
 class TestMaterialNormalization:
+    """Tests for material shorthand and normalization."""
+
     def test_float_shorthand(self):
         sim = Simulation(materials={"si": 3.47, "sio2": 1.44})
         assert isinstance(sim.materials["si"], Material)
@@ -197,6 +211,8 @@ class TestMaterialNormalization:
 
 
 class TestFieldAssignment:
+    """Tests for field-by-field assignment in Simulation."""
+
     def test_source_port(self):
         sim = Simulation()
         sim.source.port = "o1"
@@ -284,6 +300,8 @@ class TestFieldAssignment:
 
 
 class TestCallableAPI:
+    """Tests for the callable (method-like) API in Simulation."""
+
     def test_source_callable(self):
         sim = Simulation()
         result = sim.source(port="o1", wavelength=1.31, wavelength_span=0.05)
@@ -322,6 +340,8 @@ class TestCallableAPI:
 
 
 class TestWholeObjectAssignment:
+    """Tests for whole object assignment in Simulation."""
+
     def test_source(self):
         sim = Simulation()
         sim.source = ModeSource(port="o2", wavelength=1.31)
@@ -347,6 +367,8 @@ class TestWholeObjectAssignment:
 
 
 class TestValidation:
+    """Tests for simulation configuration validation."""
+
     def test_missing_component(self):
         sim = Simulation()
         result = sim.validate_config()
@@ -375,6 +397,8 @@ class TestValidation:
 
 
 class TestWavelengthDerivation:
+    """Tests for wavelength configuration derivation."""
+
     def test_from_source_defaults(self):
         sim = Simulation()
         wl = sim._wavelength_config()
@@ -397,6 +421,8 @@ class TestWavelengthDerivation:
 
 
 class TestConfigTranslation:
+    """Tests for translation to low-level config objects."""
+
     def test_stopping_fixed(self):
         sim = Simulation()
         sim.solver.stopping = "fixed"
@@ -484,6 +510,8 @@ class TestConfigTranslation:
 
 
 class TestImports:
+    """Tests for importing the new declarative API."""
+
     def test_import_all_new_api(self):
         from gsim.meep import (
             FDTD,
