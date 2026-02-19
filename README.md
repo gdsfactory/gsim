@@ -31,12 +31,18 @@ with minimal boilerplate.
 pip install gsim
 ```
 
-For development:
+For development (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/gdsfactory/gsim
 cd gsim
-pip install -e ".[dev]"
+uv sync --dev
+```
+
+Or use the justfile:
+
+```bash
+just dev
 ```
 
 ## Documentation
