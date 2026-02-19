@@ -1,13 +1,19 @@
 [build-system]
+requires = ["build", "setuptools>=61", "uv", "wheel"]
 build-backend = "setuptools.build_meta"
-requires = ["setuptools>=61", "uv", "build", "wheel"]
 
 [project]
-authors = [{name = "GDSFactory", email = "contact@gdsfactory.com"}]
+name = "gsim"
+version = "0.0.5"
+description = ""
+readme = "README.md"
+requires-python = "~=3.12.0"
+license = { text = "Apache-2.0" }
+authors = [{ name = "GDSFactory", email = "contact@gdsfactory.com" }]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.12",
-  "Operating System :: OS Independent"
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.12"
 ]
 dependencies = [
   "gdsfactory>=9.32.0",
@@ -20,12 +26,6 @@ dependencies = [
   "trame-vtk",
   "trame-vuetify"
 ]
-description = ""
-license = {text = "Apache-2.0"}
-name = "gsim"
-readme = "README.md"
-requires-python = "~=3.12.0"
-version = "0.0.5"
 
 [project.optional-dependencies]
 dev = [
@@ -58,9 +58,7 @@ dev = [
   "nbstripout>=0.8.1",
   "ty>=0.0.15"
 ]
-docs = [
-  "ihp-gdsfactory>=0.1.4"
-]
+docs = ["ihp-gdsfactory>=0.1.4"]
 
 [[tool.bver.file]]
 src = "README.md"
@@ -77,6 +75,17 @@ commit-template = "Release {new-version}"
 [tool.codespell]
 ignore-words-list = "doubleclick"
 
+[tool.interrogate]
+docstring-style = "google"
+exclude = ["docs/**/*", "tests/**/*"]
+ext = []
+fail-under = 100
+ignore-nested-classes = true
+ignore-nested-functions = true
+ignore-regex = ["^test_.*"]
+omit-covered-files = true
+verbose = 2
+
 [tool.mypy]
 mypy_path = ["src"]
 python_version = "3.12"
@@ -88,7 +97,12 @@ module = "gsim"
 
 [[tool.mypy.overrides]]
 check_untyped_defs = false
-disable_error_code = ["no-untyped-def", "no-untyped-call", "var-annotated", "assignment"]
+disable_error_code = [
+  "no-untyped-def",
+  "no-untyped-call",
+  "var-annotated",
+  "assignment"
+]
 disallow_any_generics = false
 disallow_untyped_defs = false
 # The Palace subpackage is still evolving and uses optional dependencies
@@ -99,7 +113,12 @@ warn_return_any = false
 
 [[tool.mypy.overrides]]
 check_untyped_defs = false
-disable_error_code = ["no-untyped-def", "no-untyped-call", "var-annotated", "assignment"]
+disable_error_code = [
+  "no-untyped-def",
+  "no-untyped-call",
+  "var-annotated",
+  "assignment"
+]
 disallow_any_generics = false
 disallow_untyped_defs = false
 # The MEEP subpackage wraps cloud-only MEEP simulation. Relaxed mypy
@@ -140,7 +159,7 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = '--tb=short'
+addopts = "--tb=short"
 norecursedirs = ["scripts"]
 testpaths = ["tests"]
 
@@ -188,7 +207,7 @@ ignore = [
   "TD002",  # missing-todo-author
   "TD003",  # missing-todo-link
   "TID252",  # relative-imports
-  "TRY003"  # raise-vanilla-args
+  "TRY003",  # raise-vanilla-args
 ]
 select = ["ALL"]
 
@@ -206,17 +225,17 @@ select = ["ALL"]
   "PLC2401",  # non-ascii-name
   "S101",  # assert
   "SLF001",  # private-member-access
-  "T201"  # print
+  "T201",  # print
 ]
 "docs/hooks.py" = [
   "ARG001",  # unused-function-argument (MkDocs hooks require specific signatures)
   "INP001",  # implicit-namespace-package
-  "PERF401"  # use-list-extend (keeping for readability)
+  "PERF401",  # use-list-extend (keeping for readability)
 ]
 "nbs/*.py" = [
   "EXE001",  # shebang-present-but-not-executable
   "INP001",  # implicit-namespace-package
-  "T201"  # print (natural in scripts)
+  "T201",  # print (natural in scripts)
 ]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations
@@ -231,7 +250,7 @@ select = ["ALL"]
   "PLC2401",  # non-ascii-name
   "S101",  # assert
   "SLF001",  # private-member-access
-  "T201"  # print
+  "T201",  # print
 ]
 "tests/**/*.py" = [
   "ANN",  # flake8-annotations
@@ -241,7 +260,7 @@ select = ["ALL"]
   "PT011",  # pytest-raises-too-broad
   "S101",  # assert
   "SLF001",  # private-member-access (testing internal state)
-  "T201"  # print
+  "T201",  # print
 ]
 
 [tool.ruff.lint.pydocstyle]
