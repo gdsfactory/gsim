@@ -41,6 +41,7 @@ repos:
     rev: "v3.8.1"
     hooks:
       - id: prettier
+        types_or: [javascript, css, json, html]
   - repo: local
     hooks:
       - id: nbclean
