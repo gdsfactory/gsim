@@ -66,3 +66,52 @@ repos:
         entry: uv run --no-sync ty check
         language: system
         files: \.(py)$
+
+  - repo: https://github.com/tombi-toml/tombi-pre-commit
+    rev: v0.7.14
+    hooks:
+      - id: tombi-format
+      - id: tombi-lint
+      
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.20.0
+    hooks:
+      - id: yamlfmt
+        args: [-conf, ".github/.yamlfmt.yaml"]
+        
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args: [--strict, "-c=.github/.yamllint.yaml"]
+        
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.10
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.20.0
+    hooks:
+      - id: markdownlint-cli2
+        name: markdownlint
+        args: [--config, .github/.markdownlint-cli2.yaml]
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        args: [--wrap=120]
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-gfm-alerts
+          - mdformat-tables
+          - mdformat-frontmatter
+          - mdformat-footnote
+
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+      - id: interrogate
+        args: [--config=pyproject.toml]
+        pass_filenames: true
