@@ -91,6 +91,7 @@ repos:
           - mdformat-tables
           - mdformat-frontmatter
           - mdformat-footnote
+        exclude: "docs/nbs/*.md"
   - repo: https://github.com/econchick/interrogate
     rev: 1.7.0
     hooks:

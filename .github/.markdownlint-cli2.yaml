@@ -14,3 +14,4 @@ config:
 ignores:
   - ".venv/**"
   - "**/.venv/**"
+  - "docs/nbs/*.md"
