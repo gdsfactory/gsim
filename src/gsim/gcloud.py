@@ -204,9 +204,7 @@ def run_simulation(
     root = Path(parent_dir) if parent_dir else Path.cwd()
     sim_dir = root / f"sim-data-{job.job_name}"
     input_dir = sim_dir / "input"
-    output_dir = sim_dir / "output"
     input_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Move config files into input/
     for item in list(config_dir.iterdir()):
@@ -228,14 +226,14 @@ def run_simulation(
 
     # Check status
     if finished_job.exit_code != 0:
-        _handle_failed_job(finished_job, output_dir, verbose)
+        _handle_failed_job(finished_job, sim_dir, verbose)
 
-    # Download into output/
-    raw_results = sim.download_results(finished_job, output_dir=output_dir)
+    # Download directly into sim_dir (SDK creates results/ subdirectory)
+    raw_results = sim.download_results(finished_job, output_dir=sim_dir)
     files = _flatten_results(raw_results)
 
     if verbose and files:
-        print(f"Downloaded {len(files)} files to {output_dir}")  # noqa: T201
+        print(f"Downloaded {len(files)} files to {sim_dir}")  # noqa: T201
 
     return RunResult(sim_dir=sim_dir, files=files, job_name=job.job_name)
 

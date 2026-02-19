@@ -665,6 +665,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
     def run(
         self,
+        parent_dir: str | Path | None = None,
         *,
         verbose: bool = True,
     ) -> dict[str, Path]:
@@ -673,11 +674,14 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         Requires mesh() to be called first. Automatically calls
         write_config() if config.json hasn't been written yet.
 
-        Config files are uploaded, then moved into a structured
-        ``sim-data-{job_name}/input/`` directory. Results are downloaded
-        to ``sim-data-{job_name}/output/``.
+        Input files are copied to a temporary directory and uploaded.
+        Immediately after upload the inputs are saved into
+        ``sim-data-{job_name}/input/`` (before waiting for results).
+        Results are downloaded to ``sim-data-{job_name}/output/``.
 
         Args:
+            parent_dir: Where to create the sim directory.
+                Defaults to the current working directory.
             verbose: Print progress messages
 
         Returns:
@@ -691,6 +695,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             >>> results = sim.run()
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
+        import shutil
+
         from gsim.gcloud import run_simulation
 
         if self._output_dir is None:
@@ -701,11 +707,27 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         if not config_path.exists():
             self.write_config()
 
-        result = run_simulation(
-            config_dir=self._output_dir,
-            job_type="palace",
-            verbose=verbose,
-        )
+        # Copy input files to a temp dir so run_simulation doesn't
+        # delete the user's output directory.
+        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
+        try:
+            for item in self._output_dir.iterdir():
+                dest = tmp / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+
+            result = run_simulation(
+                config_dir=tmp,
+                job_type="palace",
+                verbose=verbose,
+                parent_dir=parent_dir,
+            )
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
         return result.files
 
     def run_local(
