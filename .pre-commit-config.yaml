@@ -86,13 +86,13 @@ repos:
     hooks:
       - id: mdformat
         args: [--wrap=120]
+        exclude: 'docs/nbs/example\.md'
         additional_dependencies:
           - mdformat-gfm
           - mdformat-gfm-alerts
           - mdformat-tables
           - mdformat-frontmatter
           - mdformat-footnote
-        exclude: "docs/nbs/*.md"
   - repo: https://github.com/econchick/interrogate
     rev: 1.7.0
     hooks:
