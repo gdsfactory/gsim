@@ -231,3 +231,142 @@ class SParameterResult(BaseModel):
         fig.tight_layout()
 
         return fig
+
+
+class CouplingResult(BaseModel):
+    """Coupling efficiency results from fiber-to-chip Gaussian beam simulation.
+
+    Parses CSV output from the cloud runner and provides visualization.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    wavelengths: list[float] = Field(default_factory=list)
+    coupling_efficiency: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description="Port name -> CE values (linear, 0-1) per wavelength",
+    )
+    debug_info: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Debug diagnostics from meep_debug.json (if available)",
+    )
+    diagnostic_images: dict[str, str] = Field(
+        default_factory=dict,
+        description="Diagnostic image paths: key -> filepath",
+    )
+
+    @classmethod
+    def from_csv(cls, path: str | Path) -> CouplingResult:
+        """Parse coupling efficiency results from CSV file.
+
+        Expected CSV format:
+            wavelength,o1,o2,...
+            1.5,0.25,0.01,...
+
+        Values are linear coupling efficiency (0-1).
+
+        Args:
+            path: Path to CSV file
+
+        Returns:
+            CouplingResult instance
+        """
+        path = Path(path)
+        wavelengths: list[float] = []
+        ce: dict[str, list[float]] = {}
+
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                return cls()
+
+            port_names = [c for c in reader.fieldnames if c != "wavelength"]
+            for name in port_names:
+                ce[name] = []
+
+            for row in reader:
+                wavelengths.append(float(row["wavelength"]))
+                for name in port_names:
+                    ce[name].append(float(row[name]))
+
+        # Auto-load debug log if present alongside CSV
+        debug_info: dict[str, Any] = {}
+        debug_path = path.parent / "meep_debug.json"
+        if debug_path.exists():
+            with contextlib.suppress(json.JSONDecodeError, OSError):
+                debug_info = json.loads(debug_path.read_text())
+
+        # Auto-detect diagnostic PNGs
+        diagnostic_images: dict[str, str] = {}
+        for key, filename in [
+            ("geometry_xy", "meep_geometry_xy.png"),
+            ("geometry_xz", "meep_geometry_xz.png"),
+            ("geometry_yz", "meep_geometry_yz.png"),
+            ("fields_xy", "meep_fields_xy.png"),
+            ("animation", "meep_animation.mp4"),
+        ]:
+            img_path = path.parent / filename
+            if img_path.exists():
+                diagnostic_images[key] = str(img_path)
+
+        return cls(
+            wavelengths=wavelengths,
+            coupling_efficiency=ce,
+            debug_info=debug_info,
+            diagnostic_images=diagnostic_images,
+        )
+
+    @property
+    def peak_ce(self) -> dict[str, float]:
+        """Peak coupling efficiency per port in dB.
+
+        Returns:
+            Dict of port_name -> peak CE in dB.
+        """
+        import math
+
+        result: dict[str, float] = {}
+        for name, values in self.coupling_efficiency.items():
+            if values:
+                peak_linear = max(values)
+                result[name] = (
+                    10 * math.log10(peak_linear) if peak_linear > 0 else -100.0
+                )
+            else:
+                result[name] = -100.0
+        return result
+
+    def plot(self, db: bool = True, **kwargs: Any) -> Any:
+        """Plot coupling efficiency vs wavelength.
+
+        Args:
+            db: If True, plot in dB scale (10*log10)
+            **kwargs: Passed to matplotlib plot()
+
+        Returns:
+            matplotlib Figure
+        """
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        plt.close(fig)  # prevent double display in notebooks
+
+        ylabel = "Coupling Efficiency (dB)" if db else "Coupling Efficiency"
+        for name, values in self.coupling_efficiency.items():
+            if db:
+                import math
+
+                y_vals = [10 * math.log10(v) if v > 0 else -100 for v in values]
+            else:
+                y_vals = values
+
+            ax.plot(self.wavelengths, y_vals, ".-", label=name, **kwargs)
+
+        ax.set_xlabel("Wavelength (um)")
+        ax.set_ylabel(ylabel)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_title("Coupling Efficiency")
+        fig.tight_layout()
+
+        return fig

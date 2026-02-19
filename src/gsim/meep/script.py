@@ -490,6 +490,220 @@ def build_monitors(config, sim):
 
 
 # ---------------------------------------------------------------------------
+# Fiber source: Gaussian beam + incident flux
+# ---------------------------------------------------------------------------
+
+def build_fiber_source(config, cell_x=None, cell_y=None, dpml=None):
+    """Build a MEEP GaussianBeamSource from fiber source config.
+
+    Creates a Gaussian beam launched from above (or below) the device
+    to simulate fiber-to-chip coupling (grating coupler excitation).
+
+    Args:
+        config: Simulation config dict.
+        cell_x: Cell x dimension (if None, computed from component_bbox).
+        cell_y: Cell y dimension (if None, computed from component_bbox).
+        dpml: PML thickness (if None, read from config).
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    src_cfg = config["source"]
+    fwidth = src_cfg["fwidth"]
+    beam_waist = src_cfg["beam_waist"]
+    theta_deg = src_cfg["angle_theta"]
+    phi_deg = src_cfg["angle_phi"]
+    polarization = src_cfg["polarization"]
+    direction = src_cfg["direction"]
+    position = src_cfg["position"]
+    z_position = src_cfg["z_position"]
+
+    domain = config["domain"]
+    if dpml is None:
+        dpml = domain["dpml"]
+
+    # Compute beam k-direction from angles
+    theta = math.radians(theta_deg)
+    phi = math.radians(phi_deg)
+    if direction == "down":
+        # Beam going downward (-z), tilted by theta from vertical
+        kx = math.sin(theta) * math.cos(phi)
+        ky = math.sin(theta) * math.sin(phi)
+        kz = -math.cos(theta)
+    else:
+        kx = math.sin(theta) * math.cos(phi)
+        ky = math.sin(theta) * math.sin(phi)
+        kz = math.cos(theta)
+
+    beam_kdir = mp.Vector3(kx, ky, kz)
+
+    # Polarization: TE = E in y (for phi=0), TM = E in plane of incidence
+    if polarization == "TE":
+        beam_E0 = mp.Vector3(0, 1, 0)
+    else:
+        # TM: E in the plane of incidence (xz for phi=0)
+        beam_E0 = mp.Vector3(math.cos(theta), 0, math.sin(theta))
+
+    # Source plane: horizontal, spans cell minus PML
+    if cell_x is not None and cell_y is not None:
+        sx = cell_x - 2 * dpml
+        sy = cell_y - 2 * dpml
+    else:
+        # Fallback: compute from component bbox
+        component_bbox = config["component_bbox"]
+        if component_bbox is not None:
+            bbox_left, bbox_bottom, bbox_right, bbox_top = component_bbox
+        else:
+            bbox_left, bbox_bottom, bbox_right, bbox_top = -10, -10, 10, 10
+        margin_xy = domain["margin_xy"]
+        sx = (bbox_right - bbox_left) + 2 * margin_xy
+        sy = (bbox_top - bbox_bottom) + 2 * margin_xy
+
+    center = mp.Vector3(position[0], position[1], z_position)
+    size = mp.Vector3(sx, sy, 0)
+
+    source = mp.GaussianBeamSource(
+        src=mp.GaussianSource(frequency=fcen, fwidth=fwidth),
+        center=center,
+        size=size,
+        beam_x0=mp.Vector3(position[0], position[1], z_position),
+        beam_kdir=beam_kdir,
+        beam_w0=beam_waist,
+        beam_E0=beam_E0,
+    )
+
+    return [source], center
+
+
+def build_incident_flux_monitor(config, sim, source_center):
+    """Build a flux monitor near the source to measure incident power.
+
+    Placed 0.5 um below (toward device) the source center for a
+    'down' beam, or 0.5 um above for an 'up' beam. Spans the full
+    cell minus PML in XY.
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    df = fdtd["df"]
+    nfreq = fdtd["num_freqs"]
+    src_cfg = config["source"]
+    direction = src_cfg["direction"]
+    domain = config["domain"]
+    dpml = domain["dpml"]
+
+    # Offset toward the device
+    offset = 0.5
+    if direction == "down":
+        z_monitor = source_center.z - offset
+    else:
+        z_monitor = source_center.z + offset
+
+    # Span full cell minus PML in XY
+    sx = sim.cell_size.x - 2 * dpml
+    sy = sim.cell_size.y - 2 * dpml
+
+    center = mp.Vector3(source_center.x, source_center.y, z_monitor)
+    size = mp.Vector3(sx, sy, 0)
+
+    flux = sim.add_flux(
+        fcen, df, nfreq,
+        mp.FluxRegion(center=center, size=size),
+    )
+    return flux
+
+
+def extract_coupling_efficiency(config, sim, monitors, incident_flux):
+    """Extract coupling efficiency at each port via eigenmode decomposition.
+
+    CE = |alpha_waveguide|^2 / incident_flux for each port and frequency.
+
+    Returns:
+        (ce_params, debug_data) tuple
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    nfreq = fdtd["num_freqs"]
+    df = fdtd["df"]
+    freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
+
+    # Get total incident flux (array of nfreq values).
+    # Use abs() because a downward beam produces negative flux through a
+    # +z-normal plane (MEEP convention: positive flux = +z direction).
+    inc_flux_raw = mp.get_fluxes(incident_flux)
+    inc_flux = [abs(f) for f in inc_flux_raw]
+
+    debug_data = {
+        "incident_flux": [float(f) for f in inc_flux],
+        "incident_flux_raw": [float(f) for f in inc_flux_raw],
+        "eigenmode_info": {},
+    }
+
+    ce_params = {}
+
+    for port in config["ports"]:
+        port_name = port["name"]
+        if port_name not in monitors:
+            continue
+
+        # Eigenmode decomposition at waveguide port
+        port_kp = _port_kpoint(port)
+        ob = sim.get_eigenmode_coefficients(
+            monitors[port_name], [1], eig_parity=mp.NO_PARITY,
+            kpoint_func=lambda f, n, kp=port_kp: kp,
+        )
+
+        # Use the forward-propagating mode (outgoing from grating into waveguide)
+        # Port direction = direction of incoming mode from outside
+        # For grating coupler output ports, outgoing = into waveguide
+        port_dir = port["direction"]
+        # Outgoing mode: opposite to "incoming" direction convention
+        out_idx = 1 if port_dir == "+" else 0
+        alpha = ob.alpha[0, :, out_idx]
+
+        # CE = |alpha|^2 / incident_flux
+        ce = np.zeros(nfreq)
+        for fi in range(nfreq):
+            if inc_flux[fi] > 0:
+                ce[fi] = float(abs(alpha[fi]) ** 2 / inc_flux[fi])
+
+        ce_params[port_name] = ce
+
+        debug_data["eigenmode_info"][port_name] = {
+            "alpha_mag": [float(abs(a)) for a in alpha],
+            "ce": [float(c) for c in ce],
+        }
+
+    return ce_params, debug_data
+
+
+def save_ce_results(config, ce_params, output_path="coupling_efficiency.csv"):
+    """Save coupling efficiency to CSV.  Only rank 0 writes."""
+    if not mp.am_master():
+        return
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    df = fdtd["df"]
+    nfreq = fdtd["num_freqs"]
+
+    freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
+    wavelengths = 1.0 / freqs
+
+    port_names = sorted(ce_params.keys())
+    fieldnames = ["wavelength"] + port_names
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for i, wl in enumerate(wavelengths):
+            row = {"wavelength": f"{wl:.6f}"}
+            for name in port_names:
+                row[name] = f"{float(ce_params[name][i]):.8f}"
+            writer.writerow(row)
+
+    logger.info("Coupling efficiency saved to %s", output_path)
+
+
+# ---------------------------------------------------------------------------
 # S-parameter extraction
 # ---------------------------------------------------------------------------
 
@@ -697,6 +911,8 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
             "stopping_mode": stopping["mode"],
         },
         "eigenmode_info": debug_data.get("eigenmode_info", {}),
+        "incident_flux": debug_data.get("incident_flux", []),
+        "incident_flux_raw": debug_data.get("incident_flux_raw", []),
         "incident_coefficients": debug_data.get("incident_coefficients", {}),
         "raw_coefficients": debug_data.get("raw_coefficients", {}),
         "power_conservation": debug_data.get("power_conservation", []),
@@ -989,12 +1205,8 @@ def main():
     # Background slabs first, then patterned prisms (later objects take precedence)
     geometry = background_slabs + geometry
 
-    logger.info("Building sources...")
-    sources = build_sources(config)
-
-    if not sources:
-        logger.error("No source port found in config")
-        sys.exit(1)
+    source_type = config["source"].get("source_type", "mode")
+    logger.info("Source type: %s", source_type)
 
     resolution = config["resolution"]["pixels_per_um"]
     fdtd = config["fdtd"]
@@ -1009,12 +1221,24 @@ def main():
         bbox_left, bbox_right = bbox.left, bbox.right
         bbox_bottom, bbox_top = bbox.bottom, bbox.top
 
-    z_min = min(l["zmin"] for l in config["layer_stack"])
-    z_max = max(l["zmax"] for l in config["layer_stack"])
+    # Include both layer_stack AND dielectrics in z-range so the cell
+    # encompasses cladding/air layers above the topmost patterned layer.
+    all_z_entries = config["layer_stack"] + config.get("dielectrics", [])
+    z_min = min(l["zmin"] for l in all_z_entries)
+    z_max = max(l["zmax"] for l in all_z_entries)
 
     domain = config["domain"]
     dpml = domain["dpml"]
     margin_xy = domain["margin_xy"]
+
+    # For fiber source, ensure the cell extends to include the source z
+    if source_type == "fiber":
+        src_z = config["source"]["z_position"]
+        src_dir = config["source"]["direction"]
+        if src_dir == "down" and src_z > z_max:
+            z_max = src_z + 0.5  # 0.5 um margin above source
+        elif src_dir == "up" and src_z < z_min:
+            z_min = src_z - 0.5
 
     # XY: margin_xy is gap between geometry bbox and PML
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
@@ -1027,6 +1251,21 @@ def main():
         (bbox_top + bbox_bottom) / 2,
         (z_max + z_min) / 2,
     )
+
+    # Build sources AFTER cell dimensions are known (fiber source needs them)
+    fiber_source_center = None
+    if source_type == "fiber":
+        logger.info("Building Gaussian beam source...")
+        sources, fiber_source_center = build_fiber_source(
+            config, cell_x=cell_x, cell_y=cell_y, dpml=dpml,
+        )
+    else:
+        logger.info("Building eigenmode sources...")
+        sources = build_sources(config)
+
+    if not sources:
+        logger.error("No source found in config")
+        sys.exit(1)
 
     logger.info("Cell size: %.2f x %.2f x %.2f um", cell_x, cell_y, cell_z)
     logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
@@ -1094,6 +1333,12 @@ def main():
 
     logger.info("Building monitors...")
     monitors = build_monitors(config, sim)
+
+    # For fiber source, also build incident flux monitor
+    incident_flux = None
+    if source_type == "fiber" and fiber_source_center is not None:
+        logger.info("Building incident flux monitor...")
+        incident_flux = build_incident_flux_monitor(config, sim, fiber_source_center)
 
     stopping = config["stopping"]
     run_after = stopping["run_after_sources"]
@@ -1223,16 +1468,27 @@ def main():
             render_animation_frames(eps_data, _extent)
             compile_animation_mp4()
 
-    logger.info("Extracting S-parameters...")
-    s_params, debug_data = extract_s_params(config, sim, monitors)
+    if source_type == "fiber" and incident_flux is not None:
+        logger.info("Extracting coupling efficiency...")
+        ce_params, debug_data = extract_coupling_efficiency(
+            config, sim, monitors, incident_flux
+        )
+        debug_data["_meep_time"] = sim.meep_time()
+        debug_data["_timesteps"] = sim.timestep()
+        debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
 
-    # Attach simulation metadata to debug_data
-    debug_data["_meep_time"] = sim.meep_time()
-    debug_data["_timesteps"] = sim.timestep()
-    debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
+        save_ce_results(config, ce_params)
+        save_debug_log(config, {}, debug_data, wall_seconds=wall_seconds)
+    else:
+        logger.info("Extracting S-parameters...")
+        s_params, debug_data = extract_s_params(config, sim, monitors)
+        debug_data["_meep_time"] = sim.meep_time()
+        debug_data["_timesteps"] = sim.timestep()
+        debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
 
-    save_results(config, s_params)
-    save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
+        save_results(config, s_params)
+        save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
+
     logger.info("Done!")
 
 

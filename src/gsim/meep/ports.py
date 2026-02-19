@@ -44,6 +44,8 @@ def extract_port_info(
     component: Component,
     layer_stack: LayerStack,
     source_port: str | None = None,
+    *,
+    mark_source: bool = True,
 ) -> list[PortData]:
     """Extract port information from a gdsfactory component.
 
@@ -51,6 +53,8 @@ def extract_port_info(
         component: gdsfactory Component with ports
         layer_stack: LayerStack to determine z-coordinates
         source_port: Name of the source port. If None, first port is the source.
+        mark_source: If False, no port gets ``is_source=True`` (used when
+            the source is a FiberSource rather than a port eigenmode).
 
     Returns:
         List of PortData objects ready for JSON serialization
@@ -62,7 +66,12 @@ def extract_port_info(
     for i, gf_port in enumerate(component.ports):
         normal_axis, direction = get_port_normal(gf_port.orientation)
 
-        is_source = gf_port.name == source_port if source_port is not None else i == 0
+        if mark_source:
+            is_source = (
+                gf_port.name == source_port if source_port is not None else i == 0
+            )
+        else:
+            is_source = False
 
         ports.append(
             PortData(

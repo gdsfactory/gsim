@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, computed_field
 
 
 class SymmetryEntry(BaseModel):
@@ -111,7 +111,7 @@ class StoppingConfig(BaseModel):
 
 
 class SourceConfig(BaseModel):
-    """Source excitation configuration.
+    """Eigenmode source excitation configuration.
 
     Controls the Gaussian source bandwidth and which port is excited.
     When ``bandwidth`` is ``None`` (auto), ``compute_fwidth`` returns a
@@ -122,6 +122,10 @@ class SourceConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    source_type: Literal["mode"] = Field(
+        default="mode",
+        description="Source type discriminator.",
+    )
     bandwidth: float | None = Field(
         default=None,
         description=(
@@ -159,6 +163,32 @@ class SourceConfig(BaseModel):
             wl_max = wl_center + self.bandwidth / 2
             return 1.0 / wl_min - 1.0 / wl_max
         return max(3 * monitor_df, 0.2 * fcen)
+
+
+class FiberSourceConfig(BaseModel):
+    """Gaussian beam source config for fiber-to-chip coupling simulation.
+
+    Sent as JSON to the cloud runner, which builds an ``mp.GaussianBeamSource``.
+    The ``z_position`` is the absolute z-coordinate of the source plane
+    (resolved from the API-level ``z_offset`` + stack top).
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    source_type: Literal["fiber"] = Field(
+        default="fiber",
+        description="Source type discriminator.",
+    )
+    beam_waist: float = Field(gt=0, description="Gaussian beam waist radius in um")
+    angle_theta: float = Field(
+        ge=0, lt=90, description="Polar angle from vertical (deg)"
+    )
+    angle_phi: float = Field(description="Azimuthal angle (deg)")
+    polarization: Literal["TE", "TM"]
+    direction: Literal["down", "up"]
+    position: list[float] = Field(description="Beam center [x, y]")
+    z_position: float = Field(description="Absolute z-coordinate of source plane")
+    fwidth: float = Field(gt=0, description="Source fwidth in frequency units")
 
 
 class WavelengthConfig(BaseModel):
@@ -322,7 +352,11 @@ class SimConfig(BaseModel):
     ports: list[PortData]
     materials: dict[str, MaterialData]
     wavelength: WavelengthConfig = Field(serialization_alias="fdtd")
-    source: SourceConfig
+    source: Annotated[
+        Annotated[SourceConfig, Tag("mode")]
+        | Annotated[FiberSourceConfig, Tag("fiber")],
+        Discriminator("source_type"),
+    ]
     stopping: StoppingConfig
     resolution: ResolutionConfig
     domain: DomainConfig

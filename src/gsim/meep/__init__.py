@@ -20,8 +20,11 @@ Example::
 
 from gsim.meep.models import (
     FDTD,
+    CouplingResult,
     Domain,
     DomainConfig,
+    FiberSource,
+    FiberSourceConfig,
     Geometry,
     Material,
     ModeSource,
@@ -38,8 +41,11 @@ from gsim.meep.simulation import BuildResult, Simulation
 __all__ = [
     "FDTD",
     "BuildResult",
+    "CouplingResult",
     "Domain",
     "DomainConfig",
+    "FiberSource",
+    "FiberSourceConfig",
     "Geometry",
     "Material",
     "ModeSource",
