@@ -29,12 +29,18 @@ gsim connects GDSFactory layout designs to multiple EM solvers for photonic and 
 pip install gsim
 ```
 
-For development:
+For development (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/gdsfactory/gsim
 cd gsim
-pip install -e ".[dev]"
+uv sync --dev
+```
+
+Or use the justfile:
+
+```bash
+just dev
 ```
 
 ## Documentation
