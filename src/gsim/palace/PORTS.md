@@ -12,7 +12,7 @@ configurations.
 - **Definition**: `target_layername='TopMetal2'`
 - **GDS shape**: Rectangle with finite width and length
 
-```
+```text
       ════════════════  ← metal layer
          ▓▓▓▓▓▓▓▓       ← port surface (horizontal)
 ```
@@ -24,7 +24,7 @@ configurations.
 - **Definition**: `from_layername='Metal3', to_layername='TopMetal2'`
 - **GDS shape**: Line (degenerate rectangle) - one dimension is minimal
 
-```
+```text
       ════════════════  ← TopMetal2
             ║
             ║  ← port surface (vertical, like a wall)
@@ -77,7 +77,7 @@ Via ports expect essentially a line in the GDS:
 
 Use a **via port** spanning from signal layer to ground layer:
 
-```
+```text
 TopMetal2 (signal) ════════════
                         ║ ← via port surface (vertical)
 Metal1 (ground)    ════════════
@@ -99,7 +99,7 @@ configure_port(
 
 Use an **in-plane port** spanning the gap between signal and ground:
 
-```
+```text
 Ground ═══╡    ║    ╞═══ Signal ═══╡    ║    ╞═══ Ground
           └────┘                   └────┘
           port 1                   port 2
@@ -155,7 +155,7 @@ Palace computes these by:
 
 If the port only touches one conductor, voltage is undefined - there's no second reference point.
 
-```
+```text
                 Port touching both (CORRECT):
 
 Ground ═══════╡▓▓▓▓▓▓╞═══════ Signal
