@@ -3,6 +3,7 @@
 from gsim.meep.models.api import (
     FDTD,
     Domain,
+    FiberSource,
     Geometry,
     Material,
     ModeSource,
@@ -12,6 +13,7 @@ from gsim.meep.models.config import (
     AccuracyConfig,
     DiagnosticsConfig,
     DomainConfig,
+    FiberSourceConfig,
     LayerStackEntry,
     MaterialData,
     PortData,
@@ -22,7 +24,7 @@ from gsim.meep.models.config import (
     SymmetryEntry,
     WavelengthConfig,
 )
-from gsim.meep.models.results import SParameterResult
+from gsim.meep.models.results import CouplingResult, SParameterResult
 
 # Backward compatibility alias
 FDTDConfig = WavelengthConfig
@@ -30,10 +32,13 @@ FDTDConfig = WavelengthConfig
 __all__ = [
     "FDTD",
     "AccuracyConfig",
+    "CouplingResult",
     "DiagnosticsConfig",
     "Domain",
     "DomainConfig",
     "FDTDConfig",
+    "FiberSource",
+    "FiberSourceConfig",
     "Geometry",
     "LayerStackEntry",
     "Material",

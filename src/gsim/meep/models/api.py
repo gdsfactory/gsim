@@ -90,6 +90,71 @@ class ModeSource(BaseModel):
         return self
 
 
+class FiberSource(BaseModel):
+    """Gaussian beam source simulating fiber-to-chip coupling.
+
+    Launches a Gaussian beam from above (or below) to model grating
+    coupler excitation. Normalization uses an incident flux monitor
+    rather than eigenmode decomposition at the source.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    wavelength: float = Field(
+        default=1.55,
+        gt=0,
+        description="Center wavelength in um",
+    )
+    wavelength_span: float = Field(
+        default=0.1,
+        ge=0,
+        description="Wavelength span of the measurement frequency grid in um.",
+    )
+    num_freqs: int = Field(
+        default=11,
+        ge=1,
+        description="Number of frequency points",
+    )
+    beam_waist: float = Field(
+        default=5.2,
+        gt=0,
+        description="Gaussian beam waist radius in um (SMF-28 MFD/2 ≈ 5.2)",
+    )
+    angle_theta: float = Field(
+        default=10.0,
+        ge=0,
+        lt=90,
+        description="Polar angle from vertical in degrees",
+    )
+    angle_phi: float = Field(
+        default=0.0,
+        description="Azimuthal angle in degrees (0 = tilted in XZ plane)",
+    )
+    polarization: Literal["TE", "TM"] = Field(
+        default="TE",
+        description="Beam polarization",
+    )
+    position: list[float] | None = Field(
+        default=None,
+        description="Beam center [x, y]. None = auto (component bbox center).",
+    )
+    z_offset: float = Field(
+        default=1.0,
+        gt=0,
+        description="Distance above stack top to place source plane (um)",
+    )
+    direction: Literal["down", "up"] = Field(
+        default="down",
+        description="Beam propagation direction ('down' = into chip)",
+    )
+
+    def __call__(self, **kwargs: Any) -> FiberSource:
+        """Update fields in place. Returns self for chaining."""
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Domain
 # ---------------------------------------------------------------------------
