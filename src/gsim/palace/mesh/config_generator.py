@@ -163,15 +163,20 @@ def generate_palace_config(
                 direction = (
                     "Z" if port.geometry == PortGeometry.VIA else port.direction.upper()
                 )
-                lumped_ports.append(
-                    {
-                        "Index": port_idx,
-                        "R": port.impedance,
-                        "Direction": direction,
-                        "Excitation": port_idx if port.excited else False,
-                        "Attributes": [port_group["phys_group"]],
-                    }
-                )
+                port_entry: dict[str, object] = {
+                    "Index": port_idx,
+                    "R": port.impedance,
+                    "Direction": direction,
+                    "Excitation": port_idx if port.excited else False,
+                    "Attributes": [port_group["phys_group"]],
+                }
+                if port.resistance is not None:
+                    port_entry["Rs"] = port.resistance
+                if port.inductance is not None:
+                    port_entry["L"] = port.inductance
+                if port.capacitance is not None:
+                    port_entry["C"] = port.capacitance
+                lumped_ports.append(port_entry)
         port_idx += 1
 
     boundaries: dict[str, object] = {

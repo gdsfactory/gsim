@@ -62,6 +62,9 @@ class PalacePort:
 
     # Electrical properties
     impedance: float = 50.0  # Ohms
+    resistance: float | None = None  # Ohms
+    inductance: float | None = None  # H
+    capacitance: float | None = None  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
     @property
@@ -298,6 +301,9 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             to_layer=to_layer,
             length=info.get("length"),
             impedance=info.get("impedance", 50.0),
+            resistance=info.get("resistance"),
+            inductance=info.get("inductance"),
+            capacitance=info.get("capacitance"),
             excited=info.get("excited", True),
         )
         palace_ports.append(palace_port)

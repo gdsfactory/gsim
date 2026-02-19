@@ -104,6 +104,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         to_layer: str | None = None,
         length: float | None = None,
         impedance: float = 50.0,
+        resistance: float | None = None,
+        inductance: float | None = None,
+        capacitance: float | None = None,
         excited: bool = True,
         geometry: Literal["inplane", "via"] = "inplane",
     ) -> None:
@@ -116,6 +119,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
             impedance: Port impedance (Ohms)
+            resistance: Series resistance (Ohms)
+            inductance: Series inductance (H)
+            capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
             geometry: Port geometry type ("inplane" or "via")
 
@@ -136,6 +142,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 to_layer=to_layer,
                 length=length,
                 impedance=impedance,
+                resistance=resistance,
+                inductance=inductance,
+                capacitance=capacitance,
                 excited=excited,
                 geometry=geometry,
             )
@@ -346,6 +355,14 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     impedance=port_config.impedance,
                     excited=port_config.excited,
                 )
+
+            # Attach RLC values to port info for downstream consumers
+            if port_config.resistance is not None:
+                gf_port.info["resistance"] = port_config.resistance
+            if port_config.inductance is not None:
+                gf_port.info["inductance"] = port_config.inductance
+            if port_config.capacitance is not None:
+                gf_port.info["capacitance"] = port_config.capacitance
 
         # Configure CPW ports
         for cpw_config in self.cpw_ports:
