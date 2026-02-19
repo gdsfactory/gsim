@@ -78,11 +78,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
       - name: Install Just
         uses: taiki-e/install-action@just
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
       - name: Install svgbob
         run: cargo install svgbob_cli
       - name: Create environment
