@@ -190,7 +190,7 @@ def generate_mesh(
         refined_mesh_size=config.refined_mesh_size,
         max_mesh_size=config.max_mesh_size,
         margin=config.margin,
-        air_margin=config.margin,
+        air_margin=config.air_above,
         fmax=config.fmax,
         show_gui=config.show_gui,
         driven_config=driven_config,
