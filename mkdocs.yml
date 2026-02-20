@@ -23,6 +23,7 @@ nav:
   - Palace:
       - CPW: nbs/palace_demo_cpw.md
       - Microstrip: nbs/palace_demo_microstrip.md
+      - Width Sweep: nbs/palace_width_sweep.md
   - api reference:
       - gsim.palace: api.md
 plugins:
