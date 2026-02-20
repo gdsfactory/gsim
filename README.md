@@ -1,18 +1,29 @@
-# Gsim 0.0.4
+# gsim 0.0.5
 
-> a GDSFactory Simulation Plugin
+> Electromagnetic simulation for photonics and electronics, powered by [GDSFactory+](https://gdsfactory.com)
 
 ![gsim-logo](./docs/assets/img/gsim-small.png)
 
 ## Overview
 
-Gsim bridges the gap between circuit layout design (using [GDSFactory](https://gdsfactory.github.io/gdsfactory/)) and electromagnetic simulation (using [Palace](https://awslabs.github.io/palace/)). It automates the conversion of IC component layouts into simulation-ready mesh files and configuration.
+gsim connects GDSFactory layout designs to multiple EM solvers for photonic and electronic simulation. It handles
+geometry extraction, mesh generation, port configuration, and cloud execution so you can go from GDS to S-parameters
+with minimal boilerplate.
+
+## Solvers
+
+| Module        | Solver                                      | Method | Use Case                                               |
+| ------------- | ------------------------------------------- | ------ | ------------------------------------------------------ |
+| `gsim.palace` | [Palace](https://awslabs.github.io/palace/) | FEM    | RF/microwave, impedance extraction, driven simulations |
+| `gsim.meep`   | [Meep](https://meep.readthedocs.io/)        | FDTD   | Photonic components, S-parameters, mode propagation    |
 
 ## Features
 
-- **Layer Stack Extraction**: Extract layer stacks from PDK definitions with a comprehensive material properties database
-- **Port Configuration**: Convert GDSFactory ports into Palace-compatible port definitions (inplane, via, and CPW ports)
-- **Mesh Generation**: Generate GMSH-compatible finite element meshes with configurable quality presets
+- **Layer stack extraction** — build 3D geometry from PDK layer stacks
+- **Port configuration** — convert GDSFactory ports into solver-compatible definitions
+- **Mesh generation** — GMSH finite-element meshes with configurable quality presets (Palace)
+- **Cloud execution** — upload, run, and download results via `gsim.gcloud`
+- **Visualization** — solver-agnostic 3D/2D component preview (PyVista, Matplotlib)
 
 ## Installation
 
@@ -20,63 +31,24 @@ Gsim bridges the gap between circuit layout design (using [GDSFactory](https://g
 pip install gsim
 ```
 
-For development:
+For development (requires [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-git clone https://github.com/doplaydo/gsim
+git clone https://github.com/gdsfactory/gsim
 cd gsim
-pip install -e .[dev]
+uv sync --dev
 ```
 
-## Quick Start
+Or use the justfile:
 
-```python
-from gsim.palace import (
-    get_stack,
-    configure_inplane_port,
-    extract_ports,
-    generate_mesh,
-    MeshConfig,
-)
-
-# Get layer stack from active PDK
-stack = get_stack()
-
-# Configure ports on your component
-configure_inplane_port(c.ports["o1"], layer="topmetal2", length=5.0)
-configure_inplane_port(c.ports["o2"], layer="topmetal2", length=5.0)
-
-# Extract configured ports
-ports = extract_ports(c, stack)
-
-# Generate mesh
-result = generate_mesh(
-    component=c,
-    stack=stack,
-    ports=ports,
-    output_dir="./simulation",
-    config=MeshConfig.default(),
-)
+```bash
+just dev
 ```
-
-## Mesh Presets
-
-| Preset  | Refined Size | Max Size | Use Case                          |
-| ------- | ------------ | -------- | --------------------------------- |
-| Coarse  | 10.0 µm      | 600.0 µm | Fast iteration (~2.5 elements/λ)  |
-| Default | 5.0 µm       | 300.0 µm | Balanced accuracy (~5 elements/λ) |
-| Fine    | 2.0 µm       | 70.0 µm  | High accuracy (~10 elements/λ)    |
-
-## Port Types
-
-- **Inplane ports**: Horizontal ports on single metal layer for CPW gaps
-- **Via ports**: Vertical ports between two metal layers for microstrip structures
-- **CPW ports**: Multi-element ports for proper Coplanar Waveguide excitation
 
 ## Documentation
 
-See the [documentation](https://doplaydo.github.io/gsim/) for detailed API reference and examples.
+See the [documentation](https://gdsfactory.github.io/gsim/) for API reference and examples.
 
 ## License
 
-Copyright 2026 GDSFactory
+[Apache-2.0](LICENSE)

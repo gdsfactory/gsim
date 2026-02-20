@@ -121,6 +121,7 @@ class TestMixinMethods:
             sim = cls()
             sim.set_output_dir(tmp_path / "test")
             assert sim.output_dir == tmp_path / "test"
+            assert sim.output_dir is not None
             assert sim.output_dir.exists()
 
     def test_set_stack(self):

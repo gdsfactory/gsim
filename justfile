@@ -1,9 +1,9 @@
 dist:
   uv run python -m build --wheel
 
-dev: bver
+dev:
   uv venv --python 3.12 --clear
-  uv sync --all-extras
+  uv sync --dev
   uv pip install -e .
   uvx pre-commit install
 

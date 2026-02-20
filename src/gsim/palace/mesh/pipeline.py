@@ -85,6 +85,7 @@ class MeshConfig:
     preview_only: bool = False  # Show geometry without meshing
 
     def __post_init__(self) -> None:
+        """Initializes default boundary conditions if not provided."""
         if self.boundary_conditions is None:
             # Default: ABC everywhere
             self.boundary_conditions = ["ABC", "ABC", "ABC", "ABC", "ABC", "ABC"]

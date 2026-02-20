@@ -46,7 +46,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         >>> sim.add_cpw_port("P3", "P4", layer="topmetal2", length=5.0)
         >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
         >>> sim.mesh("./sim", preset="default")
-        >>> results = sim.simulate()
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -663,44 +663,74 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Simulation
     # -------------------------------------------------------------------------
 
-    def simulate(
+    def run(
         self,
+        parent_dir: str | Path | None = None,
         *,
         verbose: bool = True,
     ) -> dict[str, Path]:
         """Run simulation on GDSFactory+ cloud.
 
-        Requires mesh() and write_config() to be called first.
+        Requires mesh() to be called first. Automatically calls
+        write_config() if config.json hasn't been written yet.
+
+        Input files are copied to a temporary directory and uploaded.
+        Immediately after upload the inputs are saved into
+        ``sim-data-{job_name}/input/`` (before waiting for results).
+        Results are downloaded to ``sim-data-{job_name}/output/``.
 
         Args:
+            parent_dir: Where to create the sim directory.
+                Defaults to the current working directory.
             verbose: Print progress messages
 
         Returns:
             Dict mapping result filenames to local paths
 
         Raises:
-            ValueError: If output_dir not set
-            FileNotFoundError: If mesh or config files don't exist
+            ValueError: If output_dir not set or mesh not generated
             RuntimeError: If simulation fails
 
         Example:
-            >>> results = sim.simulate()
+            >>> results = sim.run()
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
+        import shutil
+
         from gsim.gcloud import run_simulation
 
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
 
-        output_dir = self._output_dir
+        # Auto-generate config.json if not already written
+        config_path = self._output_dir / "config.json"
+        if not config_path.exists():
+            self.write_config()
 
-        return run_simulation(
-            output_dir,
-            job_type="palace",
-            verbose=verbose,
-        )
+        # Copy input files to a temp dir so run_simulation doesn't
+        # delete the user's output directory.
+        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
+        try:
+            for item in self._output_dir.iterdir():
+                dest = tmp / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
 
-    def simulate_local(
+            result = run_simulation(
+                config_dir=tmp,
+                job_type="palace",
+                verbose=verbose,
+                parent_dir=parent_dir,
+            )
+        except Exception:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+        return result.files
+
+    def run_local(
         self,
         *,
         palace_sif_path: str | Path | None = None,
@@ -781,11 +811,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             try:
                 import psutil
 
-                num_processes = max(1, psutil.cpu_count(logical=True) - 2)
+                num_processes = psutil.cpu_count(logical=True) or 1
             except ImportError:
                 import os
 
-                num_processes = max(1, (os.cpu_count() or 1) - 2)
+                num_processes = os.cpu_count() or 1
 
         # Build command
         cmd = [

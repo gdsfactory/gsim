@@ -19,7 +19,6 @@ repos:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
         exclude: 'changelog\.d/.*|CHANGELOG\.md'
-
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.14
     hooks:
@@ -31,13 +30,6 @@ repos:
         stages: [pre-commit]
         args: ["--fix", "--config", "pyproject.toml"]
         types_or: [python]
-
-  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.16.0
-    hooks:
-      - id: pretty-format-toml
-        args: [--autofix]
-
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
@@ -45,12 +37,11 @@ repos:
         args: [--skip="*.ipynb"]
         additional_dependencies:
           - tomli
-
   - repo: https://github.com/rbubley/mirrors-prettier
     rev: "v3.8.1"
     hooks:
       - id: prettier
-
+        types_or: [javascript, css, json, html]
   - repo: local
     hooks:
       - id: nbclean
@@ -58,7 +49,6 @@ repos:
         entry: just nbclean
         language: system
         files: \.(ipynb)$
-
   - repo: local
     hooks:
       - id: ty
@@ -66,3 +56,46 @@ repos:
         entry: uv run --no-sync ty check
         language: system
         files: \.(py)$
+  - repo: https://github.com/tombi-toml/tombi-pre-commit
+    rev: v0.7.14
+    hooks:
+      - id: tombi-format
+      - id: tombi-lint
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.20.0
+    hooks:
+      - id: yamlfmt
+        args: [-conf, ".github/.yamlfmt.yaml"]
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args: [--strict, "-c=.github/.yamllint.yaml"]
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.10
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.20.0
+    hooks:
+      - id: markdownlint-cli2
+        name: markdownlint
+        args: [--config, .github/.markdownlint-cli2.yaml]
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        args: [--wrap=120]
+        exclude: 'docs/nbs/example\.md'
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-gfm-alerts
+          - mdformat-tables
+          - mdformat-frontmatter
+          - mdformat-footnote
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0
+    hooks:
+      - id: interrogate
+        args: [--config=pyproject.toml]
+        pass_filenames: true

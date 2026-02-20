@@ -1,0 +1,22 @@
+name: Pre-commit
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install UV
+        uses: astral-sh/setup-uv@v6
+      - name: Install Just
+        uses: taiki-e/install-action@just
+      - name: Create environment
+        run: uv sync --dev --all-extras
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1

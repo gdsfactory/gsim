@@ -4,7 +4,8 @@ Palace EM Simulation API for GDSFactory.
 
 ## Overview
 
-Gsim bridges the gap between circuit layout design (using [GDSFactory](https://gdsfactory.github.io/gdsfactory/)) and electromagnetic simulation (using [Palace](https://awslabs.github.io/palace/)).
+Gsim bridges the gap between circuit layout design (using [GDSFactory](https://gdsfactory.github.io/gdsfactory/)) and
+electromagnetic simulation (using [Palace](https://awslabs.github.io/palace/)).
 
 ## Installation
 

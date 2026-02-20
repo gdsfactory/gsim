@@ -1,6 +1,7 @@
 # Simulation outputs
 sim-data-*/
 palace-sim-*/
+meep-sim-*/
 
 # files
 *.c
