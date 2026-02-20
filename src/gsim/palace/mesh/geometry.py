@@ -130,15 +130,18 @@ def add_metals(
     kernel,
     geometry: GeometryData,
     stack: LayerStack,
+    planar_conductors: bool = False,
 ) -> dict:
     """Add metal and via geometries to gmsh.
 
     Creates extruded volumes for vias and shells (surfaces) for conductors.
+    If planar_conductors is True, conductors are treated as 2D surfaces (PEC).
 
     Args:
         kernel: gmsh OCC kernel
         geometry: Extracted geometry data
         stack: LayerStack with layer definitions
+        planar_conductors: If True, treat conductors as 2D PEC surfaces
 
     Returns:
         Dict with layer_name -> list of (surface_tags_xy, surface_tags_z) for
@@ -181,7 +184,10 @@ def add_metals(
             if surfacetag is None:
                 continue
 
-            if thickness > 0:
+            if planar_conductors and layer_type == "conductor":
+                # For planar conductors, keep as 2D surface (PEC boundary)
+                metal_tags[layer_name]["surfaces_xy"].append(surfacetag)
+            elif thickness > 0:
                 result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
                 volumetag = result[1][1]
 

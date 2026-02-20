@@ -142,6 +142,7 @@ def generate_mesh(
     show_gui: bool = False,
     driven_config: DrivenConfig | None = None,
     write_config: bool = True,
+    planar_conductors: bool = False,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -159,6 +160,7 @@ def generate_mesh(
         show_gui: Show gmsh GUI during meshing
         driven_config: Optional DrivenConfig for frequency sweep settings
         write_config: Whether to write config.json (default True)
+        planar_conductors: If True, treat conductors as 2D PEC surfaces
 
     Returns:
         MeshResult with paths and metadata
@@ -190,7 +192,7 @@ def generate_mesh(
     try:
         # Add geometry
         logger.info("Adding metals...")
-        metal_tags = add_metals(kernel, geometry, stack)
+        metal_tags = add_metals(kernel, geometry, stack, planar_conductors)
 
         logger.info("Adding ports...")
         port_tags, port_info = add_ports(kernel, ports, stack)
@@ -213,6 +215,7 @@ def generate_mesh(
             geom_dimtags,
             geom_map,
             stack,
+            planar_conductors,
         )
 
         # Setup mesh fields

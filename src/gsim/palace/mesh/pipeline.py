@@ -80,6 +80,9 @@ class MeshConfig:
     # Options: 'ABC' (absorbing), 'PEC' (perfect electric conductor), 'PMC'
     boundary_conditions: list[str] | None = None
 
+    # Conductor modeling
+    planar_conductors: bool = False  # Treat conductors as 2D PEC surfaces
+
     # GUI control
     show_gui: bool = False  # Show gmsh GUI during meshing
     preview_only: bool = False  # Show geometry without meshing
@@ -195,6 +198,7 @@ def generate_mesh(
         show_gui=config.show_gui,
         driven_config=driven_config,
         write_config=write_config,
+        planar_conductors=config.planar_conductors,
     )
 
     # Convert to pipeline's MeshResult format

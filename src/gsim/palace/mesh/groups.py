@@ -22,6 +22,7 @@ def assign_physical_groups(
     geom_dimtags: list,
     geom_map: list,
     _stack: LayerStack,
+    planar_conductors: bool = False,
 ) -> dict:
     """Assign physical groups after fragmenting.
 
@@ -34,12 +35,14 @@ def assign_physical_groups(
         geom_dimtags: Dimension tags from fragmentation
         geom_map: Geometry map from fragmentation
         _stack: Layer stack (unused; reserved for future material metadata)
+        planar_conductors: If True, conductors are 2D PEC surfaces
 
     Returns:
         Dict with group info for config file generation:
         {
             "volumes": {material_name: {"phys_group": int, "tags": [int]}},
             "conductor_surfaces": {layer_name: {"phys_group": int, "tags": [int]}},
+            "pec_surfaces": {layer_name: {"phys_group": int, "tags": [int]}},
             "port_surfaces": {port_name: {"phys_group": int, "tags": [int]} or
                             {"type": "cpw", "elements": [...]}},
             "boundary_surfaces": {"absorbing": {"phys_group": int, "tags": [int]}}
@@ -48,6 +51,7 @@ def assign_physical_groups(
     groups = {
         "volumes": {},
         "conductor_surfaces": {},
+        "pec_surfaces": {},
         "port_surfaces": {},
         "boundary_surfaces": {},
     }
@@ -68,6 +72,21 @@ def assign_physical_groups(
 
     # Assign surface groups for conductors
     for layer_name, tag_info in metal_tags.items():
+        # Handle planar conductors (2D PEC surfaces)
+        if planar_conductors and tag_info["surfaces_xy"]:
+            new_surface_tags = gmsh_utils.get_tags_after_fragment(
+                tag_info["surfaces_xy"], geom_dimtags, geom_map, dimension=2
+            )
+            if new_surface_tags:
+                phys_group = gmsh_utils.assign_physical_group(
+                    2, new_surface_tags, f"{layer_name}_pec"
+                )
+                groups["pec_surfaces"][layer_name] = {
+                    "phys_group": phys_group,
+                    "tags": new_surface_tags,
+                }
+        
+        # Handle volumetric conductors (finite conductivity)
         if tag_info["volumes"]:
             all_xy_tags = []
             all_z_tags = []

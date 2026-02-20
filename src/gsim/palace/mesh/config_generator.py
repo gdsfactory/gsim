@@ -117,6 +117,9 @@ def generate_palace_config(
 
     # Build boundaries section
     conductors: list[dict[str, object]] = []
+    pec_boundaries: list[dict[str, object]] = []
+    
+    # Handle finite conductivity surfaces (volumetric conductors)
     for name, info in groups["conductor_surfaces"].items():
         # Extract layer name from "layer_xy" or "layer_z"
         layer_name = name.rsplit("_", 1)[0]
@@ -130,6 +133,10 @@ def generate_palace_config(
                     "Thickness": layer.zmax - layer.zmin,
                 }
             )
+    
+    # Handle PEC surfaces (planar conductors)
+    for layer_name, info in groups.get("pec_surfaces", {}).items():
+        pec_boundaries.append({"Attributes": [info["phys_group"]]})
 
     lumped_ports: list[dict[str, object]] = []
     port_idx = 1
@@ -178,6 +185,10 @@ def generate_palace_config(
         "Conductivity": conductors,
         "LumpedPort": lumped_ports,
     }
+    
+    # Add PEC boundaries if any exist
+    if pec_boundaries:
+        boundaries["PEC"] = pec_boundaries
 
     if "absorbing" in groups["boundary_surfaces"]:
         boundaries["Absorbing"] = {
