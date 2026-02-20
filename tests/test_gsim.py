@@ -15,7 +15,7 @@ def test_package_version():
     """Test that package version is accessible."""
     import gsim
 
-    assert gsim.__version__ == "0.0.0"
+    assert gsim.__version__ == "0.0.5"
 
 
 def test_palace_submodule_import():

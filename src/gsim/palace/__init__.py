@@ -50,7 +50,7 @@ from gsim.common.stack import (
     print_stack,
     print_stack_table,
 )
-from gsim.gcloud import print_job_summary
+from gsim.gcloud import RunResult, print_job_summary, register_result_parser
 from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
@@ -155,6 +155,14 @@ __all__ = [
     "print_stack_table",
     "run_simulation",
 ]
+
+
+def _parse_palace_result(run_result: RunResult) -> dict:
+    """Parse Palace cloud results — returns the files dict."""
+    return run_result.files
+
+
+register_result_parser("palace", _parse_palace_result)
 
 # Palace-specific run_simulation with job_type preset
 run_simulation = partial(_run_simulation, job_type="palace")

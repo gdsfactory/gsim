@@ -10,8 +10,12 @@ Currently includes:
 
 from __future__ import annotations
 
+from gsim.gcloud import get_status, wait_for_results
+
 __version__ = "0.0.5"
 
 __all__ = [
     "__version__",
+    "get_status",
+    "wait_for_results",
 ]

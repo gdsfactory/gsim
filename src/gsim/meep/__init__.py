@@ -18,6 +18,7 @@ Example::
     result = sim.run()
 """
 
+from gsim.gcloud import RunResult, register_result_parser
 from gsim.meep.models import (
     FDTD,
     Domain,
@@ -34,6 +35,17 @@ from gsim.meep.models import (
     WavelengthConfig,
 )
 from gsim.meep.simulation import BuildResult, Simulation
+
+
+def _parse_meep_result(run_result: RunResult) -> SParameterResult:
+    """Parse MEEP cloud results into an SParameterResult."""
+    csv_path = run_result.files.get("s_parameters.csv")
+    if csv_path is not None:
+        return SParameterResult.from_csv(csv_path)
+    return SParameterResult()
+
+
+register_result_parser("meep", _parse_meep_result)
 
 __all__ = [
     "FDTD",

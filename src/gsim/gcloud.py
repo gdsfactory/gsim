@@ -6,10 +6,17 @@ the GDSFactory+ cloud infrastructure.
 Usage:
     from gsim import gcloud
 
-    # Run simulation (uploads, starts, waits, downloads)
+    # Blocking (default): upload + start + wait + download
     result = gcloud.run_simulation("./sim", job_type="palace")
-    print(result.sim_dir)   # palace_abc123/
-    print(result.files)     # {"port-S.csv": Path(...), ...}
+
+    # Fine-grained control:
+    job_id = gcloud.upload("./sim", job_type="palace")
+    gcloud.start(job_id)
+    gcloud.get_status(job_id)
+    result = gcloud.wait_for_results(job_id)
+
+    # Multi-job polling:
+    results = gcloud.wait_for_results(id1, id2, id3)
 
     # Or use solver-specific wrappers:
     from gsim import palace as pa
@@ -19,11 +26,13 @@ Usage:
 from __future__ import annotations
 
 import contextlib
+import importlib
 import io
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gdsfactoryplus import sim
 
@@ -45,6 +54,52 @@ class RunResult:
     sim_dir: Path
     files: dict[str, Path] = field(default_factory=dict)
     job_name: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Result parser registry
+# ---------------------------------------------------------------------------
+
+_RESULT_PARSERS: dict[str, Callable[[RunResult], Any]] = {}
+
+
+def register_result_parser(solver: str, parser: Callable[[RunResult], Any]) -> None:
+    """Register a result parser for a solver type.
+
+    Args:
+        solver: Solver name (e.g. ``"meep"``, ``"palace"``).
+        parser: Callable that takes a :class:`RunResult` and returns
+            a solver-specific result object.
+    """
+    _RESULT_PARSERS[solver] = parser
+
+
+def _extract_solver_from_job(job) -> str | None:
+    """Extract the solver name from a Job's ``job_def_name``.
+
+    Handles formats like ``"prod-meep-simulation"`` → ``"meep"``,
+    ``"prod-palace-simulation"`` → ``"palace"``, or plain ``"meep"``.
+    """
+    name = getattr(job, "job_def_name", "") or ""
+    # Try known solver names in the definition string
+    for solver in ("meep", "palace", "femwell"):
+        if solver in name.lower():
+            return solver
+    return None
+
+
+def _get_result_parser(solver: str) -> Callable[[RunResult], Any] | None:
+    """Look up a result parser, auto-importing the solver module if needed."""
+    if solver not in _RESULT_PARSERS:
+        # Auto-import gsim.{solver} to trigger registration
+        with contextlib.suppress(ImportError):
+            importlib.import_module(f"gsim.{solver}")
+    return _RESULT_PARSERS.get(solver)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _flatten_results(raw_results: dict) -> dict[str, Path]:
@@ -122,6 +177,304 @@ def _get_job_definition(job_type: str):
     return getattr(sim.JobDefinition, job_type_upper)
 
 
+def _download_job(job, parent_dir: str | Path | None, verbose: bool) -> RunResult:
+    """Download results from a finished job.
+
+    Creates ``sim-data-{job_name}/`` directory structure and downloads
+    output files.
+
+    Args:
+        job: Finished Job object from the SDK.
+        parent_dir: Where to create the sim directory (default: cwd).
+        verbose: Print progress messages.
+
+    Returns:
+        RunResult with sim_dir, files, and job_name.
+
+    Raises:
+        RuntimeError: If the job failed (non-zero exit code).
+    """
+    root = Path(parent_dir) if parent_dir else Path.cwd()
+    sim_dir = root / f"sim-data-{job.job_name}"
+    sim_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check status
+    if job.exit_code is not None and job.exit_code != 0:
+        _handle_failed_job(job, sim_dir, verbose)
+
+    # Download directly into sim_dir
+    raw_results = sim.download_results(job, output_dir=sim_dir)
+    files = _flatten_results(raw_results)
+
+    if verbose and files:
+        print(f"Downloaded {len(files)} files to {sim_dir}")  # noqa: T201
+
+    return RunResult(sim_dir=sim_dir, files=files, job_name=job.job_name)
+
+
+def _parse_result(job, run_result: RunResult) -> Any:
+    """Apply the registered result parser for this job's solver type.
+
+    Falls back to the raw RunResult if no parser is registered.
+    """
+    solver = _extract_solver_from_job(job)
+    if solver is None:
+        return run_result
+
+    parser = _get_result_parser(solver)
+    if parser is None:
+        return run_result
+
+    return parser(run_result)
+
+
+# ---------------------------------------------------------------------------
+# Public API — fine-grained control
+# ---------------------------------------------------------------------------
+
+
+def upload(
+    config_dir: str | Path,
+    job_type: str,
+    *,
+    verbose: bool = True,
+) -> str:
+    """Upload simulation files to the cloud. Does NOT start execution.
+
+    Args:
+        config_dir: Directory containing simulation config files.
+        job_type: Simulation type (e.g. ``"palace"``, ``"meep"``).
+        verbose: Print progress messages.
+
+    Returns:
+        ``job_id`` string that can be passed to :func:`start`,
+        :func:`get_status`, or :func:`wait_for_results`.
+    """
+    config_dir = Path(config_dir)
+    if not config_dir.exists():
+        raise FileNotFoundError(f"Config directory not found: {config_dir}")
+
+    if verbose:
+        print("Uploading simulation... ", end="", flush=True)  # noqa: T201
+
+    pre_job = upload_simulation_dir(config_dir, job_type)
+
+    if verbose:
+        print(f"done (job_id: {pre_job.job_id})")  # noqa: T201
+
+    return pre_job.job_id
+
+
+def start(job_id: str, *, verbose: bool = True) -> str:
+    """Start cloud execution for a previously uploaded job.
+
+    Args:
+        job_id: Job identifier returned by :func:`upload`.
+        verbose: Print progress messages.
+
+    Returns:
+        The ``job_name`` (human-readable label).
+    """
+    from gdsfactoryplus.sim import PreJob
+
+    pre_job = PreJob(job_id=job_id, job_name="")
+    job = sim.start_simulation(pre_job)
+
+    if verbose:
+        print(f"Job started: {job.job_name}")  # noqa: T201
+
+    return job.job_name
+
+
+def get_status(job_id: str) -> str:
+    """Get the current status of a cloud job.
+
+    Args:
+        job_id: Job identifier.
+
+    Returns:
+        Status string — one of ``"created"``, ``"queued"``,
+        ``"running"``, ``"completed"``, ``"failed"``.
+    """
+    job = sim.get_job(job_id)
+    return job.status.value
+
+
+def wait_for_results(
+    *job_ids: str,
+    verbose: bool = True,
+    parent_dir: str | Path | None = None,
+    poll_interval: float = 5.0,
+) -> Any:
+    """Wait for one or more jobs to finish, then download and parse results.
+
+    Accepts job IDs as positional args or a single list/tuple::
+
+        wait_for_results(id1, id2)
+        wait_for_results([id1, id2])
+
+    For a single job, returns the parsed result directly.
+    For multiple jobs, returns a list of results (same order as input).
+
+    Args:
+        *job_ids: One or more job ID strings, or a single list/tuple of IDs.
+        verbose: Print progress messages.
+        parent_dir: Where to create sim-data directories (default: cwd).
+        poll_interval: Seconds between status polls (default 5.0).
+
+    Returns:
+        Parsed result (single job) or list of parsed results (multiple jobs).
+    """
+    # Support both varargs and a single list/tuple
+    if len(job_ids) == 1 and isinstance(job_ids[0], (list, tuple)):
+        job_ids = tuple(job_ids[0])
+
+    if not job_ids:
+        raise ValueError("At least one job_id is required")
+
+    # Fetch initial job objects
+    jobs: dict[str, Any] = {jid: sim.get_job(jid) for jid in job_ids}
+    now = time.monotonic()
+    start_times: dict[str, float] = dict.fromkeys(job_ids, now)
+    end_times: dict[str, float] = {}
+    terminal = {sim.SimStatus.COMPLETED, sim.SimStatus.FAILED}
+
+    # Freeze timer for any jobs already finished
+    for jid, job in jobs.items():
+        if job.status in terminal:
+            end_times[jid] = now
+
+    # Track how many lines we printed last time (for overwriting multi-job)
+    prev_lines = 0
+
+    # Poll until all jobs reach a terminal state
+    while not all(j.status in terminal for j in jobs.values()):
+        if verbose:
+            prev_lines = _print_status_table(
+                jobs, start_times, prev_lines, end_times=end_times
+            )
+        time.sleep(poll_interval)
+        for jid, job in jobs.items():
+            if job.status not in terminal:
+                jobs[jid] = sim.get_job(jid)
+                # Freeze timer when job reaches terminal state
+                if jobs[jid].status in terminal:
+                    end_times[jid] = time.monotonic()
+
+    # Final status display (with newline to finish the line)
+    if verbose:
+        _print_status_table(
+            jobs, start_times, prev_lines, end_times=end_times, final=True
+        )
+
+    # Download + parse all
+    results = []
+    for jid in job_ids:
+        job = jobs[jid]
+        run_result = _download_job(job, parent_dir, verbose)
+        results.append(_parse_result(job, run_result))
+
+    return results[0] if len(job_ids) == 1 else results
+
+
+def _output_mode() -> str:
+    """Detect the output environment.
+
+    Returns ``"jupyter"`` inside a Jupyter/IPython kernel (notebook or
+    nbconvert), ``"tty"`` when stdout is a terminal, or ``"pipe"``
+    otherwise (plain CI, redirected output).
+    """
+    try:
+        from IPython import get_ipython
+
+        ipy = get_ipython()
+        if ipy is not None and "IPKernelApp" in ipy.config:
+            return "jupyter"
+    except ImportError:
+        pass
+
+    import sys
+
+    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+        return "tty"
+
+    return "pipe"
+
+
+def _print_status_table(
+    jobs: dict[str, Any],
+    start_times: dict[str, float],
+    prev_lines: int = 0,
+    *,
+    end_times: dict[str, float] | None = None,
+    final: bool = False,
+) -> int:
+    """Print job status, updating in place.
+
+    * **Jupyter / nbconvert** — uses ``clear_output(wait=True)`` so every
+      poll replaces the previous output.  nbconvert only captures the
+      *last* state, giving one clean line in rendered docs.
+    * **TTY (terminal)** — uses carriage-return / ANSI cursor-up to overwrite.
+    * **Pipe / plain CI** — only prints the final status.
+
+    Returns the number of lines printed (for the TTY path to erase).
+    """
+    import sys
+
+    _end_times = end_times or {}
+    mode = _output_mode()
+
+    # Pipe: only print at the end
+    if mode == "pipe" and not final:
+        return 0
+
+    # Jupyter: clear previous cell output before printing
+    if mode == "jupyter":
+        from IPython.display import clear_output
+
+        clear_output(wait=True)
+
+    # TTY: move cursor up to overwrite previous output
+    if mode == "tty" and prev_lines > 0:
+        sys.stdout.write(f"\033[{prev_lines}A")
+
+    def _elapsed(jid: str) -> str:
+        t = _end_times.get(jid, time.monotonic()) - start_times[jid]
+        mins, secs = divmod(int(t), 60)
+        return f"{mins}m {secs:02d}s"
+
+    lines_printed = 0
+    n = len(jobs)
+
+    if n == 1:
+        jid, job = next(iter(jobs.items()))
+        msg = f"  {job.job_name or jid}  {job.status.value}  {_elapsed(jid)}"
+        if mode == "tty":
+            sys.stdout.write(f"\r{msg:<60s}")
+            if final:
+                sys.stdout.write("\n")
+        else:
+            print(msg)  # noqa: T201
+        sys.stdout.flush()
+        return 1
+
+    # Multi-job: header + one line per job
+    print(f"Waiting for {n} jobs...")  # noqa: T201
+    lines_printed += 1
+    for jid, job in jobs.items():
+        line = f"  {job.job_name or jid:<30s} {job.status.value:<12s} {_elapsed(jid)}"
+        print(line)  # noqa: T201
+        lines_printed += 1
+
+    sys.stdout.flush()
+    return lines_printed
+
+
+# ---------------------------------------------------------------------------
+# Public API — legacy / backward-compatible
+# ---------------------------------------------------------------------------
+
+
 def upload_simulation_dir(input_dir: str | Path, job_type: str):
     """Upload a simulation directory for cloud execution.
 
@@ -144,7 +497,7 @@ def run_simulation(
     on_started: Callable | None = None,
     parent_dir: str | Path | None = None,
 ) -> RunResult:
-    """Run a simulation on GDSFactory+ cloud.
+    """Run a simulation on GDSFactory+ cloud (blocking).
 
     This function handles the complete workflow:
     1. Uploads simulation files from *config_dir*

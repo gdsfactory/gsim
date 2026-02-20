@@ -91,6 +91,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     _last_mesh_result: Any = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)
 
+    # Cloud job state (set by upload/run)
+    _job_id: str | None = PrivateAttr(default=None)
+
     # -------------------------------------------------------------------------
     # Port methods
     # -------------------------------------------------------------------------
@@ -660,6 +663,116 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         return config_path
 
     # -------------------------------------------------------------------------
+    # Cloud: fine-grained control
+    # -------------------------------------------------------------------------
+
+    def _prepare_upload_dir(self) -> Path:
+        """Prepare a temp directory with all config/mesh files for upload.
+
+        Ensures ``_output_dir`` is set, ``config.json`` exists, and copies
+        everything to a fresh temp directory.
+
+        Returns:
+            Path to temp directory ready for upload.
+        """
+        import shutil
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        # Always (re)generate config.json to reflect current driven settings
+        self.write_config()
+
+        # Copy input files to a temp dir so we don't destroy the user's directory
+        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
+        for item in self._output_dir.iterdir():
+            dest = tmp / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+        return tmp
+
+    def upload(self, *, verbose: bool = True) -> str:
+        """Prepare config, upload to the cloud. Does NOT start execution.
+
+        Requires :meth:`set_output_dir` and :meth:`mesh` to have been
+        called first.
+
+        Args:
+            verbose: Print progress messages.
+
+        Returns:
+            ``job_id`` string for use with :meth:`start`, :meth:`get_status`,
+            or :func:`gsim.wait_for_results`.
+        """
+        from gsim import gcloud
+
+        tmp = self._prepare_upload_dir()
+        try:
+            self._job_id = gcloud.upload(tmp, "palace", verbose=verbose)
+        except Exception:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return self._job_id
+
+    def start(self, *, verbose: bool = True) -> None:
+        """Start cloud execution for this sim's uploaded job.
+
+        Raises:
+            ValueError: If :meth:`upload` has not been called.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("Call upload() first")
+        gcloud.start(self._job_id, verbose=verbose)
+
+    def get_status(self) -> str:
+        """Get the current status of this sim's cloud job.
+
+        Returns:
+            Status string (``"created"``, ``"queued"``, ``"running"``,
+            ``"completed"``, ``"failed"``).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.get_status(self._job_id)
+
+    def wait_for_results(
+        self,
+        *,
+        verbose: bool = True,
+        parent_dir: str | Path | None = None,
+    ) -> Any:
+        """Wait for this sim's cloud job, download and parse results.
+
+        Args:
+            verbose: Print progress messages.
+            parent_dir: Where to create the sim-data directory.
+
+        Returns:
+            Parsed result (typically ``dict[str, Path]`` of output files).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.wait_for_results(
+            self._job_id, verbose=verbose, parent_dir=parent_dir
+        )
+
+    # -------------------------------------------------------------------------
     # Simulation
     # -------------------------------------------------------------------------
 
@@ -668,24 +781,23 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         parent_dir: str | Path | None = None,
         *,
         verbose: bool = True,
-    ) -> dict[str, Path]:
+        wait: bool = True,
+    ) -> dict[str, Path] | str:
         """Run simulation on GDSFactory+ cloud.
 
         Requires mesh() to be called first. Automatically calls
         write_config() if config.json hasn't been written yet.
 
-        Input files are copied to a temporary directory and uploaded.
-        Immediately after upload the inputs are saved into
-        ``sim-data-{job_name}/input/`` (before waiting for results).
-        Results are downloaded to ``sim-data-{job_name}/output/``.
-
         Args:
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
-            verbose: Print progress messages
+            verbose: Print progress messages.
+            wait: If ``True`` (default), block until results are ready.
+                If ``False``, upload + start and return the ``job_id``.
 
         Returns:
-            Dict mapping result filenames to local paths
+            ``dict[str, Path]`` of output files when ``wait=True``,
+            or ``job_id`` string when ``wait=False``.
 
         Raises:
             ValueError: If output_dir not set or mesh not generated
@@ -695,40 +807,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             >>> results = sim.run()
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
-        import shutil
-
-        from gsim.gcloud import run_simulation
-
-        if self._output_dir is None:
-            raise ValueError("Output directory not set. Call set_output_dir() first.")
-
-        # Auto-generate config.json if not already written
-        config_path = self._output_dir / "config.json"
-        if not config_path.exists():
-            self.write_config()
-
-        # Copy input files to a temp dir so run_simulation doesn't
-        # delete the user's output directory.
-        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
-        try:
-            for item in self._output_dir.iterdir():
-                dest = tmp / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
-
-            result = run_simulation(
-                config_dir=tmp,
-                job_type="palace",
-                verbose=verbose,
-                parent_dir=parent_dir,
-            )
-        except Exception:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise
-
-        return result.files
+        self.upload(verbose=False)
+        self.start(verbose=verbose)
+        if not wait:
+            return self._job_id  # type: ignore[return-value]  # set by upload()
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
     def run_local(
         self,

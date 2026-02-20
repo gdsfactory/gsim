@@ -116,6 +116,10 @@ class Simulation(BaseModel):
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
 
+    # Cloud job state (set by upload/run)
+    _job_id: str | None = PrivateAttr(default=None)
+    _config_dir: Path | None = PrivateAttr(default=None)
+
     # -------------------------------------------------------------------------
     # Validators
     # -------------------------------------------------------------------------
@@ -617,6 +621,84 @@ class Simulation(BaseModel):
         return output_dir
 
     # -------------------------------------------------------------------------
+    # Cloud: fine-grained control
+    # -------------------------------------------------------------------------
+
+    def upload(self, *, verbose: bool = True) -> str:
+        """Write config and upload to the cloud. Does NOT start execution.
+
+        Args:
+            verbose: Print progress messages.
+
+        Returns:
+            ``job_id`` string for use with :meth:`start`, :meth:`get_status`,
+            or :func:`gsim.wait_for_results`.
+        """
+        import tempfile
+
+        from gsim import gcloud
+
+        tmp = Path(tempfile.mkdtemp(prefix="meep_"))
+        self.write_config(tmp)
+        self._config_dir = tmp
+        self._job_id = gcloud.upload(tmp, "meep", verbose=verbose)
+        return self._job_id
+
+    def start(self, *, verbose: bool = True) -> None:
+        """Start cloud execution for this sim's uploaded job.
+
+        Raises:
+            ValueError: If :meth:`upload` has not been called.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("Call upload() first")
+        gcloud.start(self._job_id, verbose=verbose)
+
+    def get_status(self) -> str:
+        """Get the current status of this sim's cloud job.
+
+        Returns:
+            Status string (``"created"``, ``"queued"``, ``"running"``,
+            ``"completed"``, ``"failed"``).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.get_status(self._job_id)
+
+    def wait_for_results(
+        self,
+        *,
+        verbose: bool = True,
+        parent_dir: str | Path | None = None,
+    ) -> Any:
+        """Wait for this sim's cloud job, download and parse results.
+
+        Args:
+            verbose: Print progress messages.
+            parent_dir: Where to create the sim-data directory.
+
+        Returns:
+            Parsed result (typically ``SParameterResult``).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.wait_for_results(
+            self._job_id, verbose=verbose, parent_dir=parent_dir
+        )
+
+    # -------------------------------------------------------------------------
     # run
     # -------------------------------------------------------------------------
 
@@ -625,48 +707,26 @@ class Simulation(BaseModel):
         parent_dir: str | Path | None = None,
         *,
         verbose: bool = True,
+        wait: bool = True,
     ) -> Any:
         """Run MEEP simulation on the cloud.
-
-        Config files are written to a temporary directory, uploaded, then
-        moved into a structured ``sim-data-{job_name}/input/`` directory.
-        Results are downloaded to ``sim-data-{job_name}/output/``.
 
         Args:
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
             verbose: Print progress info.
+            wait: If ``True`` (default), block until results are ready.
+                If ``False``, upload + start and return the ``job_id``.
 
         Returns:
-            SParameterResult with parsed S-parameters.
+            ``SParameterResult`` when ``wait=True``, or ``job_id`` string
+            when ``wait=False``.
         """
-        import tempfile
-
-        from gsim.gcloud import run_simulation
-        from gsim.meep.models.results import SParameterResult
-
-        tmp = Path(tempfile.mkdtemp(prefix="meep_"))
-        try:
-            self.write_config(tmp)
-            result = run_simulation(
-                config_dir=tmp,
-                job_type="meep",
-                verbose=verbose,
-                parent_dir=parent_dir,
-            )
-        except Exception:
-            # Clean up temp dir on failure (run_simulation moves it on success)
-            import shutil
-
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise
-
-        csv_path = result.files.get("s_parameters.csv")
-        if csv_path is not None:
-            return SParameterResult.from_csv(csv_path)
-
-        logger.warning("No s_parameters.csv found in results")
-        return SParameterResult()
+        self.upload(verbose=False)
+        self.start(verbose=verbose)
+        if not wait:
+            return self._job_id
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
     # -------------------------------------------------------------------------
     # Visualization
