@@ -50,8 +50,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
       - name: Create environment
         run: just dev
-      - name: Install ubcpdk (unreleased)
-        run: uv pip install ubcpdk@git+https://github.com/gdsfactory/ubc.git
+      - name: Install ubcpdk
+        run: uv pip install ubcpdk
       - name: Create ipykernel
         run: uv run --no-sync python -m ipykernel install --user --name gsim
       - name: Run notebook
@@ -82,8 +82,8 @@ jobs:
         run: cargo install svgbob_cli
       - name: Create environment
         run: just dev
-      - name: Install ubcpdk (unreleased)
-        run: uv pip install ubcpdk@git+https://github.com/gdsfactory/ubc.git
+      - name: Install ubcpdk
+        run: uv pip install ubcpdk
       - name: Download all notebook artifacts
         uses: actions/download-artifact@v4
         with:

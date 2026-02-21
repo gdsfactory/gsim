@@ -551,8 +551,16 @@ class Simulation(BaseModel):
             bbox = component.dbbox()
             bbox_w = bbox.right - bbox.left
             bbox_h = bbox.top - bbox.bottom
-        z_min = min(e.zmin for e in layer_stack_entries)
-        z_max = max(e.zmax for e in layer_stack_entries)
+        # Use both layer and dielectric z-ranges for the cell height.
+        # PDKs without explicit box/clad layers (e.g. cspdk) would otherwise
+        # produce a cell that's too short, with PML touching the core.
+        z_vals = [e.zmin for e in layer_stack_entries] + [
+            e.zmax for e in layer_stack_entries
+        ]
+        for d in dielectric_entries:
+            z_vals.extend((d["zmin"], d["zmax"]))
+        z_min = min(z_vals)
+        z_max = max(z_vals)
         cell_x = bbox_w + 2 * (margin_xy + dpml)
         cell_y = bbox_h + 2 * (margin_xy + dpml)
         cell_z = (z_max - z_min) + 2 * dpml

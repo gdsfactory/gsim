@@ -1009,8 +1009,15 @@ def main():
         bbox_left, bbox_right = bbox.left, bbox.right
         bbox_bottom, bbox_top = bbox.bottom, bbox.top
 
-    z_min = min(l["zmin"] for l in config["layer_stack"])
-    z_max = max(l["zmax"] for l in config["layer_stack"])
+    # Use both layers and dielectrics for z-range so that PDKs without
+    # explicit box/clad layers (e.g. cspdk) still get enough headroom.
+    z_vals = [l["zmin"] for l in config["layer_stack"]] + [
+        l["zmax"] for l in config["layer_stack"]
+    ]
+    for d in config.get("dielectrics", []):
+        z_vals.extend((d["zmin"], d["zmax"]))
+    z_min = min(z_vals)
+    z_max = max(z_vals)
 
     domain = config["domain"]
     dpml = domain["dpml"]
@@ -1019,7 +1026,7 @@ def main():
     # XY: margin_xy is gap between geometry bbox and PML
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
     cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
-    # Z: margin_z_above/below is already baked into layer_stack via set_z_crop(),
+    # Z: margin_z_above/below is already baked into the stack via z_crop,
     #    so only add dpml beyond the stack extent
     cell_z = (z_max - z_min) + 2 * dpml
     cell_center = mp.Vector3(

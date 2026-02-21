@@ -105,8 +105,17 @@ def crop_geometry_model(
     """
     from gsim.common.geometry_model import GeometryModel, Prism
 
-    z_lo = min(layer.zmin for layer in stack.layers.values())
-    z_hi = max(layer.zmax for layer in stack.layers.values())
+    # Use both layers and dielectrics to determine the full z-range.
+    # PDKs like cspdk don't define box/clad as explicit layers, so relying
+    # on layers alone would shrink the bbox to just the patterned geometry
+    # (e.g. 0-0.22 um), causing PML to sit on the core.
+    z_vals: list[float] = []
+    for layer in stack.layers.values():
+        z_vals.extend((layer.zmin, layer.zmax))
+    for diel in stack.dielectrics:
+        z_vals.extend((diel["zmin"], diel["zmax"]))
+    z_lo = min(z_vals)
+    z_hi = max(z_vals)
 
     cropped_prisms: dict[str, list[Prism]] = {}
     for layer_name, prism_list in gm.prisms.items():
