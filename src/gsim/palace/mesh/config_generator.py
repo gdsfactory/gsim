@@ -134,10 +134,7 @@ def generate_palace_config(
             )
 
     # Handle PEC surfaces (planar conductors)
-    pec_boundaries = [
-        {"Attributes": [info["phys_group"]]}
-        for info in groups.get("pec_surfaces", {}).values()
-    ]
+    pec_attrs = [info["phys_group"] for info in groups.get("pec_surfaces", {}).values()]
 
     lumped_ports: list[dict[str, object]] = []
     port_idx = 1
@@ -188,8 +185,8 @@ def generate_palace_config(
     }
 
     # Add PEC boundaries if any exist
-    if pec_boundaries:
-        boundaries["PEC"] = pec_boundaries
+    if pec_attrs:
+        boundaries["PEC"] = {"Attributes": pec_attrs}
 
     if "absorbing" in groups["boundary_surfaces"]:
         boundaries["Absorbing"] = {
