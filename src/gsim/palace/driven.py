@@ -816,26 +816,145 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     def run_local(
         self,
         *,
+        palace_sif_path: str | Path | None = None,
+        num_processes: int | None = None,
         verbose: bool = True,
     ) -> dict[str, Path]:
-        """Run simulation locally using Palace.
+        """Run simulation locally using Palace via Apptainer.
 
         Requires mesh() and write_config() to be called first,
-        and Palace to be installed locally.
+        and Palace to be installed locally via Apptainer.
 
         Args:
+            palace_sif_path: Path to Palace Apptainer SIF file. 
+                If None, uses PALACE_SIF environment variable.
+            num_processes: Number of MPI processes (default: CPU count - 2)
             verbose: Print progress messages
 
         Returns:
             Dict mapping result filenames to local paths
 
         Raises:
-            NotImplementedError: Local simulation is not yet implemented
-        """
-        raise NotImplementedError(
-            "Local simulation is not yet implemented. "
-            "Use simulate() to run on GDSFactory+ cloud."
-        )
+            ValueError: If output_dir not set or PALACE_SIF not configured
+            FileNotFoundError: If mesh, config, or Palace SIF not found
+            RuntimeError: If simulation fails
 
+        Example:
+            >>> # Using environment variable
+            >>> import os
+            >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
+            >>> results = sim.simulate_local()
+            >>> 
+            >>> # Or specify path directly
+            >>> results = sim.simulate_local(palace_sif_path="/path/to/Palace.sif")
+            >>> print(f"S-params: {results['port-S.csv']}")
+        """
+        import os
+        import subprocess
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        output_dir = Path(self._output_dir)
+        config_path = output_dir / "config.json"
+        mesh_path = output_dir / "palace.msh"
+
+        # Check required files exist
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {config_path}. Call write_config() first."
+            )
+
+        if not mesh_path.exists():
+            raise FileNotFoundError(
+                f"Mesh file not found: {mesh_path}. Call mesh() first."
+            )
+
+        # Determine Palace SIF path from environment variable or parameter
+        if palace_sif_path is None:
+            palace_sif_path = os.environ.get("PALACE_SIF")
+            if palace_sif_path is None:
+                raise ValueError(
+                    "Palace SIF path not specified. Either set PALACE_SIF "
+                    "environment variable or pass palace_sif_path parameter."
+                )
+            if verbose:
+                logger.info("Using PALACE_SIF from environment: %s", palace_sif_path)
+
+        sif_path = Path(palace_sif_path)
+        
+        if not sif_path.exists():
+            raise FileNotFoundError(
+                f"Palace SIF file not found: {sif_path}. "
+                "Install Palace via Apptainer or provide correct path."
+            )
+
+        # Determine number of processes
+        if num_processes is None:
+            try:
+                import psutil
+
+                num_processes = psutil.cpu_count(logical=True) or 1
+            except ImportError:
+                import os
+
+                num_processes = os.cpu_count() or 1
+
+        # Build command
+        cmd = [
+            "apptainer",
+            "run",
+            str(sif_path),
+            "-nt",
+            str(num_processes),
+            "config.json",
+        ]
+
+        if verbose:
+            logger.info("Running Palace simulation in %s", output_dir)
+            logger.info("Command: %s", " ".join(cmd))
+            logger.info("Processes: %d", num_processes)
+
+        # Run simulation
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            
+            # Print output if verbose
+            if verbose and result.stdout:
+                print(result.stdout)
+            if verbose and result.stderr:
+                print(result.stderr, file=__import__('sys').stderr)
+                
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Palace simulation failed with return code {e.returncode}"
+            if e.stdout:
+                error_msg += f"\n\nStdout:\n{e.stdout}"
+            if e.stderr:
+                error_msg += f"\n\nStderr:\n{e.stderr}"
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "Apptainer not found. Install Apptainer to run local simulations."
+            ) from e
+
+        if verbose:
+            logger.info("Simulation completed successfully")
+
+        postpro_dir = output_dir / "output/palace/"
+
+        if verbose:
+            logger.info("Results saved to %s", postpro_dir)
+
+        return {
+            file.name: file
+            for file in postpro_dir.iterdir()
+            if file.is_file() and not file.name.startswith(".")
+        }
 
 __all__ = ["DrivenSim"]
