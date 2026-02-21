@@ -479,7 +479,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             margin: XY margin around design (um), overrides preset
             air_above: Air above top metal (um), overrides preset
             fmax: Max frequency for mesh sizing (Hz), overrides preset
-            planar_conductors: Treat conductors as 2D PEC surfaces, overrides mesh_config
+            planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI during meshing
             model_name: Base name for output files
             verbose: Print progress messages

@@ -258,13 +258,12 @@ class PalaceSimMixin:
         else:
             mesh_config = MeshConfig.default()
 
-        # Preserve planar_conductors from sim.mesh_config if not explicitly provided
-        # This allows both: sim.mesh(planar_conductors=True) and sim.mesh_config.planar_conductors=True
+        # Preserve planar_conductors from sim.mesh_config if not
+        # explicitly provided via sim.mesh(planar_conductors=...)
         if planar_conductors is None:
-            if hasattr(self, "mesh_config"):
-                existing_config = getattr(self, "mesh_config")
-                if existing_config is not None:
-                    mesh_config.planar_conductors = existing_config.planar_conductors
+            existing_config = getattr(self, "mesh_config", None)
+            if existing_config is not None:
+                mesh_config.planar_conductors = existing_config.planar_conductors
         else:
             mesh_config.planar_conductors = planar_conductors
 

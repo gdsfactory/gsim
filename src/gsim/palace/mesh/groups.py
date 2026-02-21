@@ -85,7 +85,7 @@ def assign_physical_groups(
                     "phys_group": phys_group,
                     "tags": new_surface_tags,
                 }
-        
+
         # Handle volumetric conductors (finite conductivity)
         if tag_info["volumes"]:
             all_xy_tags = []
