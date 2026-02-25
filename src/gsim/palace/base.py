@@ -345,8 +345,10 @@ class PalaceSimMixin:
         output: str | Path | None = None,
         show_groups: list[str] | None = None,
         interactive: bool = True,
+        style: str = "wireframe",
+        transparent_groups: list[str] | None = None,
     ) -> None:
-        """Plot the mesh wireframe using PyVista.
+        """Plot the mesh using PyVista.
 
         Requires mesh() to be called first.
 
@@ -356,6 +358,12 @@ class PalaceSimMixin:
                 Example: ["metal", "P"] to show metal layers and ports.
             interactive: If True, open interactive 3D viewer.
                 If False, save static PNG to output path.
+            style: ``"wireframe"`` (default) or ``"solid"``.
+                ``"solid"`` renders faces coloured by physical group
+                with selectable transparent groups.
+            transparent_groups: Physical-group names rendered at low opacity
+                when *style="solid"*.  Defaults to
+                ``["air_none", "air_plastic_enclosure"]``.
 
         Raises:
             ValueError: If output_dir not set or mesh file doesn't exist
@@ -363,6 +371,7 @@ class PalaceSimMixin:
         Example:
             >>> sim.mesh(preset="default")
             >>> sim.plot_mesh(show_groups=["metal", "P"])
+            >>> sim.plot_mesh(style="solid")
         """
         from gsim.viz import plot_mesh as _plot_mesh
 
@@ -382,4 +391,6 @@ class PalaceSimMixin:
             output=output,
             show_groups=show_groups,
             interactive=interactive,
+            style=style,
+            transparent_groups=transparent_groups,
         )

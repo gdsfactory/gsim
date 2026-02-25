@@ -49,6 +49,31 @@ class GroundPlane:
 
 
 @dataclass
+class CrossSection:
+    """Cutting-plane specification for 2-D cross-section meshing.
+
+    Provide exactly one of *x* or *y* to define the slicing plane.
+
+    Examples:
+        CrossSection(y=0.0)   # XZ-plane at y = 0
+        CrossSection(x=50.0)  # YZ-plane at x = 50 µm
+    """
+
+    x: float | None = None
+    y: float | None = None
+
+    def __post_init__(self) -> None:
+        if (self.x is None) == (self.y is None):
+            raise ValueError("Exactly one of 'x' or 'y' must be provided.")
+
+    def to_dict(self) -> dict[str, float]:
+        """Return ``{'x': val}`` or ``{'y': val}``."""
+        if self.x is not None:
+            return {"x": self.x}
+        return {"y": self.y}  # type: ignore[arg-type]
+
+
+@dataclass
 class MeshConfig:
     """Configuration for mesh generation.
 
@@ -162,6 +187,7 @@ def generate_mesh(
     model_name: str = "palace",
     driven_config: DrivenConfig | None = None,
     write_config: bool = True,
+    cross_section: CrossSection | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -174,6 +200,7 @@ def generate_mesh(
         model_name: Base name for output files (default: "mesh" -> mesh.msh)
         driven_config: Optional DrivenConfig for frequency sweep settings
         write_config: Whether to write config.json (default True)
+        cross_section: Optional CrossSection for 2-D cross-section meshing
 
     Returns:
         MeshResult with mesh path and metadata
@@ -198,6 +225,7 @@ def generate_mesh(
         show_gui=config.show_gui,
         driven_config=driven_config,
         write_config=write_config,
+        cross_section=cross_section.to_dict() if cross_section is not None else None,
         planar_conductors=config.planar_conductors,
     )
 

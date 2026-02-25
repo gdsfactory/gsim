@@ -507,3 +507,141 @@ def finalize_mesh_fields(field_ids: list[int]) -> None:
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
     gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay algorithm
+
+
+
+# ---------------------------------------------------------------------------
+# 2D cross-section helpers
+# ---------------------------------------------------------------------------
+
+def create_cutting_plane(margin: float, *, x: float | None = None, y: float | None = None) -> int:
+    """Add a large rectangle orthogonal to either the x or y axis.
+
+    Exactly one of *x* or *y* must be provided.
+
+    Args:
+        margin: Half-extent of the rectangle in the two free directions
+                (should exceed the model bounds).
+        x:      Fix x to this value → rectangle in the YZ-plane.
+        y:      Fix y to this value → rectangle in the XZ-plane.
+
+    Returns:
+        The gmsh surface tag of the plane (not yet synchronised).
+    """
+    if (x is None) == (y is None):
+        raise ValueError("Exactly one of 'x' or 'y' must be provided.")
+
+    if x is not None:
+        # YZ-plane at fixed x
+        p1 = gmsh.model.occ.addPoint(x, -margin, -margin)
+        p2 = gmsh.model.occ.addPoint(x,  margin, -margin)
+        p3 = gmsh.model.occ.addPoint(x,  margin,  margin)
+        p4 = gmsh.model.occ.addPoint(x, -margin,  margin)
+    else:
+        # XZ-plane at fixed y
+        p1 = gmsh.model.occ.addPoint(-margin, y, -margin)
+        p2 = gmsh.model.occ.addPoint( margin, y, -margin)
+        p3 = gmsh.model.occ.addPoint( margin, y,  margin)
+        p4 = gmsh.model.occ.addPoint(-margin, y,  margin)
+
+    cl = gmsh.model.occ.addCurveLoop([
+        gmsh.model.occ.addLine(p1, p2),
+        gmsh.model.occ.addLine(p2, p3),
+        gmsh.model.occ.addLine(p3, p4),
+        gmsh.model.occ.addLine(p4, p1),
+    ])
+    return gmsh.model.occ.addPlaneSurface([cl])
+
+
+def slice_with_plane(cut_plane: int) -> tuple[dict[str, list[int]], dict[str, int]]:
+    """Fragment a cutting plane against all named 3D volumes in the current model.
+
+    Reads volume→name from the dim=3 physical groups, fragments the plane
+    against all volumes in one OCC call, maps each resulting surface piece
+    back to the name of the volume it borders, then removes the pre-fragment
+    physical groups (which are now stale).
+
+    Args:
+        cut_plane: Surface tag of the cutting plane (must be synchronised).
+
+    Returns:
+        name_to_surfs: mapping from volume name → list of 2D surface tags that
+                       form the cross-section inside that volume.
+        pg_map:        mapping from physical group name → pg tag for all
+                       newly created 2D and 1D physical groups.
+    """
+    # Snapshot physical groups and build vol_tag → name.
+    pgs_before = list(gmsh.model.getPhysicalGroups())
+    vol_tag_to_name: dict[int, str] = {}
+    for pgd, pgt in pgs_before:
+        if pgd != 3:
+            continue
+        pgname = gmsh.model.getPhysicalName(pgd, pgt)
+        for vt in gmsh.model.getEntitiesForPhysicalGroup(pgd, pgt):
+            vol_tag_to_name[vt] = pgname
+
+    # Single fragment call: plane vs all volumes.
+    # removeTool=False keeps volumes alive for boundary queries.
+    all_vol_dimtags = [(3, t) for t in vol_tag_to_name]
+    _, fmap = gmsh.model.occ.fragment(
+        [(2, cut_plane)], all_vol_dimtags,
+        removeObject=True, removeTool=False,
+    )
+    gmsh.model.occ.synchronize()
+
+    # fmap[0]    → surface pieces carved from the cutting plane
+    # fmap[i+1]  → updated dimtags for all_vol_dimtags[i]
+    cs_surfs = [t for d, t in fmap[0] if d == 2]
+
+    # Map each surface piece to the volume that contains it as a face.
+    name_to_surfs: dict[str, list[int]] = {}
+    for stag in cs_surfs:
+        for i, (_, t_orig) in enumerate(all_vol_dimtags):
+            for dv, tv in ((d, t) for d, t in fmap[i + 1] if d == 3):
+                bnd = gmsh.model.getBoundary(
+                    [(dv, tv)], combined=False, oriented=False, recursive=False
+                )
+                if any(bt == stag for bd, bt in bnd if bd == 2):
+                    name_to_surfs.setdefault(vol_tag_to_name[t_orig], []).append(stag)
+                    break
+            else:
+                continue
+            break
+
+    for name, tags in name_to_surfs.items():
+        print(f"  '{name}' → surfaces {tags}")
+
+    # Remove the now-stale pre-fragment physical groups.
+    gmsh.model.removePhysicalGroups(pgs_before)
+
+    # --- Surface physical groups ---
+    pg_map: dict[str, int] = {}
+    for name, stags in name_to_surfs.items():
+        pg = gmsh.model.addPhysicalGroup(2, stags, name=name)
+        pg_map[name] = pg
+        print(f"  Physical '{name}' (dim=2): pg={pg}, tags={stags}")
+
+    # --- Line physical groups (edges labelled by the pair of surfaces they separate) ---
+    edge_to_names: dict[int, list[str]] = {}
+    for name, stags in name_to_surfs.items():
+        for stag in stags:
+            for bd, bt in gmsh.model.getBoundary(
+                [(2, stag)], combined=False, oriented=False, recursive=False
+            ):
+                if bd == 1:
+                    edge_to_names.setdefault(bt, [])
+                    if name not in edge_to_names[bt]:
+                        edge_to_names[bt].append(name)
+    label_to_edges: dict[str, list[int]] = {}
+    for lt, ns in edge_to_names.items():
+        lbl = "__".join(sorted(ns)) if len(ns) > 1 else f"{ns[0]}__None"
+        label_to_edges.setdefault(lbl, []).append(lt)
+    for lbl, lts in label_to_edges.items():
+        pg = gmsh.model.addPhysicalGroup(1, lts, name=lbl)
+        pg_map[lbl] = pg
+        print(f"  Physical '{lbl}' (dim=1): pg={pg}, tags={lts}")
+
+    return name_to_surfs, pg_map
+
+
+

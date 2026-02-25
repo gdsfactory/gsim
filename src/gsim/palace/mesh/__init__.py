@@ -39,6 +39,7 @@ from gsim.palace.mesh.generator import (
     generate_mesh as generate_mesh_direct,
 )
 from gsim.palace.mesh.pipeline import (
+    CrossSection,
     GroundPlane,
     MeshConfig,
     MeshPreset,
@@ -49,6 +50,7 @@ from gsim.palace.mesh.pipeline import (
 from . import gmsh_utils
 
 __all__ = [
+    "CrossSection",
     "GeometryData",
     "GroundPlane",
     "MeshConfig",

@@ -142,6 +142,7 @@ def generate_mesh(
     show_gui: bool = False,
     driven_config: DrivenConfig | None = None,
     write_config: bool = True,
+    cross_section: dict[str, float] | None = None,
     planar_conductors: bool = False,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
@@ -160,6 +161,9 @@ def generate_mesh(
         show_gui: Show gmsh GUI during meshing
         driven_config: Optional DrivenConfig for frequency sweep settings
         write_config: Whether to write config.json (default True)
+        cross_section: Optional cutting plane specification. Pass a dict
+            with exactly one of ``{"x": <value>}`` or ``{"y": <value>}``
+            to slice the 3-D geometry and produce a 2-D mesh instead.
         planar_conductors: If True, treat conductors as 2D PEC surfaces
 
     Returns:
@@ -218,19 +222,33 @@ def generate_mesh(
             planar_conductors,
         )
 
-        # Setup mesh fields
-        logger.info("Setting up mesh refinement...")
-        _setup_mesh_fields(
-            kernel, groups, geometry, stack, refined_mesh_size, max_mesh_size
-        )
+        # Handle optional cross-section cutting plane
+        if cross_section is not None:
+            logger.info("Creating cutting plane for 2-D cross-section...")
+            xmin, ymin, xmax, ymax = geometry.bbox
+            cp_margin = (
+                max(xmax - xmin, ymax - ymin) + margin + air_margin + 500
+            )
+            cut_tag = gmsh_utils.create_cutting_plane(cp_margin, **cross_section)
+            kernel.synchronize()
+            gmsh_utils.slice_with_plane(cut_tag)
+            # Set a reasonable global mesh size for the 2-D case
+            gmsh.option.setNumber("Mesh.MeshSizeMax", max_mesh_size)
+        else:
+            # Setup 3-D mesh fields (not applicable after slicing)
+            logger.info("Setting up mesh refinement...")
+            _setup_mesh_fields(
+                kernel, groups, geometry, stack, refined_mesh_size, max_mesh_size
+            )
 
         # Show GUI if requested
         if show_gui:
             gmsh.fltk.run()
 
-        # Generate mesh
-        logger.info("Generating mesh...")
-        gmsh.model.mesh.generate(3)
+        # Generate mesh (2-D for cross-section, 3-D otherwise)
+        mesh_dim = 2 if cross_section is not None else 3
+        logger.info("Generating %d-D mesh...", mesh_dim)
+        gmsh.model.mesh.generate(mesh_dim)
 
         # Collect mesh statistics
         mesh_stats = collect_mesh_stats()

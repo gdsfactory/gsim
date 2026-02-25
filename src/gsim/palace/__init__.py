@@ -57,9 +57,11 @@ from gsim.gcloud import run_simulation as _run_simulation
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
+from gsim.palace.modal import ModalSim
 
 # Mesh utilities
 from gsim.palace.mesh import (
+    CrossSection,
     GroundPlane,
     MeshConfig,
     MeshPreset,
@@ -100,11 +102,12 @@ from gsim.palace.ports import (
 )
 
 # Visualization
-from gsim.viz import plot_mesh
+from gsim.viz import plot_mesh, view_mesh
 
 __all__ = [
     "MATERIALS_DB",
     "CPWPortConfig",
+    "CrossSection",
     "DrivenConfig",
     "DrivenSim",
     "EigenmodeConfig",
@@ -123,6 +126,7 @@ __all__ = [
     "MeshConfigModel",
     "MeshPreset",
     "MeshResult",
+    "ModalSim",
     "NumericalConfig",
     "PalacePort",
     "PortConfig",
@@ -154,6 +158,7 @@ __all__ = [
     "print_stack",
     "print_stack_table",
     "run_simulation",
+    "view_mesh",
 ]
 
 
