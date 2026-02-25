@@ -53,7 +53,7 @@ repos:
     hooks:
       - id: generate-api-docs
         name: generate-api-docs
-        entry: uv run python -c "import sys; sys.path.insert(0, 'docs'); from hooks import generate_api_md; from pathlib import Path; Path('docs/api.md').write_text(generate_api_md())"
+        entry: uv run python -c "import sys; sys.path.insert(0, 'docs'); from hooks import generate_api_md; from pathlib import Path; content = generate_api_md(); content and Path('docs/api.md').write_text(content)"
         language: system
         files: src/gsim/.*__init__\.py$|docs/hooks\.py$
         pass_filenames: false

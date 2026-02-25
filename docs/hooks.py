@@ -93,10 +93,19 @@ def _module_section(heading: str, module_path: str) -> list[str]:
     return lines
 
 
-def generate_api_md() -> str:
-    """Generate the full API reference markdown."""
+def generate_api_md() -> str | None:
+    """Generate the full API reference markdown.
+
+    Returns ``None`` if any module fails to import (e.g. missing
+    dependencies in CI) so callers can skip writing a partial file.
+    """
     lines = ["# API Reference\n"]
     for heading, module_path in MODULES:
+        try:
+            importlib.import_module(module_path)
+        except Exception:
+            logger.warning("Could not import %s — skipping generation", module_path)
+            return None
         section = _module_section(heading, module_path)
         if section:
             lines.extend(section)
@@ -112,5 +121,8 @@ def generate_api_md() -> str:
 def on_pre_build(config: Any, **kwargs: Any) -> None:
     """Generate api.md before the build starts."""
     api_content = generate_api_md()
+    if api_content is None:
+        logger.warning("Skipping api.md generation (import failure)")
+        return
     API_MD.write_text(api_content)
     logger.info("Generated %s (%d bytes)", API_MD, len(api_content))
