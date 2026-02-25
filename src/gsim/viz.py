@@ -5,6 +5,8 @@ This module provides visualization tools for meshes and simulation results.
 
 from __future__ import annotations
 
+__all__ = ["plot_mesh"]
+
 import logging
 from pathlib import Path
 

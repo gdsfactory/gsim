@@ -25,8 +25,7 @@ nav:
       - Microstrip: nbs/palace_demo_microstrip.md
       - Branch Line Coupler: nbs/palace_demo_BranchLineCoupler.md
       - "Parallel Simulations: Width Sweep": nbs/palace_width_sweep.md
-  - api reference:
-      - gsim.palace: api.md
+  - API Reference: api.md
 plugins:
   - search
   - autorefs

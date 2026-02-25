@@ -15,3 +15,4 @@ ignores:
   - ".venv/**"
   - "**/.venv/**"
   - "docs/nbs/*.md"
+  - "docs/api.md"
