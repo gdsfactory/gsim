@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING
 
 import gmsh
 
+from gsim.common.mesh.generator import collect_mesh_stats
+
 from . import gmsh_utils
 from .config_generator import (
-    collect_mesh_stats,
     generate_palace_config,
     write_config,
 )

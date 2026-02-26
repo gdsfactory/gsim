@@ -178,6 +178,8 @@
 
 ::: gsim.meep.Material
 
+::: gsim.meep.MeepMeshSim
+
 ::: gsim.meep.ModeSource
 
 ::: gsim.meep.ResolutionConfig

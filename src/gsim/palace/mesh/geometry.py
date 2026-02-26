@@ -1,138 +1,30 @@
 """Geometry extraction and creation for Palace mesh generation.
 
-This module handles extracting polygons from gdsfactory components
-and creating 3D geometry in gmsh.
+Generic geometry helpers (GeometryData, extract_geometry, get_layer_info,
+add_dielectrics) are provided by ``gsim.common.mesh.geometry`` and
+re-exported here for backward compatibility.
+
+This module keeps Palace-specific functions: ``add_metals`` and ``add_ports``.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from . import gmsh_utils
+from gsim.common.mesh import gmsh_utils
+
+# Re-export generic helpers so existing Palace code keeps working
+from gsim.common.mesh.geometry import (
+    GeometryData,
+    add_dielectrics,
+    extract_geometry,
+    get_layer_info,
+)
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.ports.config import PalacePort
-
-
-@dataclass
-class GeometryData:
-    """Container for geometry data extracted from component."""
-
-    polygons: list  # List of (layer_num, pts_x, pts_y, holes) tuples
-    bbox: tuple[float, float, float, float]  # (xmin, ymin, xmax, ymax)
-    layer_bboxes: dict  # layer_num -> (xmin, ymin, xmax, ymax)
-
-
-def extract_geometry(component, stack: LayerStack) -> GeometryData:
-    """Extract polygon geometry from a gdsfactory component.
-
-    Args:
-        component: gdsfactory Component
-        stack: LayerStack for layer mapping
-
-    Returns:
-        GeometryData with polygons and bounding boxes
-    """
-    polygons = []
-    global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
-    layer_bboxes = {}
-
-    # Get polygons from component
-    polygons_by_index = component.get_polygons()
-
-    # Build layer_index -> GDS tuple mapping
-    layout = component.kcl.layout
-    index_to_gds = {}
-    for layer_index in range(layout.layers()):
-        if layout.is_valid_layer(layer_index):
-            info = layout.get_info(layer_index)
-            index_to_gds[layer_index] = (info.layer, info.datatype)
-
-    # Build GDS tuple -> layer number mapping
-    gds_to_layernum = {}
-    for layer_data in stack.layers.values():
-        gds_tuple = tuple(layer_data.gds_layer)
-        gds_to_layernum[gds_tuple] = gds_tuple[0]
-
-    # Convert polygons
-    for layer_index, polys in polygons_by_index.items():
-        gds_tuple = index_to_gds.get(layer_index)
-        if gds_tuple is None:
-            continue
-
-        layernum = gds_to_layernum.get(gds_tuple)
-        if layernum is None:
-            continue
-
-        for poly in polys:
-            # Convert klayout polygon to lists (nm -> um)
-            points = list(poly.each_point_hull())
-            if len(points) < 3:
-                continue
-
-            pts_x = [pt.x / 1000.0 for pt in points]
-            pts_y = [pt.y / 1000.0 for pt in points]
-
-            # Extract holes from polygon
-            holes = []
-            for hole_idx in range(poly.holes()):
-                hole_pts = list(poly.each_point_hole(hole_idx))
-                if len(hole_pts) >= 3:
-                    hx = [pt.x / 1000.0 for pt in hole_pts]
-                    hy = [pt.y / 1000.0 for pt in hole_pts]
-                    holes.append((hx, hy))
-
-            polygons.append((layernum, pts_x, pts_y, holes))
-
-            # Update bounding boxes
-            xmin, xmax = min(pts_x), max(pts_x)
-            ymin, ymax = min(pts_y), max(pts_y)
-
-            global_bbox[0] = min(global_bbox[0], xmin)
-            global_bbox[1] = min(global_bbox[1], ymin)
-            global_bbox[2] = max(global_bbox[2], xmax)
-            global_bbox[3] = max(global_bbox[3], ymax)
-
-            if layernum not in layer_bboxes:
-                layer_bboxes[layernum] = [xmin, ymin, xmax, ymax]
-            else:
-                bbox = layer_bboxes[layernum]
-                bbox[0] = min(bbox[0], xmin)
-                bbox[1] = min(bbox[1], ymin)
-                bbox[2] = max(bbox[2], xmax)
-                bbox[3] = max(bbox[3], ymax)
-
-    return GeometryData(
-        polygons=polygons,
-        bbox=(global_bbox[0], global_bbox[1], global_bbox[2], global_bbox[3]),
-        layer_bboxes=layer_bboxes,
-    )
-
-
-def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
-    """Get layer info from stack by GDS layer number.
-
-    Args:
-        stack: LayerStack with layer definitions
-        gds_layer: GDS layer number
-
-    Returns:
-        Dict with layer info or None if not found
-    """
-    for name, layer in stack.layers.items():
-        if layer.gds_layer[0] == gds_layer:
-            return {
-                "name": name,
-                "zmin": layer.zmin,
-                "zmax": layer.zmax,
-                "thickness": layer.zmax - layer.zmin,
-                "material": layer.material,
-                "type": layer.layer_type,
-            }
-    return None
 
 
 def add_metals(
@@ -443,6 +335,7 @@ def build_entities(
         )
 
     return entities
+
 
 
 def add_ports(
