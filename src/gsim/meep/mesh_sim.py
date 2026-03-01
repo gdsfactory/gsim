@@ -186,7 +186,6 @@ class MeepMeshSim(BaseModel):
         self,
         output_dir: str | Path,
         *,
-        model_name: str = "mesh",
         refined_mesh_size: float = 0.05,
         max_mesh_size: float = 1.0,
         margin: float | None = None,
@@ -195,9 +194,10 @@ class MeepMeshSim(BaseModel):
     ) -> Any:
         """Generate a GMSH mesh for this simulation.
 
+        Creates ``mesh.msh`` inside *output_dir*.
+
         Args:
             output_dir: Directory for mesh output files.
-            model_name: Base name for the ``.msh`` file.
             refined_mesh_size: Fine mesh size near waveguide boundaries (um).
             max_mesh_size: Coarse mesh size in cladding/substrate (um).
             margin: XY margin around geometry (um). Defaults to
@@ -236,7 +236,7 @@ class MeepMeshSim(BaseModel):
             component=self.geometry.component,
             stack=self.geometry.stack,
             output_dir=output_dir,
-            model_name=model_name,
+            model_name="mesh",
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,

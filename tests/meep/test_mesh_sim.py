@@ -270,10 +270,10 @@ class TestMeepMeshSimEndToEnd:
 
     def test_mesh_generates_msh(self, sim_with_component, tmp_path):
         sim = sim_with_component
-        result = sim.mesh(tmp_path, model_name="test_wg")
+        result = sim.mesh(tmp_path)
 
         assert result.mesh_path.exists()
-        assert result.mesh_path.name == "test_wg.msh"
+        assert result.mesh_path.name == "mesh.msh"
         assert result.mesh_stats.get("nodes", 0) > 0
         assert result.mesh_stats.get("tetrahedra", 0) > 0
         assert "volumes" in result.groups
@@ -281,14 +281,14 @@ class TestMeepMeshSimEndToEnd:
 
     def test_write_config_after_mesh(self, sim_with_component, tmp_path):
         sim = sim_with_component
-        sim.mesh(tmp_path, model_name="test_wg")
+        sim.mesh(tmp_path)
         config_path = sim.write_config()
 
         assert config_path.exists()
         assert config_path.name == "mesh_config.json"
 
         data = json.loads(config_path.read_text())
-        assert data["mesh_filename"] == "test_wg.msh"
+        assert data["mesh_filename"] == "mesh.msh"
         assert "si" in data["materials"]
         assert data["source"]["wavelength"] == 1.55
         assert data["monitors"] == ["o1", "o2"]

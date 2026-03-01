@@ -6,6 +6,7 @@ and creating 3D geometry in gmsh. Solver-agnostic — no Palace or Meep imports.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -14,6 +15,8 @@ from gsim.common.mesh import gmsh_utils
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -285,6 +288,45 @@ def add_dielectrics(
     kernel.synchronize()
 
     return dielectric_tags
+
+
+def _resolve_port_layer(
+    port,
+    component,
+    stack: LayerStack,
+) -> tuple[str, float, float] | None:
+    """Resolve a gdsfactory port's layer to a stack layer name and z-range.
+
+    Args:
+        port: gdsfactory Port object
+        component: gdsfactory Component (needed for klayout layer lookup)
+        stack: LayerStack
+
+    Returns:
+        ``(layer_name, zmin, zmax)`` or ``None`` if no matching stack layer.
+    """
+    # Build GDS tuple → stack layer lookup
+    gds_to_layer = {}
+    for name, layer in stack.layers.items():
+        gds_to_layer[tuple(layer.gds_layer)] = (name, layer)
+
+    # port.layer is a klayout layer index (int); convert to GDS tuple
+    port_layer_raw = port.layer
+    if isinstance(port_layer_raw, int):
+        layout = component.kcl.layout
+        if not layout.is_valid_layer(port_layer_raw):
+            return None
+        info = layout.get_info(port_layer_raw)
+        port_gds = (info.layer, info.datatype)
+    else:
+        port_gds = tuple(port_layer_raw)
+
+    match = gds_to_layer.get(port_gds)
+    if match is None:
+        return None
+
+    layer_name, layer = match
+    return (layer_name, layer.zmin, layer.zmax)
 
 
 __all__ = [
