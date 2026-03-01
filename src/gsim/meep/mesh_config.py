@@ -59,6 +59,18 @@ def _serialize_mesh_groups(groups: dict) -> dict[str, Any]:
     if groups.get("outer_boundary"):
         out["outer_boundary"] = {"phys_group": groups["outer_boundary"]["phys_group"]}
 
+    if "port_surfaces" in groups:
+        out["port_surfaces"] = {}
+        for name, info in groups["port_surfaces"].items():
+            out["port_surfaces"][name] = {
+                "phys_group": info["phys_group"],
+                "center": info["center"],
+                "width": info["width"],
+                "orientation": info["orientation"],
+                "layer": info["layer"],
+                "z_range": info["z_range"],
+            }
+
     return out
 
 

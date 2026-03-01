@@ -39,6 +39,7 @@ def generate_mesh(
     margin: float = 50.0,
     air_margin: float = 50.0,
     include_airbox: bool = True,
+    include_ports: bool = True,
     show_gui: bool = False,
 ) -> MeshResult:
     """Generate a generic GMSH mesh from a gdsfactory component and LayerStack.
@@ -47,8 +48,10 @@ def generate_mesh(
         1. Extract polygon geometry from the component
         2. Extrude all layer polygons into 3D volumes
         3. Add dielectric background boxes and optionally airbox
+        3b. (Optional) Add port surfaces from component ports
         4. Fragment all geometry for conformal meshing
         5. Assign physical groups (one per material, plus outer boundary)
+        5b. Assign port physical groups
         6. Set up mesh refinement near layer volume boundaries
         7. Generate 3D mesh and write .msh file
 
@@ -63,6 +66,8 @@ def generate_mesh(
         air_margin: Air box margin around dielectric envelope (um)
         include_airbox: Whether to add a surrounding airbox volume.
             Needed for RF (Palace); not needed for photonics (Meep).
+        include_ports: Whether to create port surfaces from component
+            ports as physical groups. Default ``True``.
         show_gui: Show gmsh GUI during meshing
 
     Returns:
@@ -120,6 +125,11 @@ def generate_mesh(
             geom_map,
             stack,
         )
+
+        # 5b. Find and tag port surfaces on existing volume boundaries
+        if include_ports:
+            logger.info("Identifying port surfaces...")
+            _assign_port_groups(component, stack, groups)
 
         # 6. Mesh refinement
         logger.info("Setting up mesh refinement...")
@@ -228,6 +238,112 @@ def _assign_generic_groups(
 
     kernel.synchronize()
     return groups
+
+
+def _assign_port_groups(
+    component,
+    stack: LayerStack,
+    groups: dict,
+) -> None:
+    """Find existing volume boundary faces at port locations.
+
+    Assign them as physical groups.
+
+    After fragmentation, the layer volumes have boundary faces at each
+    component port.  This function identifies those faces by matching
+    their bounding box to the expected port rectangle, then assigns
+    them to named surface physical groups (``port_<name>``).
+
+    Modifies *groups* in-place, adding a ``"port_surfaces"`` key.
+    """
+    from gsim.common.mesh.geometry import _resolve_port_layer
+
+    # Collect all boundary surfaces of post-fragment layer volumes
+    layer_boundary_surfs: set[int] = set()
+    for layer_info in groups["layer_volumes"].values():
+        for vtag in layer_info["tags"]:
+            try:
+                boundary = gmsh.model.getBoundary([(3, vtag)], oriented=False)
+                for _, stag in boundary:
+                    layer_boundary_surfs.add(stag)
+            except Exception:
+                pass
+
+    if not layer_boundary_surfs:
+        return
+
+    # Cache bounding boxes for all boundary surfaces
+    surf_bboxes: dict[int, tuple[float, ...]] = {}
+    import contextlib
+
+    for stag in layer_boundary_surfs:
+        with contextlib.suppress(Exception):
+            surf_bboxes[stag] = gmsh.model.getBoundingBox(2, stag)
+
+    tol = 0.02  # bounding-box match tolerance (um)
+
+    groups["port_surfaces"] = {}
+
+    for port in component.ports:
+        resolved = _resolve_port_layer(port, component, stack)
+        if resolved is None:
+            continue
+        layer_name, zmin, zmax = resolved
+
+        cx, cy = float(port.center[0]), float(port.center[1])
+        hw = float(port.width) / 2
+        angle = float(port.orientation) % 360
+
+        # Expected port rectangle bounds
+        if angle < 45 or angle >= 315 or (135 <= angle < 225):
+            # East/West → YZ plane at x=cx
+            exp = (cx, cy - hw, zmin, cx, cy + hw, zmax)
+        else:
+            # North/South → XZ plane at y=cy
+            exp = (cx - hw, cy, zmin, cx + hw, cy, zmax)
+
+        matching_tags: list[int] = []
+        for stag, bbox in surf_bboxes.items():
+            sxmin, symin, szmin, sxmax, symax, szmax = bbox
+            if (
+                abs(sxmin - exp[0]) < tol
+                and abs(symin - exp[1]) < tol
+                and abs(szmin - exp[2]) < tol
+                and abs(sxmax - exp[3]) < tol
+                and abs(symax - exp[4]) < tol
+                and abs(szmax - exp[5]) < tol
+            ):
+                matching_tags.append(stag)
+
+        if matching_tags:
+            phys_group = gmsh_utils.assign_physical_group(
+                2, matching_tags, f"port_{port.name}"
+            )
+            groups["port_surfaces"][port.name] = {
+                "phys_group": phys_group,
+                "tags": matching_tags,
+                "center": [cx, cy],
+                "width": float(port.width),
+                "orientation": angle,
+                "layer": layer_name,
+                "z_range": [zmin, zmax],
+            }
+            logger.info(
+                "Port '%s': phys_group=%d (%d face(s)) on layer '%s'",
+                port.name,
+                phys_group,
+                len(matching_tags),
+                layer_name,
+            )
+        else:
+            logger.warning(
+                "Port '%s': no matching boundary face found at center=(%.3f, %.3f)",
+                port.name,
+                cx,
+                cy,
+            )
+
+    gmsh.model.occ.synchronize()
 
 
 def _setup_generic_refinement(
