@@ -5,12 +5,17 @@ of gdsfactory+.
 
 Currently includes:
     - palace: Palace EM simulation API
+    - meep: MEEP photonic FDTD simulation API
 """
 
 from __future__ import annotations
 
-__version__ = "0.0.3"
+from gsim.gcloud import get_status, wait_for_results
+
+__version__ = "0.0.6"
 
 __all__ = [
     "__version__",
+    "get_status",
+    "wait_for_results",
 ]

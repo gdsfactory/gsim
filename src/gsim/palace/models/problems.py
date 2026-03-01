@@ -64,7 +64,7 @@ class DrivenConfig(BaseModel):
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
         freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
-        return {
+        config: dict = {
             "Samples": [
                 {
                     "Type": "Linear" if self.scale == "linear" else "Log",
@@ -76,6 +76,9 @@ class DrivenConfig(BaseModel):
             ],
             "AdaptiveTol": max(0, self.adaptive_tol),
         }
+        if self.adaptive_tol > 0:
+            config["AdaptiveMaxSamples"] = self.adaptive_max_samples
+        return config
 
 
 class EigenmodeConfig(BaseModel):

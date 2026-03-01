@@ -60,32 +60,30 @@ class CPWPortConfig(BaseModel):
     CPW ports consist of two elements (upper and lower gaps) that are
     excited with opposite E-field directions to create the CPW mode.
 
+    The port is placed at the center of the signal conductor. The two
+    gap element surfaces are computed from s_width and gap_width.
+
     Attributes:
-        upper: Name of the upper gap port on the component
-        lower: Name of the lower gap port on the component
+        name: Port name (must match a single component port at the signal center)
         layer: Target conductor layer
+        s_width: Width of the signal (center) conductor (um)
+        gap_width: Width of each gap between signal and ground (um)
         length: Port extent along direction (um)
         impedance: Port impedance (Ohms)
         excited: Whether this port is excited
-        name: Optional name for the CPW port (default: "cpw_{lower}")
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    upper: str = Field(description="Name of upper gap port")
-    lower: str = Field(description="Name of lower gap port")
+    name: str = Field(description="Port name matching component port")
     layer: str = Field(description="Target conductor layer")
+    s_width: float = Field(gt=0, description="Signal conductor width (um)")
+    gap_width: float = Field(
+        gt=0, description="Gap width between signal and ground (um)"
+    )
     length: float = Field(gt=0, description="Port extent in um")
     impedance: float = Field(default=50.0, gt=0)
     excited: bool = True
-    name: str | None = Field(
-        default=None, description="CPW port name (default: cpw_{lower})"
-    )
-
-    @property
-    def effective_name(self) -> str:
-        """Get the effective port name."""
-        return self.name if self.name else f"cpw_{self.lower}"
 
 
 class TerminalConfig(BaseModel):

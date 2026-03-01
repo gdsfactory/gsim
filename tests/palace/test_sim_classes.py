@@ -34,7 +34,7 @@ class TestDrivenSimValidation:
     def test_cpw_port_requires_layer(self):
         """Test validation catches CPW port without layer."""
         sim = DrivenSim()
-        sim.add_cpw_port("P1", "P2", layer="", length=5.0)  # Empty layer
+        sim.add_cpw_port("P1", layer="", s_width=10, gap_width=6, length=5.0)
         result = sim.validate_config()
         assert not result.valid
         assert any("'layer' is required" in e for e in result.errors)
@@ -121,6 +121,7 @@ class TestMixinMethods:
             sim = cls()
             sim.set_output_dir(tmp_path / "test")
             assert sim.output_dir == tmp_path / "test"
+            assert sim.output_dir is not None
             assert sim.output_dir.exists()
 
     def test_set_stack(self):

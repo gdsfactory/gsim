@@ -5,6 +5,8 @@ This module provides visualization tools for meshes and simulation results.
 
 from __future__ import annotations
 
+__all__ = ["plot_mesh"]
+
 import logging
 from pathlib import Path
 
@@ -67,7 +69,7 @@ def plot_mesh(
                     line_width=1,
                     label=group_map.get(gid, str(gid)),
                 )
-        plotter.add_legend()  # type: ignore[call-arg]
+        plotter.add_legend()
     else:
         plotter.add_mesh(mesh, style="wireframe", color="black", line_width=1)
 

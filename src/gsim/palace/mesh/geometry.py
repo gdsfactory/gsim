@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class GeometryData:
     """Container for geometry data extracted from component."""
 
-    polygons: list  # List of (layer_num, pts_x, pts_y) tuples
+    polygons: list  # List of (layer_num, pts_x, pts_y, holes) tuples
     bbox: tuple[float, float, float, float]  # (xmin, ymin, xmax, ymax)
     layer_bboxes: dict  # layer_num -> (xmin, ymin, xmax, ymax)
 
@@ -76,7 +76,16 @@ def extract_geometry(component, stack: LayerStack) -> GeometryData:
             pts_x = [pt.x / 1000.0 for pt in points]
             pts_y = [pt.y / 1000.0 for pt in points]
 
-            polygons.append((layernum, pts_x, pts_y))
+            # Extract holes from polygon
+            holes = []
+            for hole_idx in range(poly.holes()):
+                hole_pts = list(poly.each_point_hole(hole_idx))
+                if len(hole_pts) >= 3:
+                    hx = [pt.x / 1000.0 for pt in hole_pts]
+                    hy = [pt.y / 1000.0 for pt in hole_pts]
+                    holes.append((hx, hy))
+
+            polygons.append((layernum, pts_x, pts_y, holes))
 
             # Update bounding boxes
             xmin, xmax = min(pts_x), max(pts_x)
@@ -130,15 +139,18 @@ def add_metals(
     kernel,
     geometry: GeometryData,
     stack: LayerStack,
+    planar_conductors: bool = False,
 ) -> dict:
     """Add metal and via geometries to gmsh.
 
     Creates extruded volumes for vias and shells (surfaces) for conductors.
+    If planar_conductors is True, conductors are treated as 2D surfaces (PEC).
 
     Args:
         kernel: gmsh OCC kernel
         geometry: Extracted geometry data
         stack: LayerStack with layer definitions
+        planar_conductors: If True, treat conductors as 2D PEC surfaces
 
     Returns:
         Dict with layer_name -> list of (surface_tags_xy, surface_tags_z) for
@@ -149,10 +161,10 @@ def add_metals(
 
     # Group polygons by layer
     polygons_by_layer = {}
-    for layernum, pts_x, pts_y in geometry.polygons:
+    for layernum, pts_x, pts_y, holes in geometry.polygons:
         if layernum not in polygons_by_layer:
             polygons_by_layer[layernum] = []
-        polygons_by_layer[layernum].append((pts_x, pts_y))
+        polygons_by_layer[layernum].append((pts_x, pts_y, holes))
 
     # Process each layer
     for layernum, polys in polygons_by_layer.items():
@@ -175,13 +187,18 @@ def add_metals(
                 "surfaces_z": [],
             }
 
-        for pts_x, pts_y in polys:
+        for pts_x, pts_y, holes in polys:
             # Create extruded polygon
-            surfacetag = gmsh_utils.create_polygon_surface(kernel, pts_x, pts_y, zmin)
+            surfacetag = gmsh_utils.create_polygon_surface(
+                kernel, pts_x, pts_y, zmin, holes=holes
+            )
             if surfacetag is None:
                 continue
 
-            if thickness > 0:
+            if planar_conductors and layer_type == "conductor":
+                # For planar conductors, keep as 2D surface (PEC boundary)
+                metal_tags[layer_name]["surfaces_xy"].append(surfacetag)
+            elif thickness > 0:
                 result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
                 volumetag = result[1][1]
 

@@ -63,6 +63,7 @@ def create_polygon_surface(
     pts_y: list[float],
     z: float,
     meshseed: float = 0,
+    holes: list[tuple[list[float], list[float]]] | None = None,
 ) -> int | None:
     """Create a planar surface from polygon vertices at z height.
 
@@ -72,6 +73,7 @@ def create_polygon_surface(
         pts_y: list of y coordinates
         z: z coordinate of the surface
         meshseed: mesh seed size at vertices (0 = auto)
+        holes: list of (hole_pts_x, hole_pts_y) tuples for interior holes
 
     Returns:
         Surface tag, or None if polygon is invalid
@@ -101,9 +103,28 @@ def create_polygon_surface(
     if len(linetaglist) < 3:
         return None
 
-    # Create surface
+    # Create outer curve loop
     curvetag = kernel.addCurveLoop(linetaglist, tag=-1)
-    surfacetag = kernel.addPlaneSurface([curvetag], tag=-1)
+
+    # Create hole curve loops
+    all_loops = [curvetag]
+    for hx, hy in holes or []:
+        hole_lines = []
+        hole_verts = []
+        for v in range(len(hx)):
+            vtag = kernel.addPoint(hx[v], hy[v], z, meshseed, -1)
+            hole_verts.append(vtag)
+        for v in range(len(hx)):
+            try:
+                ltag = kernel.addLine(hole_verts[v], hole_verts[(v + 1) % len(hx)], -1)
+                hole_lines.append(ltag)
+            except Exception:
+                pass
+        if len(hole_lines) >= 3:
+            hole_loop = kernel.addCurveLoop(hole_lines, tag=-1)
+            all_loops.append(hole_loop)
+
+    surfacetag = kernel.addPlaneSurface(all_loops, tag=-1)
 
     return surfacetag
 
@@ -115,6 +136,7 @@ def extrude_polygon(
     zmin: float,
     thickness: float,
     meshseed: float = 0,
+    holes: list[tuple[list[float], list[float]]] | None = None,
 ) -> int | None:
     """Create an extruded polygon volume (for vias, metals).
 
@@ -125,11 +147,14 @@ def extrude_polygon(
         zmin: base z coordinate
         thickness: extrusion height
         meshseed: mesh seed size at vertices
+        holes: list of (hole_pts_x, hole_pts_y) tuples for interior holes
 
     Returns:
         Volume tag if thickness > 0, surface tag if thickness == 0, or None if invalid
     """
-    surfacetag = create_polygon_surface(kernel, pts_x, pts_y, zmin, meshseed)
+    surfacetag = create_polygon_surface(
+        kernel, pts_x, pts_y, zmin, meshseed, holes=holes
+    )
     if surfacetag is None:
         return None
 

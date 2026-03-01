@@ -21,6 +21,7 @@ class MeshConfig(BaseModel):
         air_above: Air above top metal (um)
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
+        planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
         show_gui: Show gmsh GUI during meshing
         preview_only: Generate preview only, don't save mesh
     """
@@ -34,6 +35,7 @@ class MeshConfig(BaseModel):
     air_above: float = Field(default=100.0, ge=0)
     fmax: float = Field(default=100e9, gt=0)
     boundary_conditions: list[str] | None = None
+    planar_conductors: bool = False
     show_gui: bool = False
     preview_only: bool = False
 

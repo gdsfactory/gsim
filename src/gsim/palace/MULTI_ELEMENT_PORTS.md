@@ -4,7 +4,8 @@
 
 ## Problem
 
-Coplanar waveguide (CPW) structures require multi-element lumped ports to properly excite the CPW mode. Single-element ports treat each gap as independent and result in incorrect S-parameters (no transmission).
+Coplanar waveguide (CPW) structures require multi-element lumped ports to properly excite the CPW mode. Single-element
+ports treat each gap as independent and result in incorrect S-parameters (no transmission).
 
 ## Background
 
@@ -68,18 +69,21 @@ result = generate_mesh(
 ### How It Works
 
 1. `configure_cpw_port()` links two gdsfactory ports as CPW elements
+
    - Stores `palace_type='cpw_element'` in port.info
    - Assigns `cpw_group` ID to link the pair
    - Auto-detects +/- directions based on Y positions
 
-2. `extract_cpw_ports()` groups CPW elements into `CPWPort` objects
+1. `extract_cpw_ports()` groups CPW elements into `CPWPort` objects
+
    - Each CPWPort has `upper_center` and `lower_center`
    - `get_element_directions()` returns `("+Y", "-Y")` or similar
 
-3. Mesh generator creates separate surfaces for each element
+1. Mesh generator creates separate surfaces for each element
+
    - Physical groups: `P1_E0`, `P1_E1` for port 1 elements
 
-4. Config generator outputs multi-element format:
+1. Config generator outputs multi-element format:
 
 ```json
 {

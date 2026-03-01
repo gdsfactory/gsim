@@ -45,7 +45,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         >>> sim.set_eigenmode(num_modes=10, target=50e9)
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
-        >>> results = sim.simulate()
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -131,41 +131,41 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
     def add_cpw_port(
         self,
-        upper: str,
-        lower: str,
+        name: str,
         *,
         layer: str,
+        s_width: float,
+        gap_width: float,
         length: float,
         impedance: float = 50.0,
         excited: bool = True,
-        name: str | None = None,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
 
         Args:
-            upper: Name of the upper gap port on the component
-            lower: Name of the lower gap port on the component
+            name: Name of the port on the component (at signal center)
             layer: Target conductor layer
+            s_width: Signal conductor width (um)
+            gap_width: Gap width between signal and ground (um)
             length: Port extent along direction (um)
             impedance: Port impedance (Ohms)
             excited: Whether this port is excited
-            name: Optional name for the CPW port
 
         Example:
-            >>> sim.add_cpw_port("P2", "P1", layer="topmetal2", length=5.0)
+            >>> sim.add_cpw_port(
+            ...     "o1", layer="topmetal2", s_width=10, gap_width=6, length=5
+            ... )
         """
-        self.cpw_ports = [
-            p for p in self.cpw_ports if not (p.upper == upper and p.lower == lower)
-        ]
+        self.cpw_ports = [p for p in self.cpw_ports if p.name != name]
         self.cpw_ports.append(
             CPWPortConfig(
-                upper=upper,
-                lower=lower,
+                name=name,
                 layer=layer,
+                s_width=s_width,
+                gap_width=gap_width,
                 length=length,
                 impedance=impedance,
                 excited=excited,
-                name=name,
             )
         )
 
@@ -291,27 +291,26 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 )
 
         for cpw_config in self.cpw_ports:
-            port_upper = None
-            port_lower = None
+            gf_port = None
             for p in component.ports:
-                if p.name == cpw_config.upper:
-                    port_upper = p
-                if p.name == cpw_config.lower:
-                    port_lower = p
+                if p.name == cpw_config.name:
+                    gf_port = p
+                    break
 
-            if port_upper is None:
-                raise ValueError(f"CPW upper port '{cpw_config.upper}' not found.")
-            if port_lower is None:
-                raise ValueError(f"CPW lower port '{cpw_config.lower}' not found.")
+            if gf_port is None:
+                raise ValueError(
+                    f"CPW port '{cpw_config.name}' not found on component. "
+                    f"Available: {[p.name for p in component.ports]}"
+                )
 
             configure_cpw_port(
-                port_upper=port_upper,
-                port_lower=port_lower,
+                gf_port,
                 layer=cpw_config.layer,
+                s_width=cpw_config.s_width,
+                gap_width=cpw_config.gap_width,
                 length=cpw_config.length,
                 impedance=cpw_config.impedance,
                 excited=cpw_config.excited,
-                cpw_name=cpw_config.name,
             )
 
         self._configured_ports = True
@@ -339,6 +338,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             fmax=mesh_config.fmax,
             show_gui=mesh_config.show_gui,
             preview_only=mesh_config.preview_only,
+            planar_conductors=mesh_config.planar_conductors,
         )
 
         stack = self._resolve_stack()
@@ -387,6 +387,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         margin: float | None = None,
         air_above: float | None = None,
         fmax: float | None = None,
+        planar_conductors: bool | None = None,
         show_gui: bool = True,
     ) -> None:
         """Preview the mesh without running simulation.
@@ -398,10 +399,11 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             margin: XY margin around design (um)
             air_above: Air above top metal (um)
             fmax: Max frequency for mesh sizing (Hz)
+            planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI for interactive preview
 
         Example:
-            >>> sim.preview(preset="fine", show_gui=True)
+            >>> sim.preview(preset="fine", planar_conductors=True, show_gui=True)
         """
         from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
         from gsim.palace.mesh import generate_mesh
@@ -419,6 +421,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             margin=margin,
             air_above=air_above,
             fmax=fmax,
+            planar_conductors=planar_conductors,
             show_gui=show_gui,
         )
 
@@ -434,6 +437,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             fmax=mesh_config.fmax,
             show_gui=show_gui,
             preview_only=True,
+            planar_conductors=mesh_config.planar_conductors,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -458,6 +462,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         margin: float | None = None,
         air_above: float | None = None,
         fmax: float | None = None,
+        planar_conductors: bool | None = None,
         show_gui: bool = False,
         model_name: str = "palace",
         verbose: bool = True,
@@ -473,6 +478,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             margin: XY margin around design (um), overrides preset
             air_above: Air above top metal (um), overrides preset
             fmax: Max frequency for mesh sizing (Hz), overrides preset
+            planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI during meshing
             model_name: Base name for output files
             verbose: Print progress messages
@@ -485,7 +491,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
         Example:
             >>> sim.set_output_dir("./sim")
-            >>> result = sim.mesh(preset="fine")
+            >>> result = sim.mesh(preset="fine", planar_conductors=True)
             >>> print(f"Mesh saved to: {result.mesh_path}")
         """
         from gsim.palace.ports import extract_ports
@@ -502,6 +508,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             margin=margin,
             air_above=air_above,
             fmax=fmax,
+            planar_conductors=planar_conductors,
             show_gui=show_gui,
         )
 
@@ -530,7 +537,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Simulation
     # -------------------------------------------------------------------------
 
-    def simulate(
+    def run(
         self,
         output_dir: str | Path | None = None,
         *,

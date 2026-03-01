@@ -244,6 +244,7 @@ class PalaceSimMixin:
         margin: float | None,
         air_above: float | None,
         fmax: float | None,
+        planar_conductors: bool | None,
         show_gui: bool,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides."""
@@ -256,6 +257,15 @@ class PalaceSimMixin:
             mesh_config = MeshConfig.fine()
         else:
             mesh_config = MeshConfig.default()
+
+        # Preserve planar_conductors from sim.mesh_config if not
+        # explicitly provided via sim.mesh(planar_conductors=...)
+        if planar_conductors is None:
+            existing_config = getattr(self, "mesh_config", None)
+            if existing_config is not None:
+                mesh_config.planar_conductors = existing_config.planar_conductors
+        else:
+            mesh_config.planar_conductors = planar_conductors
 
         # Track overrides for warning
         overrides = []
@@ -270,6 +280,8 @@ class PalaceSimMixin:
                 overrides.append(f"air_above={air_above}")
             if fmax is not None:
                 overrides.append(f"fmax={fmax}")
+            if planar_conductors is not None:
+                overrides.append(f"planar_conductors={planar_conductors}")
 
             if overrides:
                 warnings.warn(

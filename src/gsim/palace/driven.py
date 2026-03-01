@@ -42,11 +42,12 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         >>> sim = DrivenSim()
         >>> sim.set_geometry(component)
         >>> sim.set_stack(air_above=300.0)
-        >>> sim.add_cpw_port("P2", "P1", layer="topmetal2", length=5.0)
-        >>> sim.add_cpw_port("P3", "P4", layer="topmetal2", length=5.0)
+        >>> sim.add_cpw_port("o1", layer="topmetal2", s_width=10, gap_width=6, length=5)
+        >>> sim.add_cpw_port("o2", layer="topmetal2", s_width=10, gap_width=6, length=5)
         >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
-        >>> sim.mesh("./sim", preset="default")
-        >>> results = sim.simulate()
+        >>> sim.set_output_dir("./sim")
+        >>> sim.mesh(preset="default")
+        >>> results = sim.run()
 
     Attributes:
         geometry: Wrapped gdsfactory Component (from common)
@@ -90,6 +91,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     _configured_ports: bool = PrivateAttr(default=False)
     _last_mesh_result: Any = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)
+
+    # Cloud job state (set by upload/run)
+    _job_id: str | None = PrivateAttr(default=None)
 
     # -------------------------------------------------------------------------
     # Port methods
@@ -143,46 +147,49 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
     def add_cpw_port(
         self,
-        upper: str,
-        lower: str,
+        name: str,
         *,
         layer: str,
+        s_width: float,
+        gap_width: float,
         length: float,
         impedance: float = 50.0,
         excited: bool = True,
-        name: str | None = None,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
 
         CPW ports consist of two elements (upper and lower gaps) that are
         excited with opposite E-field directions to create the CPW mode.
 
+        Place a single gdsfactory port at the center of the signal conductor.
+        The two gap element surfaces are computed from s_width and gap_width.
+
         Args:
-            upper: Name of the upper gap port on the component
-            lower: Name of the lower gap port on the component
+            name: Port name (must match a component port at the signal center)
             layer: Target conductor layer (e.g., "topmetal2")
+            s_width: Width of the signal (center) conductor (um)
+            gap_width: Width of each gap between signal and ground (um)
             length: Port extent along direction (um)
             impedance: Port impedance (Ohms)
             excited: Whether this port is excited
-            name: Optional name for the CPW port (default: "cpw_{lower}")
 
         Example:
-            >>> sim.add_cpw_port("P2", "P1", layer="topmetal2", length=5.0)
+            >>> sim.add_cpw_port(
+            ...     "left", layer="topmetal2", s_width=20, gap_width=15, length=5.0
+            ... )
         """
-        # Remove existing CPW port with same elements if any
-        self.cpw_ports = [
-            p for p in self.cpw_ports if not (p.upper == upper and p.lower == lower)
-        ]
+        # Remove existing CPW port with same name if any
+        self.cpw_ports = [p for p in self.cpw_ports if p.name != name]
 
         self.cpw_ports.append(
             CPWPortConfig(
-                upper=upper,
-                lower=lower,
+                name=name,
                 layer=layer,
+                s_width=s_width,
+                gap_width=gap_width,
                 length=length,
                 impedance=impedance,
                 excited=excited,
-                name=name,
             )
         )
 
@@ -275,7 +282,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
             # Validate CPW ports
             errors.extend(
-                f"CPW port ({cpw.upper}, {cpw.lower}): 'layer' is required"
+                f"CPW port '{cpw.name}': 'layer' is required"
                 for cpw in self.cpw_ports
                 if not cpw.layer
             )
@@ -283,7 +290,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         # Validate excitation port if specified
         if self.driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
-            cpw_names = [cpw.effective_name for cpw in self.cpw_ports]
+            cpw_names = [cpw.name for cpw in self.cpw_ports]
             all_port_names = port_names + cpw_names
             if self.driven.excitation_port not in all_port_names:
                 errors.append(
@@ -349,38 +356,26 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         # Configure CPW ports
         for cpw_config in self.cpw_ports:
-            # Find upper port
-            port_upper = None
+            # Find the single gdsfactory port at the signal center
+            gf_port = None
             for p in component.ports:
-                if p.name == cpw_config.upper:
-                    port_upper = p
+                if p.name == cpw_config.name:
+                    gf_port = p
                     break
-            if port_upper is None:
+            if gf_port is None:
                 raise ValueError(
-                    f"CPW upper port '{cpw_config.upper}' not found. "
-                    f"Available: {[p.name for p in component.ports]}"
-                )
-
-            # Find lower port
-            port_lower = None
-            for p in component.ports:
-                if p.name == cpw_config.lower:
-                    port_lower = p
-                    break
-            if port_lower is None:
-                raise ValueError(
-                    f"CPW lower port '{cpw_config.lower}' not found. "
+                    f"CPW port '{cpw_config.name}' not found on component. "
                     f"Available: {[p.name for p in component.ports]}"
                 )
 
             configure_cpw_port(
-                port_upper=port_upper,
-                port_lower=port_lower,
+                gf_port,
                 layer=cpw_config.layer,
+                s_width=cpw_config.s_width,
+                gap_width=cpw_config.gap_width,
                 length=cpw_config.length,
                 impedance=cpw_config.impedance,
                 excited=cpw_config.excited,
-                cpw_name=cpw_config.name,
             )
 
         self._configured_ports = True
@@ -415,6 +410,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             fmax=effective_fmax,
             show_gui=mesh_config.show_gui,
             preview_only=mesh_config.preview_only,
+            planar_conductors=mesh_config.planar_conductors,
         )
 
         # Resolve stack
@@ -467,6 +463,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         margin: float | None = None,
         air_above: float | None = None,
         fmax: float | None = None,
+        planar_conductors: bool | None = None,
         show_gui: bool = True,
     ) -> None:
         """Preview the mesh without running simulation.
@@ -480,10 +477,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             margin: XY margin around design (um)
             air_above: Air above top metal (um)
             fmax: Max frequency for mesh sizing (Hz)
+            planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI for interactive preview
 
         Example:
-            >>> sim.preview(preset="fine", show_gui=True)
+            >>> sim.preview(preset="fine", planar_conductors=True, show_gui=True)
         """
         from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
         from gsim.palace.mesh import generate_mesh
@@ -503,6 +501,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             margin=margin,
             air_above=air_above,
             fmax=fmax,
+            planar_conductors=planar_conductors,
             show_gui=show_gui,
         )
 
@@ -522,6 +521,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             fmax=mesh_config.fmax,
             show_gui=show_gui,
             preview_only=True,
+            planar_conductors=mesh_config.planar_conductors,
         )
 
         # Generate mesh in temp directory
@@ -547,6 +547,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         margin: float | None = None,
         air_above: float | None = None,
         fmax: float | None = None,
+        planar_conductors: bool | None = None,
         show_gui: bool = False,
         model_name: str = "palace",
         verbose: bool = True,
@@ -565,6 +566,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             margin: XY margin around design (um), overrides preset
             air_above: Air above top metal (um), overrides preset
             fmax: Max frequency for mesh sizing (Hz), overrides preset
+            planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI during meshing
             model_name: Base name for output files
             verbose: Print progress messages
@@ -577,7 +579,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         Example:
             >>> sim.set_output_dir("./sim")
-            >>> result = sim.mesh(preset="fine")
+            >>> result = sim.mesh(preset="fine", planar_conductors=True)
             >>> print(f"Mesh saved to: {result.mesh_path}")
         """
         from gsim.palace.ports import extract_ports
@@ -595,6 +597,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             margin=margin,
             air_above=air_above,
             fmax=fmax,
+            planar_conductors=planar_conductors,
             show_gui=show_gui,
         )
 
@@ -660,69 +663,299 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         return config_path
 
     # -------------------------------------------------------------------------
-    # Simulation
+    # Cloud: fine-grained control
     # -------------------------------------------------------------------------
 
-    def simulate(
-        self,
-        *,
-        verbose: bool = True,
-    ) -> dict[str, Path]:
-        """Run simulation on GDSFactory+ cloud.
+    def _prepare_upload_dir(self) -> Path:
+        """Prepare a temp directory with all config/mesh files for upload.
 
-        Requires mesh() and write_config() to be called first.
-
-        Args:
-            verbose: Print progress messages
+        Ensures ``_output_dir`` is set, ``config.json`` exists, and copies
+        everything to a fresh temp directory.
 
         Returns:
-            Dict mapping result filenames to local paths
-
-        Raises:
-            ValueError: If output_dir not set
-            FileNotFoundError: If mesh or config files don't exist
-            RuntimeError: If simulation fails
-
-        Example:
-            >>> results = sim.simulate()
-            >>> print(f"S-params saved to: {results['port-S.csv']}")
+            Path to temp directory ready for upload.
         """
-        from gsim.gcloud import run_simulation
+        import shutil
 
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
 
-        output_dir = self._output_dir
+        # Always (re)generate config.json to reflect current driven settings
+        self.write_config()
 
-        return run_simulation(
-            output_dir,
-            job_type="palace",
-            verbose=verbose,
-        )
+        # Copy input files to a temp dir so we don't destroy the user's directory
+        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
+        for item in self._output_dir.iterdir():
+            dest = tmp / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+        return tmp
 
-    def simulate_local(
+    def upload(self, *, verbose: bool = True) -> str:
+        """Prepare config, upload to the cloud. Does NOT start execution.
+
+        Requires :meth:`set_output_dir` and :meth:`mesh` to have been
+        called first.
+
+        Args:
+            verbose: Print progress messages.
+
+        Returns:
+            ``job_id`` string for use with :meth:`start`, :meth:`get_status`,
+            or :func:`gsim.wait_for_results`.
+        """
+        from gsim import gcloud
+
+        tmp = self._prepare_upload_dir()
+        try:
+            self._job_id = gcloud.upload(tmp, "palace", verbose=verbose)
+        except Exception:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return self._job_id
+
+    def start(self, *, verbose: bool = True) -> None:
+        """Start cloud execution for this sim's uploaded job.
+
+        Raises:
+            ValueError: If :meth:`upload` has not been called.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("Call upload() first")
+        gcloud.start(self._job_id, verbose=verbose)
+
+    def get_status(self) -> str:
+        """Get the current status of this sim's cloud job.
+
+        Returns:
+            Status string (``"created"``, ``"queued"``, ``"running"``,
+            ``"completed"``, ``"failed"``).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.get_status(self._job_id)
+
+    def wait_for_results(
         self,
         *,
         verbose: bool = True,
-    ) -> dict[str, Path]:
-        """Run simulation locally using Palace.
-
-        Requires mesh() and write_config() to be called first,
-        and Palace to be installed locally.
+        parent_dir: str | Path | None = None,
+    ) -> Any:
+        """Wait for this sim's cloud job, download and parse results.
 
         Args:
+            verbose: Print progress messages.
+            parent_dir: Where to create the sim-data directory.
+
+        Returns:
+            Parsed result (typically ``dict[str, Path]`` of output files).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.wait_for_results(
+            self._job_id, verbose=verbose, parent_dir=parent_dir
+        )
+
+    # -------------------------------------------------------------------------
+    # Simulation
+    # -------------------------------------------------------------------------
+
+    def run(
+        self,
+        parent_dir: str | Path | None = None,
+        *,
+        verbose: bool = True,
+        wait: bool = True,
+    ) -> dict[str, Path] | str:
+        """Run simulation on GDSFactory+ cloud.
+
+        Requires mesh() to be called first. Automatically calls
+        write_config() if config.json hasn't been written yet.
+
+        Args:
+            parent_dir: Where to create the sim directory.
+                Defaults to the current working directory.
+            verbose: Print progress messages.
+            wait: If ``True`` (default), block until results are ready.
+                If ``False``, upload + start and return the ``job_id``.
+
+        Returns:
+            ``dict[str, Path]`` of output files when ``wait=True``,
+            or ``job_id`` string when ``wait=False``.
+
+        Raises:
+            ValueError: If output_dir not set or mesh not generated
+            RuntimeError: If simulation fails
+
+        Example:
+            >>> results = sim.run()
+            >>> print(f"S-params saved to: {results['port-S.csv']}")
+        """
+        self.upload(verbose=False)
+        self.start(verbose=verbose)
+        if not wait:
+            return self._job_id  # type: ignore[return-value]  # set by upload()
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+
+    def run_local(
+        self,
+        *,
+        palace_sif_path: str | Path | None = None,
+        num_processes: int | None = None,
+        verbose: bool = True,
+    ) -> dict[str, Path]:
+        """Run simulation locally using Palace via Apptainer.
+
+        Requires mesh() and write_config() to be called first,
+        and Palace to be installed locally via Apptainer.
+
+        Args:
+            palace_sif_path: Path to Palace Apptainer SIF file.
+                If None, uses PALACE_SIF environment variable.
+            num_processes: Number of MPI processes (default: CPU count - 2)
             verbose: Print progress messages
 
         Returns:
             Dict mapping result filenames to local paths
 
         Raises:
-            NotImplementedError: Local simulation is not yet implemented
+            ValueError: If output_dir not set or PALACE_SIF not configured
+            FileNotFoundError: If mesh, config, or Palace SIF not found
+            RuntimeError: If simulation fails
+
+        Example:
+            >>> # Using environment variable
+            >>> import os
+            >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
+            >>> results = sim.simulate_local()
+            >>>
+            >>> # Or specify path directly
+            >>> results = sim.simulate_local(palace_sif_path="/path/to/Palace.sif")
+            >>> print(f"S-params: {results['port-S.csv']}")
         """
-        raise NotImplementedError(
-            "Local simulation is not yet implemented. "
-            "Use simulate() to run on GDSFactory+ cloud."
-        )
+        import os
+        import subprocess
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        output_dir = Path(self._output_dir)
+        config_path = output_dir / "config.json"
+        mesh_path = output_dir / "palace.msh"
+
+        # Check required files exist
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {config_path}. Call write_config() first."
+            )
+
+        if not mesh_path.exists():
+            raise FileNotFoundError(
+                f"Mesh file not found: {mesh_path}. Call mesh() first."
+            )
+
+        # Determine Palace SIF path from environment variable or parameter
+        if palace_sif_path is None:
+            palace_sif_path = os.environ.get("PALACE_SIF")
+            if palace_sif_path is None:
+                raise ValueError(
+                    "Palace SIF path not specified. Either set PALACE_SIF "
+                    "environment variable or pass palace_sif_path parameter."
+                )
+            if verbose:
+                logger.info("Using PALACE_SIF from environment: %s", palace_sif_path)
+
+        sif_path = Path(palace_sif_path).expanduser().resolve()
+
+        if not sif_path.exists():
+            raise FileNotFoundError(
+                f"Palace SIF file not found: {sif_path}. "
+                "Install Palace via Apptainer or provide correct path."
+            )
+
+        # Determine number of processes
+        if num_processes is None:
+            try:
+                import psutil
+
+                num_processes = psutil.cpu_count(logical=True) or 1
+            except ImportError:
+                import os
+
+                num_processes = os.cpu_count() or 1
+
+        # Build command
+        cmd = [
+            "apptainer",
+            "run",
+            str(sif_path),
+            "-nt",
+            str(num_processes),
+            "config.json",
+        ]
+
+        if verbose:
+            logger.info("Running Palace simulation in %s", output_dir)
+            logger.info("Command: %s", " ".join(cmd))
+            logger.info("Processes: %d", num_processes)
+
+        # Run simulation
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Log output if verbose
+            if verbose and result.stdout:
+                logger.info(result.stdout)
+            if verbose and result.stderr:
+                logger.warning(result.stderr)
+
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Palace simulation failed with return code {e.returncode}"
+            if e.stdout:
+                error_msg += f"\n\nStdout:\n{e.stdout}"
+            if e.stderr:
+                error_msg += f"\n\nStderr:\n{e.stderr}"
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "Apptainer not found. Install Apptainer to run local simulations."
+            ) from e
+
+        if verbose:
+            logger.info("Simulation completed successfully")
+
+        postpro_dir = output_dir / "output/palace/"
+
+        if verbose:
+            logger.info("Results saved to %s", postpro_dir)
+
+        return {
+            file.name: file
+            for file in postpro_dir.iterdir()
+            if file.is_file() and not file.name.startswith(".")
+        }
 
 
 __all__ = ["DrivenSim"]

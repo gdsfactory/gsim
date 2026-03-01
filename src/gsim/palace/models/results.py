@@ -26,9 +26,11 @@ class ValidationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     def __bool__(self) -> bool:
+        """Returns True if the validation passed, False otherwise."""
         return self.valid
 
     def __str__(self) -> str:
+        """Returns a formatted string representation of the validation results."""
         lines = []
         if self.valid:
             lines.append("Validation: PASSED")
@@ -78,6 +80,7 @@ class SimulationResult(BaseModel):
     mesh_stats: dict = Field(default_factory=dict)
 
     def __str__(self) -> str:
+        """Returns a formatted string summary of the simulation results."""
         lines = ["Mesh Summary"]
         lines.append("=" * 40)
 
@@ -151,6 +154,7 @@ class SimulationResult(BaseModel):
         return "\n".join(lines)
 
     def __repr__(self) -> str:
+        """Returns the string representation of the simulation results."""
         return self.__str__()
 
 

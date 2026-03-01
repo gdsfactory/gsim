@@ -1,122 +1,128 @@
-"""MkDocs hooks for gsim documentation."""
+"""MkDocs hooks for gsim documentation.
 
+Auto-generates docs/api.md from each module's ``__all__`` so the API
+reference stays in sync with the source code.
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
 from pathlib import Path
+from types import ModuleType
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DOCS_DIR = Path(__file__).parent
 API_MD = DOCS_DIR / "api.md"
 
-# Define the API structure to document
-API_SECTIONS = {
-    "Types": [
-        "gsim.palace.PortType",
-        "gsim.palace.MeshPreset",
-        "gsim.palace.GroundPlane",
-    ],
-    "Classes": [
-        "gsim.palace.Layer",
-        "gsim.palace.LayerStack",
-        "gsim.palace.StackLayer",
-        "gsim.palace.MaterialProperties",
-        "gsim.palace.ValidationResult",
-        "gsim.palace.PalacePort",
-        "gsim.palace.PortGeometry",
-        "gsim.palace.MeshConfig",
-        "gsim.palace.MeshResult",
-    ],
-    "Functions": [
-        "gsim.palace.get_stack",
-        "gsim.palace.load_stack_yaml",
-        "gsim.palace.extract_from_pdk",
-        "gsim.palace.extract_layer_stack",
-        "gsim.palace.parse_layer_stack",
-        "gsim.palace.get_material_properties",
-        "gsim.palace.material_is_conductor",
-        "gsim.palace.material_is_dielectric",
-        "gsim.palace.plot_stack",
-        "gsim.palace.print_stack",
-        "gsim.palace.print_stack_table",
-        "gsim.palace.configure_inplane_port",
-        "gsim.palace.configure_via_port",
-        "gsim.palace.configure_cpw_port",
-        "gsim.palace.extract_ports",
-        "gsim.palace.generate_mesh",
-    ],
-    "Constants": [
-        "gsim.palace.MATERIALS_DB",
-    ],
+# Modules to document, in display order.
+# Each entry is (heading, dotted module path).
+MODULES: list[tuple[str, str]] = [
+    ("gsim", "gsim"),
+    ("gsim.common", "gsim.common"),
+    ("gsim.common.viz", "gsim.common.viz"),
+    ("gsim.palace", "gsim.palace"),
+    ("gsim.meep", "gsim.meep"),
+    ("gsim.gcloud", "gsim.gcloud"),
+]
+
+# Names to skip (internal aliases, re-exports that duplicate another section).
+SKIP_NAMES: set[str] = {
+    "__version__",
+    "Stack",  # backward-compat alias for LayerStack
+    "MeshConfigModel",  # internal alias
 }
 
 
-def generate_api_md() -> str:
-    """Generate the API documentation markdown content."""
-    lines = ["# API\n"]
+def _is_public_api(name: str, obj: object) -> bool:
+    """Return True if *name* should appear in the API docs."""
+    if name.startswith("_"):
+        return False
+    if name in SKIP_NAMES:
+        return False
+    # Skip plain values (str, int, float, bool) — keep classes, functions, enums, etc.
+    return not isinstance(obj, (str, int, float, bool))
 
-    for section, items in API_SECTIONS.items():
-        lines.append(f"## {section}\n")
-        for item in items:
-            lines.append(f"::: {item}\n")
 
+def _classify(obj: object) -> str:
+    """Return a section label for *obj*."""
+    if isinstance(obj, type) and issubclass(obj, Exception):
+        return "Exceptions"
+    if isinstance(obj, type):
+        return "Classes"
+    if callable(obj):
+        return "Functions"
+    return "Data"
+
+
+def _module_section(heading: str, module_path: str) -> list[str]:
+    """Generate mkdocstrings directives for one module."""
+    try:
+        mod: ModuleType = importlib.import_module(module_path)
+    except Exception:
+        logger.warning("Could not import %s — skipping", module_path)
+        return []
+
+    names = getattr(mod, "__all__", None)
+    if names is None:
+        names = [n for n in dir(mod) if not n.startswith("_")]
+
+    # Group names by kind
+    groups: dict[str, list[str]] = {}
+    for name in sorted(names):
+        obj = getattr(mod, name, None)
+        if obj is None or not _is_public_api(name, obj):
+            continue
+        kind = _classify(obj)
+        groups.setdefault(kind, []).append(name)
+
+    if not groups:
+        return []
+
+    lines: list[str] = [f"## {heading}\n"]
+    # Preferred section order
+    for section in ("Classes", "Functions", "Data", "Exceptions"):
+        items = groups.get(section)
+        if not items:
+            continue
+        lines.append(f"### {section}\n")
+        for name in items:
+            lines.append(f"::: {module_path}.{name}\n")
+    return lines
+
+
+def generate_api_md() -> str | None:
+    """Generate the full API reference markdown.
+
+    Returns ``None`` if any module fails to import (e.g. missing
+    dependencies in CI) so callers can skip writing a partial file.
+    """
+    lines = ["# API Reference\n"]
+    for heading, module_path in MODULES:
+        try:
+            importlib.import_module(module_path)
+        except Exception:
+            logger.warning("Could not import %s — skipping generation", module_path)
+            return None
+        section = _module_section(heading, module_path)
+        if section:
+            lines.extend(section)
+            lines.append("---\n")
     return "\n".join(lines)
 
 
-def on_startup(command: str, dirty: bool, **kwargs: Any) -> None:
-    """Called once when the MkDocs build starts."""
-
-
-def on_shutdown(**kwargs: Any) -> None:
-    """Called once when the MkDocs build ends."""
-
-
-def on_config(config: Any, **kwargs: Any) -> Any:
-    """Called after config file is loaded but before validation."""
-    return config
+# ---------------------------------------------------------------------------
+# MkDocs hook entry points
+# ---------------------------------------------------------------------------
 
 
 def on_pre_build(config: Any, **kwargs: Any) -> None:
-    """Called before the build starts. Generate api.md here."""
+    """Generate api.md before the build starts."""
     api_content = generate_api_md()
+    if api_content is None:
+        logger.warning("Skipping api.md generation (import failure)")
+        return
     API_MD.write_text(api_content)
-
-
-def on_files(files: Any, config: Any, **kwargs: Any) -> Any:
-    """Called after files are gathered but before processing."""
-    return files
-
-
-def on_nav(nav: Any, config: Any, files: Any, **kwargs: Any) -> Any:
-    """Called after navigation is built."""
-    return nav
-
-
-def on_env(env: Any, config: Any, files: Any, **kwargs: Any) -> Any:
-    """Called after Jinja2 environment is created."""
-    return env
-
-
-def on_post_build(config: Any, **kwargs: Any) -> None:
-    """Called after the build is complete."""
-
-
-def on_pre_page(page: Any, config: Any, files: Any, **kwargs: Any) -> Any:
-    """Called before a page is processed."""
-    return page
-
-
-def on_page_markdown(
-    markdown: str, page: Any, config: Any, files: Any, **kwargs: Any
-) -> str:
-    """Process markdown content before it's converted to HTML."""
-    return markdown
-
-
-def on_page_content(
-    html: str, page: Any, config: Any, files: Any, **kwargs: Any
-) -> str:
-    """Called after markdown is converted to HTML."""
-    return html
-
-
-def on_post_page(output: str, page: Any, config: Any, **kwargs: Any) -> str:
-    """Called after page is fully processed."""
-    return output
+    logger.info("Generated %s (%d bytes)", API_MD, len(api_content))

@@ -80,11 +80,15 @@ class MeshConfig:
     # Options: 'ABC' (absorbing), 'PEC' (perfect electric conductor), 'PMC'
     boundary_conditions: list[str] | None = None
 
+    # Conductor modeling
+    planar_conductors: bool = False  # Treat conductors as 2D PEC surfaces
+
     # GUI control
     show_gui: bool = False  # Show gmsh GUI during meshing
     preview_only: bool = False  # Show geometry without meshing
 
     def __post_init__(self) -> None:
+        """Initializes default boundary conditions if not provided."""
         if self.boundary_conditions is None:
             # Default: ABC everywhere
             self.boundary_conditions = ["ABC", "ABC", "ABC", "ABC", "ABC", "ABC"]
@@ -189,11 +193,12 @@ def generate_mesh(
         refined_mesh_size=config.refined_mesh_size,
         max_mesh_size=config.max_mesh_size,
         margin=config.margin,
-        air_margin=config.margin,
+        air_margin=config.air_above,
         fmax=config.fmax,
         show_gui=config.show_gui,
         driven_config=driven_config,
         write_config=write_config,
+        planar_conductors=config.planar_conductors,
     )
 
     # Convert to pipeline's MeshResult format

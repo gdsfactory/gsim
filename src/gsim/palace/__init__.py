@@ -17,12 +17,13 @@ Usage:
     sim = DrivenSim()
     sim.set_geometry(component)
     sim.set_stack(air_above=300.0)
-    sim.add_cpw_port("P2", "P1", layer="topmetal2", length=5.0)
+    sim.add_cpw_port("o1", layer="topmetal2", s_width=10, gap_width=6, length=5)
     sim.set_driven(fmin=1e9, fmax=100e9)
 
     # Generate mesh and run
-    sim.mesh("./sim", preset="fine")
-    results = sim.simulate()
+    sim.set_output_dir("./sim")
+    sim.mesh(preset="fine")
+    results = sim.run()
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ from gsim.common.stack import (
     print_stack,
     print_stack_table,
 )
-from gsim.gcloud import print_job_summary
+from gsim.gcloud import RunResult, print_job_summary, register_result_parser
 from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
@@ -155,6 +156,14 @@ __all__ = [
     "print_stack_table",
     "run_simulation",
 ]
+
+
+def _parse_palace_result(run_result: RunResult) -> dict:
+    """Parse Palace cloud results — returns the files dict."""
+    return run_result.files
+
+
+register_result_parser("palace", _parse_palace_result)
 
 # Palace-specific run_simulation with job_type preset
 run_simulation = partial(_run_simulation, job_type="palace")

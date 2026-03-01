@@ -153,74 +153,72 @@ def configure_via_port(
 
 
 def configure_cpw_port(
-    port_upper,
-    port_lower,
+    port,
     layer: str,
+    s_width: float,
+    gap_width: float,
     length: float,
     impedance: float = 50.0,
     excited: bool = True,
-    cpw_name: str | None = None,
 ):
-    """Configure two gdsfactory ports as a CPW (multi-element) lumped port.
+    """Configure a gdsfactory port as a CPW (multi-element) lumped port.
 
     In CPW (Ground-Signal-Ground), E-fields are opposite in the two gaps.
-    This function links two ports to form one multi-element lumped port
-    that Palace will excite with proper CPW mode.
+    The port should be placed at the signal center. The upper and lower gap
+    centers are computed from the signal width and gap width.
 
     Args:
-        port_upper: gdsfactory Port for upper gap (signal-to-ground2)
-        port_lower: gdsfactory Port for lower gap (ground1-to-signal)
+        port: gdsfactory Port at the signal center
         layer: Target conductor layer name (e.g., 'topmetal2')
+        s_width: Signal conductor width in um
+        gap_width: Gap width between signal and ground in um
         length: Port extent along direction (um)
         impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited (default: True)
-        cpw_name: Optional name for the CPW port (default: uses port_lower.name)
 
     Examples:
         ```python
         configure_cpw_port(
-            port_upper=c.ports["gap_upper"],
-            port_lower=c.ports["gap_lower"],
+            c.ports["o1"],
             layer="topmetal2",
+            s_width=10.0,
+            gap_width=6.0,
             length=5.0,
         )
         ```
     """
-    # Generate unique CPW group ID
-    cpw_group_id = cpw_name or f"cpw_{port_lower.name}"
+    import numpy as np
 
-    # Auto-detect directions based on positions
-    upper_y = float(port_upper.center[1])
-    lower_y = float(port_lower.center[1])
+    center = np.array([float(port.center[0]), float(port.center[1])])
+    orientation_rad = np.deg2rad(
+        float(port.orientation) if port.orientation is not None else 0.0
+    )
 
-    # The port farther from origin in Y gets negative direction (E toward signal)
-    # The port closer to origin gets positive direction (E toward signal)
-    if upper_y > lower_y:
-        upper_direction = "-Y"
-        lower_direction = "+Y"
-    else:
-        upper_direction = "+Y"
-        lower_direction = "-Y"
+    # Transverse direction (perpendicular to port orientation, in-plane)
+    # Port orientation points along the waveguide; transverse is 90° CCW
+    transverse = np.array([-np.sin(orientation_rad), np.cos(orientation_rad)])
 
-    # Store metadata on BOTH ports, marking them as CPW elements
-    for port, direction in [
-        (port_upper, upper_direction),
-        (port_lower, lower_direction),
-    ]:
-        port.info["palace_type"] = "cpw_element"
-        port.info["cpw_group"] = cpw_group_id
-        port.info["cpw_direction"] = direction
-        port.info["layer"] = layer
-        port.info["length"] = length
-        port.info["impedance"] = impedance
-        port.info["excited"] = excited
+    # Gap center offset from signal center
+    offset = (s_width + gap_width) / 2.0
+
+    upper_center = center + transverse * offset
+    lower_center = center - transverse * offset
+
+    # Store computed CPW element info on the single port
+    port.info["palace_type"] = "cpw"
+    port.info["layer"] = layer
+    port.info["length"] = length
+    port.info["impedance"] = impedance
+    port.info["excited"] = excited
+    port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
+    port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
+    port.info["cpw_gap_width"] = gap_width
 
 
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """Extract Palace ports from a gdsfactory component.
 
     Handles all port types: inplane, via, and CPW (multi-element).
-    CPW ports are automatically grouped by their cpw_group ID.
 
     Args:
         component: gdsfactory Component with configured ports
@@ -231,9 +229,6 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """
     palace_ports = []
 
-    # First, collect CPW elements grouped by cpw_group
-    cpw_groups: dict[str, list] = {}
-
     for port in component.ports:
         info = port.info
         palace_type = info.get("palace_type")
@@ -241,12 +236,47 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         if palace_type is None:
             continue
 
-        if palace_type == "cpw_element":
-            group_id = info.get("cpw_group")
-            if group_id:
-                if group_id not in cpw_groups:
-                    cpw_groups[group_id] = []
-                cpw_groups[group_id].append(port)
+        if palace_type == "cpw":
+            # Single-port CPW: gap centers were pre-computed by configure_cpw_port
+            layer_name = info.get("layer")
+            zmin, zmax = 0.0, 0.0
+            if layer_name and layer_name in stack.layers:
+                layer = stack.layers[layer_name]
+                zmin = layer.zmin
+                zmax = layer.zmax
+
+            upper_center = info["cpw_upper_center"]
+            lower_center = info["cpw_lower_center"]
+            gap_width = info["cpw_gap_width"]
+
+            centers = [
+                (float(upper_center[0]), float(upper_center[1])),
+                (float(lower_center[0]), float(lower_center[1])),
+            ]
+            # Upper element: E-field toward signal (negative transverse)
+            # Lower element: E-field toward signal (positive transverse)
+            directions = ["-Y", "+Y"]
+
+            cpw_port = PalacePort(
+                name=port.name,
+                port_type=PortType.LUMPED,
+                geometry=PortGeometry.INPLANE,
+                center=(float(port.center[0]), float(port.center[1])),
+                width=gap_width,
+                orientation=float(port.orientation)
+                if port.orientation is not None
+                else 0.0,
+                zmin=zmin,
+                zmax=zmax,
+                layer=layer_name,
+                length=info.get("length"),
+                multi_element=True,
+                centers=centers,
+                directions=directions,
+                impedance=info.get("impedance", 50.0),
+                excited=info.get("excited", True),
+            )
+            palace_ports.append(cpw_port)
             continue
 
         # Handle single-element ports (lumped, waveport)
@@ -301,63 +331,5 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             excited=info.get("excited", True),
         )
         palace_ports.append(palace_port)
-
-    # Now process CPW groups into multi-element PalacePort objects
-    for group_id, ports in cpw_groups.items():
-        if len(ports) != 2:
-            raise ValueError(
-                f"CPW group '{group_id}' must have exactly 2 ports, got {len(ports)}"
-            )
-
-        # Sort by Y position to get consistent ordering
-        ports_sorted = sorted(ports, key=lambda p: p.center[1], reverse=True)
-        port_upper, port_lower = ports_sorted[0], ports_sorted[1]
-
-        info = port_lower.info
-        layer_name = info.get("layer")
-
-        # Get z coordinates from stack
-        zmin, zmax = 0.0, 0.0
-        if layer_name and layer_name in stack.layers:
-            layer = stack.layers[layer_name]
-            zmin = layer.zmin
-            zmax = layer.zmax
-
-        # Get centers and directions
-        centers = [
-            (float(port_upper.center[0]), float(port_upper.center[1])),
-            (float(port_lower.center[0]), float(port_lower.center[1])),
-        ]
-        directions = [
-            port_upper.info.get("cpw_direction", "-Y"),
-            port_lower.info.get("cpw_direction", "+Y"),
-        ]
-
-        # Use average center for the main center field
-        avg_center = (
-            (centers[0][0] + centers[1][0]) / 2,
-            (centers[0][1] + centers[1][1]) / 2,
-        )
-
-        cpw_port = PalacePort(
-            name=group_id,
-            port_type=PortType.LUMPED,
-            geometry=PortGeometry.INPLANE,
-            center=avg_center,
-            width=float(port_lower.width),
-            orientation=float(port_lower.orientation)
-            if port_lower.orientation
-            else 0.0,
-            zmin=zmin,
-            zmax=zmax,
-            layer=layer_name,
-            length=info.get("length"),
-            multi_element=True,
-            centers=centers,
-            directions=directions,
-            impedance=info.get("impedance", 50.0),
-            excited=info.get("excited", True),
-        )
-        palace_ports.append(cpw_port)
 
     return palace_ports
