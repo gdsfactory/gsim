@@ -19,6 +19,7 @@ Example::
 """
 
 from gsim.gcloud import RunResult, register_result_parser
+from gsim.meep.mesh_sim import MeepMeshSim
 from gsim.meep.models import (
     FDTD,
     Domain,
@@ -54,6 +55,7 @@ __all__ = [
     "DomainConfig",
     "Geometry",
     "Material",
+    "MeepMeshSim",
     "ModeSource",
     "ResolutionConfig",
     "SParameterResult",

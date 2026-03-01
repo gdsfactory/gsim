@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import gmsh_utils
+from gsim.common.mesh import gmsh_utils
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack

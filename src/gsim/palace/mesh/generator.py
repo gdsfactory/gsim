@@ -14,18 +14,17 @@ from typing import TYPE_CHECKING
 
 import gmsh
 
-from . import gmsh_utils
+from gsim.common.mesh import gmsh_utils
+from gsim.common.mesh.generator import collect_mesh_stats
+from gsim.common.mesh.geometry import GeometryData, add_dielectrics, extract_geometry
+
 from .config_generator import (
-    collect_mesh_stats,
     generate_palace_config,
     write_config,
 )
 from .geometry import (
-    GeometryData,
-    add_dielectrics,
     add_metals,
     add_ports,
-    extract_geometry,
 )
 from .groups import assign_physical_groups
 

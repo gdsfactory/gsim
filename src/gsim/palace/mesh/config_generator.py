@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import gmsh
+from gsim.common.mesh.generator import collect_mesh_stats
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
@@ -208,117 +208,6 @@ def generate_palace_config(
         json.dump(port_info_struct, f, indent=4)
 
     return config_path
-
-
-def collect_mesh_stats() -> dict:
-    """Collect mesh statistics from gmsh after mesh generation.
-
-    Must be called while gmsh is initialized and the mesh is generated.
-
-    Returns:
-        Dict with mesh statistics including:
-        - bbox: Bounding box coordinates
-        - nodes: Number of nodes
-        - elements: Total element count
-        - tetrahedra: Tet count
-        - quality: Shape quality metrics (gamma)
-        - sicn: Signed Inverse Condition Number
-        - edge_length: Min/max edge lengths
-        - groups: Physical group info
-    """
-    stats = {}
-
-    # Get bounding box
-    try:
-        xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(-1, -1)
-        stats["bbox"] = {
-            "xmin": xmin,
-            "ymin": ymin,
-            "zmin": zmin,
-            "xmax": xmax,
-            "ymax": ymax,
-            "zmax": zmax,
-        }
-    except Exception:
-        pass
-
-    # Get node count
-    try:
-        node_tags, _, _ = gmsh.model.mesh.getNodes()
-        stats["nodes"] = len(node_tags)
-    except Exception:
-        pass
-
-    # Get element counts and collect tet tags for quality
-    tet_tags = []
-    try:
-        element_types, element_tags, _ = gmsh.model.mesh.getElements()
-        total_elements = sum(len(tags) for tags in element_tags)
-        stats["elements"] = total_elements
-
-        # Count tetrahedra (type 4) and save tags
-        for etype, tags in zip(element_types, element_tags, strict=False):
-            if etype == 4:  # 4-node tetrahedron
-                stats["tetrahedra"] = len(tags)
-                tet_tags = list(tags)
-    except Exception:
-        pass
-
-    # Get mesh quality for tetrahedra
-    if tet_tags:
-        # Gamma: inscribed/circumscribed radius ratio (shape quality)
-        try:
-            qualities = gmsh.model.mesh.getElementQualities(tet_tags, "gamma")
-            if len(qualities) > 0:
-                stats["quality"] = {
-                    "min": round(min(qualities), 3),
-                    "max": round(max(qualities), 3),
-                    "mean": round(sum(qualities) / len(qualities), 3),
-                }
-        except Exception:
-            pass
-
-        # SICN: Signed Inverse Condition Number (negative = invalid element)
-        try:
-            sicn = gmsh.model.mesh.getElementQualities(tet_tags, "minSICN")
-            if len(sicn) > 0:
-                sicn_min = min(sicn)
-                invalid_count = sum(1 for s in sicn if s < 0)
-                stats["sicn"] = {
-                    "min": round(sicn_min, 3),
-                    "mean": round(sum(sicn) / len(sicn), 3),
-                    "invalid": invalid_count,
-                }
-        except Exception:
-            pass
-
-        # Edge lengths
-        try:
-            min_edges = gmsh.model.mesh.getElementQualities(tet_tags, "minEdge")
-            max_edges = gmsh.model.mesh.getElementQualities(tet_tags, "maxEdge")
-            if len(min_edges) > 0 and len(max_edges) > 0:
-                stats["edge_length"] = {
-                    "min": round(min(min_edges), 3),
-                    "max": round(max(max_edges), 3),
-                }
-        except Exception:
-            pass
-
-    # Get physical groups with tags
-    try:
-        groups = {"volumes": [], "surfaces": []}
-        for dim, tag in gmsh.model.getPhysicalGroups():
-            name = gmsh.model.getPhysicalName(dim, tag)
-            entry = {"name": name, "tag": tag}
-            if dim == 3:
-                groups["volumes"].append(entry)
-            elif dim == 2:
-                groups["surfaces"].append(entry)
-        stats["groups"] = groups
-    except Exception:
-        pass
-
-    return stats
 
 
 def write_config(
