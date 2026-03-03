@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import gmsh
 
+from gsim.palace.ports.config import PortType
+
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models import DrivenConfig
@@ -150,6 +152,7 @@ def generate_palace_config(
     pec_attrs = [info["phys_group"] for info in groups.get("pec_surfaces", {}).values()]
 
     lumped_ports: list[dict[str, object]] = []
+    wave_ports: list[dict[str, object]] = []
     port_idx = 1
 
     for port in ports:
@@ -178,28 +181,40 @@ def generate_palace_config(
                     )
             else:
                 # Single-element port
-                direction = (
-                    "Z" if port.geometry == PortGeometry.VIA else port.direction.upper()
-                )
-                port_entry: dict[str, object] = {
-                    "Index": port_idx,
-                    "R": port.impedance,
-                    "Direction": direction,
-                    "Excitation": port_idx if port.excited else False,
-                    "Attributes": [port_group["phys_group"]],
-                }
-                if port.resistance is not None:
-                    port_entry["Rs"] = port.resistance
-                if port.inductance is not None:
-                    port_entry["L"] = port.inductance
-                if port.capacitance is not None:
-                    port_entry["C"] = port.capacitance
-                lumped_ports.append(port_entry)
+                if port.port_type == PortType.LUMPED:
+                    direction = (
+                        "Z" if port.geometry == PortGeometry.VIA else port.direction.upper()
+                    )
+                    port_entry: dict[str, object] = {
+                        "Index": port_idx,
+                        "R": port.impedance,
+                        "Direction": direction,
+                        "Excitation": port_idx if port.excited else False,
+                        "Attributes": [port_group["phys_group"]],
+                    }
+                    if port.resistance is not None:
+                        port_entry["Rs"] = port.resistance
+                    if port.inductance is not None:
+                        port_entry["L"] = port.inductance
+                    if port.capacitance is not None:
+                        port_entry["C"] = port.capacitance
+                    lumped_ports.append(port_entry)
+                elif port.port_type == PortType.WAVEPORT:
+                    wave_ports.append(
+                        {
+                            "Index": port_idx,
+                            "Mode": port.mode,
+                            "Offset": port.offset,
+                            "Excitation": port_idx if port.excited else False,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                    )
         port_idx += 1
 
     boundaries: dict[str, object] = {
         "Conductivity": conductors,
         "LumpedPort": lumped_ports,
+        "WavePort": wave_ports,
     }
 
     # Add PEC boundaries if any exist

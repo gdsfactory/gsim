@@ -67,6 +67,10 @@ class PalacePort:
     capacitance: float | None = None  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
+    # Waveport specific settings
+    mode: int = 1  # Mode number to excite.
+    offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
+
     @property
     def direction(self) -> str:
         """Get direction from orientation."""
@@ -231,6 +235,48 @@ def configure_cpw_port(
     port.info["cpw_gap_width"] = gap_width
 
 
+def configure_wave_port(
+    ports,
+    layer: str,
+    length: float,
+    mode: int = 1,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure gdsfactory port(s) as wave ports for Palace simulation.
+
+    Wave ports are domain boundary ports where mode solving is needed.
+
+    Args:
+        ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
+        layer: Target conductor layer name (e.g., 'topmetal2')
+        length: Port extent along direction in um (perpendicular to port width)
+        mode: Mode number to excite.
+        offset: Offset distance used for scattering parameter de-embedding.
+        excited: Whether port is excited vs just measured (default: True)
+
+    Examples:
+        ```python
+        configure_wave_port(
+            c.ports["o1"], name="o1", layer="topmetal2", length=5.0, mode=1
+        )
+        configure_wave_port(
+            c.ports, name="all_ports", layer="topmetal2", length=5.0, mode=1
+        )  # all ports
+        ```
+    """
+    # Handle single port or iterable
+    port_list = [ports] if hasattr(ports, "info") else ports
+
+    for port in port_list:
+        port.info["palace_type"] = "waveport"
+        port.info["layer"] = layer
+        port.info["length"] = length
+        port.info["mode"] = mode
+        port.info["offset"] = offset
+        port.info["excited"] = excited
+
+
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """Extract Palace ports from a gdsfactory component.
 
@@ -325,8 +371,10 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         elif palace_type == "waveport":
             port_type = PortType.WAVEPORT
             geometry = PortGeometry.INPLANE  # Waveport geometry TBD
-            zmin, zmax = stack.get_z_range()
-
+            if layer_name in stack.layers:
+                layer = stack.layers[layer_name]
+                zmin = layer.zmin
+                zmax = layer.zmax
         else:
             raise ValueError(f"Unknown port type: {palace_type}")
 
@@ -348,6 +396,8 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             inductance=info.get("inductance"),
             capacitance=info.get("capacitance"),
             excited=info.get("excited", True),
+            mode=info.get("mode", 1),
+            offset=info.get("offset", 0.0),
         )
         palace_ports.append(palace_port)
 

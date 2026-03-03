@@ -25,6 +25,7 @@ from gsim.palace.models import (
     SimulationResult,
     ValidationResult,
 )
+from gsim.palace.models.ports import WavePortConfig
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Port configurations
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    wave_ports: list[WavePortConfig] = Field(default_factory=list)
 
     # Driven simulation config
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
@@ -211,6 +213,49 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             )
         )
 
+    def add_wave_port(
+        self,
+        name: str,
+        *,
+        layer: str | None = None,
+        length: float | None = None,
+        mode: int = 1,
+        excited: bool = True,
+        offset: float = 0.0,
+    ) -> None:
+        """Add a single element wave port.
+
+        Args:
+            name: Port name (must match a component port at the signal center)
+            layer: Target conductor layer (e.g., "topmetal2")
+            length: Port extent along direction (um)
+            mode: Mode number to excite.
+            excited: Whether this port is excited
+            offset: Offset distance used for scattering parameter de-embedding.
+
+        Example:
+            >>> sim.add_wave_port(
+            ...     "w1",
+            ...     layer="topmetal2",
+            ...     length=5.0,
+            ...     mode=1,
+            ...     excited=True,
+            ...     offset=0.0,
+            ... )
+        """
+        self.wave_ports = [p for p in self.wave_ports if p.name != name]
+
+        self.wave_ports.append(
+            WavePortConfig(
+                name=name,
+                layer=layer,
+                length=length,
+                mode=mode,
+                excited=excited,
+                offset=offset,
+            )
+        )
+
     # -------------------------------------------------------------------------
     # Driven configuration
     # -------------------------------------------------------------------------
@@ -280,7 +325,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             )
 
         # Check ports
-        has_ports = bool(self.ports) or bool(self.cpw_ports)
+        has_ports = bool(self.ports) or bool(self.cpw_ports) or bool(self.wave_ports)
         if not has_ports:
             warnings_list.append(
                 "No ports configured. Call add_port() or add_cpw_port()."
@@ -304,12 +349,19 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 for cpw in self.cpw_ports
                 if not cpw.layer
             )
+            # Validate wave ports
+            errors.extend(
+                f"Wave port '{wp.name}': 'layer' is required"
+                for wp in self.wave_ports
+                if not wp.layer
+            )
 
         # Validate excitation port if specified
         if self.driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
             cpw_names = [cpw.name for cpw in self.cpw_ports]
-            all_port_names = port_names + cpw_names
+            wave_names = [wp.name for wp in self.wave_ports]
+            all_port_names = port_names + cpw_names + wave_names
             if self.driven.excitation_port not in all_port_names:
                 errors.append(
                     f"Excitation port '{self.driven.excitation_port}' not found. "
@@ -329,6 +381,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             configure_cpw_port,
             configure_inplane_port,
             configure_via_port,
+            configure_wave_port,
         )
 
         component = self.geometry.component if self.geometry else None
@@ -404,6 +457,34 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 excited=cpw_config.excited,
                 offset=cpw_config.offset,
             )
+
+        # Configure wave ports
+        for port_config in self.wave_ports:
+            if port_config.name is None:
+                continue
+
+            # Find matching gdsfactory port
+            gf_port = None
+            for p in component.ports:
+                if p.name == port_config.name:
+                    gf_port = p
+                    break
+
+            if gf_port is None:
+                raise ValueError(
+                    f"Port '{port_config.name}' not found on component. "
+                    f"Available ports: {[p.name for p in component.ports]}"
+                )
+
+            if port_config.layer is not None:
+                configure_wave_port(
+                    gf_port,
+                    layer=port_config.layer,
+                    length=port_config.length or gf_port.width,
+                    excited=port_config.excited,
+                    mode=port_config.mode,
+                    offset=port_config.offset,
+                )
 
         self._configured_ports = True
 
@@ -658,8 +739,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     def write_config(self) -> Path:
         """Write Palace config.json after mesh generation.
 
-        Use this when mesh() was called with write_config=False.
-
         Returns:
             Path to the generated config.json
 
@@ -667,7 +746,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             ValueError: If mesh() hasn't been called yet
 
         Example:
-            >>> result = sim.mesh("./sim", write_config=False)
+            >>> result = sim.mesh("./sim")
             >>> config_path = sim.write_config()
         """
         from gsim.palace.mesh.generator import write_config as gen_write_config

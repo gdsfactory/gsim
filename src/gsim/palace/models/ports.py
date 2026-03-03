@@ -135,7 +135,8 @@ class WavePortConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     name: str
-    layer: str
+    layer: str | None = None
+    length: float | None = Field(default=None, gt=0)
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
     excited: bool = True
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
