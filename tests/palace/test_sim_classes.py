@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
+import gdsfactory as gf
 import pytest
 
-from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim
+from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim, ModalSim
+from gsim.palace.mesh import MeshResult
 
 
 class TestDrivenSimValidation:
@@ -110,6 +115,56 @@ class TestElectrostaticSimValidation:
         # Still invalid due to missing geometry, but terminal count is OK
         assert any("No component set" in e for e in result.errors)
         assert not any("at least 2 terminals" in e for e in result.errors)
+
+
+class TestModalSimValidation:
+    """Test ModalSim validation logic."""
+
+    def test_missing_geometry(self):
+        """Test validation catches missing geometry."""
+
+        sim = ModalSim()
+        result = sim.validate_config()
+        assert not result.valid
+        assert any("No component set" in e for e in result.errors)
+
+    def test_missing_cross_section(self):
+        """Test validation catches missing cross-section."""
+
+        sim = ModalSim()
+        sim.set_geometry(gf.Component("test"))
+        result = sim.validate_config()
+        assert not result.valid
+        assert any("No cross-section defined" in e for e in result.errors)
+
+    def test_valid_config(self):
+        """Test validation passes with geometry and cross-section."""
+
+        sim = ModalSim()
+        sim.set_geometry(gf.Component("test_modal_unique"))
+        sim.set_cross_section(y=0.0)
+        result = sim.validate_config()
+        assert result.valid
+
+    def test_mesh_build_config_call(self):
+        """Test that mesh() correctly calls _build_mesh_config."""
+        sim = ModalSim()
+        sim.set_geometry(gf.Component("test_modal_mesh_call"))
+        sim.set_cross_section(y=0.0)
+        sim.set_output_dir("dummy_dir")
+
+        # Mock generate_mesh and _resolve_stack to avoid full execution
+        with (
+            patch("gsim.palace.mesh.generate_mesh") as mock_gen,
+            patch("gsim.palace.modal.ModalSim._resolve_stack"),
+        ):
+            # Setup a valid mock return value
+            mock_gen.return_value = MeshResult(
+                mesh_path=Path("palace.msh"), port_info=[], mesh_stats={}
+            )
+
+            # This should not raise TypeError anymore
+            sim.mesh(preset="default")
 
 
 class TestMixinMethods:
