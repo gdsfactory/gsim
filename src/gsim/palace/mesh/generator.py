@@ -31,7 +31,6 @@ from .groups import assign_physical_groups
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
 
 logger = logging.getLogger(__name__)
@@ -50,6 +49,7 @@ class MeshResult:
     output_dir: Path | None = None
     model_name: str = "palace"
     fmax: float = 100e9
+    terminals: list | None = None
 
 
 def _setup_mesh_fields(
@@ -140,7 +140,10 @@ def generate_mesh(
     air_margin: float = 50.0,
     fmax: float = 100e9,
     show_gui: bool = False,
-    driven_config: DrivenConfig | None = None,
+    driven_config: Any | None = None,
+    eigenmode_config: Any | None = None,
+    electrostatic_config: Any | None = None,
+    terminals: list | None = None,
     write_config: bool = True,
     planar_conductors: bool = False,
 ) -> MeshResult:
@@ -254,7 +257,10 @@ def generate_mesh(
                 output_dir,
                 model_name,
                 fmax,
-                driven_config,
+                driven_config=driven_config,
+                eigenmode_config=eigenmode_config,
+                electrostatic_config=electrostatic_config,
+                terminals=terminals,
             )
 
     finally:
@@ -271,6 +277,7 @@ def generate_mesh(
         output_dir=output_dir,
         model_name=model_name,
         fmax=fmax,
+        terminals=terminals,
     )
 
     return result

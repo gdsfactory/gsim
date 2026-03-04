@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig
     from gsim.palace.ports.config import PalacePort
 
 from gsim.palace.mesh.generator import generate_mesh as gen_mesh
@@ -151,6 +150,7 @@ class MeshResult:
     output_dir: Path | None = None
     model_name: str = "palace"
     fmax: float = 100e9
+    terminals: list | None = None
 
 
 def generate_mesh(
@@ -160,7 +160,10 @@ def generate_mesh(
     output_dir: str | Path,
     config: MeshConfig | None = None,
     model_name: str = "palace",
-    driven_config: DrivenConfig | None = None,
+    driven_config: Any | None = None,
+    eigenmode_config: Any | None = None,
+    electrostatic_config: Any | None = None,
+    terminals: list | None = None,
     write_config: bool = True,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
@@ -197,6 +200,9 @@ def generate_mesh(
         fmax=config.fmax,
         show_gui=config.show_gui,
         driven_config=driven_config,
+        eigenmode_config=eigenmode_config,
+        electrostatic_config=electrostatic_config,
+        terminals=terminals,
         write_config=write_config,
         planar_conductors=config.planar_conductors,
     )
@@ -211,4 +217,5 @@ def generate_mesh(
         output_dir=result.output_dir,
         model_name=result.model_name,
         fmax=result.fmax,
+        terminals=result.terminals,
     )

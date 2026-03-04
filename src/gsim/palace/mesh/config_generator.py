@@ -26,6 +26,9 @@ def generate_palace_config(
     model_name: str,
     fmax: float,
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: Any | None = None,
+    electrostatic_config: Any | None = None,
+    terminals: list | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -44,13 +47,23 @@ def generate_palace_config(
     """
     from gsim.palace.ports.config import PortGeometry
 
-    # Use driven_config if provided, otherwise fall back to legacy parameters
-    if driven_config is not None:
-        solver_driven = driven_config.to_palace_config()
+    problem_type = "Driven"
+    solver_specific: dict[str, object] = {}
+
+    if eigenmode_config is not None:
+        problem_type = "Eigenmode"
+        solver_specific["Eigenmode"] = eigenmode_config.to_palace_config()
+    elif electrostatic_config is not None:
+        problem_type = "Electrostatic"
+        solver_specific["Electrostatic"] = electrostatic_config.to_palace_config()
+    elif driven_config is not None:
+        problem_type = "Driven"
+        solver_specific["Driven"] = driven_config.to_palace_config()
     else:
         # Legacy behavior - compute from fmax
+        problem_type = "Driven"
         freq_step = fmax / 40e9
-        solver_driven = {
+        solver_specific["Driven"] = {
             "Samples": [
                 {
                     "Type": "Linear",
@@ -65,7 +78,7 @@ def generate_palace_config(
 
     config: dict[str, object] = {
         "Problem": {
-            "Type": "Driven",
+            "Type": problem_type,
             "Verbose": 3,
             "Output": f"output/{model_name}",
         },
@@ -87,7 +100,7 @@ def generate_palace_config(
             },
             "Order": 2,
             "Device": "CPU",
-            "Driven": solver_driven,
+            **solver_specific,
         },
     }
 
@@ -186,8 +199,36 @@ def generate_palace_config(
 
     boundaries: dict[str, object] = {
         "Conductivity": conductors,
-        "LumpedPort": lumped_ports,
     }
+
+    if lumped_ports and problem_type != "Eigenmode":
+        boundaries["LumpedPort"] = lumped_ports
+
+    # Handle Terminals for Electrostatic
+    if problem_type == "Electrostatic" and terminals:
+        palace_terminals = []
+        term_idx = 1
+        for term in terminals:
+            layer = term.layer
+            # Find physical groups associated with this layer
+            attrs = []
+
+            # Check volumetric conductors
+            if f"{layer}_xy" in groups.get("conductor_surfaces", {}):
+                attrs.append(groups["conductor_surfaces"][f"{layer}_xy"]["phys_group"])
+            if f"{layer}_z" in groups.get("conductor_surfaces", {}):
+                attrs.append(groups["conductor_surfaces"][f"{layer}_z"]["phys_group"])
+
+            # Check planar conductors
+            if layer in groups.get("pec_surfaces", {}):
+                attrs.append(groups["pec_surfaces"][layer]["phys_group"])
+
+            if attrs:
+                palace_terminals.append({"Index": term_idx, "Attributes": attrs})
+            term_idx += 1
+
+        if palace_terminals:
+            boundaries["Terminal"] = palace_terminals
 
     # Add PEC boundaries if any exist
     if pec_attrs:
@@ -331,6 +372,9 @@ def write_config(
     stack: LayerStack,
     ports: list[PalacePort],
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: Any | None = None,
+    electrostatic_config: Any | None = None,
+    terminals: list | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -366,6 +410,9 @@ def write_config(
         model_name=mesh_result.model_name,
         fmax=mesh_result.fmax,
         driven_config=driven_config,
+        eigenmode_config=eigenmode_config,
+        electrostatic_config=electrostatic_config,
+        terminals=terminals,
     )
 
     # Update the mesh_result with the config path
