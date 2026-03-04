@@ -18,10 +18,11 @@ class MeshConfig(BaseModel):
         max_mesh_size: Maximum mesh size in air/dielectric (um)
         cells_per_wavelength: Number of mesh cells per wavelength
         margin: XY margin around design (um)
-        air_above: Air above top metal (um)
+        airbox_margin: Extra airbox around stack (um); 0 = disabled
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
+        refine_from_curves: Refine mesh based on distance to conductor edges
         show_gui: Show gmsh GUI during meshing
         preview_only: Generate preview only, don't save mesh
     """
@@ -32,10 +33,11 @@ class MeshConfig(BaseModel):
     max_mesh_size: float = Field(default=300.0, gt=0)
     cells_per_wavelength: int = Field(default=10, ge=1)
     margin: float = Field(default=50.0, ge=0)
-    air_above: float = Field(default=100.0, ge=0)
+    airbox_margin: float = Field(default=0.0, ge=0)
     fmax: float = Field(default=100e9, gt=0)
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False
+    refine_from_curves: bool = False
     show_gui: bool = False
     preview_only: bool = False
 
@@ -77,6 +79,23 @@ class MeshConfig(BaseModel):
         return cls(**defaults)  # type: ignore[arg-type]
 
     @classmethod
+    def graded(cls, **kwargs: float | bool | list[str] | None) -> Self:
+        """Default mesh sizes with refinement near conductor edges.
+
+        Same global sizing as *default* but adds distance-based grading
+        from conductor curves so the mesh is fine where it matters and
+        coarse elsewhere.
+        """
+        defaults: dict[str, float | int | bool | list[str] | None] = {
+            "refined_mesh_size": 5.0,
+            "max_mesh_size": 300.0,
+            "cells_per_wavelength": 10,
+            "refine_from_curves": True,
+        }
+        defaults.update(kwargs)
+        return cls(**defaults)  # type: ignore[arg-type]
+
+    @classmethod
     def fine(cls, **kwargs: float | bool | list[str] | None) -> Self:
         """High accuracy mesh (~10 elements per wavelength).
 
@@ -87,6 +106,7 @@ class MeshConfig(BaseModel):
             "refined_mesh_size": 2.0,
             "max_mesh_size": 70.0,
             "cells_per_wavelength": 20,
+            "refine_from_curves": True,
         }
         defaults.update(kwargs)
         return cls(**defaults)  # type: ignore[arg-type]

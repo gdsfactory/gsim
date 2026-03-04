@@ -197,11 +197,12 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
-            air_above=mesh_config.air_above,
+            airbox_margin=mesh_config.airbox_margin,
             fmax=mesh_config.fmax,
             show_gui=mesh_config.show_gui,
             preview_only=mesh_config.preview_only,
             planar_conductors=mesh_config.planar_conductors,
+            refine_from_curves=mesh_config.refine_from_curves,
         )
 
         stack = self._resolve_stack()
@@ -234,11 +235,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     def preview(
         self,
         *,
-        preset: Literal["coarse", "default", "fine"] | None = None,
+        preset: Literal["coarse", "default", "graded", "fine"] | None = None,
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
-        air_above: float | None = None,
+        airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
         show_gui: bool = True,
@@ -246,11 +247,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         """Preview the mesh without running simulation.
 
         Args:
-            preset: Mesh quality preset ("coarse", "default", "fine")
+            preset: Mesh quality preset ("coarse", "default", "graded", "fine")
             refined_mesh_size: Mesh size near conductors (um)
             max_mesh_size: Max mesh size in air/dielectric (um)
             margin: XY margin around design (um)
-            air_above: Air above top metal (um)
+            airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz)
             planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI for interactive preview
@@ -272,7 +273,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
-            air_above=air_above,
+            airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
             show_gui=show_gui,
@@ -285,11 +286,12 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
-            air_above=mesh_config.air_above,
+            airbox_margin=mesh_config.airbox_margin,
             fmax=mesh_config.fmax,
             show_gui=show_gui,
             preview_only=True,
             planar_conductors=mesh_config.planar_conductors,
+            refine_from_curves=mesh_config.refine_from_curves,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -308,11 +310,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     def mesh(
         self,
         *,
-        preset: Literal["coarse", "default", "fine"] | None = None,
+        preset: Literal["coarse", "default", "graded", "fine"] | None = None,
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
-        air_above: float | None = None,
+        airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
         show_gui: bool = False,
@@ -324,11 +326,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         Requires set_output_dir() to be called first.
 
         Args:
-            preset: Mesh quality preset ("coarse", "default", "fine")
+            preset: Mesh quality preset ("coarse", "default", "graded", "fine")
             refined_mesh_size: Mesh size near conductors (um), overrides preset
             max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
             margin: XY margin around design (um), overrides preset
-            air_above: Air above top metal (um), overrides preset
+            airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz) - less relevant for electrostatic
             planar_conductors: Treat conductors as 2D PEC surfaces
             show_gui: Show gmsh GUI during meshing
@@ -354,7 +356,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
-            air_above=air_above,
+            airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
             show_gui=show_gui,

@@ -25,6 +25,7 @@ from .geometry import (
     add_dielectrics,
     add_metals,
     add_ports,
+    build_entities,
     extract_geometry,
 )
 from .groups import assign_physical_groups
@@ -59,6 +60,7 @@ def _setup_mesh_fields(
     stack: LayerStack,
     refined_cellsize: float,
     max_cellsize: float,
+    refine_from_curves: bool = False,
 ) -> None:
     """Set up mesh refinement fields.
 
@@ -69,6 +71,7 @@ def _setup_mesh_fields(
         stack: LayerStack with material properties
         refined_cellsize: Fine mesh size near conductors (um)
         max_cellsize: Coarse mesh size in air/dielectric (um)
+        refine_from_curves: Refine mesh based on distance to conductor edges
     """
     # Collect boundary lines from conductor surfaces
     boundary_lines = []
@@ -76,6 +79,13 @@ def _setup_mesh_fields(
         for tag in surface_info["tags"]:
             lines = gmsh_utils.get_boundary_lines(tag, kernel)
             boundary_lines.extend(lines)
+
+    # Add PEC surface edges when refine_from_curves is enabled
+    if refine_from_curves:
+        for surface_info in groups["pec_surfaces"].values():
+            for tag in surface_info["tags"]:
+                lines = gmsh_utils.get_boundary_lines(tag, kernel)
+                boundary_lines.extend(lines)
 
     # Add port boundaries
     for surface_info in groups["port_surfaces"].values():
@@ -143,6 +153,7 @@ def generate_mesh(
     driven_config: DrivenConfig | None = None,
     write_config: bool = True,
     planar_conductors: bool = False,
+    refine_from_curves: bool = False,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -161,6 +172,7 @@ def generate_mesh(
         driven_config: Optional DrivenConfig for frequency sweep settings
         write_config: Whether to write config.json (default True)
         planar_conductors: If True, treat conductors as 2D PEC surfaces
+        refine_from_curves: Refine mesh based on distance to conductor edges
 
     Returns:
         MeshResult with paths and metadata
@@ -200,9 +212,15 @@ def generate_mesh(
         logger.info("Adding dielectrics...")
         dielectric_tags = add_dielectrics(kernel, geometry, stack, margin, air_margin)
 
-        # Fragment geometry
-        logger.info("Fragmenting geometry...")
-        geom_dimtags, geom_map = gmsh_utils.fragment_all(kernel)
+        # Build entities and run boolean pipeline
+        logger.info("Running boolean pipeline...")
+        entities = build_entities(
+            metal_tags,
+            dielectric_tags,
+            port_tags,
+            port_info,
+        )
+        pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
         # Assign physical groups
         logger.info("Assigning physical groups...")
@@ -212,15 +230,21 @@ def generate_mesh(
             dielectric_tags,
             port_tags,
             port_info,
-            geom_dimtags,
-            geom_map,
+            entities,
+            pg_map,
             stack,
         )
 
         # Setup mesh fields
         logger.info("Setting up mesh refinement...")
         _setup_mesh_fields(
-            kernel, groups, geometry, stack, refined_mesh_size, max_mesh_size
+            kernel,
+            groups,
+            geometry,
+            stack,
+            refined_mesh_size,
+            max_mesh_size,
+            refine_from_curves,
         )
 
         # Show GUI if requested

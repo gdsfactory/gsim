@@ -227,13 +227,12 @@ def add_dielectrics(
     margin: float,
     air_margin: float = 0.0,
 ) -> dict:
-    """Add dielectric volumes and surrounding airbox to gmsh.
+    """Add dielectric volumes to gmsh.
 
-    All dielectric boxes are created at their exact geometric bounds.
-    Coincident faces between adjacent layers (shared z-planes) are
-    resolved by the subsequent ``fragment_all()`` call, which uses
-    OCC boolean fragment to produce a conformal mesh — no artificial
-    offsets are needed.
+    All boxes are created at their exact geometric bounds.  Coincident
+    faces and overlapping volumes are resolved later by
+    ``run_boolean_pipeline``, which performs priority-based cuts and
+    conformal fragmentation — no artificial offsets needed.
 
     Args:
         kernel: gmsh OCC kernel
@@ -241,29 +240,28 @@ def add_dielectrics(
         stack: LayerStack with dielectric definitions
         margin: XY margin around design (um)
         air_margin: Extra margin for the surrounding airbox (um).
-            When > 0, an enclosing airbox is created and dielectrics
-            are cut out of it so volumes never overlap.
+            When > 0, an enclosing airbox is created.  The boolean
+            pipeline will carve the dielectrics out of it
+            automatically.
 
     Returns:
         Dict with material_name -> list of volume_tags
     """
     dielectric_tags: dict[str, list[int]] = {}
 
-    # Geometry bounds (with margin)
     xmin, ymin, xmax, ymax = geometry.bbox
     xmin -= margin
     ymin -= margin
     xmax += margin
     ymax += margin
 
-    # Track overall z range for the airbox
     z_min_all = math.inf
     z_max_all = -math.inf
 
     for dielectric in stack.dielectrics:
         material = dielectric["material"]
 
-        # When we build an explicit airbox, skip the air dielectric layer
+        # When building an explicit airbox, skip the dielectric air layer
         if material == "air" and air_margin > 0:
             continue
 
@@ -275,7 +273,6 @@ def add_dielectrics(
 
         dielectric_tags.setdefault(material, [])
 
-        # Exact bounds — fragment_all() resolves shared faces
         box_tag = gmsh_utils.create_box(
             kernel,
             xmin,
@@ -287,9 +284,7 @@ def add_dielectrics(
         )
         dielectric_tags[material].append(box_tag)
 
-    # Surrounding airbox: create, then cut dielectric volumes out so
-    # it contains only the air region (no overlapping volumes).
-    # Inspired by the priority-cut approach in gmsh_utils.run_boolean_pipeline.
+    # Surrounding airbox (boolean pipeline handles the overlap)
     if air_margin > 0:
         airbox_tag = gmsh_utils.create_box(
             kernel,
@@ -300,20 +295,93 @@ def add_dielectrics(
             ymax + air_margin,
             z_max_all + air_margin,
         )
-        # Cut dielectrics from the airbox (keep dielectrics intact)
-        dielectric_dimtags = [(3, t) for tags in dielectric_tags.values() for t in tags]
-        air_pieces, _ = kernel.cut(
-            [(3, airbox_tag)],
-            dielectric_dimtags,
-            removeObject=True,
-            removeTool=False,
-        )
-        kernel.synchronize()
-        dielectric_tags["airbox"] = [t for _, t in air_pieces if _ == 3]
+        dielectric_tags["airbox"] = [airbox_tag]
 
     kernel.synchronize()
 
     return dielectric_tags
+
+
+def build_entities(
+    metal_tags: dict,
+    dielectric_tags: dict,
+    port_tags: dict,
+    port_info: list,
+) -> list[gmsh_utils.Entity]:
+    """Convert geometry tag dicts into Entity objects for the boolean pipeline.
+
+    Mesh-order convention (lower = higher priority, gets cut first):
+        0  - conductor (2D PEC) surfaces
+        1  - port surfaces
+        2  - dielectrics (non-airbox volumes)
+        3  - airbox volume (lowest priority, carved by everything else)
+
+    Args:
+        metal_tags: from ``add_metals()``
+        dielectric_tags: from ``add_dielectrics()``
+        port_tags: from ``add_ports()``
+        port_info: metadata list from ``add_ports()``
+
+    Returns:
+        List of Entity objects ready for ``run_boolean_pipeline()``.
+    """
+    Entity = gmsh_utils.Entity
+    entities: list[gmsh_utils.Entity] = []
+
+    # --- Conductors (dim=2 surfaces, highest priority) ---
+    for layer_name, tag_info in metal_tags.items():
+        # PEC / zero-thickness surfaces
+        if tag_info["surfaces_xy"]:
+            entities.append(
+                Entity(
+                    name=f"{layer_name}_pec",
+                    dim=2,
+                    mesh_order=0,
+                    tags=tag_info["surfaces_xy"],
+                )
+            )
+
+    # --- Port surfaces (dim=2) ---
+    for port_name, surf_tags in port_tags.items():
+        port_num = int(port_name[1:])
+        info = next(
+            (p for p in port_info if p["portnumber"] == port_num),
+            None,
+        )
+        if info and info.get("type") == "cpw":
+            # One entity per CPW element
+            for i, tag in enumerate(surf_tags):
+                entities.append(
+                    Entity(
+                        name=f"{port_name}_E{i}",
+                        dim=2,
+                        mesh_order=1,
+                        tags=[tag],
+                    )
+                )
+        else:
+            entities.append(
+                Entity(
+                    name=port_name,
+                    dim=2,
+                    mesh_order=1,
+                    tags=surf_tags,
+                )
+            )
+
+    # --- Dielectric volumes (dim=3) ---
+    for material, vol_tags in dielectric_tags.items():
+        order = 3 if material == "airbox" else 2
+        entities.append(
+            Entity(
+                name=material,
+                dim=3,
+                mesh_order=order,
+                tags=vol_tags,
+            )
+        )
+
+    return entities
 
 
 def add_ports(
@@ -490,6 +558,7 @@ __all__ = [
     "add_dielectrics",
     "add_metals",
     "add_ports",
+    "build_entities",
     "extract_geometry",
     "get_layer_info",
 ]

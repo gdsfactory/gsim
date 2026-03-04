@@ -6,7 +6,6 @@ DrivenSim, EigenmodeSim, ElectrostaticSim.
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -194,7 +193,7 @@ class PalaceSimMixin:
     def set_numerical(
         self,
         *,
-        order: int = 2,
+        order: int = 1,
         tolerance: float = 1e-6,
         max_iterations: int = 400,
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = "Default",
@@ -264,11 +263,11 @@ class PalaceSimMixin:
 
     def _build_mesh_config(
         self,
-        preset: Literal["coarse", "default", "fine"] | None,
+        preset: Literal["coarse", "default", "graded", "fine"] | None,
         refined_mesh_size: float | None,
         max_mesh_size: float | None,
         margin: float | None,
-        air_above: float | None,
+        airbox_margin: float | None,
         fmax: float | None,
         planar_conductors: bool | None,
         show_gui: bool,
@@ -279,6 +278,8 @@ class PalaceSimMixin:
         # Build mesh config from preset
         if preset == "coarse":
             mesh_config = MeshConfig.coarse()
+        elif preset == "graded":
+            mesh_config = MeshConfig.graded()
         elif preset == "fine":
             mesh_config = MeshConfig.fine()
         else:
@@ -293,28 +294,6 @@ class PalaceSimMixin:
         else:
             mesh_config.planar_conductors = planar_conductors
 
-        # Track overrides for warning
-        overrides = []
-        if preset is not None:
-            if refined_mesh_size is not None:
-                overrides.append(f"refined_mesh_size={refined_mesh_size}")
-            if max_mesh_size is not None:
-                overrides.append(f"max_mesh_size={max_mesh_size}")
-            if margin is not None:
-                overrides.append(f"margin={margin}")
-            if air_above is not None:
-                overrides.append(f"air_above={air_above}")
-            if fmax is not None:
-                overrides.append(f"fmax={fmax}")
-            if planar_conductors is not None:
-                overrides.append(f"planar_conductors={planar_conductors}")
-
-            if overrides:
-                warnings.warn(
-                    f"Preset '{preset}' values overridden by: {', '.join(overrides)}",
-                    stacklevel=4,
-                )
-
         # Apply overrides
         if refined_mesh_size is not None:
             mesh_config.refined_mesh_size = refined_mesh_size
@@ -322,8 +301,8 @@ class PalaceSimMixin:
             mesh_config.max_mesh_size = max_mesh_size
         if margin is not None:
             mesh_config.margin = margin
-        if air_above is not None:
-            mesh_config.air_above = air_above
+        if airbox_margin is not None:
+            mesh_config.airbox_margin = airbox_margin
         if fmax is not None:
             mesh_config.fmax = fmax
         mesh_config.show_gui = show_gui

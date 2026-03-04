@@ -1,6 +1,7 @@
 """Physical group assignment for Palace mesh generation.
 
-This module handles assigning gmsh physical groups after geometry fragmentation.
+This module builds the ``groups`` dict consumed by the config generator
+from the ``pg_map`` produced by ``run_boolean_pipeline``.
 """
 
 from __future__ import annotations
@@ -19,11 +20,11 @@ def assign_physical_groups(
     dielectric_tags: dict,
     port_tags: dict,
     port_info: list,
-    geom_dimtags: list,
-    geom_map: list,
+    entities: list[gmsh_utils.Entity],
+    pg_map: dict[str, int],
     _stack: LayerStack,
 ) -> dict:
-    """Assign physical groups after fragmenting.
+    """Build the ``groups`` dict from the boolean-pipeline result.
 
     Args:
         kernel: gmsh OCC kernel
@@ -31,22 +32,22 @@ def assign_physical_groups(
         dielectric_tags: Dielectric material tags from add_dielectrics()
         port_tags: Port surface tags (may have multiple surfaces for CPW)
         port_info: Port metadata including type info
-        geom_dimtags: Dimension tags from fragmentation
-        geom_map: Geometry map from fragmentation
-        _stack: Layer stack (unused; reserved for future material metadata)
+        entities: Entity list used in run_boolean_pipeline
+        pg_map: name → physical-group tag returned by run_boolean_pipeline
+        _stack: Layer stack (reserved for future use)
 
     Returns:
-        Dict with group info for config file generation:
-        {
-            "volumes": {material_name: {"phys_group": int, "tags": [int]}},
-            "conductor_surfaces": {layer_name: {"phys_group": int, "tags": [int]}},
-            "pec_surfaces": {layer_name: {"phys_group": int, "tags": [int]}},
-            "port_surfaces": {port_name: {"phys_group": int, "tags": [int]} or
-                            {"type": "cpw", "elements": [...]}},
-            "boundary_surfaces": {"absorbing": {"phys_group": int, "tags": [int]}}
-        }
+        Dict with the same schema as before::
+
+            {
+                "volumes": {name: {"phys_group": int, "tags": [int]}},
+                "conductor_surfaces": {name: {"phys_group": int, "tags": [int]}},
+                "pec_surfaces": {name: {"phys_group": int, "tags": [int]}},
+                "port_surfaces": {name: ...},
+                "boundary_surfaces": {name: {"phys_group": int, "tags": [int]}},
+            }
     """
-    groups = {
+    groups: dict[str, dict] = {
         "volumes": {},
         "conductor_surfaces": {},
         "pec_surfaces": {},
@@ -54,133 +55,85 @@ def assign_physical_groups(
         "boundary_surfaces": {},
     }
 
-    # Assign volume groups for dielectrics
-    for material_name, tags in dielectric_tags.items():
-        new_tags = gmsh_utils.get_tags_after_fragment(
-            tags, geom_dimtags, geom_map, dimension=3
-        )
-        if new_tags:
-            # Only take first N tags (same as original count)
-            new_tags = new_tags[: len(tags)]
-            phys_group = gmsh_utils.assign_physical_group(3, new_tags, material_name)
-            groups["volumes"][material_name] = {
-                "phys_group": phys_group,
-                "tags": new_tags,
-            }
+    # Helper: entity name → (phys_group, surface_tags)
+    entity_by_name: dict[str, gmsh_utils.Entity] = {e.name: e for e in entities}
 
-    # Assign surface groups for conductors
+    # --- Volumes (dielectrics + airbox) ---
+    for material in dielectric_tags:
+        entity = entity_by_name.get(material)
+        pg = pg_map.get(material)
+        if entity and pg is not None:
+            vol_tags = [t for d, t in entity.dimtags if d == 3]
+            if vol_tags:
+                groups["volumes"][material] = {
+                    "phys_group": pg,
+                    "tags": vol_tags,
+                }
+
+    # --- PEC surfaces (planar conductors) ---
     for layer_name, tag_info in metal_tags.items():
-        # Handle planar / zero-thickness conductors (2D PEC surfaces)
         if tag_info["surfaces_xy"]:
-            new_surface_tags = gmsh_utils.get_tags_after_fragment(
-                tag_info["surfaces_xy"], geom_dimtags, geom_map, dimension=2
-            )
-            if new_surface_tags:
-                phys_group = gmsh_utils.assign_physical_group(
-                    2, new_surface_tags, f"{layer_name}_pec"
-                )
-                groups["pec_surfaces"][layer_name] = {
-                    "phys_group": phys_group,
-                    "tags": new_surface_tags,
-                }
+            pec_name = f"{layer_name}_pec"
+            entity = entity_by_name.get(pec_name)
+            pg = pg_map.get(pec_name)
+            if entity and pg is not None:
+                surf_tags = [t for d, t in entity.dimtags if d == 2]
+                if surf_tags:
+                    groups["pec_surfaces"][layer_name] = {
+                        "phys_group": pg,
+                        "tags": surf_tags,
+                    }
 
-        # Handle volumetric conductors (finite conductivity)
-        if tag_info["volumes"]:
-            all_xy_tags = []
-            all_z_tags = []
-
-            for item in tag_info["volumes"]:
-                if isinstance(item, tuple):
-                    _volumetag, surface_tags = item
-                    # Get updated surface tags after fragment
-                    new_surface_tags = gmsh_utils.get_tags_after_fragment(
-                        surface_tags, geom_dimtags, geom_map, dimension=2
-                    )
-
-                    # Separate xy and z surfaces
-                    for tag in new_surface_tags:
-                        if gmsh_utils.is_vertical_surface(tag):
-                            all_z_tags.append(tag)
-                        else:
-                            all_xy_tags.append(tag)
-
-            if all_xy_tags:
-                phys_group = gmsh_utils.assign_physical_group(
-                    2, all_xy_tags, f"{layer_name}_xy"
-                )
-                groups["conductor_surfaces"][f"{layer_name}_xy"] = {
-                    "phys_group": phys_group,
-                    "tags": all_xy_tags,
-                }
-
-            if all_z_tags:
-                phys_group = gmsh_utils.assign_physical_group(
-                    2, all_z_tags, f"{layer_name}_z"
-                )
-                groups["conductor_surfaces"][f"{layer_name}_z"] = {
-                    "phys_group": phys_group,
-                    "tags": all_z_tags,
-                }
-
-    # Assign port surface groups
+    # --- Port surfaces ---
     for port_name, tags in port_tags.items():
-        # Find corresponding port_info entry
-        port_num = int(port_name[1:])  # "P1" -> 1
-        info = next((p for p in port_info if p["portnumber"] == port_num), None)
+        port_num = int(port_name[1:])
+        info = next(
+            (p for p in port_info if p["portnumber"] == port_num),
+            None,
+        )
 
         if info and info.get("type") == "cpw":
-            # CPW port: create separate physical group for each element
             element_phys_groups = []
-            for i, tag in enumerate(tags):
-                new_tag_list = gmsh_utils.get_tags_after_fragment(
-                    [tag], geom_dimtags, geom_map, dimension=2
-                )
-                if new_tag_list:
-                    elem_name = f"{port_name}_E{i}"
-                    phys_group = gmsh_utils.assign_physical_group(
-                        2, new_tag_list, elem_name
-                    )
-                    element_phys_groups.append(
-                        {
-                            "phys_group": phys_group,
-                            "tags": new_tag_list,
-                            "direction": info["elements"][i]["direction"],
-                        }
-                    )
-
+            for i in range(len(tags)):
+                elem_name = f"{port_name}_E{i}"
+                entity = entity_by_name.get(elem_name)
+                pg = pg_map.get(elem_name)
+                if entity and pg is not None:
+                    surf_tags = [t for d, t in entity.dimtags if d == 2]
+                    if surf_tags:
+                        element_phys_groups.append(
+                            {
+                                "phys_group": pg,
+                                "tags": surf_tags,
+                                "direction": info["elements"][i]["direction"],
+                            }
+                        )
             groups["port_surfaces"][port_name] = {
                 "type": "cpw",
                 "elements": element_phys_groups,
             }
         else:
-            # Regular single-element port
-            new_tags = gmsh_utils.get_tags_after_fragment(
-                tags, geom_dimtags, geom_map, dimension=2
-            )
-            if new_tags:
-                phys_group = gmsh_utils.assign_physical_group(2, new_tags, port_name)
-                groups["port_surfaces"][port_name] = {
-                    "phys_group": phys_group,
-                    "tags": new_tags,
-                }
+            pg = pg_map.get(port_name)
+            entity = entity_by_name.get(port_name)
+            if entity and pg is not None:
+                surf_tags = [t for d, t in entity.dimtags if d == 2]
+                if surf_tags:
+                    groups["port_surfaces"][port_name] = {
+                        "phys_group": pg,
+                        "tags": surf_tags,
+                    }
 
-    # Assign boundary surfaces (from airbox)
-    if "airbox" in groups["volumes"]:
-        airbox_tags = groups["volumes"]["airbox"]["tags"]
-        if airbox_tags:
-            _, simulation_boundary = kernel.getSurfaceLoops(airbox_tags[0])
-            if simulation_boundary:
-                boundary_tags = list(next(iter(simulation_boundary)))
-                phys_group = gmsh_utils.assign_physical_group(
-                    2, boundary_tags, "Absorbing_boundary"
-                )
-                groups["boundary_surfaces"]["absorbing"] = {
-                    "phys_group": phys_group,
-                    "tags": boundary_tags,
-                }
+    # --- Boundary surfaces (outer faces labelled *__None by the pipeline) ---
+    boundary_pgs: list[int] = [
+        pg for name, pg in pg_map.items() if name.endswith("__None")
+    ]
+    if boundary_pgs:
+        groups["boundary_surfaces"]["absorbing"] = {
+            "phys_group": boundary_pgs,
+            "tags": [],  # tags not needed; pg_map is authoritative
+        }
 
     kernel.synchronize()
-
     return groups
 
 

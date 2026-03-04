@@ -40,6 +40,14 @@ class TestMeshConfig:
         assert config.max_mesh_size == 70.0
         assert config.cells_per_wavelength == 20
 
+    def test_graded_preset(self):
+        """Test graded mesh preset (default sizes + refine_from_curves)."""
+        config = MeshConfig.graded()
+        assert config.refined_mesh_size == 5.0
+        assert config.max_mesh_size == 300.0
+        assert config.cells_per_wavelength == 10
+        assert config.refine_from_curves is True
+
     def test_preset_with_overrides(self):
         """Test preset with custom overrides."""
         config = MeshConfig.coarse(margin=100.0, fmax=50e9)
@@ -53,12 +61,12 @@ class TestMeshConfig:
             refined_mesh_size=3.0,
             max_mesh_size=200.0,
             margin=75.0,
-            air_above=150.0,
+            airbox_margin=150.0,
         )
         assert config.refined_mesh_size == 3.0
         assert config.max_mesh_size == 200.0
         assert config.margin == 75.0
-        assert config.air_above == 150.0
+        assert config.airbox_margin == 150.0
 
 
 class TestGroundPlane:

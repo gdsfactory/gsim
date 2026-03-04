@@ -29,6 +29,7 @@ class MeshPreset(Enum):
 
     COARSE = "coarse"  # ~2.5 elements/λ - fast iteration
     DEFAULT = "default"  # ~5 elements/λ - COMSOL default
+    GRADED = "graded"  # default sizes + refinement near conductor edges
     FINE = "fine"  # ~10 elements/λ - high accuracy
 
 
@@ -36,6 +37,7 @@ class MeshPreset(Enum):
 _MESH_PRESETS = {
     MeshPreset.COARSE: (10.0, 600.0, 5),
     MeshPreset.DEFAULT: (5.0, 300.0, 10),
+    MeshPreset.GRADED: (5.0, 300.0, 10),
     MeshPreset.FINE: (2.0, 70.0, 20),
 }
 
@@ -55,6 +57,7 @@ class MeshConfig:
     Use class methods for quick presets:
         MeshConfig.coarse()   - Fast iteration (~2.5 elem/λ)
         MeshConfig.default()  - Balanced (COMSOL default, ~5 elem/λ)
+        MeshConfig.graded()   - Default sizes + refined near conductor edges
         MeshConfig.fine()     - High accuracy (~10 elem/λ)
 
     Or customize directly:
@@ -68,7 +71,7 @@ class MeshConfig:
 
     # Geometry margins
     margin: float = 50.0  # XY margin around design (um)
-    air_above: float = 100.0  # Air above top metal (um)
+    airbox_margin: float = 0.0  # Extra airbox around stack (um); 0 = disabled
 
     # Ground plane (optional - for microstrip structures)
     ground_plane: GroundPlane | None = None
@@ -82,6 +85,7 @@ class MeshConfig:
 
     # Conductor modeling
     planar_conductors: bool = False  # Treat conductors as 2D PEC surfaces
+    refine_from_curves: bool = False  # Refine mesh near conductor edges
 
     # GUI control
     show_gui: bool = False  # Show gmsh GUI during meshing
@@ -116,6 +120,18 @@ class MeshConfig:
         )
 
     @classmethod
+    def graded(cls, **kwargs) -> MeshConfig:
+        """Default mesh sizes with refinement near conductor edges."""
+        refined, max_size, cpw = _MESH_PRESETS[MeshPreset.GRADED]
+        return cls(
+            refined_mesh_size=refined,
+            max_mesh_size=max_size,
+            cells_per_wavelength=cpw,
+            refine_from_curves=True,
+            **kwargs,
+        )
+
+    @classmethod
     def fine(cls, **kwargs) -> MeshConfig:
         """High accuracy mesh (~10 elements per wavelength)."""
         refined, max_size, cpw = _MESH_PRESETS[MeshPreset.FINE]
@@ -123,6 +139,7 @@ class MeshConfig:
             refined_mesh_size=refined,
             max_mesh_size=max_size,
             cells_per_wavelength=cpw,
+            refine_from_curves=True,
             **kwargs,
         )
 
@@ -193,12 +210,13 @@ def generate_mesh(
         refined_mesh_size=config.refined_mesh_size,
         max_mesh_size=config.max_mesh_size,
         margin=config.margin,
-        air_margin=config.air_above,
+        air_margin=config.airbox_margin,
         fmax=config.fmax,
         show_gui=config.show_gui,
         driven_config=driven_config,
         write_config=write_config,
         planar_conductors=config.planar_conductors,
+        refine_from_curves=config.refine_from_curves,
     )
 
     # Convert to pipeline's MeshResult format
