@@ -7,7 +7,7 @@ vacuum layers suitable for meshing and EM simulation.
 
 It also provides :func:`cpw_layer_stack` which builds a complete gsim
 :class:`~gsim.common.stack.extractor.LayerStack` for the three-layer
-SUBSTRATE / CONDUCTOR / VACUUM topology used by QPDK components.
+SUBSTRATE / SUPERCONDUCTOR / VACUUM topology used by QPDK components.
 
 Usage::
 
@@ -40,7 +40,7 @@ from gsim.common.stack.materials import MATERIALS_DB
 #: Default GDS layer numbers for the three CPW layers.
 CPW_LAYERS: dict[str, tuple[int, int]] = {
     "SUBSTRATE": (1, 0),
-    "CONDUCTOR": (2, 0),
+    "SUPERCONDUCTOR": (2, 0),
     "VACUUM": (3, 0),
 }
 
@@ -56,7 +56,7 @@ def cpw_layer_stack(
     dielectric regions that match what the Palace mesher expects:
 
     * **SUBSTRATE** (1, 0) — dielectric below the conductor plane
-    * **CONDUCTOR** (2, 0) — metal plane (zero-thickness by default for
+    * **SUPERCONDUCTOR** (2, 0) — metal plane (zero-thickness by default for
       2-D boundary-element treatment)
     * **VACUUM** (3, 0) — air / vacuum above the conductor
 
@@ -92,9 +92,9 @@ def cpw_layer_stack(
         layer_type="dielectric",
     )
 
-    stack.layers["CONDUCTOR"] = Layer(
-        name="CONDUCTOR",
-        gds_layer=LAYER["CONDUCTOR"],
+    stack.layers["SUPERCONDUCTOR"] = Layer(
+        name="SUPERCONDUCTOR",
+        gds_layer=LAYER["SUPERCONDUCTOR"],
         zmin=substrate_thickness,
         zmax=substrate_thickness + conductor_thickness,
         thickness=conductor_thickness,
@@ -155,15 +155,15 @@ def create_etched_component(
 
     The resulting component contains three layers taken from *cpw_layers*:
 
-    * ``CONDUCTOR`` — metallised area (SIM_AREA minus M1_ETCH)
-    * ``SUBSTRATE`` — full simulation footprint
-    * ``VACUUM``    — same footprint (used for the air volume above)
+    * ``SUPERCONDUCTOR`` — metallised area (SIM_AREA minus M1_ETCH)
+    * ``SUBSTRATE``       — full simulation footprint
+    * ``VACUUM``          — same footprint (used for the air volume above)
 
     Ports from the original *component* are copied over.
 
     Args:
         component: Source QPDK component (must have SIM_AREA & M1_ETCH layers).
-        cpw_layers: Mapping with at least ``CONDUCTOR``, ``SUBSTRATE`` and
+        cpw_layers: Mapping with at least ``SUPERCONDUCTOR``, ``SUBSTRATE`` and
             ``VACUUM`` keys whose values are ``(layer, datatype)`` tuples.
             Defaults to :data:`CPW_LAYERS`.
         sim_area_layer: Override for the QPDK SIM_AREA layer index.
@@ -172,7 +172,7 @@ def create_etched_component(
             Defaults to ``LAYER.M1_ETCH`` from ``qpdk.tech``.
 
     Returns:
-        New ``gf.Component`` with CONDUCTOR / SUBSTRATE / VACUUM layers
+        New ``gf.Component`` with SUPERCONDUCTOR / SUBSTRATE / VACUUM layers
         and the original ports.
     """
     if cpw_layers is None:
@@ -214,7 +214,7 @@ def create_etched_component(
     el = etched.kdb_cell.layout()
 
     for name, region in [
-        ("CONDUCTOR", conductor_region),
+        ("SUPERCONDUCTOR", conductor_region),
         ("SUBSTRATE", sim_region),
         ("VACUUM", sim_region),
     ]:

@@ -121,7 +121,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         Example:
             >>> sim.add_port("o1", layer="topmetal2", length=5.0)
             >>> sim.add_port(
-            ...     "junction", layer="CONDUCTOR", length=5.0, inductance=10e-9
+            ...     "junction", layer="SUPERCONDUCTOR", length=5.0, inductance=10e-9
             ... )
         """
         self.ports = [p for p in self.ports if p.name != name]
