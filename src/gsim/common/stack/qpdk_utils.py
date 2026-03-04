@@ -88,7 +88,7 @@ def cpw_layer_stack(
         zmin=0.0,
         zmax=substrate_thickness,
         thickness=substrate_thickness,
-        material="silicon",
+        material="sapphire",
         layer_type="dielectric",
     )
 
@@ -118,7 +118,7 @@ def cpw_layer_stack(
             "name": "substrate",
             "zmin": 0.0,
             "zmax": substrate_thickness,
-            "material": "silicon",
+            "material": "sapphire",
         },
         {
             "name": "vacuum",
@@ -129,7 +129,7 @@ def cpw_layer_stack(
     ]
 
     # --- materials ---------------------------------------------------------
-    stack.materials["silicon"] = MATERIALS_DB["silicon"].to_dict()
+    stack.materials["sapphire"] = MATERIALS_DB["sapphire"].to_dict()
     stack.materials["aluminum"] = MATERIALS_DB["aluminum"].to_dict()
     stack.materials["vacuum"] = MATERIALS_DB["vacuum"].to_dict()
 
