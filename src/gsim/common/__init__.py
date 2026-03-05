@@ -14,7 +14,6 @@ from gsim.common.geometry import Geometry
 from gsim.common.geometry_model import GeometryModel, Prism, extract_geometry_model
 from gsim.common.polygon_utils import decimate, klayout_to_shapely, shapely_to_klayout
 from gsim.common.stack import Layer, LayerStack, ValidationResult
-from gsim.common.stack.qpdk_utils import cpw_layer_stack, create_etched_component
 
 # Alias for backward compatibility
 Stack = LayerStack
@@ -27,8 +26,6 @@ __all__ = [
     "Prism",
     "Stack",
     "ValidationResult",
-    "cpw_layer_stack",
-    "create_etched_component",
     "decimate",
     "extract_geometry_model",
     "klayout_to_shapely",

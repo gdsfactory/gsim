@@ -23,7 +23,6 @@ dependencies = [
   "plotly",
   "pydantic>=2.10.6",
   "pyvista>=0.43.0",
-  "qpdk @ git+https://github.com/gdsfactory/quantum-rf-pdk.git@v0.2.1",
   "trame-vtk",
   "trame-vuetify",
 ]
@@ -39,7 +38,6 @@ dev = [
 docs = [
   "altair>=5.5.0",
   "griffe>=1.5.6",
-  "ihp-gdsfactory>=0.1.4",
   "ipykernel>=6.29.5",
   "matplotlib>=3.10.0",
   "mkautodoc>=0.2.0",

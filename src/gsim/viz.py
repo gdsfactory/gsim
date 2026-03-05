@@ -113,7 +113,8 @@ def _plot_wireframe(
                     line_width=1,
                     label=group_map.get(gid, str(gid)),
                 )
-        plotter.add_legend()  # type: ignore[call-arg]
+        if ids:
+            plotter.add_legend()  # type: ignore[call-arg]
     else:
         plotter.add_mesh(mesh, style="wireframe", color="black", line_width=1)  # type: ignore[arg-type]
 

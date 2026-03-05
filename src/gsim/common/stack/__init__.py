@@ -51,12 +51,9 @@ def get_stack(
 ) -> LayerStack:
     """Get layer stack from active PDK or YAML file.
 
-    Automatically detects the active PDK and builds the appropriate stack:
-
-    * **QPDK** — builds a CPW (SUBSTRATE / CONDUCTOR / VACUUM) stack via
-      :func:`gsim.common.stack.qpdk_utils.cpw_layer_stack`.
-    * **Other PDKs** (IHP, SKY130, …) — extracts layers from the PDK's
-      ``LAYER_STACK`` via :func:`extract_from_pdk`.
+    Automatically detects the active PDK and builds the appropriate stack
+    by extracting layers from the PDK's ``LAYER_STACK`` via
+    :func:`extract_from_pdk`.
 
     Args:
         yaml_path: Path to custom YAML stack file. If None, uses active PDK.
@@ -88,16 +85,6 @@ def get_stack(
     pdk = gf.get_active_pdk()
     if pdk is None:
         raise ValueError("No active PDK found. Call PDK.activate() first.")
-
-    # QPDK: build the three-layer CPW stack directly
-    if getattr(pdk, "name", "").lower() == "qpdk":
-        from gsim.common.stack.qpdk_utils import cpw_layer_stack
-
-        stack, _layers = cpw_layer_stack(
-            substrate_thickness=kwargs.get("substrate_thickness", 500),
-            vacuum_thickness=kwargs.get("air_above", 500),
-        )
-        return stack
 
     return extract_from_pdk(pdk, **kwargs)
 

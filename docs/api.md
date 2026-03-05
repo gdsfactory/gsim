@@ -28,10 +28,6 @@
 
 ### Functions
 
-::: gsim.common.cpw_layer_stack
-
-::: gsim.common.create_etched_component
-
 ::: gsim.common.decimate
 
 ::: gsim.common.extract_geometry_model

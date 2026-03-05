@@ -50,8 +50,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
       - name: Create environment
         run: just dev
-      - name: Install ubcpdk
-        run: uv pip install ubcpdk
+      - name: Install notebook PDK
+        run: |
+          nb="${{ matrix.notebook }}"
+          case "$nb" in
+            *qpdk*) uv pip install "qpdk @ git+https://github.com/gdsfactory/quantum-rf-pdk.git" ;;
+            *palace*) uv pip install ihp-gdsfactory ;;
+            *meep*) uv pip install ubcpdk ;;
+          esac
       - name: Create ipykernel
         run: uv run --no-sync python -m ipykernel install --user --name gsim
       - name: Run notebook
@@ -83,8 +89,6 @@ jobs:
         run: cargo install svgbob_cli
       - name: Create environment
         run: just dev
-      - name: Install ubcpdk
-        run: uv pip install ubcpdk
       - name: Download executed notebooks
         uses: actions/download-artifact@v4
         with:
