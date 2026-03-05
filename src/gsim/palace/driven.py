@@ -6,8 +6,6 @@ simulations to extract S-parameters.
 
 from __future__ import annotations
 
-import logging
-import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,11 +20,7 @@ from gsim.palace.models import (
     MeshConfig,
     NumericalConfig,
     PortConfig,
-    SimulationResult,
-    ValidationResult,
 )
-
-logger = logging.getLogger(__name__)
 
 
 class DrivenSim(PalaceSimMixin, BaseModel):
