@@ -684,6 +684,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             driven_config=self.driven,
         )
 
+        # Validate mesh and config
+        validation = self.validate_mesh()
+        if not validation.valid:
+            raise ValueError(f"Mesh validation failed:\n{validation}")
+
         return config_path
 
     # -------------------------------------------------------------------------

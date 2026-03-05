@@ -341,6 +341,37 @@ def build_entities(
                 )
             )
 
+        # Volumetric conductors: shell surfaces (volume already removed)
+        if tag_info["volumes"]:
+            xy_tags = []
+            z_tags = []
+            for item in tag_info["volumes"]:
+                if isinstance(item, tuple):
+                    _volumetag, surface_tags = item
+                    for tag in surface_tags:
+                        if gmsh_utils.is_vertical_surface(tag):
+                            z_tags.append(tag)
+                        else:
+                            xy_tags.append(tag)
+            if xy_tags:
+                entities.append(
+                    Entity(
+                        name=f"{layer_name}_xy",
+                        dim=2,
+                        mesh_order=0,
+                        tags=xy_tags,
+                    )
+                )
+            if z_tags:
+                entities.append(
+                    Entity(
+                        name=f"{layer_name}_z",
+                        dim=2,
+                        mesh_order=0,
+                        tags=z_tags,
+                    )
+                )
+
     # --- Port surfaces (dim=2) ---
     for port_name, surf_tags in port_tags.items():
         port_num = int(port_name[1:])
