@@ -50,7 +50,7 @@ class PalaceSimMixin:
     numerical: NumericalConfig
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
     ports: list[PortConfig] = Field(default_factory=list)
-    cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    cpw_ports: list[CPWPortConfig]  # = Field(default_factory=list)
     _output_dir: Path | None
     _stack_kwargs: dict[str, Any]
 
