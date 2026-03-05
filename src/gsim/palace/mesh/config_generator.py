@@ -203,9 +203,8 @@ def generate_palace_config(
                             }
                         )
                     else:
-                        elements = [
-                            {"Attributes": [elem["phys_group"]]}
-                            for elem in port_group["elements"]
+                        attributes = [
+                            elem["phys_group"] for elem in port_group["elements"]
                         ]
                         wave_ports.append(
                             {
@@ -213,7 +212,7 @@ def generate_palace_config(
                                 "Mode": port.mode,
                                 "Offset": port.offset,
                                 "Excitation": port_idx if port.excited else False,
-                                "Elements": elements,
+                                "Attributes": attributes,
                             }
                         )
             else:

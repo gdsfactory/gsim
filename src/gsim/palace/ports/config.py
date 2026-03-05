@@ -343,10 +343,10 @@ def configure_cpw_wave_port(
     transverse = np.array([-np.sin(orientation_rad), np.cos(orientation_rad)])
 
     # Gap center offset from signal center
-    offset = (s_width + gap_width) / 2.0
+    gap_offset = (s_width + gap_width) / 2.0
 
-    upper_center = center + transverse * offset
-    lower_center = center - transverse * offset
+    upper_center = center + transverse * gap_offset
+    lower_center = center - transverse * gap_offset
 
     # Store computed CPW element info on the single port
     port.info["palace_type"] = "cpw_waveport"

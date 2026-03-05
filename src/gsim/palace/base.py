@@ -438,8 +438,12 @@ class PalaceSimMixin:
                         errors.append(
                             "config.json has no Conductivity or PEC boundaries."
                         )
-                    if not boundaries.get("LumpedPort"):
-                        errors.append("config.json has no LumpedPort entries.")
+                    if not boundaries.get("LumpedPort") and not boundaries.get(
+                        "WavePort"
+                    ):
+                        errors.append(
+                            "config.json has no LumpedPort or WavePort entries."
+                        )
                 except json.JSONDecodeError as e:
                     errors.append(f"config.json is invalid JSON: {e}")
 
