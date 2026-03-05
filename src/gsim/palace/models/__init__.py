@@ -20,6 +20,7 @@ from gsim.palace.models.mesh import MeshConfig
 from gsim.palace.models.numerical import NumericalConfig
 from gsim.palace.models.ports import (
     CPWPortConfig,
+    CPWWavePortConfig,
     PortConfig,
     TerminalConfig,
     WavePortConfig,
@@ -36,6 +37,7 @@ from gsim.palace.models.stack import MaterialConfig
 
 __all__ = [
     "CPWPortConfig",
+    "CPWWavePortConfig",
     "DrivenConfig",
     "EigenmodeConfig",
     "ElectrostaticConfig",

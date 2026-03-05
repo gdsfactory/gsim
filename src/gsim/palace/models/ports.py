@@ -26,7 +26,9 @@ class PortConfig(BaseModel):
         from_layer: Bottom layer for via ports
         to_layer: Top layer for via ports
         length: Port extent along direction (um)
-        impedance: Port impedance (Ohms)
+        resistance: Series resistance (Ohms)
+        inductance: Series inductance (H)
+        capacitance: Shunt capacitance (F)
         excited: Whether this port is excited
         geometry: Port geometry type ("inplane" or "via")
     """
@@ -38,14 +40,9 @@ class PortConfig(BaseModel):
     from_layer: str | None = None
     to_layer: str | None = None
     length: float | None = Field(default=None, gt=0)
-    impedance: float = Field(default=50.0, gt=0)
-    resistance: float | None = Field(
-        default=None, ge=0, description="Resistance in Ohms"
-    )
-    inductance: float | None = Field(default=None, ge=0, description="Inductance in H")
-    capacitance: float | None = Field(
-        default=None, ge=0, description="Capacitance in F"
-    )
+    resistance: float = Field(default=50.0, ge=0)
+    inductance: float = Field(default=0.0, ge=0)
+    capacitance: float = Field(default=0.0, ge=0)
     excited: bool = True
     geometry: Literal["inplane", "via"] = "inplane"
 
@@ -78,7 +75,9 @@ class CPWPortConfig(BaseModel):
         length: Port extent along direction (um)
         offset: Shift the port along the waveguide direction (um).
             Positive moves in the port orientation direction.
-        impedance: Port impedance (Ohms)
+        resistance: Series resistance (Ohms)
+        inductance: Series inductance (H)
+        capacitance: Shunt capacitance (F)
         excited: Whether this port is excited
     """
 
@@ -96,7 +95,9 @@ class CPWPortConfig(BaseModel):
         description="Shift port inward along the waveguide (um). "
         "Positive = away from boundary, into conductor.",
     )
-    impedance: float = Field(default=50.0, gt=0)
+    resistance: float = Field(default=50.0, ge=0)
+    inductance: float = Field(default=0.0, ge=0)
+    capacitance: float = Field(default=0.0, ge=0)
     excited: bool = True
 
 

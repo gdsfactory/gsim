@@ -61,10 +61,9 @@ class PalacePort:
     )
 
     # Electrical properties
-    impedance: float = 50.0  # Ohms
-    resistance: float | None = None  # Ohms
-    inductance: float | None = None  # H
-    capacitance: float | None = None  # F
+    resistance: float = 50.0  # Ohms
+    inductance: float = 0.0  # H
+    capacitance: float = 0.0  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
     # Waveport specific settings
@@ -89,7 +88,9 @@ def configure_inplane_port(
     ports,
     layer: str,
     length: float,
-    impedance: float = 50.0,
+    resistance: float = 50.0,
+    inductance: float = 0.0,
+    capacitance: float = 0.0,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as inplane (lumped) ports for Palace simulation.
@@ -101,7 +102,9 @@ def configure_inplane_port(
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         layer: Target conductor layer name (e.g., 'topmetal2')
         length: Port extent along direction in um (perpendicular to port width)
-        impedance: Port impedance in Ohms (default: 50)
+        resistance: Series resistance in Ohms (default: 50)
+        inductance: Series inductance in Henries (default: 0)
+        capacitance: Shunt capacitance in Farads (default: 0)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -117,7 +120,9 @@ def configure_inplane_port(
         port.info["palace_type"] = "lumped"
         port.info["layer"] = layer
         port.info["length"] = length
-        port.info["impedance"] = impedance
+        port.info["resistance"] = resistance
+        port.info["inductance"] = inductance
+        port.info["capacitance"] = capacitance
         port.info["excited"] = excited
 
 
@@ -125,7 +130,9 @@ def configure_via_port(
     ports,
     from_layer: str,
     to_layer: str,
-    impedance: float = 50.0,
+    resistance: float = 50.0,
+    inductance: float = 0.0,
+    capacitance: float = 0.0,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as via (vertical) lumped ports.
@@ -137,7 +144,9 @@ def configure_via_port(
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         from_layer: Bottom conductor layer name (e.g., 'metal1')
         to_layer: Top conductor layer name (e.g., 'topmetal2')
-        impedance: Port impedance in Ohms (default: 50)
+        resistance: Series resistance in Ohms (default: 50)
+        inductance: Series inductance in Henries (default: 0)
+        capacitance: Shunt capacitance in Farads (default: 0)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -155,7 +164,9 @@ def configure_via_port(
         port.info["palace_type"] = "lumped"
         port.info["from_layer"] = from_layer
         port.info["to_layer"] = to_layer
-        port.info["impedance"] = impedance
+        port.info["resistance"] = resistance
+        port.info["inductance"] = inductance
+        port.info["capacitance"] = capacitance
         port.info["excited"] = excited
 
 
@@ -165,7 +176,9 @@ def configure_cpw_port(
     s_width: float,
     gap_width: float,
     length: float,
-    impedance: float = 50.0,
+    resistance: float = 50.0,
+    inductance: float = 0.0,
+    capacitance: float = 0.0,
     excited: bool = True,
     offset: float = 0.0,
 ):
@@ -181,7 +194,9 @@ def configure_cpw_port(
         s_width: Signal conductor width in um
         gap_width: Gap width between signal and ground in um
         length: Port extent along direction (um)
-        impedance: Port impedance in Ohms (default: 50)
+        resistance: Series resistance in Ohms (default: 50)
+        inductance: Series inductance in Henries (default: 0)
+        capacitance: Shunt capacitance in Farads (default: 0)
         excited: Whether port is excited (default: True)
         offset: Shift port inward along the waveguide (um).
             Positive moves away from the boundary, into the conductor.
@@ -228,7 +243,9 @@ def configure_cpw_port(
     port.info["palace_type"] = "cpw_lumped"
     port.info["layer"] = layer
     port.info["length"] = length
-    port.info["impedance"] = impedance
+    port.info["resistance"] = resistance
+    port.info["inductance"] = inductance
+    port.info["capacitance"] = capacitance
     port.info["excited"] = excited
     port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
     port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
@@ -287,7 +304,7 @@ def configure_cpw_wave_port(
     offset: float = 0.0,
     excited: bool = True,
 ):
-    """Configure a gdsfactory port as a CPW (multi-element) lumped port.
+    """Configure a gdsfactory port as a CPW (multi-element) wave port.
 
     In CPW (Ground-Signal-Ground), E-fields are opposite in the two gaps.
     The port should be placed at the signal center. The upper and lower gap
@@ -306,7 +323,7 @@ def configure_cpw_wave_port(
     Examples:
         ```python
         configure_cpw_wave_port(
-            c.ports["o1"],
+            c.ports["w1"],
             layer="topmetal2",
             s_width=10.0,
             gap_width=6.0,
@@ -405,7 +422,9 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 multi_element=True,
                 centers=centers,
                 directions=directions,
-                impedance=info.get("impedance", 50.0),
+                resistance=info.get("resistance", 50.0),
+                inductance=info.get("inductance", 0.0),
+                capacitance=info.get("capacitance", 0.0),
                 mode=info.get("mode", 1),
                 offset=info.get("offset", 0.0),
                 excited=info.get("excited", True),
@@ -463,7 +482,6 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             from_layer=from_layer,
             to_layer=to_layer,
             length=info.get("length"),
-            impedance=info.get("impedance", 50.0),
             resistance=info.get("resistance"),
             inductance=info.get("inductance"),
             capacitance=info.get("capacitance"),

@@ -163,43 +163,57 @@ def generate_palace_config(
             if port.multi_element:
                 # Multi-element port (CPW)
                 if port_group.get("type") == "cpw":
-                    elements = [
-                        {
-                            "Attributes": [elem["phys_group"]],
-                            "Direction": elem["direction"],
-                        }
-                        for elem in port_group["elements"]
-                    ]
-
-                    lumped_ports.append(
-                        {
-                            "Index": port_idx,
-                            "R": port.impedance,
-                            "Excitation": port_idx if port.excited else False,
-                            "Elements": elements,
-                        }
-                    )
+                    if port.port_type == PortType.LUMPED:
+                        elements = [
+                            {
+                                "Attributes": [elem["phys_group"]],
+                                "Direction": elem["direction"],
+                            }
+                            for elem in port_group["elements"]
+                        ]
+                        lumped_ports.append(
+                            {
+                                "Index": port_idx,
+                                "R": port.resistance,
+                                "L": port.inductance,
+                                "C": port.capacitance,
+                                "Excitation": port_idx if port.excited else False,
+                                "Elements": elements,
+                            }
+                        )
+                    else:
+                        elements = [
+                            {"Attributes": [elem["phys_group"]]}
+                            for elem in port_group["elements"]
+                        ]
+                        wave_ports.append(
+                            {
+                                "Index": port_idx,
+                                "Mode": port.mode,
+                                "Offset": port.offset,
+                                "Excitation": port_idx if port.excited else False,
+                                "Elements": elements,
+                            }
+                        )
             else:
                 # Single-element port
                 if port.port_type == PortType.LUMPED:
                     direction = (
-                        "Z" if port.geometry == PortGeometry.VIA else port.direction.upper()
+                        "Z"
+                        if port.geometry == PortGeometry.VIA
+                        else port.direction.upper()
                     )
                     port_entry: dict[str, object] = {
                         "Index": port_idx,
-                        "R": port.impedance,
+                        "R": port.resistance,
+                        "L": port.inductance,
+                        "C": port.capacitance,
                         "Direction": direction,
                         "Excitation": port_idx if port.excited else False,
                         "Attributes": [port_group["phys_group"]],
                     }
-                    if port.resistance is not None:
-                        port_entry["Rs"] = port.resistance
-                    if port.inductance is not None:
-                        port_entry["L"] = port.inductance
-                    if port.capacitance is not None:
-                        port_entry["C"] = port.capacitance
                     lumped_ports.append(port_entry)
-                elif port.port_type == PortType.WAVEPORT:
+                else:
                     wave_ports.append(
                         {
                             "Index": port_idx,

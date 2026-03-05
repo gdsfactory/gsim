@@ -17,6 +17,7 @@ from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
+    CPWWavePortConfig,
     DrivenConfig,
     MaterialConfig,
     MeshConfig,
@@ -24,8 +25,8 @@ from gsim.palace.models import (
     PortConfig,
     SimulationResult,
     ValidationResult,
+    WavePortConfig,
 )
-from gsim.palace.models.ports import CPWWavePortConfig, WavePortConfig
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +111,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         from_layer: str | None = None,
         to_layer: str | None = None,
         length: float | None = None,
-        impedance: float = 50.0,
-        resistance: float | None = None,
-        inductance: float | None = None,
-        capacitance: float | None = None,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
         geometry: Literal["inplane", "via"] = "inplane",
     ) -> None:
@@ -125,7 +125,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             from_layer: Bottom layer for via ports
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
-            impedance: Port impedance (Ohms)
             resistance: Series resistance (Ohms)
             inductance: Series inductance (H)
             capacitance: Shunt capacitance (F)
@@ -148,7 +147,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 from_layer=from_layer,
                 to_layer=to_layer,
                 length=length,
-                impedance=impedance,
                 resistance=resistance,
                 inductance=inductance,
                 capacitance=capacitance,
@@ -166,7 +164,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         gap_width: float,
         length: float = 0.1,
         offset: float = 0.0,
-        impedance: float = 50.0,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
@@ -192,7 +192,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             length: Port extent along direction (um)
             offset: Shift the port inward along the waveguide (um).
                 Positive moves away from the boundary, into the conductor.
-            impedance: Port impedance (Ohms)
+            resistance: Series resistance (Ohms)
+            inductance: Series inductance (H)
+            capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
 
         Example:
@@ -209,7 +211,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 gap_width=gap_width,
                 length=length,
                 offset=offset,
-                impedance=impedance,
+                resistance=resistance,
+                inductance=inductance,
+                capacitance=capacitance,
                 excited=excited,
             )
         )
@@ -385,7 +389,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         )
         if not has_ports:
             warnings_list.append(
-                "No ports configured. Call add_port() or add_cpw_port()."
+                "No ports configured. Call any of add_port(), add_cpw_port(),"
+                " add_wave_port(), or add_cpw_wave_port()."
             )
         else:
             # Validate port configurations
@@ -439,7 +444,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Internal helpers
     # -------------------------------------------------------------------------
 
-    def _find_gf_port(self, port_name: str) -> Any:
+    def _find_gf_port(self, port_name: str):
         """Find a gdsfactory port by name."""
         component = self.geometry.component if self.geometry else None
         if component is None:
@@ -481,7 +486,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     gf_port,
                     layer=port_config.layer,
                     length=port_config.length or gf_port.width,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
             elif port_config.geometry == "via" and (
@@ -491,17 +498,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     gf_port,
                     from_layer=port_config.from_layer,
                     to_layer=port_config.to_layer,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
-
-            # Attach RLC values to port info for downstream consumers
-            if port_config.resistance is not None:
-                gf_port.info["resistance"] = port_config.resistance
-            if port_config.inductance is not None:
-                gf_port.info["inductance"] = port_config.inductance
-            if port_config.capacitance is not None:
-                gf_port.info["capacitance"] = port_config.capacitance
 
         # Configure CPW ports
         for cpw_config in self.cpw_ports:
@@ -516,7 +517,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 s_width=cpw_config.s_width,
                 gap_width=cpw_config.gap_width,
                 length=cpw_config.length,
-                impedance=cpw_config.impedance,
+                resistance=cpw_config.resistance,
+                inductance=cpw_config.inductance,
+                capacitance=cpw_config.capacitance,
                 excited=cpw_config.excited,
                 offset=cpw_config.offset,
             )
@@ -538,6 +541,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     mode=port_config.mode,
                     offset=port_config.offset,
                 )
+
         # Configure CPW wave ports
         for cpw_config in self.cpw_wave_ports:
             if cpw_config.name is None:
