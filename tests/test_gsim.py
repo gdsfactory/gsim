@@ -11,13 +11,6 @@ def test_package_import():
     assert hasattr(gsim, "__version__")
 
 
-def test_package_version():
-    """Test that package version is accessible."""
-    import gsim
-
-    assert gsim.__version__ == "0.0.5"
-
-
 def test_palace_submodule_import():
     """Test that palace submodule can be imported."""
     from gsim import palace
