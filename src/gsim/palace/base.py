@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from gsim.palace.models.results import ValidationResult
+
 if TYPE_CHECKING:
     from gdsfactory.component import Component
 
@@ -308,6 +310,106 @@ class PalaceSimMixin:
         mesh_config.show_gui = show_gui
 
         return mesh_config
+
+    # -------------------------------------------------------------------------
+    # Post-mesh validation
+    # -------------------------------------------------------------------------
+
+    def validate_mesh(self) -> ValidationResult:
+        """Validate the generated mesh and config before cloud submission.
+
+        Checks that physical groups are correctly assigned after meshing:
+        conductor surfaces, dielectric volumes, ports, and absorbing boundary.
+        Also verifies the generated config.json structure.
+
+        Call after mesh() and before run().
+
+        Returns:
+            ValidationResult with validation status and messages
+
+        Example:
+            >>> sim.mesh(preset="coarse")
+            >>> result = sim.validate_mesh()
+            >>> print(result)
+        """
+        errors = []
+        warnings_list = []
+
+        mesh_result = getattr(self, "_mesh_result", None) or getattr(
+            self, "_last_mesh_result", None
+        )
+        if mesh_result is None:
+            errors.append("No mesh generated. Call mesh() first.")
+            return ValidationResult(valid=False, errors=errors, warnings=warnings_list)
+
+        groups = mesh_result.groups
+
+        # Check dielectric volumes
+        if not groups.get("volumes"):
+            errors.append("No dielectric volumes in mesh.")
+        else:
+            vol_names = list(groups["volumes"].keys())
+            warnings_list.append(f"Volumes: {vol_names}")
+
+        # Check conductor surfaces (volumetric or PEC)
+        has_conductors = bool(groups.get("conductor_surfaces"))
+        has_pec = bool(groups.get("pec_surfaces"))
+        if not has_conductors and not has_pec:
+            errors.append(
+                "No conductor surfaces in mesh. "
+                "Check that conductor layers have polygons and correct layer_type."
+            )
+        else:
+            if has_conductors:
+                warnings_list.append(
+                    f"Conductor surfaces: {list(groups['conductor_surfaces'].keys())}"
+                )
+            if has_pec:
+                warnings_list.append(
+                    f"PEC surfaces: {list(groups['pec_surfaces'].keys())}"
+                )
+
+        # Check ports
+        port_surfaces = groups.get("port_surfaces", {})
+        if not port_surfaces:
+            errors.append("No port surfaces in mesh.")
+        else:
+            for port_name, port_info in port_surfaces.items():
+                if port_info.get("type") == "cpw":
+                    n_elems = len(port_info.get("elements", []))
+                    if n_elems < 2:
+                        errors.append(
+                            f"CPW port '{port_name}' has {n_elems} elements "
+                            f"(expected >= 2)."
+                        )
+
+        # Check absorbing boundary
+        if not groups.get("boundary_surfaces", {}).get("absorbing"):
+            warnings_list.append(
+                "No absorbing boundary found. This is expected if airbox_margin=0."
+            )
+
+        # Validate config.json if it exists
+        output_dir = getattr(self, "_output_dir", None)
+        if output_dir is not None:
+            import json
+
+            config_path = output_dir / "config.json"
+            if config_path.exists():
+                try:
+                    config = json.loads(config_path.read_text())
+                    boundaries = config.get("Boundaries", {})
+                    if not boundaries.get("Conductivity") and not boundaries.get("PEC"):
+                        errors.append(
+                            "config.json has no Conductivity or PEC boundaries."
+                        )
+                    if not boundaries.get("LumpedPort"):
+                        errors.append("config.json has no LumpedPort entries.")
+                except json.JSONDecodeError as e:
+                    errors.append(f"config.json is invalid JSON: {e}")
+
+        valid = len(errors) == 0
+        return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
 
     # -------------------------------------------------------------------------
     # Convenience methods
