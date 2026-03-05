@@ -154,6 +154,7 @@ def generate_mesh(
     refine_from_curves: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
     merge_via_distance: float = 2.0,
+    verbosity: int = 3,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -191,7 +192,7 @@ def generate_mesh(
 
     # Initialize gmsh
     gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.option.setNumber("General.Verbosity", verbosity)
 
     if "palace_mesh" in gmsh.model.list():
         gmsh.model.setCurrent("palace_mesh")
