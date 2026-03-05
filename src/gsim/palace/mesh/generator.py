@@ -154,6 +154,7 @@ def generate_mesh(
     write_config: bool = True,
     planar_conductors: bool = False,
     refine_from_curves: bool = False,
+    verbosity: int = 3,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -190,7 +191,7 @@ def generate_mesh(
 
     # Initialize gmsh
     gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.option.setNumber("General.Verbosity", verbosity)
 
     if "palace_mesh" in gmsh.model.list():
         gmsh.model.setCurrent("palace_mesh")
