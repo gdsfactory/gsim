@@ -11,8 +11,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import Field
-
 from gsim.palace.models import (
     CPWPortConfig,
     DrivenConfig,
@@ -48,8 +46,8 @@ class PalaceSimMixin:
     stack: LayerStack | None
     materials: dict[str, MaterialConfig]
     numerical: NumericalConfig
-    driven: DrivenConfig = Field(default_factory=DrivenConfig)
-    ports: list[PortConfig] = Field(default_factory=list)
+    driven: DrivenConfig  # = Field(default_factory=DrivenConfig)
+    ports: list[PortConfig]  # = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig]  # = Field(default_factory=list)
     _output_dir: Path | None
     _stack_kwargs: dict[str, Any]
