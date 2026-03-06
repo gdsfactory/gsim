@@ -6,16 +6,28 @@ DrivenSim, EigenmodeSim, ElectrostaticSim.
 
 from __future__ import annotations
 
+import logging
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from gsim.palace.models.results import ValidationResult
+from gsim.palace.models import (
+    CPWPortConfig,
+    DrivenConfig,
+    MaterialConfig,
+    MeshConfig,
+    NumericalConfig,
+    PortConfig,
+    TerminalConfig,
+)
+from gsim.palace.models.results import SimulationResult, ValidationResult
 
 if TYPE_CHECKING:
     from gdsfactory.component import Component
 
     from gsim.common import Geometry, LayerStack
-    from gsim.palace.models import MaterialConfig, MeshConfig, NumericalConfig
+
+logger = logging.getLogger(__name__)
 
 
 class PalaceSimMixin:
@@ -35,6 +47,11 @@ class PalaceSimMixin:
     stack: LayerStack | None
     materials: dict[str, MaterialConfig]
     numerical: NumericalConfig
+    driven: DrivenConfig
+    ports: list[PortConfig]
+    cpw_ports: list[CPWPortConfig]
+    terminals: list[TerminalConfig]
+    simulation_type: Literal["driven", "eigenmode", "electrostatic"]
     _output_dir: Path | None
     _stack_kwargs: dict[str, Any]
 
@@ -152,8 +169,9 @@ class PalaceSimMixin:
         self,
         name: str,
         *,
-        material_type: Literal["conductor", "dielectric", "semiconductor"]
-        | None = None,
+        material_type: (
+            Literal["conductor", "dielectric", "semiconductor"] | None
+        ) = None,
         conductivity: float | None = None,
         permittivity: float | None = None,
         loss_tangent: float | None = None,
@@ -173,8 +191,6 @@ class PalaceSimMixin:
             ... )
             >>> sim.set_material("sio2", material_type="dielectric", permittivity=3.9)
         """
-        from gsim.palace.models import MaterialConfig
-
         # Determine type if not provided
         resolved_type = material_type
         if resolved_type is None:
@@ -217,8 +233,6 @@ class PalaceSimMixin:
         Example:
             >>> sim.set_numerical(order=3, tolerance=1e-8)
         """
-        from gsim.palace.models import NumericalConfig
-
         self.numerical = NumericalConfig(
             order=order,
             tolerance=tolerance,
@@ -275,8 +289,6 @@ class PalaceSimMixin:
         show_gui: bool,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides."""
-        from gsim.palace.models import MeshConfig
-
         # Build mesh config from preset
         if preset == "coarse":
             mesh_config = MeshConfig.coarse()
@@ -499,3 +511,949 @@ class PalaceSimMixin:
             style=style,
             transparent_groups=transparent_groups,
         )
+
+    # -------------------------------------------------------------------------
+    # Validation
+    # -------------------------------------------------------------------------
+
+    def validate_config(self) -> ValidationResult:
+        """Validate the simulation configuration.
+
+        Returns:
+            ValidationResult with validation status and messages
+        """
+        errors = []
+        warnings_list = []
+
+        # Check geometry
+        if self.geometry is None:
+            errors.append("No component set. Call set_geometry(component) first.")
+
+        # Check stack
+        if self.stack is None and not self._stack_kwargs:
+            warnings_list.append(
+                "No stack configured. Will use active PDK with defaults."
+            )
+
+        # Check ports
+
+        has_ports = bool(self.ports) or bool(self.cpw_ports)
+        if not has_ports:
+            if self.simulation_type == "driven":
+                warnings_list.append(
+                    "No ports configured. Call add_port() or add_cpw_port()."
+                )
+            elif self.simulation_type == "eigenmode":
+                warnings_list.append(
+                    "No ports configured. Eigenmode findsallmodes without port loading."
+                )
+        else:
+            # Validate port configurations
+            for port in self.ports:
+                if port.geometry == "inplane" and port.layer is None:
+                    errors.append(f"Port '{port.name}': inplane ports require 'layer'")
+                if port.geometry == "via" and (
+                    port.from_layer is None or port.to_layer is None
+                ):
+                    errors.append(
+                        f"Port '{port.name}': via ports require "
+                        "'from_layer' and 'to_layer'"
+                    )
+
+            # Validate CPW ports
+            errors.extend(
+                f"CPW port '{cpw.name}': 'layer' is required"
+                for cpw in self.cpw_ports
+                if not cpw.layer
+            )
+
+        # Validate excitation port if specified
+        if self.simulation_type == "driven" and self.driven.excitation_port is not None:
+            port_names = [p.name for p in self.ports]
+            cpw_names = [cpw.name for cpw in self.cpw_ports]
+            all_port_names = port_names + cpw_names
+            if self.driven.excitation_port not in all_port_names:
+                errors.append(
+                    f"Excitation port '{self.driven.excitation_port}' not found. "
+                    f"Available: {all_port_names}"
+                )
+
+        if self.simulation_type == "electrostatic" and len(self.terminals) < 2:
+            # Electrostatic requires at least 2 terminals
+            errors.append(
+                "Electrostatic simulation requires at least 2 terminals. "
+                "Call add_terminal() to add terminals."
+            )
+        if self.simulation_type == "electrostatic":
+            # Validate terminal configurations
+            errors.extend(
+                f"Terminal '{terminal.name}': 'layer' is required"
+                for terminal in self.terminals
+                if not terminal.layer
+            )
+
+        valid = len(errors) == 0
+        return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
+
+    # -------------------------------------------------------------------------
+    # Internal helpers
+    # -------------------------------------------------------------------------
+
+    def _configure_ports_on_component(self, stack: LayerStack) -> None:  # noqa: ARG002
+        """Configure ports on the component using legacy functions."""
+        from gsim.palace.ports import (
+            configure_cpw_port,
+            configure_inplane_port,
+            configure_via_port,
+        )
+
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            raise ValueError("No component set")
+
+        # Configure regular ports
+        for port_config in self.ports:
+            if port_config.name is None:
+                continue
+
+            # Find matching gdsfactory port
+            gf_port = None
+            for p in component.ports:
+                if p.name == port_config.name:
+                    gf_port = p
+                    break
+
+            if gf_port is None:
+                raise ValueError(
+                    f"Port '{port_config.name}' not found on component. "
+                    f"Available ports: {[p.name for p in component.ports]}"
+                )
+
+            if port_config.geometry == "inplane" and port_config.layer is not None:
+                configure_inplane_port(
+                    gf_port,
+                    layer=port_config.layer,
+                    length=port_config.length or gf_port.width,
+                    impedance=port_config.impedance,
+                    excited=port_config.excited,
+                )
+            elif port_config.geometry == "via" and (
+                port_config.from_layer is not None and port_config.to_layer is not None
+            ):
+                configure_via_port(
+                    gf_port,
+                    from_layer=port_config.from_layer,
+                    to_layer=port_config.to_layer,
+                    impedance=port_config.impedance,
+                    excited=port_config.excited,
+                )
+
+            # Attach RLC values to port info for downstream consumers
+            if port_config.resistance is not None:
+                gf_port.info["resistance"] = port_config.resistance
+            if port_config.inductance is not None:
+                gf_port.info["inductance"] = port_config.inductance
+            if port_config.capacitance is not None:
+                gf_port.info["capacitance"] = port_config.capacitance
+
+        # Configure CPW ports
+        for cpw_config in self.cpw_ports:
+            # Find the single gdsfactory port at the signal center
+            gf_port = None
+            for p in component.ports:
+                if p.name == cpw_config.name:
+                    gf_port = p
+                    break
+            if gf_port is None:
+                raise ValueError(
+                    f"CPW port '{cpw_config.name}' not found on component. "
+                    f"Available: {[p.name for p in component.ports]}"
+                )
+
+            configure_cpw_port(
+                gf_port,
+                layer=cpw_config.layer,
+                s_width=cpw_config.s_width,
+                gap_width=cpw_config.gap_width,
+                length=cpw_config.length,
+                impedance=cpw_config.impedance,
+                excited=cpw_config.excited,
+                offset=cpw_config.offset,
+            )
+
+        self._configured_ports = True
+
+    def _generate_mesh_internal(
+        self,
+        output_dir: Path,
+        mesh_config: MeshConfig,
+        ports: list,
+        driven_config: Any,
+        model_name: str,
+        verbose: bool,
+        write_config: bool = True,
+    ) -> SimulationResult:
+        """Internal mesh generation."""
+        from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
+        from gsim.palace.mesh import generate_mesh
+
+        component = self.geometry.component if self.geometry else None
+
+        # Get effective fmax from driven config if mesh doesn't specify
+        effective_fmax = mesh_config.fmax
+        if driven_config is not None and mesh_config.fmax == 100e9:
+            effective_fmax = driven_config.fmax
+
+        legacy_mesh_config = LegacyMeshConfig(
+            refined_mesh_size=mesh_config.refined_mesh_size,
+            max_mesh_size=mesh_config.max_mesh_size,
+            cells_per_wavelength=mesh_config.cells_per_wavelength,
+            margin=mesh_config.margin,
+            airbox_margin=mesh_config.airbox_margin,
+            fmax=effective_fmax,
+            show_gui=mesh_config.show_gui,
+            preview_only=mesh_config.preview_only,
+            planar_conductors=mesh_config.planar_conductors,
+            refine_from_curves=mesh_config.refine_from_curves,
+        )
+
+        # Resolve stack
+        stack = self._resolve_stack()
+
+        if verbose:
+            logger.info("Generating mesh in %s", output_dir)
+
+        mesh_result = generate_mesh(
+            component=component,
+            stack=stack,
+            ports=ports,
+            output_dir=output_dir,
+            config=legacy_mesh_config,
+            model_name=model_name,
+            driven_config=driven_config,
+            write_config=write_config,
+        )
+
+        # Store mesh_result for deferred config generation
+        self._last_mesh_result = mesh_result
+        self._last_ports = ports
+
+        return SimulationResult(
+            mesh_path=mesh_result.mesh_path,
+            output_dir=output_dir,
+            config_path=mesh_result.config_path,
+            port_info=mesh_result.port_info,
+            mesh_stats=mesh_result.mesh_stats,
+        )
+
+    def _get_ports_for_preview(self, stack: LayerStack) -> list:
+        """Get ports for preview."""
+        from gsim.palace.ports import extract_ports
+
+        component = self.geometry.component if self.geometry else None
+        self._configure_ports_on_component(stack)
+        return extract_ports(component, stack)
+
+    # -------------------------------------------------------------------------
+    # Preview
+    # -------------------------------------------------------------------------
+
+    def preview(
+        self,
+        *,
+        preset: Literal["coarse", "default", "graded", "fine"] | None = None,
+        refined_mesh_size: float | None = None,
+        max_mesh_size: float | None = None,
+        margin: float | None = None,
+        airbox_margin: float | None = None,
+        fmax: float | None = None,
+        planar_conductors: bool | None = None,
+        show_gui: bool = True,
+    ) -> None:
+        """Preview the mesh without running simulation.
+
+        Opens the gmsh GUI to visualize the mesh interactively.
+
+        Args:
+            preset: Mesh quality preset ("coarse", "default", "graded", "fine")
+            refined_mesh_size: Mesh size near conductors (um)
+            max_mesh_size: Max mesh size in air/dielectric (um)
+            margin: XY margin around design (um)
+            airbox_margin: Extra airbox around stack (um); 0 = disabled
+            fmax: Max frequency for mesh sizing (Hz)
+            planar_conductors: Treat conductors as 2D PEC surfaces
+            show_gui: Show gmsh GUI for interactive preview
+
+        Example:
+            >>> sim.preview(preset="fine", planar_conductors=True, show_gui=True)
+        """
+        from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
+        from gsim.palace.mesh import generate_mesh
+
+        component = self.geometry.component if self.geometry else None
+
+        # Validate configuration
+        validation = self.validate_config()
+        if not validation.valid:
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
+
+        # Build mesh config
+        mesh_config = self._build_mesh_config(
+            preset=preset,
+            refined_mesh_size=refined_mesh_size,
+            max_mesh_size=max_mesh_size,
+            margin=margin,
+            airbox_margin=airbox_margin,
+            fmax=fmax,
+            planar_conductors=planar_conductors,
+            show_gui=show_gui,
+        )
+
+        # Resolve stack
+        stack = self._resolve_stack()
+
+        # Get ports
+        ports = self._get_ports_for_preview(stack)
+
+        # Build legacy mesh config with preview mode
+        legacy_mesh_config = LegacyMeshConfig(
+            refined_mesh_size=mesh_config.refined_mesh_size,
+            max_mesh_size=mesh_config.max_mesh_size,
+            cells_per_wavelength=mesh_config.cells_per_wavelength,
+            margin=mesh_config.margin,
+            airbox_margin=mesh_config.airbox_margin,
+            fmax=mesh_config.fmax,
+            show_gui=show_gui,
+            preview_only=True,
+            planar_conductors=mesh_config.planar_conductors,
+            refine_from_curves=mesh_config.refine_from_curves,
+        )
+
+        # Generate mesh in temp directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            generate_mesh(
+                component=component,
+                stack=stack,
+                ports=ports,
+                output_dir=tmpdir,
+                config=legacy_mesh_config,
+            )
+
+    # -------------------------------------------------------------------------
+    # Mesh generation
+    # -------------------------------------------------------------------------
+
+    def mesh(
+        self,
+        *,
+        preset: Literal["coarse", "default", "graded", "fine"] | None = None,
+        refined_mesh_size: float | None = None,
+        max_mesh_size: float | None = None,
+        margin: float | None = None,
+        airbox_margin: float | None = None,
+        fmax: float | None = None,
+        planar_conductors: bool | None = None,
+        show_gui: bool = False,
+        model_name: str = "palace",
+        verbose: bool = True,
+    ) -> SimulationResult:
+        """Generate the mesh for Palace simulation.
+
+        Only generates the mesh file (palace.msh). Config is generated
+        separately with write_config().
+
+        Requires set_output_dir() to be called first.
+
+        Args:
+            preset: Mesh quality preset ("coarse", "default", "graded", "fine")
+            refined_mesh_size: Mesh size near conductors (um), overrides preset
+            max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
+            margin: XY margin around design (um), overrides preset
+            airbox_margin: Extra airbox around stack (um); 0 = disabled
+            fmax: Max frequency for mesh sizing (Hz), overrides preset
+            planar_conductors: Treat conductors as 2D PEC surfaces
+            show_gui: Show gmsh GUI during meshing
+            model_name: Base name for output files
+            verbose: Print progress messages
+
+        Returns:
+            SimulationResult with mesh path
+
+        Raises:
+            ValueError: If output_dir not set or configuration is invalid
+
+        Example:
+            >>> sim.set_output_dir("./sim")
+            >>> result = sim.mesh(preset="fine", planar_conductors=True)
+            >>> print(f"Mesh saved to: {result.mesh_path}")
+        """
+        from gsim.palace.ports import extract_ports
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        component = self.geometry.component if self.geometry else None
+
+        # Build mesh config
+        mesh_config = self._build_mesh_config(
+            preset=preset,
+            refined_mesh_size=refined_mesh_size,
+            max_mesh_size=max_mesh_size,
+            margin=margin,
+            airbox_margin=airbox_margin,
+            fmax=fmax,
+            planar_conductors=planar_conductors,
+            show_gui=show_gui,
+        )
+
+        # Validate configuration
+        validation = self.validate_config()
+        if not validation.valid:
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
+
+        output_dir = self._output_dir
+
+        # Resolve stack and configure ports
+        stack = self._resolve_stack()
+        self._configure_ports_on_component(stack)
+
+        # Extract ports
+        palace_ports = extract_ports(component, stack)
+
+        # Generate mesh (config is written separately by simulate() or write_config())
+        return self._generate_mesh_internal(
+            output_dir=output_dir,
+            mesh_config=mesh_config,
+            ports=palace_ports,
+            driven_config=self.driven,
+            model_name=model_name,
+            verbose=verbose,
+            write_config=False,
+        )
+
+    def write_config(self) -> Path:
+        """Write Palace config.json after mesh generation.
+
+        Use this when mesh() was called with write_config=False.
+
+        Returns:
+            Path to the generated config.json
+
+        Raises:
+            ValueError: If mesh() hasn't been called yet
+
+        Example:
+            >>> result = sim.mesh("./sim", write_config=False)
+            >>> config_path = sim.write_config()
+        """
+        from gsim.palace.mesh.generator import write_config as gen_write_config
+
+        if self._last_mesh_result is None:
+            raise ValueError("No mesh result. Call mesh() first.")
+
+        if not self._last_mesh_result.groups:
+            raise ValueError(
+                "Mesh result has no groups data. "
+                "Was mesh() called with write_config=True already?"
+            )
+
+        stack = self._resolve_stack()
+        config_path = gen_write_config(
+            mesh_result=self._last_mesh_result,
+            stack=stack,
+            ports=self._last_ports,
+            driven_config=self.driven,
+        )
+
+        # Validate mesh and config
+        validation = self.validate_mesh()
+        if not validation.valid:
+            raise ValueError(f"Mesh validation failed:\n{validation}")
+
+        return config_path
+
+    # -------------------------------------------------------------------------
+    # Cloud: fine-grained control
+    # -------------------------------------------------------------------------
+
+    def _prepare_upload_dir(self) -> Path:
+        """Prepare a temp directory with all config/mesh files for upload.
+
+        Ensures ``_output_dir`` is set, ``config.json`` exists, and copies
+        everything to a fresh temp directory.
+
+        Returns:
+            Path to temp directory ready for upload.
+        """
+        import shutil
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        # Always (re)generate config.json to reflect current driven settings
+        self.write_config()
+
+        # Copy input files to a temp dir so we don't destroy the user's directory
+        tmp = Path(tempfile.mkdtemp(prefix="palace_"))
+        for item in self._output_dir.iterdir():
+            dest = tmp / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+        return tmp
+
+    def upload(self, *, verbose: bool = True) -> str:
+        """Prepare config, upload to the cloud. Does NOT start execution.
+
+        Requires :meth:`set_output_dir` and :meth:`mesh` to have been
+        called first.
+
+        Args:
+            verbose: Print progress messages.
+
+        Returns:
+            ``job_id`` string for use with :meth:`start`, :meth:`get_status`,
+            or :func:`gsim.wait_for_results`.
+        """
+        from gsim import gcloud
+
+        tmp = self._prepare_upload_dir()
+        try:
+            self._job_id = gcloud.upload(tmp, "palace", verbose=verbose)
+        except Exception:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return self._job_id
+
+    def start(self, *, verbose: bool = True) -> None:
+        """Start cloud execution for this sim's uploaded job.
+
+        Raises:
+            ValueError: If :meth:`upload` has not been called.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("Call upload() first")
+        gcloud.start(self._job_id, verbose=verbose)
+
+    def get_status(self) -> str:
+        """Get the current status of this sim's cloud job.
+
+        Returns:
+            Status string (``"created"``, ``"queued"``, ``"running"``,
+            ``"completed"``, ``"failed"``).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.get_status(self._job_id)
+
+    def wait_for_results(
+        self,
+        *,
+        verbose: bool = True,
+        parent_dir: str | Path | None = None,
+    ) -> Any:
+        """Wait for this sim's cloud job, download and parse results.
+
+        Args:
+            verbose: Print progress messages.
+            parent_dir: Where to create the sim-data directory.
+
+        Returns:
+            Parsed result (typically ``dict[str, Path]`` of output files).
+
+        Raises:
+            ValueError: If no job has been submitted yet.
+        """
+        from gsim import gcloud
+
+        if self._job_id is None:
+            raise ValueError("No job submitted yet")
+        return gcloud.wait_for_results(
+            self._job_id, verbose=verbose, parent_dir=parent_dir
+        )
+
+    # -------------------------------------------------------------------------
+    # Simulation
+    # -------------------------------------------------------------------------
+
+    def run(
+        self,
+        parent_dir: str | Path | None = None,
+        *,
+        verbose: bool = True,
+        wait: bool = True,
+    ) -> dict[str, Path] | str:
+        """Run simulation on GDSFactory+ cloud.
+
+        Requires mesh() to be called first. Automatically calls
+        write_config() if config.json hasn't been written yet.
+
+        Args:
+            parent_dir: Where to create the sim directory.
+                Defaults to the current working directory.
+            verbose: Print progress messages.
+            wait: If ``True`` (default), block until results are ready.
+                If ``False``, upload + start and return the ``job_id``.
+
+        Returns:
+            ``dict[str, Path]`` of output files when ``wait=True``,
+            or ``job_id`` string when ``wait=False``.
+
+        Raises:
+            ValueError: If output_dir not set or mesh not generated
+            RuntimeError: If simulation fails
+
+        Example:
+            >>> results = sim.run()
+            >>> print(f"S-params saved to: {results['port-S.csv']}")
+        """
+        self.upload(verbose=False)
+        self.start(verbose=verbose)
+        if not wait:
+            return self._job_id  # type: ignore[return-value]  # set by upload()
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+
+    def run_local(
+        self,
+        *,
+        palace_sif_path: str | Path | None = None,
+        palace_executable: str | Path | None = None,
+        use_apptainer: bool = True,
+        num_processes: int = 1,
+        num_threads: int | None = None,
+        verbose: bool = True,
+    ) -> dict[str, Path]:
+        """Run simulation locally using Palace.
+
+        Requires mesh() and write_config() to be called first.
+        Supports both Apptainer and direct Palace installation.
+
+        Args:
+            palace_sif_path: Path to Palace Apptainer SIF file.
+                Only used when ``use_apptainer=True``.
+                If None, uses PALACE_SIF environment variable.
+            palace_executable: Path to Palace executable.
+                Only used when ``use_apptainer=False``.
+                If None, uses PALACE_EXECUTABLE environment variable or "palace".
+            use_apptainer: If True (default), run via Apptainer using SIF file.
+                If False, run Palace executable directly.
+            num_processes: Number of MPI processes (default: 1)
+            num_threads: Number of OpenMP threads to use for OpenMP builds, default is 1
+                or the value of OMP_NUM_THREADS in the environment
+            verbose: Print progress messages
+
+        Returns:
+            Dict mapping result filenames to local paths
+
+        Raises:
+            ValueError: If output_dir not set or Palace not configured
+            FileNotFoundError: If mesh, config, or Palace not found
+            RuntimeError: If simulation fails
+
+        Example:
+            >>> # Using Apptainer (default)
+            >>> import os
+            >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
+            >>> results = sim.run_local()
+            >>>
+            >>> # Using Apptainer with explicit path
+            >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
+            >>>
+            >>> # Using direct Palace installation
+            >>> results = sim.run_local(use_apptainer=False)
+            >>>
+            >>> # Using direct Palace with custom executable path
+            >>> results = sim.run_local(
+            ...     use_apptainer=False, palace_executable="/usr/local/bin/palace"
+            ... )
+            >>> print(f"S-params: {results['port-S.csv']}")
+        """
+        import os
+        import shutil
+        import subprocess
+
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        output_dir = Path(self._output_dir)
+        config_path = output_dir / "config.json"
+        mesh_path = output_dir / "palace.msh"
+
+        # Check required files exist
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {config_path}. Call write_config() first."
+            )
+
+        if not mesh_path.exists():
+            raise FileNotFoundError(
+                f"Mesh file not found: {mesh_path}. Call mesh() first."
+            )
+
+        # Determine Palace command based on use_apptainer flag
+        if use_apptainer:
+            # Determine Palace SIF path from environment variable or parameter
+            if palace_sif_path is None:
+                palace_sif_path = os.environ.get("PALACE_SIF")
+                if palace_sif_path is None:
+                    raise ValueError(
+                        "Palace SIF path not specified. Either set PALACE_SIF "
+                        "environment variable or pass palace_sif_path parameter."
+                    )
+                if verbose:
+                    logger.info(
+                        "Using PALACE_SIF from environment: %s", palace_sif_path
+                    )
+
+            sif_path = Path(palace_sif_path).expanduser().resolve()
+
+            if not sif_path.exists():
+                raise FileNotFoundError(
+                    f"Palace SIF file not found: {sif_path}. "
+                    "Install Palace via Apptainer or provide correct path."
+                )
+
+            # Check that apptainer is available
+            if shutil.which("apptainer") is None:
+                raise RuntimeError(
+                    "Apptainer not found. Install Apptainer to run local simulations "
+                    "with use_apptainer=True."
+                )
+
+            # Build Apptainer command
+            cmd = [
+                "apptainer",
+                "run",
+                str(sif_path),
+                "-np",
+                str(num_processes),
+            ]
+
+        else:
+            # Direct Palace execution
+            if palace_executable is None:
+                palace_executable = os.environ.get("PALACE_EXECUTABLE", "palace")
+                if verbose:
+                    logger.info(
+                        "Using Palace executable from environment/default: %s",
+                        palace_executable,
+                    )
+
+            exe_path = Path(palace_executable).expanduser()
+
+            # Check if executable exists
+            if not exe_path.exists():
+                # Try resolving to see if it's in PATH
+                resolved = shutil.which(str(exe_path))
+                if resolved is None:
+                    raise FileNotFoundError(
+                        f"Palace executable not found: {exe_path}. "
+                        "Install Palace directly or provide correct path via "
+                        "palace_executable parameter."
+                    )
+                exe_path = Path(resolved)
+
+            cmd = [
+                str(exe_path),
+                "-np",
+                str(num_processes),
+            ]
+
+        if num_threads is not None:
+            cmd.extend(["-nt", str(num_threads)])
+        cmd.extend(["config.json"])
+
+        if verbose:
+            if use_apptainer:
+                logger.info("Running Palace simulation in %s via Apptainer", output_dir)
+            else:
+                logger.info("Running Palace simulation in %s directly", output_dir)
+            logger.info("Command: %s", " ".join(cmd))
+            logger.info("Processes: %d", num_processes)
+
+        # Run simulation
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            # Log output if verbose
+            if verbose and result.stdout:
+                logger.info(result.stdout)
+            if verbose and result.stderr:
+                logger.warning(result.stderr)
+
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Palace simulation failed with return code {e.returncode}"
+            if e.stdout:
+                error_msg += f"\n\nStdout:\n{e.stdout}"
+            if e.stderr:
+                error_msg += f"\n\nStderr:\n{e.stderr}"
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            if use_apptainer:
+                raise RuntimeError(
+                    "Apptainer not found. Install Apptainer to run local simulations "
+                    "with use_apptainer=True."
+                ) from e
+            raise RuntimeError(
+                "Palace executable not found. Install Palace directly or provide "
+                "correct path via palace_executable parameter, "
+                "or set PALACE_EXECUTABLE environment variable."
+            ) from e
+
+        if verbose:
+            logger.info("Simulation completed successfully")
+
+        postpro_dir = output_dir / "output/palace/"
+
+        if verbose:
+            logger.info("Results saved to %s", postpro_dir)
+
+        return {
+            file.name: file
+            for file in postpro_dir.iterdir()
+            if file.is_file() and not file.name.startswith(".")
+        }
+
+    # -------------------------------------------------------------------------
+    # Port methods
+    # -------------------------------------------------------------------------
+
+    def add_port(
+        self,
+        name: str,
+        *,
+        layer: str | None = None,
+        from_layer: str | None = None,
+        to_layer: str | None = None,
+        length: float | None = None,
+        impedance: float = 50.0,
+        resistance: float | None = None,
+        inductance: float | None = None,
+        capacitance: float | None = None,
+        excited: bool = True,
+        geometry: Literal["inplane", "via"] = "inplane",
+    ) -> None:
+        """Add a single-element lumped port.
+
+        Args:
+            name: Port name (must match component port name)
+            layer: Target layer for inplane ports
+            from_layer: Bottom layer for via ports
+            to_layer: Top layer for via ports
+            length: Port extent along direction (um)
+            impedance: Port impedance (Ohms)
+            resistance: Series resistance (Ohms)
+            inductance: Series inductance (H)
+            capacitance: Shunt capacitance (F)
+            excited: Whether this port is excited
+            geometry: Port geometry type ("inplane" or "via")
+
+        Example:
+            >>> sim.add_port("o1", layer="topmetal2", length=5.0)
+            >>> sim.add_port(
+            ...     "feed", from_layer="metal1", to_layer="topmetal2", geometry="via"
+            ... )
+        """
+        # Remove existing config for this port if any
+        self.ports = [p for p in self.ports if p.name != name]
+
+        self.ports.append(
+            PortConfig(
+                name=name,
+                layer=layer,
+                from_layer=from_layer,
+                to_layer=to_layer,
+                length=length,
+                impedance=impedance,
+                resistance=resistance,
+                inductance=inductance,
+                capacitance=capacitance,
+                excited=excited,
+                geometry=geometry,
+            )
+        )
+
+    def add_cpw_port(
+        self,
+        name: str,
+        *,
+        layer: str,
+        s_width: float,
+        gap_width: float,
+        length: float,
+        offset: float = 0.0,
+        impedance: float = 50.0,
+        excited: bool = True,
+    ) -> None:
+        """Add a coplanar waveguide (CPW) port.
+
+        CPW ports consist of two elements (upper and lower gaps) that are
+        excited with opposite E-field directions to create the CPW mode.
+
+        Place a single gdsfactory port at the center of the signal conductor.
+        The two gap element surfaces are computed from s_width and gap_width.
+
+        Args:
+            name: Port name (must match a component port at the signal center)
+            layer: Target conductor layer (e.g., "topmetal2")
+            s_width: Width of the signal (center) conductor (um)
+            gap_width: Width of each gap between signal and ground (um)
+            length: Port extent along direction (um)
+            offset: Shift the port inward along the waveguide (um).
+                Positive moves away from the boundary, into the conductor.
+            impedance: Port impedance (Ohms)
+            excited: Whether this port is excited
+
+        Example:
+            >>> sim.add_cpw_port(
+            ...     "left", layer="topmetal2", s_width=20, gap_width=15, length=5.0
+            ... )
+        """
+        # Remove existing CPW port with same name if any
+        self.cpw_ports = [p for p in self.cpw_ports if p.name != name]
+
+        self.cpw_ports.append(
+            CPWPortConfig(
+                name=name,
+                layer=layer,
+                s_width=s_width,
+                gap_width=gap_width,
+                length=length,
+                offset=offset,
+                impedance=impedance,
+                excited=excited,
+            )
+        )
+
+
+def get_num_processes() -> int:
+    """Determine number of processes to use for parallel simulations.
+
+    Returns:
+        Number of processes.
+    """
+    try:
+        import psutil
+
+        num_processes = psutil.cpu_count(logical=True) or 1
+    except ImportError:
+        import os
+
+        num_processes = os.cpu_count() or 1
+    return num_processes
