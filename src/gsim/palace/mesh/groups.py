@@ -123,7 +123,7 @@ def assign_physical_groups(
                             {
                                 "phys_group": pg,
                                 "tags": surf_tags,
-                                "direction": info["elements"][i]["direction"],
+                                "direction": info["elements"][i].get("direction"),
                             }
                         )
             groups["port_surfaces"][port_name] = {
