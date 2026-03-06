@@ -17,7 +17,6 @@ from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
-    CPWWavePortConfig,
     DrivenConfig,
     MaterialConfig,
     MeshConfig,
@@ -75,7 +74,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
-    cpw_wave_ports: list[CPWWavePortConfig] = Field(default_factory=list)
 
     # Driven simulation config
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
@@ -224,7 +222,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         name: str,
         *,
         layer: str | None = None,
-        length: float | None = None,
+        z_margin: float = 0.0,
+        lateral_margin: float = 0.0,
         mode: int = 1,
         excited: bool = True,
         offset: float = 0.0,
@@ -234,7 +233,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         Args:
             name: Port name (must match a component port at the signal center)
             layer: Target conductor layer (e.g., "topmetal2")
-            length: Port extent along direction (um)
+            z_margin: Margin in z direction
+            lateral_margin: Margin in x/y directions
+              Ignores lateral margin and port_width.
             mode: Mode number to excite.
             excited: Whether this port is excited
             offset: Offset distance used for scattering parameter de-embedding.
@@ -255,58 +256,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             WavePortConfig(
                 name=name,
                 layer=layer,
-                length=length,
-                mode=mode,
-                excited=excited,
-                offset=offset,
-            )
-        )
-
-    def add_cpw_wave_port(
-        self,
-        name: str,
-        *,
-        layer: str,
-        s_width: float,
-        gap_width: float,
-        length: float,
-        mode: int = 1,
-        excited: bool = True,
-        offset: float = 0.0,
-    ) -> None:
-        """Add a coplanar waveguide (CPW) waveport.
-
-        CPW ports consist of two elements (upper and lower gaps) that are
-        excited with opposite E-field directions to create the CPW mode.
-
-        Place a single gdsfactory port at the center of the signal conductor.
-        The two gap element surfaces are computed from s_width and gap_width.
-
-        Args:
-            name: Port name (must match a component port at the signal center)
-            layer: Target conductor layer (e.g., "topmetal2")
-            s_width: Width of the signal (center) conductor (um)
-            gap_width: Width of each gap between signal and ground (um)
-            length: Port extent along direction (um)
-            mode: Mode number to excite.
-            excited: Whether this port is excited
-            offset: Offset distance used for scattering parameter de-embedding.
-
-        Example:
-            >>> sim.add_cpw_wave_port(
-            ...     "left", layer="topmetal2", s_width=20, gap_width=15, length=5.0
-            ... )
-        """
-        # Remove existing CPW wave port with same name if any
-        self.cpw_wave_ports = [p for p in self.cpw_wave_ports if p.name != name]
-
-        self.cpw_wave_ports.append(
-            CPWWavePortConfig(
-                name=name,
-                layer=layer,
-                s_width=s_width,
-                gap_width=gap_width,
-                length=length,
+                z_margin=z_margin,
+                lateral_margin=lateral_margin,
                 mode=mode,
                 excited=excited,
                 offset=offset,
@@ -395,12 +346,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             )
 
         # Check ports
-        has_ports = (
-            bool(self.ports)
-            or bool(self.cpw_ports)
-            or bool(self.wave_ports)
-            or bool(self.cpw_wave_ports)
-        )
+        has_ports = bool(self.ports) or bool(self.cpw_ports) or bool(self.wave_ports)
         if not has_ports:
             warnings_list.append(
                 "No ports configured. Call any of add_port(), add_cpw_port(),"
@@ -431,20 +377,13 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 for wp in self.wave_ports
                 if not wp.layer
             )
-            # Validate CPW wave ports
-            errors.extend(
-                f"CPW Wave port '{wp.name}': 'layer' is required"
-                for wp in self.cpw_wave_ports
-                if not wp.layer
-            )
 
         # Validate excitation port if specified
         if self.driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
             cpw_names = [cpw.name for cpw in self.cpw_ports]
             wave_names = [wp.name for wp in self.wave_ports]
-            cpw_wave_names = [wp.name for wp in self.cpw_wave_ports]
-            all_port_names = port_names + cpw_names + wave_names + cpw_wave_names
+            all_port_names = port_names + cpw_names + wave_names
             if self.driven.excitation_port not in all_port_names:
                 errors.append(
                     f"Excitation port '{self.driven.excitation_port}' not found. "
@@ -477,7 +416,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         """Configure ports on the component using legacy functions."""
         from gsim.palace.ports import (
             configure_cpw_port,
-            configure_cpw_wave_port,
             configure_inplane_port,
             configure_via_port,
             configure_wave_port,
@@ -550,29 +488,13 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 configure_wave_port(
                     gf_port,
                     layer=port_config.layer,
-                    length=port_config.length or gf_port.width,
+                    z_margin=port_config.z_margin,
+                    lateral_margin=port_config.lateral_margin,
                     excited=port_config.excited,
                     mode=port_config.mode,
                     offset=port_config.offset,
                 )
 
-        # Configure CPW wave ports
-        for cpw_config in self.cpw_wave_ports:
-            if cpw_config.name is None:
-                continue
-            # Find the single gdsfactory port at the signal center
-            gf_port = self._find_gf_port(cpw_config.name)
-
-            configure_cpw_wave_port(
-                gf_port,
-                layer=cpw_config.layer,
-                s_width=cpw_config.s_width,
-                gap_width=cpw_config.gap_width,
-                length=cpw_config.length,
-                mode=cpw_config.mode,
-                offset=cpw_config.offset,
-                excited=cpw_config.excited,
-            )
         self._configured_ports = True
 
     def _generate_mesh_internal(
