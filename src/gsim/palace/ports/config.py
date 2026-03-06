@@ -53,7 +53,7 @@ class PalacePort:
     # Port geometry
     length: float | None = None  # Port extent along direction (um)
 
-    # Multi-element support (for CPW)
+    # Multi-element support (for lumped CPW)
     multi_element: bool = False
     centers: list[tuple[float, float]] | None = None  # Multiple centers for CPW
     directions: list[str] | None = (
@@ -67,6 +67,8 @@ class PalacePort:
     excited: bool = True  # Whether this port is excited (vs just measured)
 
     # Waveport specific settings
+    z_margin: float = 0.0  # For waveports: height margin in um
+    lateral_margin: float = 0.0
     mode: int = 1  # Mode number to excite.
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
@@ -193,7 +195,7 @@ def configure_cpw_port(
         layer: Target conductor layer name (e.g., 'topmetal2')
         s_width: Signal conductor width in um
         gap_width: Gap width between signal and ground in um
-        length: Port extent along direction (um)
+        length: Port extent along direction in um
         resistance: Series resistance in Ohms (default: 50)
         inductance: Series inductance in Henries (default: 0)
         capacitance: Shunt capacitance in Farads (default: 0)
@@ -255,7 +257,8 @@ def configure_cpw_port(
 def configure_wave_port(
     ports,
     layer: str,
-    length: float,
+    z_margin: float = 0.0,
+    lateral_margin: float = 0.0,
     mode: int = 1,
     excited: bool = True,
     offset: float = 0.0,
@@ -267,7 +270,8 @@ def configure_wave_port(
     Args:
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         layer: Target conductor layer name (e.g., 'topmetal2')
-        length: Port extent along direction in um (perpendicular to port width)
+        z_margin: Margin in the z-direction for the wave port
+        lateral_margin: Margin in the x/y direction
         mode: Mode number to excite.
         offset: Offset distance used for scattering parameter de-embedding.
         excited: Whether port is excited vs just measured (default: True)
@@ -275,10 +279,10 @@ def configure_wave_port(
     Examples:
         ```python
         configure_wave_port(
-            c.ports["o1"], name="o1", layer="topmetal2", length=5.0, mode=1
+            c.ports["o1"], name="o1", layer="topmetal2", z_margin=5.0, mode=1
         )
         configure_wave_port(
-            c.ports, name="all_ports", layer="topmetal2", length=5.0, mode=1
+            c.ports, name="all_ports", layer="topmetal2", z_margin=5.0, mode=1
         )  # all ports
         ```
     """
@@ -288,76 +292,11 @@ def configure_wave_port(
     for port in port_list:
         port.info["palace_type"] = "waveport"
         port.info["layer"] = layer
-        port.info["length"] = length
+        port.info["z_margin"] = z_margin
+        port.info["lateral_margin"] = lateral_margin
         port.info["mode"] = mode
         port.info["offset"] = offset
         port.info["excited"] = excited
-
-
-def configure_cpw_wave_port(
-    port,
-    layer: str,
-    s_width: float,
-    gap_width: float,
-    length: float,
-    mode: int = 1,
-    offset: float = 0.0,
-    excited: bool = True,
-):
-    """Configure a gdsfactory port as a CPW (multi-element) wave port.
-
-    In CPW (Ground-Signal-Ground), E-fields are opposite in the two gaps.
-    The port should be placed at the signal center. The upper and lower gap
-    centers are computed from the signal width and gap width.
-
-    Args:
-        port: gdsfactory Port at the signal center
-        layer: Target conductor layer name (e.g., 'topmetal2')
-        s_width: Signal conductor width in um
-        gap_width: Gap width between signal and ground in um
-        length: Port extent along direction (um)
-        mode: Mode number to excite.
-        offset: Offset distance used for scattering parameter de-embedding.
-        excited: Whether port is excited (default: True)
-
-    Examples:
-        ```python
-        configure_cpw_wave_port(
-            c.ports["w1"],
-            layer="topmetal2",
-            s_width=10.0,
-            gap_width=6.0,
-            length=5.0,
-        )
-        ```
-    """
-    import numpy as np
-
-    center = np.array([float(port.center[0]), float(port.center[1])])
-    orientation_rad = np.deg2rad(
-        float(port.orientation) if port.orientation is not None else 0.0
-    )
-
-    # Transverse direction (perpendicular to port orientation, in-plane)
-    # Port orientation points along the waveguide; transverse is 90° CCW
-    transverse = np.array([-np.sin(orientation_rad), np.cos(orientation_rad)])
-
-    # Gap center offset from signal center
-    gap_offset = (s_width + gap_width) / 2.0
-
-    upper_center = center + transverse * gap_offset
-    lower_center = center - transverse * gap_offset
-
-    # Store computed CPW element info on the single port
-    port.info["palace_type"] = "cpw_waveport"
-    port.info["layer"] = layer
-    port.info["length"] = length
-    port.info["mode"] = mode
-    port.info["offset"] = offset
-    port.info["excited"] = excited
-    port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
-    port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
-    port.info["cpw_gap_width"] = gap_width
 
 
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
@@ -381,18 +320,16 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         if palace_type is None:
             continue
 
-        if palace_type == "cpw_lumped" or palace_type == "cpw_waveport":
-            port_type = (
-                PortType.LUMPED if palace_type == "cpw_lumped" else PortType.WAVEPORT
-            )
+        if palace_type == "cpw_lumped":
             # Single-port CPW: gap centers were pre-computed by configure_cpw_port
-            # and configure_cpw_wave_port
             layer_name = info.get("layer")
             zmin, zmax = 0.0, 0.0
             if layer_name and layer_name in stack.layers:
                 layer = stack.layers[layer_name]
                 zmin = layer.zmin
                 zmax = layer.zmax
+            else:
+                raise ValueError(f"CPW Lumped port '{port.name}' missing layer info")
 
             upper_center = info["cpw_upper_center"]
             lower_center = info["cpw_lower_center"]
@@ -425,7 +362,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
 
             cpw_port = PalacePort(
                 name=port.name,
-                port_type=port_type,
+                port_type=PortType.LUMPED,
                 geometry=PortGeometry.INPLANE,
                 center=(float(port.center[0]), float(port.center[1])),
                 width=gap_width,
@@ -442,8 +379,6 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 resistance=info.get("resistance", 50.0),
                 inductance=info.get("inductance", 0.0),
                 capacitance=info.get("capacitance", 0.0),
-                mode=info.get("mode", 1),
-                offset=info.get("offset", 0.0),
                 excited=info.get("excited", True),
             )
             palace_ports.append(cpw_port)
@@ -483,6 +418,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 layer = stack.layers[layer_name]
                 zmin = layer.zmin
                 zmax = layer.zmax
+
         else:
             raise ValueError(f"Unknown port type: {palace_type}")
 
@@ -498,10 +434,11 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             layer=layer_name,
             from_layer=from_layer,
             to_layer=to_layer,
-            length=info.get("length"),
-            resistance=info.get("resistance"),
-            inductance=info.get("inductance"),
-            capacitance=info.get("capacitance"),
+            resistance=info.get("resistance", 50.0),
+            inductance=info.get("inductance", 0.0),
+            capacitance=info.get("capacitance", 0.0),
+            z_margin=info.get("z_margin", 0.0),
+            lateral_margin=info.get("lateral_margin", 0.0),
             excited=info.get("excited", True),
             mode=info.get("mode", 1),
             offset=info.get("offset", 0.0),

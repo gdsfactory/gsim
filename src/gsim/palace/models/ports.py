@@ -128,6 +128,7 @@ class WavePortConfig(BaseModel):
     Attributes:
         name: Port name (must match component port name)
         layer: Target conductor layer
+        z_margin: Margin to extend port geometry in z-direction (um)
         mode: Mode number to excite
         excited: Whether this port is excited
         offset: De-embedding distance in um
@@ -137,52 +138,15 @@ class WavePortConfig(BaseModel):
 
     name: str
     layer: str | None = None
-    length: float | None = Field(default=None, gt=0)
+    z_margin: float = Field(default=0, ge=0)
+    lateral_margin: float = Field(default=0.0, ge=0)
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
-    excited: bool = True
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
-
-
-class CPWWavePortConfig(BaseModel):
-    """Configuration for a coplanar waveguide (CPW) waveport.
-
-    Wave ports are used for domain-boundary ports where mode solving
-    is needed. This is an alternative to lumped ports for more accurate
-    S-parameter extraction.
-
-    CPW ports consist of two elements (upper and lower gaps) that are
-    excited with opposite E-field directions to create the CPW mode.
-
-    The port is placed at the center of the signal conductor. The two
-    gap element surfaces are computed from s_width and gap_width.
-
-    Attributes:
-        name: Port name (must match a single component port at the signal center)
-        layer: Target conductor layer
-        s_width: Width of the signal (center) conductor (um)
-        gap_width: Width of each gap between signal and ground (um)
-        length: Port extent along direction (um)
-        impedance: Port impedance (Ohms)
-        excited: Whether this port is excited
-    """
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    name: str = Field(description="Port name matching component port")
-    layer: str = Field(description="Target conductor layer")
-    s_width: float = Field(gt=0, description="Signal conductor width (um)")
-    gap_width: float = Field(
-        gt=0, description="Gap width between signal and ground (um)"
-    )
-    length: float = Field(gt=0, description="Port extent in um")
-    mode: int = Field(default=1, ge=1, description="Mode number to excite")
     excited: bool = True
-    offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
 
 
 __all__ = [
     "CPWPortConfig",
-    "CPWWavePortConfig",
     "PortConfig",
     "TerminalConfig",
     "WavePortConfig",
