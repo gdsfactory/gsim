@@ -1127,39 +1127,59 @@ class PalaceSimMixin:
         self,
         *,
         palace_sif_path: str | Path | None = None,
-        num_processes: int | None = None,
+        palace_executable: str | Path | None = None,
+        use_apptainer: bool = True,
+        num_processes: int = 1,
+        num_threads: int | None = None,
         verbose: bool = True,
     ) -> dict[str, Path]:
-        """Run simulation locally using Palace via Apptainer.
+        """Run simulation locally using Palace.
 
-        Requires mesh() and write_config() to be called first,
-        and Palace to be installed locally via Apptainer.
+        Requires mesh() and write_config() to be called first.
+        Supports both Apptainer and direct Palace installation.
 
         Args:
             palace_sif_path: Path to Palace Apptainer SIF file.
+                Only used when ``use_apptainer=True``.
                 If None, uses PALACE_SIF environment variable.
-            num_processes: Number of MPI processes (default: CPU count - 2)
+            palace_executable: Path to Palace executable.
+                Only used when ``use_apptainer=False``.
+                If None, uses PALACE_EXECUTABLE environment variable or "palace".
+            use_apptainer: If True (default), run via Apptainer using SIF file.
+                If False, run Palace executable directly.
+            num_processes: Number of MPI processes (default: 1)
+            num_threads: Number of OpenMP threads to use for OpenMP builds, default is 1
+                or the value of OMP_NUM_THREADS in the environment
             verbose: Print progress messages
 
         Returns:
             Dict mapping result filenames to local paths
 
         Raises:
-            ValueError: If output_dir not set or PALACE_SIF not configured
-            FileNotFoundError: If mesh, config, or Palace SIF not found
+            ValueError: If output_dir not set or Palace not configured
+            FileNotFoundError: If mesh, config, or Palace not found
             RuntimeError: If simulation fails
 
         Example:
-            >>> # Using environment variable
+            >>> # Using Apptainer (default)
             >>> import os
             >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
-            >>> results = sim.simulate_local()
+            >>> results = sim.run_local()
             >>>
-            >>> # Or specify path directly
-            >>> results = sim.simulate_local(palace_sif_path="/path/to/Palace.sif")
+            >>> # Using Apptainer with explicit path
+            >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
+            >>>
+            >>> # Using direct Palace installation
+            >>> results = sim.run_local(use_apptainer=False)
+            >>>
+            >>> # Using direct Palace with custom executable path
+            >>> results = sim.run_local(
+            ...     use_apptainer=False, palace_executable="/usr/local/bin/palace"
+            ... )
             >>> print(f"S-params: {results['port-S.csv']}")
         """
         import os
+        import shutil
         import subprocess
 
         if self._output_dir is None:
@@ -1180,48 +1200,83 @@ class PalaceSimMixin:
                 f"Mesh file not found: {mesh_path}. Call mesh() first."
             )
 
-        # Determine Palace SIF path from environment variable or parameter
-        if palace_sif_path is None:
-            palace_sif_path = os.environ.get("PALACE_SIF")
+        # Determine Palace command based on use_apptainer flag
+        if use_apptainer:
+            # Determine Palace SIF path from environment variable or parameter
             if palace_sif_path is None:
-                raise ValueError(
-                    "Palace SIF path not specified. Either set PALACE_SIF "
-                    "environment variable or pass palace_sif_path parameter."
+                palace_sif_path = os.environ.get("PALACE_SIF")
+                if palace_sif_path is None:
+                    raise ValueError(
+                        "Palace SIF path not specified. Either set PALACE_SIF "
+                        "environment variable or pass palace_sif_path parameter."
+                    )
+                if verbose:
+                    logger.info(
+                        "Using PALACE_SIF from environment: %s", palace_sif_path
+                    )
+
+            sif_path = Path(palace_sif_path).expanduser().resolve()
+
+            if not sif_path.exists():
+                raise FileNotFoundError(
+                    f"Palace SIF file not found: {sif_path}. "
+                    "Install Palace via Apptainer or provide correct path."
                 )
-            if verbose:
-                logger.info("Using PALACE_SIF from environment: %s", palace_sif_path)
 
-        sif_path = Path(palace_sif_path).expanduser().resolve()
+            # Check that apptainer is available
+            if shutil.which("apptainer") is None:
+                raise RuntimeError(
+                    "Apptainer not found. Install Apptainer to run local simulations "
+                    "with use_apptainer=True."
+                )
 
-        if not sif_path.exists():
-            raise FileNotFoundError(
-                f"Palace SIF file not found: {sif_path}. "
-                "Install Palace via Apptainer or provide correct path."
-            )
+            # Build Apptainer command
+            cmd = [
+                "apptainer",
+                "run",
+                str(sif_path),
+                "-np",
+                str(num_processes),
+            ]
 
-        # Determine number of processes
-        if num_processes is None:
-            try:
-                import psutil
+        else:
+            # Direct Palace execution
+            if palace_executable is None:
+                palace_executable = os.environ.get("PALACE_EXECUTABLE", "palace")
+                if verbose:
+                    logger.info(
+                        "Using Palace executable from environment/default: %s",
+                        palace_executable,
+                    )
 
-                num_processes = psutil.cpu_count(logical=True) or 1
-            except ImportError:
-                import os
+            exe_path = Path(palace_executable).expanduser()
 
-                num_processes = os.cpu_count() or 1
+            # Check if executable exists
+            if not exe_path.exists():
+                # Try resolving to see if it's in PATH
+                resolved = shutil.which(str(exe_path))
+                if resolved is None:
+                    raise FileNotFoundError(
+                        f"Palace executable not found: {exe_path}. "
+                        "Install Palace directly or provide correct path via "
+                        "palace_executable parameter."
+                    )
+                exe_path = Path(resolved)
 
-        # Build command
-        cmd = [
-            "apptainer",
-            "run",
-            str(sif_path),
-            "-nt",
-            str(num_processes),
-            "config.json",
-        ]
+            cmd = [
+                str(exe_path),
+                "-np",
+                str(num_processes),
+            ]
+
+        if num_threads is not None:
+            cmd.extend(["-nt", str(num_threads), "config.json"])
 
         if verbose:
-            logger.info("Running Palace simulation in %s", output_dir)
+            if use_apptainer:
+                logger.info("Running Palace simulation in %s via Apptainer", output_dir)
+            else:
+                logger.info("Running Palace simulation in %s directly", output_dir)
             logger.info("Command: %s", " ".join(cmd))
             logger.info("Processes: %d", num_processes)
 
@@ -1249,8 +1304,15 @@ class PalaceSimMixin:
                 error_msg += f"\n\nStderr:\n{e.stderr}"
             raise RuntimeError(error_msg) from e
         except FileNotFoundError as e:
+            if use_apptainer:
+                raise RuntimeError(
+                    "Apptainer not found. Install Apptainer to run local simulations "
+                    "with use_apptainer=True."
+                ) from e
             raise RuntimeError(
-                "Apptainer not found. Install Apptainer to run local simulations."
+                "Palace executable not found. Install Palace directly or provide "
+                "correct path via palace_executable parameter, "
+                "or set PALACE_EXECUTABLE environment variable."
             ) from e
 
         if verbose:
@@ -1377,3 +1439,20 @@ class PalaceSimMixin:
                 excited=excited,
             )
         )
+
+
+def get_num_processes() -> int:
+    """Determine number of processes to use for parallel simulations.
+
+    Returns:
+        Number of processes.
+    """
+    try:
+        import psutil
+
+        num_processes = psutil.cpu_count(logical=True) or 1
+    except ImportError:
+        import os
+
+        num_processes = os.cpu_count() or 1
+    return num_processes
