@@ -51,27 +51,57 @@ def plot_mesh(
 
     plotter.set_background("white")  # type: ignore[arg-type]
 
+    # Determine which groups to display
     if show_groups:
-        # Filter to matching groups
         ids = [
             tag
             for tag, name in group_map.items()
             if any(p in name for p in show_groups)
         ]
-        colors = ["red", "blue", "green", "orange", "purple", "cyan"]
-        for i, gid in enumerate(ids):
-            subset = mesh.extract_cells(mesh.cell_data["gmsh:physical"] == gid)
-            if subset.n_cells > 0:
-                plotter.add_mesh(
-                    subset,
-                    style="wireframe",
-                    color=colors[i % len(colors)],
-                    line_width=1,
-                    label=group_map.get(gid, str(gid)),
-                )
-        plotter.add_legend()
     else:
-        plotter.add_mesh(mesh, style="wireframe", color="black", line_width=1)
+        # Show all groups
+        ids = list(group_map.keys())
+
+    # Find the largest volume group to render transparently
+    largest_vol_id = None
+    largest_vol_count = 0
+    if not show_groups:
+        for gid in ids:
+            subset = mesh.extract_cells(mesh.cell_data["gmsh:physical"] == gid)
+            if subset.n_cells > largest_vol_count:
+                largest_vol_count = subset.n_cells
+                largest_vol_id = gid
+
+    colors = ["red", "blue", "green", "orange", "purple", "cyan"]
+    color_idx = 0
+    for gid in ids:
+        subset = mesh.extract_cells(mesh.cell_data["gmsh:physical"] == gid)
+        if subset.n_cells == 0:
+            continue
+        name = group_map.get(gid, str(gid))
+        color = colors[color_idx % len(colors)]
+        color_idx += 1
+
+        if not show_groups and gid == largest_vol_id:
+            # Render the largest volume (e.g. cladding) as transparent
+            # wireframe so inner structures are visible
+            plotter.add_mesh(
+                subset,
+                style="wireframe",
+                color=color,
+                opacity=0.15,
+                line_width=1,
+                label=name,
+            )
+        else:
+            plotter.add_mesh(
+                subset,
+                style="wireframe",
+                color=color,
+                line_width=1,
+                label=name,
+            )
+    plotter.add_legend()
 
     plotter.camera_position = "iso"
 

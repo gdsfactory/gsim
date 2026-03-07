@@ -188,25 +188,14 @@ def _assign_generic_groups(
         "outer_boundary": {},
     }
 
-    # --- Dielectric / airbox volume groups (one per material) ---
-    for material_name, tags in dielectric_tags.items():
-        new_tags = gmsh_utils.get_tags_after_fragment(
-            tags, geom_dimtags, geom_map, dimension=3
-        )
-        if new_tags:
-            new_tags = new_tags[: len(tags)]
-            phys_group = gmsh_utils.assign_physical_group(3, new_tags, material_name)
-            groups["volumes"][material_name] = {
-                "phys_group": phys_group,
-                "tags": new_tags,
-            }
-
-    # --- Layer volume groups (one per layer name) ---
+    # --- Layer volume groups first (to know which tags to exclude from dielectrics) ---
+    layer_volume_tag_set: set[int] = set()
     for layer_name, tags in layer_volume_tags.items():
         new_tags = gmsh_utils.get_tags_after_fragment(
             tags, geom_dimtags, geom_map, dimension=3
         )
         if new_tags:
+            layer_volume_tag_set.update(new_tags)
             # Look up material for this layer to also merge into volume groups
             layer = stack.layers.get(layer_name)
             material_name = layer.material if layer else layer_name
@@ -216,6 +205,22 @@ def _assign_generic_groups(
                 "phys_group": phys_group,
                 "tags": new_tags,
                 "material": material_name,
+            }
+
+    # --- Dielectric / airbox volume groups (exclude layer volume fragments) ---
+    for material_name, tags in dielectric_tags.items():
+        new_tags = gmsh_utils.get_tags_after_fragment(
+            tags, geom_dimtags, geom_map, dimension=3
+        )
+        if new_tags:
+            # Exclude fragments that belong to layer volumes to avoid
+            # double-assignment (e.g. waveguide core inside an oxide box)
+            new_tags = [t for t in new_tags if t not in layer_volume_tag_set]
+        if new_tags:
+            phys_group = gmsh_utils.assign_physical_group(3, new_tags, material_name)
+            groups["volumes"][material_name] = {
+                "phys_group": phys_group,
+                "tags": new_tags,
             }
 
     # --- Outer boundary from airbox ---

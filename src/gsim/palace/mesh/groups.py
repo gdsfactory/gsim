@@ -56,14 +56,28 @@ def assign_physical_groups(
         "boundary_surfaces": {},
     }
 
+    # Collect metal volume tags so we can exclude them from dielectrics
+    metal_volume_tag_set: set[int] = set()
+    for tag_info in metal_tags.values():
+        if tag_info["volumes"]:
+            for item in tag_info["volumes"]:
+                if isinstance(item, tuple):
+                    vol_tag = item[0]
+                    new_vol_tags = gmsh_utils.get_tags_after_fragment(
+                        [vol_tag], geom_dimtags, geom_map, dimension=3
+                    )
+                    metal_volume_tag_set.update(new_vol_tags)
+
     # Assign volume groups for dielectrics
     for material_name, tags in dielectric_tags.items():
         new_tags = gmsh_utils.get_tags_after_fragment(
             tags, geom_dimtags, geom_map, dimension=3
         )
         if new_tags:
-            # Only take first N tags (same as original count)
-            new_tags = new_tags[: len(tags)]
+            # Exclude fragments that belong to metal volumes to avoid
+            # double-assignment (e.g. metal inside a dielectric box)
+            new_tags = [t for t in new_tags if t not in metal_volume_tag_set]
+        if new_tags:
             phys_group = gmsh_utils.assign_physical_group(3, new_tags, material_name)
             groups["volumes"][material_name] = {
                 "phys_group": phys_group,
