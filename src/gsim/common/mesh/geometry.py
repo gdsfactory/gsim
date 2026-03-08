@@ -231,40 +231,53 @@ def add_dielectrics(
     z_min_all = math.inf
     z_max_all = -math.inf
 
-    # Sort dielectrics by z (top to bottom for correct layering)
-    sorted_dielectrics = sorted(
-        stack.dielectrics, key=lambda d: d["zmax"], reverse=True
-    )
-
-    # Add dielectric boxes
-    offset = 0
-    offset_delta = margin / 20
-
-    for dielectric in sorted_dielectrics:
+    # Merge adjacent dielectrics of the same material into single boxes
+    # to avoid coincident faces and sliver tets at shared z-boundaries.
+    # E.g. box (SiO2, -3→0) + clad (SiO2, 0→1.8) → one box (SiO2, -3→1.8).
+    merged: dict[str, list[tuple[float, float]]] = {}
+    for dielectric in stack.dielectrics:
         material = dielectric["material"]
         d_zmin = dielectric["zmin"]
         d_zmax = dielectric["zmax"]
+        if material not in merged:
+            merged[material] = []
+        merged[material].append((d_zmin, d_zmax))
 
-        z_min_all = min(z_min_all, d_zmin)
-        z_max_all = max(z_max_all, d_zmax)
+    # For each material, sort ranges and merge overlapping/adjacent ones
+    for material, ranges in merged.items():
+        ranges.sort()
+        combined: list[tuple[float, float]] = [ranges[0]]
+        for lo, hi in ranges[1:]:
+            prev_lo, prev_hi = combined[-1]
+            if lo <= prev_hi + 1e-6:  # adjacent or overlapping
+                combined[-1] = (prev_lo, max(prev_hi, hi))
+            else:
+                combined.append((lo, hi))
+        merged[material] = combined
 
-        if material not in dielectric_tags:
-            dielectric_tags[material] = []
+    # Create one GMSH box per merged z-range.
+    # Adjacent boxes of different materials share a face at the same z;
+    # removeAllDuplicates() after creation merges these shared faces so
+    # fragment() works cleanly without sliver tets.
+    for material, ranges in merged.items():
+        dielectric_tags[material] = []
+        for d_zmin, d_zmax in ranges:
+            z_min_all = min(z_min_all, d_zmin)
+            z_max_all = max(z_max_all, d_zmax)
 
-        # Create box with slight offset to avoid mesh issues
-        box_tag = gmsh_utils.create_box(
-            kernel,
-            xmin - offset,
-            ymin - offset,
-            d_zmin,
-            xmax + offset,
-            ymax + offset,
-            d_zmax,
-        )
-        dielectric_tags[material].append(box_tag)
+            box_tag = gmsh_utils.create_box(
+                kernel,
+                xmin,
+                ymin,
+                d_zmin,
+                xmax,
+                ymax,
+                d_zmax,
+            )
+            dielectric_tags[material].append(box_tag)
 
-        # Alternate offset to avoid coincident faces
-        offset = offset_delta if offset == 0 else 0
+    kernel.removeAllDuplicates()
+    kernel.synchronize()
 
     # Add surrounding airbox (needed for RF, not for photonics)
     if include_airbox:
