@@ -94,9 +94,7 @@ class EigenmodeConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    num_modes: int = Field(
-        default=10, ge=1, alias="N", description="Number of modes to find"
-    )
+    num_modes: int = Field(default=10, ge=1, description="Number of modes to find")
     target: float | None = Field(default=None, description="Target frequency in Hz")
     tolerance: float = Field(
         default=1e-6, gt=0, description="Eigenvalue solver tolerance"

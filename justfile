@@ -31,7 +31,7 @@ ipykernel:
   uv run python -m ipykernel install --user --name gsim --display-name gsim
 
 test:
-  uv run pytest -s -n logical
+  uv run pytest -s -n logical --cov-report=term-missing --cov-report=html --cov-report=xml --cov=src/gsim
 
 docs:
   uv run mkdocs build

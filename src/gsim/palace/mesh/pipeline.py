@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig
+    from gsim.palace.models import DrivenConfig, EigenmodeConfig
     from gsim.palace.ports.config import PalacePort
 
 from gsim.palace.mesh.generator import generate_mesh as gen_mesh
@@ -177,8 +177,11 @@ def generate_mesh(
     output_dir: str | Path,
     config: MeshConfig | None = None,
     model_name: str = "palace",
+    simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: EigenmodeConfig | None = None,
     write_config: bool = True,
+    absorbing_boundary: bool = True,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -213,10 +216,13 @@ def generate_mesh(
         air_margin=config.airbox_margin,
         fmax=config.fmax,
         show_gui=config.show_gui,
+        simulation_type=simulation_type,
         driven_config=driven_config,
+        eigenmode_config=eigenmode_config,
         write_config=write_config,
         planar_conductors=config.planar_conductors,
         refine_from_curves=config.refine_from_curves,
+        absorbing_boundary=absorbing_boundary,
     )
 
     # Convert to pipeline's MeshResult format
