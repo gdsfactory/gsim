@@ -23,6 +23,7 @@ dependencies = [
   "plotly",
   "pydantic>=2.10.6",
   "pyvista>=0.43.0",
+  "trame",
   "trame-vtk",
   "trame-vuetify",
 ]
