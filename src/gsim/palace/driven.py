@@ -336,7 +336,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         if not has_ports:
             warnings_list.append(
                 "No ports configured. Call any of add_port(), add_cpw_port(),"
-                " add_wave_port(), or add_cpw_wave_port()."
+                "or add_wave_port()"
             )
         else:
             # Validate port configurations
