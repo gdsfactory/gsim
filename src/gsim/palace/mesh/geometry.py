@@ -926,8 +926,11 @@ def add_ports(
                     }
                 )
             else:
+                layer_zmin, layer_zmax = stack.get_z_range()
                 zmin = zmin - port.z_margin
                 zmax = zmax + port.z_margin
+                zmin = max(zmin, layer_zmin)
+                zmax = min(zmax, layer_zmax)
                 angle = port.orientation % 360
                 is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
                 if is_y_axis:
