@@ -97,10 +97,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         from_layer: str | None = None,
         to_layer: str | None = None,
         length: float | None = None,
-        impedance: float = 50.0,
-        resistance: float | None = None,
-        inductance: float | None = None,
-        capacitance: float | None = None,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
         geometry: Literal["inplane", "via"] = "inplane",
     ) -> None:
@@ -112,7 +111,6 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             from_layer: Bottom layer for via ports
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
-            impedance: Port impedance (Ohms)
             resistance: Series resistance (Ohms)
             inductance: Series inductance (H)
             capacitance: Shunt capacitance (F)
@@ -133,7 +131,6 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 from_layer=from_layer,
                 to_layer=to_layer,
                 length=length,
-                impedance=impedance,
                 resistance=resistance,
                 inductance=inductance,
                 capacitance=capacitance,
@@ -151,7 +148,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         gap_width: float,
         length: float,
         offset: float = 0.0,
-        impedance: float = 50.0,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
@@ -164,7 +163,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             length: Port extent along direction (um)
             offset: Shift port inward along the waveguide (um).
                 Positive moves away from the boundary, into the conductor.
-            impedance: Port impedance (Ohms)
+            resistance: Series resistance (Ohms)
+            inductance: Series inductance (H)
+            capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
 
         Example:
@@ -181,7 +182,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 gap_width=gap_width,
                 length=length,
                 offset=offset,
-                impedance=impedance,
+                resistance=resistance,
+                inductance=inductance,
+                capacitance=capacitance,
                 excited=excited,
             )
         )
@@ -296,7 +299,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                     gf_port,
                     layer=port_config.layer,
                     length=port_config.length or gf_port.width,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
             elif port_config.geometry == "via" and (
@@ -306,7 +311,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                     gf_port,
                     from_layer=port_config.from_layer,
                     to_layer=port_config.to_layer,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
 
@@ -337,7 +344,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 s_width=cpw_config.s_width,
                 gap_width=cpw_config.gap_width,
                 length=cpw_config.length,
-                impedance=cpw_config.impedance,
+                resistance=cpw_config.resistance,
+                inductance=cpw_config.inductance,
+                capacitance=cpw_config.capacitance,
                 excited=cpw_config.excited,
                 offset=cpw_config.offset,
             )
