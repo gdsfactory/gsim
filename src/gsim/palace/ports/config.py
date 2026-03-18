@@ -281,9 +281,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             orientation_rad = np.deg2rad(
                 float(port.orientation) if port.orientation is not None else 0.0
             )
-            transverse = np.array(
-                [-np.sin(orientation_rad), np.cos(orientation_rad)]
-            )
+            transverse = np.array([-np.sin(orientation_rad), np.cos(orientation_rad)])
 
             def _vec_to_dir(v) -> str:
                 if abs(v[0]) >= abs(v[1]):
