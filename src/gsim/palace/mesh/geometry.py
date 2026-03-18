@@ -166,6 +166,11 @@ def add_metals(
             polygons_by_layer[layernum] = []
         polygons_by_layer[layernum].append((pts_x, pts_y, holes))
 
+    # Track conductor volumes for deferred surface extraction.
+    # Surface loop tags are only queried *after* removeAllDuplicates()
+    # so that stale tags from merged sub-entities cannot cause crashes.
+    _conductor_volumes: dict[str, list[int]] = {}
+
     # Process each layer
     for layernum, polys in polygons_by_layer.items():
         layer_info = get_layer_info(stack, layernum)
@@ -187,18 +192,37 @@ def add_metals(
                 "surfaces_z": [],
             }
 
+        # Create surfaces for all polygons on this layer
+        surfaces = []
         for pts_x, pts_y, holes in polys:
-            # Create extruded polygon
             surfacetag = gmsh_utils.create_polygon_surface(
                 kernel, pts_x, pts_y, zmin, holes=holes
             )
-            if surfacetag is None:
-                continue
+            if surfacetag is not None:
+                surfaces.append(surfacetag)
 
-            if layer_type == "conductor" and (planar_conductors or thickness == 0):
-                # Zero-thickness or explicitly planar → 2D PEC surface
-                metal_tags[layer_name]["surfaces_xy"].append(surfacetag)
-            elif thickness > 0:
+        if not surfaces:
+            continue
+
+        if layer_type == "conductor" and (planar_conductors or thickness == 0):
+            # Zero-thickness or explicitly planar → 2D PEC surface
+            metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+        elif thickness > 0:
+            # Fuse overlapping same-layer surfaces before extrusion so that
+            # overlapping polygons (e.g. ground planes and spines in a GSG
+            # electrode) become a single merged surface per layer.
+            if len(surfaces) > 1:
+                dimtags = [(2, s) for s in surfaces]
+                fused, _ = kernel.fuse(
+                    [dimtags[0]],
+                    dimtags[1:],
+                    removeObject=True,
+                    removeTool=True,
+                )
+                kernel.synchronize()
+                surfaces = [t for d, t in fused if d == 2]
+
+            for surfacetag in surfaces:
                 result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
                 volumetag = result[1][1]
 
@@ -206,16 +230,22 @@ def add_metals(
                     # Keep vias as volumes
                     metal_tags[layer_name]["volumes"].append(volumetag)
                 else:
-                    # For conductors, get shell surfaces and remove volume
-                    _, surfaceloops = kernel.getSurfaceLoops(volumetag)
-                    if surfaceloops:
-                        metal_tags[layer_name]["volumes"].append(
-                            (volumetag, surfaceloops[0])
-                        )
-                    kernel.remove([(3, volumetag)])
+                    # Defer shell extraction until after removeAllDuplicates
+                    _conductor_volumes.setdefault(layer_name, []).append(volumetag)
 
     kernel.removeAllDuplicates()
     kernel.synchronize()
+
+    # Extract shell surfaces from conductor volumes now that tags are stable
+    for layer_name, vol_tags in _conductor_volumes.items():
+        for volumetag in vol_tags:
+            _, surfaceloops = kernel.getSurfaceLoops(volumetag)
+            if surfaceloops:
+                metal_tags[layer_name]["volumes"].append((volumetag, surfaceloops[0]))
+            kernel.remove([(3, volumetag)])
+
+    if _conductor_volumes:
+        kernel.synchronize()
 
     return metal_tags
 
