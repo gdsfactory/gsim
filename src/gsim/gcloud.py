@@ -28,17 +28,17 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from gdsfactoryplus import sim
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import Literal
 
 __all__ = [
     "RunResult",
@@ -312,9 +312,50 @@ def get_status(job_id: str) -> str:
     return job.status.value
 
 
+def _fetch_logs(job_id: str, cursor: str | None) -> tuple[list[str], str | None]:
+    """Fetch a page of log messages. Returns (messages, next_cursor)."""
+    _get_logs = getattr(sim, "_get_job_logs", None)
+    if _get_logs is None:
+        return [], cursor
+    _logs_unavailable = getattr(sim, "LogsNotAvailableError", Exception)
+    try:
+        page = _get_logs(job_id, cursor=cursor, limit=50)
+    except _logs_unavailable:
+        return [], cursor
+    except Exception:
+        return [], cursor
+    else:
+        # Strip leading timestamps like "[2026-03-18T15:05:33.217Z] "
+        msgs = [
+            re.sub(r"^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\]\s*", "", entry.get("message", ""))
+            for entry in page["items"]
+        ]
+        next_cursor = page["page_info"].get("next_cursor") or cursor
+        return msgs, next_cursor
+
+
+def _fetch_and_print_logs(
+    job_id: str,
+    cursor: str | None,
+    *,
+    drain: bool = False,
+) -> str | None:
+    """Fetch a page of logs and print them. Returns the next cursor.
+
+    When *drain* is True, fetch all remaining pages (for final flush).
+    """
+    while True:
+        msgs, cursor = _fetch_logs(job_id, cursor)
+        for msg in msgs:
+            print(f"  {msg}")  # noqa: T201
+        if not drain or not msgs:
+            break
+    return cursor
+
+
 def wait_for_results(
     *job_ids: str,
-    verbose: bool = True,
+    verbose: Literal["quiet", "status", "full"] = "status",
     parent_dir: str | Path | None = None,
     poll_interval: float = 5.0,
 ) -> Any:
@@ -330,7 +371,10 @@ def wait_for_results(
 
     Args:
         *job_ids: One or more job ID strings, or a single list/tuple of IDs.
-        verbose: Print progress messages.
+        verbose: Output mode:
+            ``"quiet"`` — no output.
+            ``"status"`` — status line only (default).
+            ``"full"`` — stream solver logs live (timestamps stripped).
         parent_dir: Where to create sim-data directories (default: cwd).
         poll_interval: Seconds between status polls (default 5.0).
 
@@ -343,6 +387,16 @@ def wait_for_results(
 
     if not job_ids:
         raise ValueError("At least one job_id is required")
+
+    if verbose == "full" and not hasattr(sim, "_get_job_logs"):
+        import warnings
+
+        warnings.warn(
+            "Log streaming requires gdsfactoryplus >= 1.6.4. "
+            "Falling back to verbose='status'.",
+            stacklevel=2,
+        )
+        verbose = "status"
 
     # Fetch initial job objects
     jobs: dict[str, Any] = {jid: sim.get_job(jid) for jid in job_ids}
@@ -359,22 +413,35 @@ def wait_for_results(
     # Track how many lines we printed last time (for overwriting multi-job)
     prev_lines = 0
 
+    # Log cursors for streaming (one per job)
+    log_cursors: dict[str, str | None] = dict.fromkeys(job_ids, None)
+
     # Poll until all jobs reach a terminal state
     while not all(j.status in terminal for j in jobs.values()):
-        if verbose:
+        if verbose == "status":
             prev_lines = _print_status_table(
                 jobs, start_times, prev_lines, end_times=end_times
             )
+
         time.sleep(poll_interval)
+
         for jid, job in jobs.items():
             if job.status not in terminal:
                 jobs[jid] = sim.get_job(jid)
+                # Stream logs when running
+                if verbose == "full" and jobs[jid].status == sim.SimStatus.RUNNING:
+                    log_cursors[jid] = _fetch_and_print_logs(jid, log_cursors[jid])
                 # Freeze timer when job reaches terminal state
                 if jobs[jid].status in terminal:
                     end_times[jid] = time.monotonic()
 
-    # Final status display (with newline to finish the line)
-    if verbose:
+    # Final log fetch — drain all remaining pages
+    if verbose == "full":
+        for jid in job_ids:
+            _fetch_and_print_logs(jid, log_cursors[jid], drain=True)
+
+    # Final status display — skip clear_output when logs were streamed
+    if verbose == "status":
         _print_status_table(
             jobs, start_times, prev_lines, end_times=end_times, final=True
         )
@@ -383,7 +450,7 @@ def wait_for_results(
     results = []
     for jid in job_ids:
         job = jobs[jid]
-        run_result = _download_job(job, parent_dir, verbose)
+        run_result = _download_job(job, parent_dir, verbose != "quiet")
         results.append(_parse_result(job, run_result))
 
     return results[0] if len(job_ids) == 1 else results

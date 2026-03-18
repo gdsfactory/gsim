@@ -10,7 +10,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
@@ -683,13 +683,14 @@ class Simulation(BaseModel):
     def wait_for_results(
         self,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         parent_dir: str | Path | None = None,
     ) -> Any:
         """Wait for this sim's cloud job, download and parse results.
 
         Args:
-            verbose: Print progress messages.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             parent_dir: Where to create the sim-data directory.
 
         Returns:
@@ -714,7 +715,7 @@ class Simulation(BaseModel):
         self,
         parent_dir: str | Path | None = None,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
     ) -> Any:
         """Run MEEP simulation on the cloud.
@@ -722,7 +723,8 @@ class Simulation(BaseModel):
         Args:
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
-            verbose: Print progress info.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             wait: If ``True`` (default), block until results are ready.
                 If ``False``, upload + start and return the ``job_id``.
 
@@ -731,7 +733,7 @@ class Simulation(BaseModel):
             when ``wait=False``.
         """
         self.upload(verbose=False)
-        self.start(verbose=verbose)
+        self.start(verbose=verbose != "quiet")
         if not wait:
             return self._job_id
         return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)

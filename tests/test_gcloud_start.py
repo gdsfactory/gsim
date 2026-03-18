@@ -223,7 +223,7 @@ class TestWaitForResultsSingle:
 
         _RESULT_PARSERS["palace"] = lambda rr: {"parsed": True, "files": rr.files}
         try:
-            result = wait_for_results("job-1", verbose=False, parent_dir=tmp_path)
+            result = wait_for_results("job-1", verbose="quiet", parent_dir=tmp_path)
             assert result["parsed"] is True
             assert "result.csv" in result["files"]
         finally:
@@ -242,7 +242,7 @@ class TestWaitForResultsSingle:
         output_file.write_text("data")
         mock_sim.download_results.return_value = {"output": output_file}
 
-        result = wait_for_results(*["job-1"], verbose=False, parent_dir=tmp_path)
+        result = wait_for_results(*["job-1"], verbose="quiet", parent_dir=tmp_path)
         # Single element list → single result, not a list
         assert not isinstance(result, list)
 
@@ -251,7 +251,7 @@ class TestWaitForResultsSingle:
         from gsim.gcloud import wait_for_results
 
         with pytest.raises(ValueError, match="At least one job_id"):
-            wait_for_results(verbose=False)
+            wait_for_results(verbose="quiet")
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +296,9 @@ class TestWaitForResultsMulti:
 
         mock_sim.download_results.side_effect = fake_download
 
-        results = wait_for_results("job-1", "job-2", verbose=False, parent_dir=tmp_path)
+        results = wait_for_results(
+            "job-1", "job-2", verbose="quiet", parent_dir=tmp_path
+        )
         assert isinstance(results, list)
         assert len(results) == 2
 
@@ -322,7 +324,7 @@ class TestWaitForResultsMulti:
 
         mock_sim.download_results.side_effect = fake_download
 
-        results = wait_for_results(*["j1", "j2"], verbose=False, parent_dir=tmp_path)
+        results = wait_for_results(*["j1", "j2"], verbose="quiet", parent_dir=tmp_path)
         assert isinstance(results, list)
         assert len(results) == 2
 
