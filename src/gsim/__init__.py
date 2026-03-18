@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from gsim.gcloud import get_status, wait_for_results
 
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 
 __all__ = [
     "__version__",
