@@ -683,17 +683,15 @@ class Simulation(BaseModel):
     def wait_for_results(
         self,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         parent_dir: str | Path | None = None,
-        logs: Literal["none", "full", "progress"] = "none",
     ) -> Any:
         """Wait for this sim's cloud job, download and parse results.
 
         Args:
-            verbose: Print progress messages.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             parent_dir: Where to create the sim-data directory.
-            logs: Log output mode — ``"none"``, ``"full"``, or
-                ``"progress"`` (not yet implemented).
 
         Returns:
             Parsed result (typically ``SParameterResult``).
@@ -706,7 +704,7 @@ class Simulation(BaseModel):
         if self._job_id is None:
             raise ValueError("No job submitted yet")
         return gcloud.wait_for_results(
-            self._job_id, verbose=verbose, parent_dir=parent_dir, logs=logs
+            self._job_id, verbose=verbose, parent_dir=parent_dir
         )
 
     # -------------------------------------------------------------------------
@@ -717,30 +715,28 @@ class Simulation(BaseModel):
         self,
         parent_dir: str | Path | None = None,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
-        logs: Literal["none", "full", "progress"] = "none",
     ) -> Any:
         """Run MEEP simulation on the cloud.
 
         Args:
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
-            verbose: Print progress info.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             wait: If ``True`` (default), block until results are ready.
                 If ``False``, upload + start and return the ``job_id``.
-            logs: Log output mode — ``"none"``, ``"full"``, or
-                ``"progress"`` (not yet implemented).
 
         Returns:
             ``SParameterResult`` when ``wait=True``, or ``job_id`` string
             when ``wait=False``.
         """
         self.upload(verbose=False)
-        self.start(verbose=verbose)
+        self.start(verbose=verbose != "quiet")
         if not wait:
             return self._job_id
-        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir, logs=logs)
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
     # -------------------------------------------------------------------------
     # Visualization

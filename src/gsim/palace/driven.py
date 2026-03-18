@@ -783,17 +783,15 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     def wait_for_results(
         self,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         parent_dir: str | Path | None = None,
-        logs: Literal["none", "full", "progress"] = "none",
     ) -> Any:
         """Wait for this sim's cloud job, download and parse results.
 
         Args:
-            verbose: Print progress messages.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             parent_dir: Where to create the sim-data directory.
-            logs: Log output mode — ``"none"``, ``"full"``, or
-                ``"progress"`` (not yet implemented).
 
         Returns:
             Parsed result (typically ``dict[str, Path]`` of output files).
@@ -806,7 +804,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         if self._job_id is None:
             raise ValueError("No job submitted yet")
         return gcloud.wait_for_results(
-            self._job_id, verbose=verbose, parent_dir=parent_dir, logs=logs
+            self._job_id, verbose=verbose, parent_dir=parent_dir
         )
 
     # -------------------------------------------------------------------------
@@ -817,9 +815,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         self,
         parent_dir: str | Path | None = None,
         *,
-        verbose: bool = True,
+        verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
-        logs: Literal["none", "full", "progress"] = "none",
     ) -> dict[str, Path] | str:
         """Run simulation on GDSFactory+ cloud.
 
@@ -829,11 +826,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         Args:
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
-            verbose: Print progress messages.
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
             wait: If ``True`` (default), block until results are ready.
                 If ``False``, upload + start and return the ``job_id``.
-            logs: Log output mode — ``"none"``, ``"full"``, or
-                ``"progress"`` (not yet implemented).
 
         Returns:
             ``dict[str, Path]`` of output files when ``wait=True``,
@@ -848,10 +844,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
         self.upload(verbose=False)
-        self.start(verbose=verbose)
+        self.start(verbose=verbose != "quiet")
         if not wait:
             return self._job_id  # type: ignore[return-value]  # set by upload()
-        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir, logs=logs)
+        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
     def run_local(
         self,
