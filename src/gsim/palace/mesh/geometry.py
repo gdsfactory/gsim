@@ -228,6 +228,7 @@ def add_dielectrics(
     stack: LayerStack,
     margin: float,
     air_margin: float = 0.0,
+    ports: list | None = None,
 ) -> dict:
     """Add dielectric volumes to gmsh.
 
@@ -245,10 +246,16 @@ def add_dielectrics(
             When > 0, an enclosing airbox is created.  The boolean
             pipeline will carve the dielectrics out of it
             automatically.
+        ports: Optional list of PalacePort objects.  When waveports are
+            present the domain boundary on port-facing sides is clamped
+            to the port location so that the waveport surface sits
+            exactly on the domain boundary (required by Palace).
 
     Returns:
         Dict with material_name -> list of volume_tags
     """
+    from gsim.palace.ports.config import PortType
+
     dielectric_tags: dict[str, list[int]] = {}
 
     xmin, ymin, xmax, ymax = geometry.bbox
@@ -256,6 +263,30 @@ def add_dielectrics(
     ymin -= margin
     xmax += margin
     ymax += margin
+
+    # Clamp domain bounds so waveport surfaces are on the boundary.
+    # Track which faces are clamped so the airbox also stays flush.
+    clamped = {"xmin": False, "xmax": False, "ymin": False, "ymax": False}
+    for port in ports or []:
+        if port.port_type != PortType.WAVEPORT:
+            continue
+        px, py = port.center
+        mid_x = (xmin + xmax) / 2
+        mid_y = (ymin + ymax) / 2
+        if port.direction in ("x", "-x"):
+            if px <= mid_x:
+                xmin = px
+                clamped["xmin"] = True
+            else:
+                xmax = px
+                clamped["xmax"] = True
+        else:
+            if py <= mid_y:
+                ymin = py
+                clamped["ymin"] = True
+            else:
+                ymax = py
+                clamped["ymax"] = True
 
     z_min_all = math.inf
     z_max_all = -math.inf
@@ -286,15 +317,16 @@ def add_dielectrics(
         )
         dielectric_tags[material].append(box_tag)
 
-    # Surrounding airbox (boolean pipeline handles the overlap)
+    # Surrounding airbox (boolean pipeline handles the overlap).
+    # Don't extend the airbox past waveport-clamped faces.
     if air_margin > 0:
         airbox_tag = gmsh_utils.create_box(
             kernel,
-            xmin - air_margin,
-            ymin - air_margin,
+            xmin if clamped["xmin"] else xmin - air_margin,
+            ymin if clamped["ymin"] else ymin - air_margin,
             z_min_all - air_margin,
-            xmax + air_margin,
-            ymax + air_margin,
+            xmax if clamped["xmax"] else xmax + air_margin,
+            ymax if clamped["ymax"] else ymax + air_margin,
             z_max_all + air_margin,
         )
         dielectric_tags["airbox"] = [airbox_tag]

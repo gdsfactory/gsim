@@ -210,7 +210,9 @@ def generate_mesh(
         port_tags, port_info = add_ports(kernel, ports, stack)
 
         logger.info("Adding dielectrics...")
-        dielectric_tags = add_dielectrics(kernel, geometry, stack, margin, air_margin)
+        dielectric_tags = add_dielectrics(
+            kernel, geometry, stack, margin, air_margin, ports=ports
+        )
 
         # Build entities and run boolean pipeline
         logger.info("Running boolean pipeline...")
