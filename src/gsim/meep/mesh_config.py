@@ -3,6 +3,8 @@
 Serializes the full photonic problem definition (mesh reference, materials,
 source, monitors, domain, solver settings) to a ``mesh_config.json`` file
 alongside the ``.msh`` mesh file.
+
+All spatial values are written in nanometers (length_scale = 1e-9).
 """
 
 from __future__ import annotations
@@ -17,6 +19,9 @@ if TYPE_CHECKING:
     from gsim.meep.models.api import FDTD, Domain, Material, ModeSource
 
 logger = logging.getLogger(__name__)
+
+# um → nm conversion factor (hardcoded for now)
+_UM_TO_NM = 1000.0
 
 
 def _serialize_materials(materials: dict[str, float | Material]) -> dict[str, Any]:
@@ -64,11 +69,11 @@ def _serialize_mesh_groups(groups: dict) -> dict[str, Any]:
         for name, info in groups["port_surfaces"].items():
             out["port_surfaces"][name] = {
                 "phys_group": info["phys_group"],
-                "center": info["center"],
-                "width": info["width"],
+                "center": [c * _UM_TO_NM for c in info["center"]],
+                "width": info["width"] * _UM_TO_NM,
                 "orientation": info["orientation"],
                 "layer": info["layer"],
-                "z_range": info["z_range"],
+                "z_range": [z * _UM_TO_NM for z in info["z_range"]],
             }
 
     return out
@@ -78,8 +83,8 @@ def _serialize_source(source: ModeSource) -> dict[str, Any]:
     """Serialize source settings."""
     return {
         "port": source.port,
-        "wavelength": source.wavelength,
-        "wavelength_span": source.wavelength_span,
+        "wavelength": source.wavelength * _UM_TO_NM,
+        "wavelength_span": source.wavelength_span * _UM_TO_NM,
         "num_freqs": source.num_freqs,
     }
 
@@ -87,10 +92,10 @@ def _serialize_source(source: ModeSource) -> dict[str, Any]:
 def _serialize_domain(domain: Domain) -> dict[str, Any]:
     """Serialize domain settings."""
     return {
-        "pml": domain.pml,
-        "margin_xy": domain.margin,
-        "margin_z_above": domain.margin_z_above,
-        "margin_z_below": domain.margin_z_below,
+        "pml": domain.pml * _UM_TO_NM,
+        "margin_xy": domain.margin * _UM_TO_NM,
+        "margin_z_above": domain.margin_z_above * _UM_TO_NM,
+        "margin_z_below": domain.margin_z_below * _UM_TO_NM,
     }
 
 
