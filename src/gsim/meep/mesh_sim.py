@@ -242,6 +242,7 @@ class MeepMeshSim(BaseModel):
             margin=margin,
             air_margin=air_margin,
             include_airbox=include_airbox,
+            mesh_scale=1000.0,  # um → nm
         )
 
         self._last_mesh_result = result

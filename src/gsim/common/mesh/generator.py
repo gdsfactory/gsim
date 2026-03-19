@@ -40,6 +40,7 @@ def generate_mesh(
     air_margin: float = 50.0,
     include_airbox: bool = True,
     include_ports: bool = True,
+    mesh_scale: float | None = None,
     show_gui: bool = False,
 ) -> MeshResult:
     """Generate a generic GMSH mesh from a gdsfactory component and LayerStack.
@@ -68,6 +69,8 @@ def generate_mesh(
             Needed for RF (Palace); not needed for photonics (Meep).
         include_ports: Whether to create port surfaces from component
             ports as physical groups. Default ``True``.
+        mesh_scale: Scale factor applied to mesh coordinates after generation.
+            E.g. ``1000.0`` converts um → nm. Default ``None`` (no scaling).
         show_gui: Show gmsh GUI during meshing
 
     Returns:
@@ -142,6 +145,10 @@ def generate_mesh(
         # 7. Generate mesh and write
         logger.info("Generating 3D mesh...")
         gmsh.model.mesh.generate(3)
+
+        if mesh_scale is not None:
+            s = mesh_scale
+            gmsh.model.mesh.affineTransform([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0])
 
         mesh_stats = collect_mesh_stats()
 

@@ -97,7 +97,7 @@ def _serialize_domain(domain: Domain) -> dict[str, Any]:
 def _serialize_solver(solver: FDTD) -> dict[str, Any]:
     """Serialize solver settings."""
     return {
-        "resolution": solver.resolution,
+        "nanometers_per_cell": 1000.0 / solver.resolution,
         "stopping": {
             "mode": solver.stopping,
             "threshold": solver.stopping_threshold,
@@ -140,6 +140,7 @@ def write_mesh_config(
         Path to the written ``mesh_config.json``.
     """
     config = {
+        "length_scale": 1e-9,  # mesh coordinates in nm; hardcoded for now
         "mesh_filename": mesh_result.mesh_path.name,
         "materials": _serialize_materials(materials),
         "mesh_groups": _serialize_mesh_groups(mesh_result.groups),
