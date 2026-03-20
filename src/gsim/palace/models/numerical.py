@@ -11,36 +11,80 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class NumericalConfig(BaseModel):
-    """Numerical solver configuration.
+    """Numerical solver configuration for Palace FEM simulations.
 
     Attributes:
-        order: Finite element order (1-4)
-        tolerance: Linear solver tolerance
-        max_iterations: Maximum solver iterations
-        solver_type: Linear solver type
-        preconditioner: Preconditioner type
-        device: Compute device (CPU or GPU)
-        num_processors: Number of processors (None = auto)
+        order: Finite element polynomial order (1-4). Higher order means more
+            accurate field approximation per mesh element at higher cost.
+            order=1: fast, low accuracy. order=2: good balance (default).
+            order=3-4: high accuracy, significantly more DOFs. Increasing order
+            can reduce lumped port reflection artifacts and is often more
+            cost-effective than mesh refinement for smooth geometries.
+        tolerance: Linear solver relative residual convergence tolerance.
+            Tighter tolerance (e.g. 1e-8) gives more accurate solves at the
+            cost of more iterations. Default 1e-6 is suitable for most cases.
+        max_iterations: Maximum Krylov solver iterations before giving up.
+            Increase if you see "solver did not converge" warnings.
+        solver_type: Linear solver / preconditioner backend.
+            "Default" auto-selects (AMS for curl-curl, sparse direct for
+            frequency domain). "SuperLU", "STRUMPACK", "MUMPS" are sparse
+            direct solvers — more robust but use more memory.
+        preconditioner: Preconditioner for iterative solves.
+            "AMS" (Auxiliary-space Maxwell Solver) is best for EM problems.
+            "BoomerAMG" is an algebraic multigrid alternative.
+        device: Compute device. "GPU" enables GPU-accelerated assembly and
+            solves if Palace was built with GPU support.
+        num_processors: Number of MPI processes for parallel execution.
+            None = auto-detect based on cloud instance.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    # Element order
-    order: int = Field(default=2, ge=1, le=4)
+    order: int = Field(
+        default=2,
+        ge=1,
+        le=4,
+        description="Finite element polynomial order. Higher order = more accurate "
+        "fields per element but more expensive. order=1: fast/low accuracy, "
+        "order=2: good balance (default), order=3-4: high accuracy. "
+        "Increasing order can reduce lumped port reflection artifacts.",
+    )
 
-    # Linear solver
-    tolerance: float = Field(default=1e-6, gt=0)
-    max_iterations: int = Field(default=400, ge=1)
-    solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = "Default"
+    tolerance: float = Field(
+        default=1e-6,
+        gt=0,
+        description="Linear solver relative residual convergence tolerance. "
+        "Tighter (e.g. 1e-8) gives more accurate solves at higher cost.",
+    )
+    max_iterations: int = Field(
+        default=400,
+        ge=1,
+        description="Maximum Krylov solver iterations. Increase if solver "
+        "does not converge.",
+    )
+    solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = Field(
+        default="Default",
+        description="Linear solver backend. 'Default' auto-selects. "
+        "Direct solvers (SuperLU, STRUMPACK, MUMPS) are more robust "
+        "but use more memory.",
+    )
 
-    # Preconditioner
-    preconditioner: Literal["Default", "AMS", "BoomerAMG"] = "Default"
+    preconditioner: Literal["Default", "AMS", "BoomerAMG"] = Field(
+        default="Default",
+        description="Preconditioner type. 'AMS' is best for EM curl-curl "
+        "problems. 'BoomerAMG' is an algebraic multigrid alternative.",
+    )
 
-    # Device
-    device: Literal["CPU", "GPU"] = "CPU"
+    device: Literal["CPU", "GPU"] = Field(
+        default="CPU",
+        description="Compute device. 'GPU' enables GPU-accelerated assembly "
+        "and solves if Palace was built with GPU support.",
+    )
 
-    # Partitioning
-    num_processors: int | None = None  # None = auto
+    num_processors: int | None = Field(
+        default=None,
+        description="Number of MPI processes. None = auto-detect.",
+    )
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
