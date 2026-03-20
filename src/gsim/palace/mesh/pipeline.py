@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models import DrivenConfig
+    from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 
 from gsim.palace.mesh.generator import generate_mesh as gen_mesh
@@ -179,6 +180,7 @@ def generate_mesh(
     model_name: str = "palace",
     driven_config: DrivenConfig | None = None,
     write_config: bool = True,
+    pec_blocks: list[PECBlockConfig] | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -217,6 +219,7 @@ def generate_mesh(
         write_config=write_config,
         planar_conductors=config.planar_conductors,
         refine_from_curves=config.refine_from_curves,
+        pec_blocks=pec_blocks,
     )
 
     # Convert to pipeline's MeshResult format

@@ -79,6 +79,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _pec_blocks: list = PrivateAttr(default_factory=list)
 
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
@@ -380,6 +381,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             config=legacy_mesh_config,
             model_name=model_name,
             driven_config=None,  # Eigenmode doesn't use driven config
+            pec_blocks=self._pec_blocks or None,
         )
 
         return SimulationResult(
@@ -474,6 +476,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 ports=ports,
                 output_dir=tmpdir,
                 config=legacy_mesh_config,
+                pec_blocks=self._pec_blocks or None,
             )
 
     # -------------------------------------------------------------------------

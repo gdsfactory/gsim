@@ -85,6 +85,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _pec_blocks: list = PrivateAttr(default_factory=list)
 
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
@@ -456,6 +457,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             model_name=model_name,
             driven_config=driven_config,
             write_config=write_config,
+            pec_blocks=self._pec_blocks or None,
         )
 
         # Store mesh_result for deferred config generation
@@ -561,6 +563,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 ports=ports,
                 output_dir=tmpdir,
                 config=legacy_mesh_config,
+                pec_blocks=self._pec_blocks or None,
             )
 
     # -------------------------------------------------------------------------

@@ -37,6 +37,7 @@ class PalaceSimMixin:
     numerical: NumericalConfig
     _output_dir: Path | None
     _stack_kwargs: dict[str, Any]
+    _pec_blocks: list
 
     # -------------------------------------------------------------------------
     # Output directory
@@ -190,6 +191,40 @@ class PalaceSimMixin:
             conductivity=conductivity,
             permittivity=permittivity,
             loss_tangent=loss_tangent,
+        )
+
+    def add_pec(
+        self,
+        *,
+        gds_layer: tuple[int, int],
+        from_layer: str,
+        to_layer: str,
+    ) -> None:
+        """Add a PEC block between two stack layers.
+
+        The PEC block is a user-drawn polygon on a GDS layer that gets
+        extruded between ``from_layer.zmin`` and ``to_layer.zmax`` and
+        treated as a PEC boundary. This is the standard HFSS practice for
+        connecting ground planes across metal layers at port boundaries.
+
+        Args:
+            gds_layer: GDS layer tuple where the PEC polygon is drawn.
+            from_layer: Stack layer name — extrusion starts at this layer's zmin.
+            to_layer: Stack layer name — extrusion ends at this layer's zmax.
+
+        Example:
+            >>> sim.add_pec(
+            ...     gds_layer=(65000, 0), from_layer="metal1", to_layer="topmetal2"
+            ... )
+        """
+        from gsim.palace.models.pec import PECBlockConfig
+
+        self._pec_blocks.append(
+            PECBlockConfig(
+                gds_layer=gds_layer,
+                from_layer=from_layer,
+                to_layer=to_layer,
+            )
         )
 
     def set_numerical(

@@ -14,6 +14,7 @@ from . import gmsh_utils
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
+    from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 
 
@@ -332,16 +333,158 @@ def add_dielectrics(
     return dielectric_tags
 
 
+def extract_pec_polygons(component, gds_layer: tuple[int, int]) -> list:
+    """Extract polygons from an arbitrary GDS layer on a component.
+
+    Uses the same klayout polygon parsing pattern as ``extract_geometry()``.
+
+    Args:
+        component: gdsfactory Component
+        gds_layer: GDS layer tuple (layer, datatype) to extract polygons from
+
+    Returns:
+        List of (pts_x, pts_y, holes) tuples in microns
+    """
+    polygons_by_index = component.get_polygons()
+
+    layout = component.kcl.layout
+    index_to_gds = {}
+    for layer_index in range(layout.layers()):
+        if layout.is_valid_layer(layer_index):
+            info = layout.get_info(layer_index)
+            index_to_gds[layer_index] = (info.layer, info.datatype)
+
+    result = []
+    for layer_index, polys in polygons_by_index.items():
+        if index_to_gds.get(layer_index) != gds_layer:
+            continue
+        for poly in polys:
+            points = list(poly.each_point_hull())
+            if len(points) < 3:
+                continue
+            pts_x = [pt.x / 1000.0 for pt in points]
+            pts_y = [pt.y / 1000.0 for pt in points]
+            holes = []
+            for hole_idx in range(poly.holes()):
+                hole_pts = list(poly.each_point_hole(hole_idx))
+                if len(hole_pts) >= 3:
+                    hx = [pt.x / 1000.0 for pt in hole_pts]
+                    hy = [pt.y / 1000.0 for pt in hole_pts]
+                    holes.append((hx, hy))
+            result.append((pts_x, pts_y, holes))
+
+    return result
+
+
+def add_pec_blocks(
+    kernel,
+    component,
+    pec_configs: list[PECBlockConfig],
+    stack: LayerStack,
+) -> dict:
+    """Add PEC block geometries to gmsh.
+
+    For each PEC config:
+    1. Extract polygons from the specified GDS layer
+    2. Create surfaces at ``from_layer.zmin``
+    3. Fuse overlapping surfaces
+    4. Extrude to ``to_layer.zmax - from_layer.zmin``
+    5. Remove volumes but keep shell surfaces
+    6. Classify shells as xy/z using ``is_vertical_surface()``
+
+    Args:
+        kernel: gmsh OCC kernel
+        component: gdsfactory Component
+        pec_configs: List of PECBlockConfig objects
+        stack: LayerStack with layer definitions
+
+    Returns:
+        Dict: ``{"pec_block_0": {"surfaces_xy": [...], "surfaces_z": [...]}, ...}``
+    """
+    pec_block_tags: dict[str, dict[str, list[int]]] = {}
+
+    for idx, cfg in enumerate(pec_configs):
+        block_name = f"pec_block_{idx}"
+        from_layer = stack.layers.get(cfg.from_layer)
+        to_layer = stack.layers.get(cfg.to_layer)
+        if from_layer is None or to_layer is None:
+            continue
+
+        polys = extract_pec_polygons(component, cfg.gds_layer)
+        if not polys:
+            continue
+
+        zmin = from_layer.zmin
+        height = to_layer.zmax - from_layer.zmin
+
+        # Create surfaces for each polygon
+        surfaces = []
+        for pts_x, pts_y, holes in polys:
+            surfacetag = gmsh_utils.create_polygon_surface(
+                kernel, pts_x, pts_y, zmin, holes=holes
+            )
+            if surfacetag is not None:
+                surfaces.append(surfacetag)
+
+        if not surfaces:
+            continue
+
+        # Fuse overlapping surfaces
+        if len(surfaces) > 1:
+            dimtags = [(2, s) for s in surfaces]
+            fused, _ = kernel.fuse(
+                [dimtags[0]],
+                dimtags[1:],
+                removeObject=True,
+                removeTool=True,
+            )
+            kernel.synchronize()
+            surfaces = [t for d, t in fused if d == 2]
+
+        # Extrude to create volumes
+        volumes = []
+        for surfacetag in surfaces:
+            result = kernel.extrude([(2, surfacetag)], 0, 0, height)
+            volumetag = result[1][1]
+            volumes.append(volumetag)
+
+        kernel.removeAllDuplicates()
+        kernel.synchronize()
+
+        # Extract shell surfaces and classify as xy/z
+        xy_tags: list[int] = []
+        z_tags: list[int] = []
+        for volumetag in volumes:
+            _, surfaceloops = kernel.getSurfaceLoops(volumetag)
+            if surfaceloops:
+                for tag in surfaceloops[0]:
+                    if gmsh_utils.is_vertical_surface(tag):
+                        z_tags.append(tag)
+                    else:
+                        xy_tags.append(tag)
+            kernel.remove([(3, volumetag)])
+
+        kernel.synchronize()
+
+        pec_block_tags[block_name] = {
+            "surfaces_xy": xy_tags,
+            "surfaces_z": z_tags,
+        }
+
+    return pec_block_tags
+
+
 def build_entities(
     metal_tags: dict,
     dielectric_tags: dict,
     port_tags: dict,
     port_info: list,
+    pec_block_tags: dict | None = None,
 ) -> list[gmsh_utils.Entity]:
     """Convert geometry tag dicts into Entity objects for the boolean pipeline.
 
     Mesh-order convention (lower = higher priority, gets cut first):
-        0  - conductor (2D PEC) surfaces
+        0  - conductor (2D PEC) surfaces and PEC block surfaces
         1  - port surfaces
         2  - dielectrics (non-airbox volumes)
         3  - airbox volume (lowest priority, carved by everything else)
@@ -351,6 +494,7 @@ def build_entities(
         dielectric_tags: from ``add_dielectrics()``
         port_tags: from ``add_ports()``
         port_info: metadata list from ``add_ports()``
+        pec_block_tags: from ``add_pec_blocks()``, optional
 
     Returns:
         List of Entity objects ready for ``run_boolean_pipeline()``.
@@ -399,6 +543,28 @@ def build_entities(
                         dim=2,
                         mesh_order=0,
                         tags=z_tags,
+                    )
+                )
+
+    # --- PEC block surfaces (dim=2, highest priority) ---
+    if pec_block_tags:
+        for block_name, tag_info in pec_block_tags.items():
+            if tag_info["surfaces_xy"]:
+                entities.append(
+                    Entity(
+                        name=f"{block_name}_xy",
+                        dim=2,
+                        mesh_order=0,
+                        tags=tag_info["surfaces_xy"],
+                    )
+                )
+            if tag_info["surfaces_z"]:
+                entities.append(
+                    Entity(
+                        name=f"{block_name}_z",
+                        dim=2,
+                        mesh_order=0,
+                        tags=tag_info["surfaces_z"],
                     )
                 )
 
@@ -618,8 +784,10 @@ __all__ = [
     "GeometryData",
     "add_dielectrics",
     "add_metals",
+    "add_pec_blocks",
     "add_ports",
     "build_entities",
     "extract_geometry",
+    "extract_pec_polygons",
     "get_layer_info",
 ]

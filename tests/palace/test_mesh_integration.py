@@ -334,3 +334,113 @@ class TestQPDKMesh:
         """validate_mesh() must pass for a valid QPDK setup."""
         result = qpdk_sim.validate_mesh()
         assert result.valid, f"Validation failed:\n{result}"
+
+
+# ---------------------------------------------------------------------------
+# PEC block support
+# ---------------------------------------------------------------------------
+
+PEC_LAYER = (65000, 0)
+
+
+def _make_pec_component():
+    """Create a component with a PEC polygon on layer (65000, 0)."""
+    gf.gpdk.PDK.activate()
+
+    @gf.cell
+    def pec_block_cpw(
+        length: float = 300,
+        s_width: float = 20,
+        g_width: float = 40,
+        gap_width: float = 15,
+        pec_width: float = 100,
+        pec_height: float = 5,
+        layer=(99, 0),
+    ) -> gf.Component:
+        c = gf.Component()
+        # GSG electrode (same as above)
+        r1 = c << gf.c.rectangle((length, g_width), centered=True, layer=layer)
+        r1.move((0, (g_width + s_width) / 2 + gap_width))
+        c << gf.c.rectangle((length, s_width), centered=True, layer=layer)
+        r3 = c << gf.c.rectangle((length, g_width), centered=True, layer=layer)
+        r3.move((0, -(g_width + s_width) / 2 - gap_width))
+
+        # PEC block polygons at each port boundary
+        pec_left = c << gf.c.rectangle(
+            (pec_height, pec_width), centered=True, layer=PEC_LAYER
+        )
+        pec_left.move((-length / 2, 0))
+        pec_right = c << gf.c.rectangle(
+            (pec_height, pec_width), centered=True, layer=PEC_LAYER
+        )
+        pec_right.move((length / 2, 0))
+
+        c.add_port(
+            name="o1",
+            center=(-length / 2, 0),
+            width=s_width,
+            orientation=0,
+            port_type="electrical",
+            layer=layer,
+        )
+        c.add_port(
+            name="o2",
+            center=(length / 2, 0),
+            width=s_width,
+            orientation=180,
+            port_type="electrical",
+            layer=layer,
+        )
+        return c
+
+    return pec_block_cpw()
+
+
+@pytest.fixture(scope="module")
+def pec_block_sim(tmp_path_factory):
+    """Mesh with PEC blocks at port boundaries."""
+    tmp_path = tmp_path_factory.mktemp("pec_block")
+    component = _make_pec_component()
+    sim = DrivenSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim"))
+    sim.set_geometry(component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.add_cpw_port("o1", layer="topmetal2", s_width=20, gap_width=15, length=5.0)
+    sim.add_cpw_port("o2", layer="topmetal2", s_width=20, gap_width=15, length=5.0)
+    sim.add_pec(gds_layer=PEC_LAYER, from_layer="metal1", to_layer="topmetal2")
+    sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
+    sim.mesh(preset="coarse")
+    return sim
+
+
+class TestPECBlockMesh:
+    """Test mesh generation with PEC blocks."""
+
+    def test_mesh_has_pec_surfaces(self, pec_block_sim):
+        """PEC blocks must produce PEC surface groups."""
+        groups = pec_block_sim._last_mesh_result.groups
+        pec_names = list(groups["pec_surfaces"].keys())
+        assert len(pec_names) > 0, f"No PEC surfaces found. Got: {pec_names}"
+        # Should contain pec_block_0 entries
+        assert any("pec_block" in name for name in pec_names), (
+            f"No pec_block entries in PEC surfaces. Got: {pec_names}"
+        )
+
+    def test_config_json_has_pec(self, pec_block_sim):
+        """Config must include PEC boundary when PEC blocks are present."""
+        pec_block_sim.write_config()
+        config_path = Path(pec_block_sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+        assert "PEC" in config["Boundaries"], "Missing PEC boundary"
+
+    def test_mesh_has_conductor_surfaces(self, pec_block_sim):
+        """Volumetric conductors should still be present alongside PEC blocks."""
+        groups = pec_block_sim._last_mesh_result.groups
+        assert len(groups["conductor_surfaces"]) > 0, (
+            "No conductor surfaces found — PEC blocks should not replace them"
+        )
+
+    def test_validate_mesh_passes(self, pec_block_sim):
+        """validate_mesh() must pass with PEC blocks."""
+        result = pec_block_sim.validate_mesh()
+        assert result.valid, f"Validation failed:\n{result}"

@@ -24,6 +24,7 @@ from .geometry import (
     GeometryData,
     add_dielectrics,
     add_metals,
+    add_pec_blocks,
     add_ports,
     build_entities,
     extract_geometry,
@@ -33,6 +34,7 @@ from .groups import assign_physical_groups
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models import DrivenConfig
+    from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 
 logger = logging.getLogger(__name__)
@@ -154,6 +156,7 @@ def generate_mesh(
     write_config: bool = True,
     planar_conductors: bool = False,
     refine_from_curves: bool = False,
+    pec_blocks: list[PECBlockConfig] | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -206,6 +209,12 @@ def generate_mesh(
         logger.info("Adding metals...")
         metal_tags = add_metals(kernel, geometry, stack, planar_conductors)
 
+        # Add PEC blocks if configured
+        pec_block_tags: dict = {}
+        if pec_blocks:
+            logger.info("Adding PEC blocks...")
+            pec_block_tags = add_pec_blocks(kernel, component, pec_blocks, stack)
+
         logger.info("Adding ports...")
         port_tags, port_info = add_ports(kernel, ports, stack)
 
@@ -219,6 +228,7 @@ def generate_mesh(
             dielectric_tags,
             port_tags,
             port_info,
+            pec_block_tags=pec_block_tags or None,
         )
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
@@ -233,6 +243,7 @@ def generate_mesh(
             entities,
             pg_map,
             stack,
+            pec_block_tags=pec_block_tags or None,
         )
 
         # Setup mesh fields

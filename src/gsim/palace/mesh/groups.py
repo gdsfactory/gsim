@@ -26,6 +26,7 @@ def assign_physical_groups(
     entities: list[gmsh_utils.Entity],
     pg_map: dict[str, int],
     _stack: LayerStack,
+    pec_block_tags: dict | None = None,
 ) -> dict:
     """Build the ``groups`` dict from the boolean-pipeline result.
 
@@ -86,6 +87,21 @@ def assign_physical_groups(
                         "phys_group": pg,
                         "tags": surf_tags,
                     }
+
+    # --- PEC block surfaces ---
+    if pec_block_tags:
+        for block_name in pec_block_tags:
+            for suffix in ("_xy", "_z"):
+                name = f"{block_name}{suffix}"
+                entity = entity_by_name.get(name)
+                pg = pg_map.get(name)
+                if entity and pg is not None:
+                    surf_tags = [t for d, t in entity.dimtags if d == 2]
+                    if surf_tags:
+                        groups["pec_surfaces"][name] = {
+                            "phys_group": pg,
+                            "tags": surf_tags,
+                        }
 
     # --- Volumetric conductor surfaces (finite thickness) ---
     for layer_name, tag_info in metal_tags.items():
