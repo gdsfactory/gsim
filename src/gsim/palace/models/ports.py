@@ -41,8 +41,8 @@ class PortConfig(BaseModel):
     to_layer: str | None = None
     length: float | None = Field(default=None, gt=0)
     resistance: float = Field(default=50.0, ge=0)
-    inductance: float = Field(default=0.0, ge=0)
-    capacitance: float = Field(default=0.0, ge=0)
+    inductance: float | None = Field(default=None, ge=0)
+    capacitance: float | None = Field(default=None, ge=0)
     excited: bool = True
     geometry: Literal["inplane", "via"] = "inplane"
 
@@ -96,8 +96,8 @@ class CPWPortConfig(BaseModel):
         "Positive = away from boundary, into conductor.",
     )
     resistance: float = Field(default=50.0, ge=0)
-    inductance: float = Field(default=0.0, ge=0)
-    capacitance: float = Field(default=0.0, ge=0)
+    inductance: float | None = Field(default=None, ge=0)
+    capacitance: float | None = Field(default=None, ge=0)
     excited: bool = True
 
 

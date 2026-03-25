@@ -98,8 +98,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         to_layer: str | None = None,
         length: float | None = None,
         resistance: float = 50.0,
-        inductance: float = 0.0,
-        capacitance: float = 0.0,
+        inductance: float | None = None,
+        capacitance: float | None = None,
         excited: bool = True,
         geometry: Literal["inplane", "via"] = "inplane",
     ) -> None:
@@ -112,8 +112,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
             resistance: Series resistance (Ohms)
-            inductance: Series inductance (H)
-            capacitance: Shunt capacitance (F)
+            inductance: Series inductance (H, optional)
+            capacitance: Shunt capacitance (F, optional)
             excited: Whether this port is excited
             geometry: Port geometry type ("inplane" or "via")
 
@@ -149,8 +149,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         length: float,
         offset: float = 0.0,
         resistance: float = 50.0,
-        inductance: float = 0.0,
-        capacitance: float = 0.0,
+        inductance: float | None = None,
+        capacitance: float | None = None,
         excited: bool = True,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
@@ -164,8 +164,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             offset: Shift port inward along the waveguide (um).
                 Positive moves away from the boundary, into the conductor.
             resistance: Series resistance (Ohms)
-            inductance: Series inductance (H)
-            capacitance: Shunt capacitance (F)
+            inductance: Series inductance (H, optional)
+            capacitance: Shunt capacitance (F, optional)
             excited: Whether this port is excited
 
         Example:

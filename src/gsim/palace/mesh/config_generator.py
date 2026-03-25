@@ -192,16 +192,17 @@ def generate_palace_config(
                             }
                             for elem in port_group["elements"]
                         ]
-                        lumped_ports.append(
-                            {
-                                "Index": port_idx,
-                                "R": port.resistance,
-                                "L": port.inductance,
-                                "C": port.capacitance,
-                                "Excitation": port_idx if port.excited else False,
-                                "Elements": elements,
-                            }
-                        )
+                        entry = {
+                            "Index": port_idx,
+                            "R": port.resistance,
+                            "Excitation": port_idx if port.excited else False,
+                            "Elements": elements,
+                        }
+                        if port.inductance is not None:
+                            entry["L"] = port.inductance
+                        if port.capacitance is not None:
+                            entry["C"] = port.capacitance
+                        lumped_ports.append(entry)
                     else:
                         attributes = [
                             elem["phys_group"] for elem in port_group["elements"]
@@ -226,12 +227,14 @@ def generate_palace_config(
                     port_entry: dict[str, object] = {
                         "Index": port_idx,
                         "R": port.resistance,
-                        "L": port.inductance,
-                        "C": port.capacitance,
                         "Direction": direction,
                         "Excitation": port_idx if port.excited else False,
                         "Attributes": [port_group["phys_group"]],
                     }
+                    if port.inductance is not None:
+                        port_entry["L"] = port.inductance
+                    if port.capacitance is not None:
+                        port_entry["C"] = port.capacitance
                     lumped_ports.append(port_entry)
                 else:
                     wave_ports.append(

@@ -62,8 +62,8 @@ class PalacePort:
 
     # Electrical properties
     resistance: float = 50.0  # Ohms
-    inductance: float = 0.0  # H
-    capacitance: float = 0.0  # F
+    inductance: float | None = None  # H
+    capacitance: float | None = None  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
     # Waveport specific settings
@@ -91,8 +91,8 @@ def configure_inplane_port(
     layer: str,
     length: float,
     resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    inductance: float | None = None,
+    capacitance: float | None = None,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as inplane (lumped) ports for Palace simulation.
@@ -105,8 +105,8 @@ def configure_inplane_port(
         layer: Target conductor layer name (e.g., 'topmetal2')
         length: Port extent along direction in um (perpendicular to port width)
         resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        inductance: Series inductance in Henries (optional)
+        capacitance: Shunt capacitance in Farads (optional)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -123,8 +123,10 @@ def configure_inplane_port(
         port.info["layer"] = layer
         port.info["length"] = length
         port.info["resistance"] = resistance
-        port.info["inductance"] = inductance
-        port.info["capacitance"] = capacitance
+        if inductance is not None:
+            port.info["inductance"] = inductance
+        if capacitance is not None:
+            port.info["capacitance"] = capacitance
         port.info["excited"] = excited
 
 
@@ -133,8 +135,8 @@ def configure_via_port(
     from_layer: str,
     to_layer: str,
     resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    inductance: float | None = None,
+    capacitance: float | None = None,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as via (vertical) lumped ports.
@@ -147,8 +149,8 @@ def configure_via_port(
         from_layer: Bottom conductor layer name (e.g., 'metal1')
         to_layer: Top conductor layer name (e.g., 'topmetal2')
         resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        inductance: Series inductance in Henries (optional)
+        capacitance: Shunt capacitance in Farads (optional)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -167,8 +169,10 @@ def configure_via_port(
         port.info["from_layer"] = from_layer
         port.info["to_layer"] = to_layer
         port.info["resistance"] = resistance
-        port.info["inductance"] = inductance
-        port.info["capacitance"] = capacitance
+        if inductance is not None:
+            port.info["inductance"] = inductance
+        if capacitance is not None:
+            port.info["capacitance"] = capacitance
         port.info["excited"] = excited
 
 
@@ -179,8 +183,8 @@ def configure_cpw_port(
     gap_width: float,
     length: float,
     resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    inductance: float | None = None,
+    capacitance: float | None = None,
     excited: bool = True,
     offset: float = 0.0,
 ):
@@ -197,8 +201,8 @@ def configure_cpw_port(
         gap_width: Gap width between signal and ground in um
         length: Port extent along direction in um
         resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        inductance: Series inductance in Henries (optional)
+        capacitance: Shunt capacitance in Farads (optional)
         excited: Whether port is excited (default: True)
         offset: Shift port inward along the waveguide (um).
             Positive moves away from the boundary, into the conductor.
@@ -246,8 +250,10 @@ def configure_cpw_port(
     port.info["layer"] = layer
     port.info["length"] = length
     port.info["resistance"] = resistance
-    port.info["inductance"] = inductance
-    port.info["capacitance"] = capacitance
+    if inductance is not None:
+        port.info["inductance"] = inductance
+    if capacitance is not None:
+        port.info["capacitance"] = capacitance
     port.info["excited"] = excited
     port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
     port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
@@ -377,8 +383,8 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 centers=centers,
                 directions=directions,
                 resistance=info.get("resistance", 50.0),
-                inductance=info.get("inductance", 0.0),
-                capacitance=info.get("capacitance", 0.0),
+                inductance=info.get("inductance"),
+                capacitance=info.get("capacitance"),
                 excited=info.get("excited", True),
             )
             palace_ports.append(cpw_port)
@@ -435,8 +441,8 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             from_layer=from_layer,
             to_layer=to_layer,
             resistance=info.get("resistance", 50.0),
-            inductance=info.get("inductance", 0.0),
-            capacitance=info.get("capacitance", 0.0),
+            inductance=info.get("inductance"),
+            capacitance=info.get("capacitance"),
             z_margin=info.get("z_margin", 0.0),
             lateral_margin=info.get("lateral_margin", 0.0),
             excited=info.get("excited", True),
