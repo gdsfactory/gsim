@@ -45,7 +45,18 @@ jobs:
         run: ls dist
       - name: Release PYPI
         uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Find draft release notes
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh api repos/${{ github.repository }}/releases \
+            --jq '[.[] | select(.draft == true)] | first | .body // ""')
+          echo "body<<EOFBODY" >> "$GITHUB_OUTPUT"
+          echo "$body" >> "$GITHUB_OUTPUT"
+          echo "EOFBODY" >> "$GITHUB_OUTPUT"
       - name: Release GH
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ steps.draft.outputs.body }}
           files: dist/*
