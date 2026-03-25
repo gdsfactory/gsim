@@ -243,7 +243,7 @@ def _make_plotter(interactive: bool) -> pv.Plotter:
         plotter = pv.Plotter(window_size=[1200, 900])
     else:
         plotter = pv.Plotter(off_screen=True, window_size=[1200, 900])
-    plotter.set_background("white")  # type: ignore[arg-type]
+    plotter.set_background("white")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
     return plotter
 
 

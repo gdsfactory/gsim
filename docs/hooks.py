@@ -9,9 +9,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pygments import highlight  # type: ignore[import-untyped]
-from pygments.formatters import HtmlFormatter  # type: ignore[import-untyped]
-from pygments.lexers import PythonLexer  # type: ignore[import-untyped]
+from pygments import (
+    highlight,  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
+)
+from pygments.formatters import (
+    HtmlFormatter,  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
+)
+from pygments.lexers import (
+    PythonLexer,  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
+)
 
 _EXAMPLE_RE = re.compile(
     r'<details class="example" open>\s*<summary>Example</summary>'

@@ -107,7 +107,7 @@ class TestResultParserRegistry:
         sentinel = object()
         register_result_parser("test_solver", lambda _r: sentinel)
         assert "test_solver" in _RESULT_PARSERS
-        assert _RESULT_PARSERS["test_solver"](None) is sentinel  # type: ignore[arg-type]
+        assert _RESULT_PARSERS["test_solver"](None) is sentinel  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         del _RESULT_PARSERS["test_solver"]
 
     def test_overwrite(self):
@@ -116,7 +116,7 @@ class TestResultParserRegistry:
 
         register_result_parser("overwrite_test", lambda _r: 1)
         register_result_parser("overwrite_test", lambda _r: 2)
-        assert _RESULT_PARSERS["overwrite_test"](None) == 2  # type: ignore[arg-type]
+        assert _RESULT_PARSERS["overwrite_test"](None) == 2  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         del _RESULT_PARSERS["overwrite_test"]
 
 

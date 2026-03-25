@@ -19,7 +19,13 @@ import numpy as np
 from gdsfactory.component import Component
 from gdsfactory.pdk import get_layer_name
 from gdsfactory.technology import LayerLevel, LayerStack
-from pydantic import BaseModel, ConfigDict, NonNegativeFloat, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    NonNegativeFloat,
+    PrivateAttr,
+    computed_field,
+)
 
 from gsim.common.polygon import cleanup_component
 from gsim.common.types import AnyShapelyPolygon, GFComponent
@@ -52,12 +58,16 @@ class LayeredComponentBase(BaseModel):
     wafer_layer: tuple[int, int] = (999, 0)
     slice_stack: tuple[int, int | None] = (0, None)
 
+    _hash: int | None = PrivateAttr(default=None)
+
     def __hash__(self) -> int:
         """Returns a stable hash for the model using its JSON representation."""
-        if not hasattr(self, "_hash"):
+        h = self._hash
+        if h is None:
             dump = str.encode(self.model_dump_json())
-            object.__setattr__(self, "_hash", int(md5(dump).hexdigest()[:15], 16))
-        return self._hash  # type: ignore[return-value]
+            h = int(md5(dump).hexdigest()[:15], 16)
+            object.__setattr__(self, "_hash", h)
+        return h
 
     # ------------------------------------------------------------------
     # Padding helpers

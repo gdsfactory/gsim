@@ -263,19 +263,8 @@ def generate_mesh(
         if show_gui:
             gmsh.fltk.run()
 
-        # Use Netgen (algo 4) when via ports are present — TetGen fails
-        # with PLC errors when vertical via port surfaces intersect
-        # complex 3D geometry. Otherwise use TetGen (default) which
-        # produces cleaner meshes for MFEM/Palace.
-        has_via_ports = any(info.get("type") == "via" for info in port_info)
-        if has_via_ports:
-            logger.info("Via ports detected, using Netgen for 3D meshing...")
-            gmsh.option.setNumber("Mesh.Algorithm3D", 4)
-            gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
         logger.info("Generating mesh...")
         gmsh.model.mesh.generate(3)
-        if has_via_ports:
-            gmsh.model.mesh.optimize("Netgen")
 
         # Collect mesh statistics
         mesh_stats = collect_mesh_stats()

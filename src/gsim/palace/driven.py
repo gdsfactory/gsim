@@ -864,7 +864,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         self.upload(verbose=False)
         self.start(verbose=verbose != "quiet")
         if not wait:
-            return self._job_id  # type: ignore[return-value]  # set by upload()
+            if self._job_id is None:
+                msg = "job_id not set — call upload() first"
+                raise RuntimeError(msg)
+            return self._job_id
         return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
     def run_local(

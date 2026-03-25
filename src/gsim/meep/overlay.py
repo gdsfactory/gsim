@@ -133,7 +133,7 @@ def build_sim_overlay(
     ports: list[PortOverlay] = [
         PortOverlay(
             name=p.name,
-            center=tuple(p.center),  # type: ignore[arg-type]
+            center=(p.center[0], p.center[1], p.center[2]),
             width=p.width + 2 * port_margin,
             normal_axis=p.normal_axis,
             direction=p.direction,

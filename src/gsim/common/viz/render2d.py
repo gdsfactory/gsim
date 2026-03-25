@@ -441,7 +441,7 @@ def _plot_single_prism_slice(
             ymax = max(ymax, overlay.cell_max[2])
     else:
         sim_roi = Rectangle(
-            tuple(cmin),  # type: ignore[arg-type]
+            (cmin[0], cmin[1]),
             *size,
             facecolor="none",
             edgecolor="k",

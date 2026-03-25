@@ -5,7 +5,7 @@ This module contains Pydantic models for mesh generation configuration.
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -50,67 +50,67 @@ class MeshConfig(BaseModel):
         return self
 
     @classmethod
-    def coarse(cls, **kwargs: float | bool | list[str] | None) -> Self:
+    def coarse(cls, **kwargs: Any) -> Self:
         """Fast mesh for quick iteration (~2.5 elements per wavelength).
 
         This preset is suitable for initial debugging and quick checks.
         Not recommended for accurate results.
         """
-        defaults: dict[str, float | int | bool | list[str] | None] = {
+        defaults: dict[str, Any] = {
             "refined_mesh_size": 10.0,
             "max_mesh_size": 600.0,
             "cells_per_wavelength": 5,
         }
         defaults.update(kwargs)
-        return cls(**defaults)  # type: ignore[arg-type]
+        return cls(**defaults)
 
     @classmethod
-    def default(cls, **kwargs: float | bool | list[str] | None) -> Self:
+    def default(cls, **kwargs: Any) -> Self:
         """Balanced mesh (~5 elements per wavelength).
 
         This preset provides a good balance between accuracy and computation time.
         Suitable for most simulations.
         """
-        defaults: dict[str, float | int | bool | list[str] | None] = {
+        defaults: dict[str, Any] = {
             "refined_mesh_size": 5.0,
             "max_mesh_size": 300.0,
             "cells_per_wavelength": 10,
         }
         defaults.update(kwargs)
-        return cls(**defaults)  # type: ignore[arg-type]
+        return cls(**defaults)
 
     @classmethod
-    def graded(cls, **kwargs: float | bool | list[str] | None) -> Self:
+    def graded(cls, **kwargs: Any) -> Self:
         """Default mesh sizes with refinement near conductor edges.
 
         Same global sizing as *default* but adds distance-based grading
         from conductor curves so the mesh is fine where it matters and
         coarse elsewhere.
         """
-        defaults: dict[str, float | int | bool | list[str] | None] = {
+        defaults: dict[str, Any] = {
             "refined_mesh_size": 5.0,
             "max_mesh_size": 300.0,
             "cells_per_wavelength": 10,
             "refine_from_curves": True,
         }
         defaults.update(kwargs)
-        return cls(**defaults)  # type: ignore[arg-type]
+        return cls(**defaults)
 
     @classmethod
-    def fine(cls, **kwargs: float | bool | list[str] | None) -> Self:
+    def fine(cls, **kwargs: Any) -> Self:
         """High accuracy mesh (~10 elements per wavelength).
 
         This preset provides higher accuracy at the cost of increased
         computation time. Use for final production simulations.
         """
-        defaults: dict[str, float | int | bool | list[str] | None] = {
+        defaults: dict[str, Any] = {
             "refined_mesh_size": 2.0,
             "max_mesh_size": 70.0,
             "cells_per_wavelength": 20,
             "refine_from_curves": True,
         }
         defaults.update(kwargs)
-        return cls(**defaults)  # type: ignore[arg-type]
+        return cls(**defaults)
 
 
 __all__ = [
