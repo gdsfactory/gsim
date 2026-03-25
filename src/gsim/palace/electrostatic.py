@@ -204,6 +204,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             preview_only=mesh_config.preview_only,
             planar_conductors=mesh_config.planar_conductors,
             refine_from_curves=mesh_config.refine_from_curves,
+            merge_via_distance=mesh_config.merge_via_distance,
         )
 
         stack = self._resolve_stack()
@@ -294,6 +295,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             preview_only=True,
             planar_conductors=mesh_config.planar_conductors,
             refine_from_curves=mesh_config.refine_from_curves,
+            merge_via_distance=mesh_config.merge_via_distance,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:

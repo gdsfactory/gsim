@@ -157,6 +157,7 @@ def generate_mesh(
     planar_conductors: bool = False,
     refine_from_curves: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
+    merge_via_distance: float = 2.0,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -176,6 +177,7 @@ def generate_mesh(
         write_config: Whether to write config.json (default True)
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         refine_from_curves: Refine mesh based on distance to conductor edges
+        merge_via_distance: Max gap between vias to merge (um)
 
     Returns:
         MeshResult with paths and metadata
@@ -207,7 +209,9 @@ def generate_mesh(
     try:
         # Add geometry
         logger.info("Adding metals...")
-        metal_tags = add_metals(kernel, geometry, stack, planar_conductors)
+        metal_tags = add_metals(
+            kernel, geometry, stack, planar_conductors, merge_via_distance
+        )
 
         # Add PEC blocks if configured
         pec_block_tags: dict = {}
@@ -229,6 +233,7 @@ def generate_mesh(
             port_tags,
             port_info,
             pec_block_tags=pec_block_tags or None,
+            stack=stack,
         )
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
@@ -262,9 +267,19 @@ def generate_mesh(
         if show_gui:
             gmsh.fltk.run()
 
-        # Generate mesh
+        # Use Netgen (algo 4) when via ports are present — TetGen fails
+        # with PLC errors when vertical via port surfaces intersect
+        # complex 3D geometry. Otherwise use TetGen (default) which
+        # produces cleaner meshes for MFEM/Palace.
+        has_via_ports = any(info.get("type") == "via" for info in port_info)
+        if has_via_ports:
+            logger.info("Via ports detected, using Netgen for 3D meshing...")
+            gmsh.option.setNumber("Mesh.Algorithm3D", 4)
+            gmsh.option.setNumber("Mesh.OptimizeNetgen", 1)
         logger.info("Generating mesh...")
         gmsh.model.mesh.generate(3)
+        if has_via_ports:
+            gmsh.model.mesh.optimize("Netgen")
 
         # Collect mesh statistics
         mesh_stats = collect_mesh_stats()

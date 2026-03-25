@@ -6,9 +6,14 @@ and creating 3D geometry in gmsh.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from shapely import Polygon as ShapelyPolygon
+from shapely import buffer
+from shapely.ops import unary_union
 
 from . import gmsh_utils
 
@@ -16,6 +21,8 @@ if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -136,11 +143,74 @@ def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
     return None
 
 
+def _merge_via_polygons(
+    polys: list[tuple[list[float], list[float], list]],
+    merge_distance: float,
+) -> list[tuple[list[float], list[float], list]]:
+    """Merge nearby via polygons using oversize/union/undersize.
+
+    Converts polygon coordinate lists to shapely, buffers outward by
+    half the merge distance so nearby vias overlap, unions them, then
+    buffers back inward to restore the original outline.
+
+    Args:
+        polys: List of (pts_x, pts_y, holes) tuples
+        merge_distance: Max gap between vias to merge (um)
+
+    Returns:
+        Merged polygon list in the same format
+    """
+    if len(polys) <= 1 or merge_distance <= 0:
+        return polys
+
+    offset = merge_distance / 2 + 0.01
+
+    shapely_polys = []
+    for pts_x, pts_y, _holes in polys:
+        coords = list(zip(pts_x, pts_y, strict=False))
+        if len(coords) >= 3:
+            shapely_polys.append(ShapelyPolygon(coords))
+
+    if not shapely_polys:
+        return polys
+
+    # Oversize → union → undersize
+    buffered = [buffer(p, offset, join_style="mitre") for p in shapely_polys]
+    merged = buffer(unary_union(buffered), -offset, join_style="mitre")
+
+    # Convert back to coordinate lists
+    result = []
+    # unary_union may return Polygon or MultiPolygon
+    geoms = merged.geoms if hasattr(merged, "geoms") else [merged]
+    for geom in geoms:
+        if geom.is_empty:
+            continue
+        xs, ys = zip(*geom.exterior.coords[:-1], strict=True)  # drop closing duplicate
+        holes = []
+        for interior in geom.interiors:
+            hx, hy = zip(*interior.coords[:-1], strict=True)
+            holes.append((list(hx), list(hy)))
+        result.append((list(xs), list(ys), holes))
+
+    n_before = len(polys)
+    n_after = len(result)
+    if n_before != n_after:
+        logger.info(
+            "Via merging: %d polygons → %d (distance=%.1f um)",
+            n_before,
+            n_after,
+            merge_distance,
+        )
+
+    return result
+
+
 def add_metals(
     kernel,
     geometry: GeometryData,
     stack: LayerStack,
     planar_conductors: bool = False,
+    merge_via_distance: float = 2.0,
 ) -> dict:
     """Add metal and via geometries to gmsh.
 
@@ -152,10 +222,14 @@ def add_metals(
         geometry: Extracted geometry data
         stack: LayerStack with layer definitions
         planar_conductors: If True, treat conductors as 2D PEC surfaces
+        merge_via_distance: Max gap between vias to merge (um). Nearby
+            via polygons within this distance are combined into a single
+            polygon before meshing, drastically reducing mesh complexity.
 
     Returns:
-        Dict with layer_name -> list of (surface_tags_xy, surface_tags_z) for
-        conductors, or volume_tags for vias.
+        Dict with layer_name -> {"volumes": [...], "surfaces_xy": [...],
+        "surfaces_z": [...]} where volumes contains raw int tags for vias
+        and (volumetag, surface_tags) tuples for conductors.
     """
     # layer_name -> {"volumes": [], "surfaces_xy": [], "surfaces_z": []}
     metal_tags = {}
@@ -192,6 +266,10 @@ def add_metals(
                 "surfaces_xy": [],
                 "surfaces_z": [],
             }
+
+        # Merge nearby via polygons before creating gmsh surfaces
+        if layer_type == "via":
+            polys = _merge_via_polygons(polys, merge_via_distance)
 
         # Create surfaces for all polygons on this layer
         surfaces = []
@@ -234,12 +312,43 @@ def add_metals(
                     # Defer shell extraction until after removeAllDuplicates
                     _conductor_volumes.setdefault(layer_name, []).append(volumetag)
 
+    # Record bounding boxes of via volumes BEFORE removeAllDuplicates
+    # so we can re-identify them after tags get renumbered.
+    _via_bboxes: dict[str, list[tuple[float, ...]]] = {}
+    for layer_name, tag_info in metal_tags.items():
+        for vtag in tag_info["volumes"]:
+            if isinstance(vtag, int):
+                kernel.synchronize()
+                bbox = kernel.getBoundingBox(3, vtag)
+                _via_bboxes.setdefault(layer_name, []).append(bbox)
+
     kernel.removeAllDuplicates()
     kernel.synchronize()
 
-    # Extract shell surfaces from conductor volumes now that tags are stable
+    # Re-identify via volumes by matching bounding boxes
+    all_vols = kernel.getEntities(3)
+    for layer_name, bboxes in _via_bboxes.items():
+        metal_tags[layer_name]["volumes"] = []
+        for target_bbox in bboxes:
+            for _, vtag in all_vols:
+                try:
+                    bbox = kernel.getBoundingBox(3, vtag)
+                except Exception:  # noqa: S112
+                    continue
+                if all(
+                    abs(a - b) < 0.01 for a, b in zip(bbox, target_bbox, strict=True)
+                ):
+                    metal_tags[layer_name]["volumes"].append(vtag)
+                    break
+
+    # Extract shell surfaces from conductor volumes.
+    # After removeAllDuplicates, some volume tags may have been invalidated
+    # (e.g., a conductor volume that shared faces with a via volume).
+    current_vols = {t for _, t in kernel.getEntities(3)}
     for layer_name, vol_tags in _conductor_volumes.items():
         for volumetag in vol_tags:
+            if volumetag not in current_vols:
+                continue
             _, surfaceloops = kernel.getSurfaceLoops(volumetag)
             if surfaceloops:
                 metal_tags[layer_name]["volumes"].append((volumetag, surfaceloops[0]))
@@ -480,12 +589,13 @@ def build_entities(
     port_tags: dict,
     port_info: list,
     pec_block_tags: dict | None = None,
+    stack: LayerStack | None = None,
 ) -> list[gmsh_utils.Entity]:
     """Convert geometry tag dicts into Entity objects for the boolean pipeline.
 
     Mesh-order convention (lower = higher priority, gets cut first):
         0  - conductor (2D PEC) surfaces and PEC block surfaces
-        1  - port surfaces
+        1  - via volumes (3D, higher priority than dielectrics) and port surfaces
         2  - dielectrics (non-airbox volumes)
         3  - airbox volume (lowest priority, carved by everything else)
 
@@ -495,6 +605,7 @@ def build_entities(
         port_tags: from ``add_ports()``
         port_info: metadata list from ``add_ports()``
         pec_block_tags: from ``add_pec_blocks()``, optional
+        stack: LayerStack for distinguishing via vs conductor layers
 
     Returns:
         List of Entity objects ready for ``run_boolean_pipeline()``.
@@ -502,8 +613,17 @@ def build_entities(
     Entity = gmsh_utils.Entity
     entities: list[gmsh_utils.Entity] = []
 
-    # --- Conductors (dim=2 surfaces, highest priority) ---
+    # Build set of via layer names for quick lookup
+    via_layers: set[str] = set()
+    if stack:
+        via_layers = {
+            n for n, layer in stack.layers.items() if layer.layer_type == "via"
+        }
+
+    # --- Conductors and vias ---
     for layer_name, tag_info in metal_tags.items():
+        is_via = layer_name in via_layers
+
         # PEC / zero-thickness surfaces
         if tag_info["surfaces_xy"]:
             entities.append(
@@ -515,36 +635,51 @@ def build_entities(
                 )
             )
 
-        # Volumetric conductors: shell surfaces (volume already removed)
         if tag_info["volumes"]:
-            xy_tags = []
-            z_tags = []
-            for item in tag_info["volumes"]:
-                if isinstance(item, tuple):
-                    _volumetag, surface_tags = item
-                    for tag in surface_tags:
-                        if gmsh_utils.is_vertical_surface(tag):
-                            z_tags.append(tag)
-                        else:
-                            xy_tags.append(tag)
-            if xy_tags:
-                entities.append(
-                    Entity(
-                        name=f"{layer_name}_xy",
-                        dim=2,
-                        mesh_order=0,
-                        tags=xy_tags,
+            if is_via:
+                # Via volumes: 3D entities, higher priority than dielectrics
+                via_vol_tags = [
+                    item for item in tag_info["volumes"] if isinstance(item, int)
+                ]
+                if via_vol_tags:
+                    entities.append(
+                        Entity(
+                            name=layer_name,
+                            dim=3,
+                            mesh_order=1,
+                            tags=via_vol_tags,
+                        )
                     )
-                )
-            if z_tags:
-                entities.append(
-                    Entity(
-                        name=f"{layer_name}_z",
-                        dim=2,
-                        mesh_order=0,
-                        tags=z_tags,
+            else:
+                # Volumetric conductors: shell surfaces (volume already removed)
+                xy_tags = []
+                z_tags = []
+                for item in tag_info["volumes"]:
+                    if isinstance(item, tuple):
+                        _volumetag, surface_tags = item
+                        for tag in surface_tags:
+                            if gmsh_utils.is_vertical_surface(tag):
+                                z_tags.append(tag)
+                            else:
+                                xy_tags.append(tag)
+                if xy_tags:
+                    entities.append(
+                        Entity(
+                            name=f"{layer_name}_xy",
+                            dim=2,
+                            mesh_order=0,
+                            tags=xy_tags,
+                        )
                     )
-                )
+                if z_tags:
+                    entities.append(
+                        Entity(
+                            name=f"{layer_name}_z",
+                            dim=2,
+                            mesh_order=0,
+                            tags=z_tags,
+                        )
+                    )
 
     # --- PEC block surfaces (dim=2, highest priority) ---
     if pec_block_tags:

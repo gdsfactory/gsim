@@ -89,7 +89,7 @@ def classify_layer_type(
     """
     name_lower = layer_name.lower()
 
-    if "via" in name_lower or "cont" in name_lower:
+    if "via" in name_lower or "cont" in name_lower or name_lower == "vmim":
         return "via"
 
     if any(

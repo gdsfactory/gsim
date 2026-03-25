@@ -88,6 +88,9 @@ class MeshConfig:
     planar_conductors: bool = False  # Treat conductors as 2D PEC surfaces
     refine_from_curves: bool = False  # Refine mesh near conductor edges
 
+    # Via merging: merge nearby via polygons within this distance (um)
+    merge_via_distance: float = 2.0
+
     # GUI control
     show_gui: bool = False  # Show gmsh GUI during meshing
     preview_only: bool = False  # Show geometry without meshing
@@ -220,6 +223,7 @@ def generate_mesh(
         planar_conductors=config.planar_conductors,
         refine_from_curves=config.refine_from_curves,
         pec_blocks=pec_blocks,
+        merge_via_distance=config.merge_via_distance,
     )
 
     # Convert to pipeline's MeshResult format

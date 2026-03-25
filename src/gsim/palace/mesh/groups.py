@@ -62,6 +62,13 @@ def assign_physical_groups(
     # Helper: entity name → (phys_group, surface_tags)
     entity_by_name: dict[str, gmsh_utils.Entity] = {e.name: e for e in entities}
 
+    # Build set of via layer names
+    via_layers: set[str] = set()
+    if _stack:
+        via_layers = {
+            n for n, layer in _stack.layers.items() if layer.layer_type == "via"
+        }
+
     # --- Volumes (dielectrics + airbox) ---
     for material in dielectric_tags:
         entity = entity_by_name.get(material)
@@ -72,6 +79,19 @@ def assign_physical_groups(
                 groups["volumes"][material] = {
                     "phys_group": pg,
                     "tags": vol_tags,
+                }
+
+    # --- Via volumes (3D material regions with conductivity) ---
+    for layer_name in via_layers:
+        entity = entity_by_name.get(layer_name)
+        pg = pg_map.get(layer_name)
+        if entity and pg is not None:
+            vol_tags = [t for d, t in entity.dimtags if d == 3]
+            if vol_tags:
+                groups["volumes"][layer_name] = {
+                    "phys_group": pg,
+                    "tags": vol_tags,
+                    "is_via": True,
                 }
 
     # --- PEC surfaces (planar conductors) ---

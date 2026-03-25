@@ -38,6 +38,7 @@ class MeshConfig(BaseModel):
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False
     refine_from_curves: bool = False
+    merge_via_distance: float = Field(default=2.0, ge=0)
     show_gui: bool = False
     preview_only: bool = False
 

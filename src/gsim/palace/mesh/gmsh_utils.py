@@ -40,8 +40,10 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
 
     1. Group entities by dimension (descending: 3 → 0).
     2. Within each dimension, sort by mesh_order (ascending = higher priority).
-    3. Priority cuts: each entity is cut by all previously processed entities
-       in the same dimension (removeObject=True, removeTool=False).
+    3. For dim=3: fragment all volumes together in one pass (avoids degenerate
+       sliver faces from priority cuts on small volumes like vias).
+       For dim=2,1,0: priority cuts — each entity is cut by all previously
+       processed entities in the same dimension.
     4. Fragment current dimension against all higher-dimension entities
        already processed, then update tags via the returned mapping.
     5. Accumulate processed entities for the next (lower) dimension.
@@ -71,21 +73,55 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
 
         # --- A. Priority cuts within same dimension ---
         processed_in_dim: list[Entity] = []
-        for entity in current_group:
-            tool_dimtags = [dt for prev in processed_in_dim for dt in prev.dimtags]
 
-            if tool_dimtags and entity.dimtags:
-                cut_result, _ = gmsh.model.occ.cut(
-                    entity.dimtags,
-                    tool_dimtags,
+        if dim == 3:
+            # Fragment all 3D entities together in one pass.
+            # This avoids degenerate sliver faces that occ.cut() creates
+            # when small volumes (e.g. vias) are subtracted from large ones.
+            all_3d_dimtags = [dt for e in current_group for dt in e.dimtags]
+            if len(all_3d_dimtags) > 1:
+                _, out_map = gmsh.model.occ.fragment(
+                    all_3d_dimtags,
+                    [],
                     removeObject=True,
-                    removeTool=False,
+                    removeTool=True,
                 )
                 gmsh.model.occ.synchronize()
-                entity.dimtags = list(set(cut_result))
 
-            if entity.dimtags:
-                processed_in_dim.append(entity)
+                # Update each entity's dimtags from the output mapping.
+                # Fragment maps shared pieces to ALL parent entities, so
+                # de-duplicate: assign each fragment only to the highest-
+                # priority entity (lowest mesh_order, processed first).
+                claimed: set[tuple[int, int]] = set()
+                idx = 0
+                for entity in current_group:
+                    new_dimtags: list[tuple[int, int]] = []
+                    for _ in entity.dimtags:
+                        for dt in out_map[idx]:
+                            if dt not in claimed:
+                                new_dimtags.append(dt)
+                                claimed.add(dt)
+                        idx += 1
+                    entity.dimtags = list(set(new_dimtags))
+
+            processed_in_dim = [e for e in current_group if e.dimtags]
+        else:
+            # Keep existing priority-cut logic for dim=2,1,0
+            for entity in current_group:
+                tool_dimtags = [dt for prev in processed_in_dim for dt in prev.dimtags]
+
+                if tool_dimtags and entity.dimtags:
+                    cut_result, _ = gmsh.model.occ.cut(
+                        entity.dimtags,
+                        tool_dimtags,
+                        removeObject=True,
+                        removeTool=False,
+                    )
+                    gmsh.model.occ.synchronize()
+                    entity.dimtags = list(set(cut_result))
+
+                if entity.dimtags:
+                    processed_in_dim.append(entity)
 
         # --- B. Fragment against higher dimensions ---
         if processed_higher_dims and processed_in_dim:
