@@ -104,6 +104,22 @@ class TestLoadSparams:
         assert "freq_ghz" in df.columns
         assert "S_o1_o1_db" in df.columns
 
+    def test_accepts_results_dict(self, sim_dir: Path) -> None:
+        """Can pass a results dict like sim.run() returns."""
+        results = {
+            "port-S.csv": sim_dir / "output" / "palace" / "port-S.csv",
+            "port-V.csv": sim_dir / "output" / "palace" / "port-V.csv",
+        }
+        df = load_sparams(results)
+        assert "freq_ghz" in df.columns
+        assert "S_o1_o1_db" in df.columns
+        assert "S_o2_o1_db" in df.columns
+
+    def test_results_dict_missing_csv_raises(self) -> None:
+        """Results dict without port-S.csv raises."""
+        with pytest.raises(FileNotFoundError, match="port-S"):
+            load_sparams({"other.csv": Path("/nonexistent")})
+
 
 class TestGetPortMap:
     """Tests for get_port_map."""

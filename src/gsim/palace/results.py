@@ -1,14 +1,18 @@
 """Load and map Palace S-parameter results to port names.
 
-Standalone utility — works with any Palace output directory containing
-``port-S.csv`` and ``port_information.json``.
+Standalone utility — works with a Palace output directory, or the results
+dict returned by ``sim.run()``.
 
 Usage::
 
     from gsim.palace.results import load_sparams
 
+    # From a results dict (notebook workflow)
+    results = sim.run()
+    df = load_sparams(results)
+
+    # From a directory path
     df = load_sparams("./sim/output")
-    df.plot(x="freq_ghz", y="S_o1_o2_dB")
 """
 
 from __future__ import annotations
@@ -24,26 +28,29 @@ logger = logging.getLogger(__name__)
 
 
 def load_sparams(
-    output_dir: str | Path,
+    source: str | Path | dict,
     *,
     port_info_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load Palace S-parameter CSV with port-name-based columns.
 
-    Reads ``port-S.csv`` and ``port_information.json`` from *output_dir*,
-    then renames the numeric Palace column headers (``|S[2][1]| (dB)``)
-    to human-readable names (``S_o2_o1_dB``, ``S_o2_o1_deg``).
+    Reads ``port-S.csv`` and ``port_information.json``, then renames the
+    numeric Palace column headers (``|S[2][1]| (dB)``) to human-readable
+    names (``S_o2_o1_dB``, ``S_o2_o1_deg``).
 
     If ``port_information.json`` is missing or lacks ``name`` fields,
     falls back to numeric names (``S_p2_p1_dB``).
 
     Args:
-        output_dir: Directory containing Palace output files.  Accepts
-            either the top-level sim dir (containing ``output/palace/``)
-            or the ``output/palace/`` subdirectory directly.
+        source: One of:
+
+            - **results dict** returned by ``sim.run()`` — keys are
+              filenames, values are ``Path`` objects.
+            - **directory path** — the top-level sim dir or the
+              ``output/palace/`` subdirectory.
         port_info_path: Explicit path to ``port_information.json``.
             When *None* the file is auto-discovered next to the CSV or
-            in common locations relative to *output_dir*.
+            in common locations relative to the output directory.
 
     Returns:
         DataFrame with columns: ``freq_ghz`` plus one ``S_<to>_<from>_dB``
@@ -52,17 +59,13 @@ def load_sparams(
     Raises:
         FileNotFoundError: If ``port-S.csv`` cannot be found.
     """
-    output_dir = Path(output_dir)
-
-    # --- locate port-S.csv ---------------------------------------------------
-    csv_path = _find_file(output_dir, "port-S.csv")
-    if csv_path is None:
-        raise FileNotFoundError(
-            f"port-S.csv not found in {output_dir} or its subdirectories"
-        )
+    csv_path, base_dir = _resolve_source(source)
+    if csv_path is None:  # pragma: no cover — _resolve_source raises first
+        msg = "port-S.csv not found"
+        raise FileNotFoundError(msg)
 
     # --- locate port_information.json ----------------------------------------
-    port_map = _load_port_map(output_dir, csv_path, port_info_path)
+    port_map = _load_port_map(base_dir, csv_path, port_info_path)
 
     # --- read CSV and rename columns -----------------------------------------
     df = pd.read_csv(csv_path)
@@ -85,19 +88,52 @@ def load_sparams(
     return df
 
 
-def get_port_map(output_dir: str | Path) -> dict[int, str]:
-    """Return the ``{port_number: port_name}`` mapping for a sim directory.
+def get_port_map(source: str | Path | dict) -> dict[int, str]:
+    """Return the ``{port_number: port_name}`` mapping.
 
-    Useful for inspecting the mapping without loading the full CSV.
+    Accepts a directory path or a results dict from ``sim.run()``.
     """
-    output_dir = Path(output_dir)
-    csv_path = _find_file(output_dir, "port-S.csv")
-    return _load_port_map(output_dir, csv_path)
+    csv_path, base_dir = _resolve_source(source, require_csv=False)
+    return _load_port_map(base_dir, csv_path)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_source(
+    source: str | Path | dict,
+    *,
+    require_csv: bool = True,
+) -> tuple[Path | None, Path]:
+    """Turn *source* into ``(csv_path, base_dir)``.
+
+    *source* can be a directory path or a results dict from ``sim.run()``.
+    """
+    if isinstance(source, dict):
+        # Results dict: {"port-S.csv": Path(...), ...}
+        csv_val = source.get("port-S.csv")
+        if csv_val is not None:
+            csv_path = Path(csv_val)
+            return csv_path, csv_path.parent
+        # Try port_information.json to derive base dir
+        for val in source.values():
+            p = Path(val)
+            if p.exists():
+                return None, p.parent
+        if require_csv:
+            raise FileNotFoundError("Results dict has no 'port-S.csv' entry")
+        return None, Path()
+
+    output_dir = Path(source)
+    csv_path = _find_file(output_dir, "port-S.csv")
+    if csv_path is None and require_csv:
+        raise FileNotFoundError(
+            f"port-S.csv not found in {output_dir} or its subdirectories"
+        )
+    return csv_path, output_dir
+
 
 _S_PATTERN = re.compile(r"(\|?)S\[(\d+)\]\[(\d+)\]\|?\s*\((\w+\.?)\)")
 
