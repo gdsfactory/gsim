@@ -13,6 +13,7 @@ on:
   workflow_dispatch:
 env:
   GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
+  PLOTLY_RENDERER: notebook_connected
 jobs:
   # Discover all notebooks and output as JSON array for the matrix
   list-notebooks:
