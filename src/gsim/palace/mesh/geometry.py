@@ -15,6 +15,8 @@ from shapely import Polygon as ShapelyPolygon
 from shapely import buffer
 from shapely.ops import unary_union
 
+from gsim.palace.ports.config import PortType
+
 from . import gmsh_utils
 
 if TYPE_CHECKING:
@@ -372,7 +374,8 @@ def add_dielectrics(
     kernel,
     geometry: GeometryData,
     stack: LayerStack,
-    margin: float,
+    margin_x: float,
+    margin_y: float | None = None,
     air_margin: float = 0.0,
 ) -> dict:
     """Add dielectric volumes to gmsh.
@@ -386,7 +389,9 @@ def add_dielectrics(
         kernel: gmsh OCC kernel
         geometry: Extracted geometry data
         stack: LayerStack with dielectric definitions
-        margin: XY margin around design (um)
+        margin_x: X margin around design (um). Also used as Y margin
+            when *margin_y* is not provided (backward compat).
+        margin_y: Y margin around design (um). Defaults to margin_x.
         air_margin: Extra margin for the surrounding airbox (um).
             When > 0, an enclosing airbox is created.  The boolean
             pipeline will carve the dielectrics out of it
@@ -395,13 +400,16 @@ def add_dielectrics(
     Returns:
         Dict with material_name -> list of volume_tags
     """
+    if margin_y is None:
+        margin_y = margin_x
+
     dielectric_tags: dict[str, list[int]] = {}
 
     xmin, ymin, xmax, ymax = geometry.bbox
-    xmin -= margin
-    ymin -= margin
-    xmax += margin
-    ymax += margin
+    xmin -= margin_x
+    ymin -= margin_y
+    xmax += margin_x
+    ymax += margin_y
 
     z_min_all = math.inf
     z_max_all = -math.inf
@@ -758,6 +766,7 @@ def add_ports(
     kernel,
     ports: list[PalacePort],
     stack: LayerStack,
+    domain_bbox: tuple[float, float, float, float] | None = None,
 ) -> tuple[dict, list]:
     """Add port surfaces to gmsh.
 
@@ -765,6 +774,9 @@ def add_ports(
         kernel: gmsh OCC kernel
         ports: List of PalacePort objects (single or multi-element)
         stack: Layer stack
+        domain_bbox: (xmin, ymin, xmax, ymax) of the simulation domain
+            (geometry bbox with margin applied). Required when any port
+            has ``max_size=True``.
 
     Returns:
         (port_tags dict, port_info list)
@@ -787,7 +799,7 @@ def add_ports(
             if target_layer is None:
                 continue
 
-            z = target_layer.zmin
+            zmin = target_layer.zmin
             hw = port.width / 2
             hl = (port.length or port.width) / 2
 
@@ -799,11 +811,11 @@ def add_ports(
             for cx, cy in port.centers:
                 if is_y_axis:
                     surf = gmsh_utils.create_port_rectangle(
-                        kernel, cx - hw, cy - hl, z, cx + hw, cy + hl, z
+                        kernel, cx - hw, cy - hl, zmin, cx + hw, cy + hl, zmin
                     )
                 else:
                     surf = gmsh_utils.create_port_rectangle(
-                        kernel, cx - hl, cy - hw, z, cx + hl, cy + hw, z
+                        kernel, cx - hl, cy - hw, zmin, cx + hl, cy + hw, zmin
                     )
                 surfaces.append(surf)
 
@@ -813,7 +825,9 @@ def add_ports(
                 {
                     "portnumber": port_num,
                     "name": port.name,
-                    "Z0": port.impedance,
+                    "R0": port.resistance,
+                    "L0": port.inductance,
+                    "C0": port.capacitance,
                     "type": "cpw",
                     "elements": [
                         {"surface_idx": i, "direction": port.directions[i]}
@@ -821,8 +835,8 @@ def add_ports(
                     ],
                     "width": port.width,
                     "length": port.length or port.width,
-                    "zmin": z,
-                    "zmax": z,
+                    "zmin": zmin,
+                    "zmax": zmin,
                 }
             )
 
@@ -860,7 +874,9 @@ def add_ports(
                 {
                     "portnumber": port_num,
                     "name": port.name,
-                    "Z0": port.impedance,
+                    "R0": port.resistance,
+                    "L0": port.inductance,
+                    "C0": port.capacitance,
                     "type": "via",
                     "direction": "Z",
                     "length": zmax - zmin,
@@ -884,41 +900,107 @@ def add_ports(
 
             x, y = port.center
             hw = port.width / 2
-            z = target_layer.zmin
+            zmin = target_layer.zmin
+            zmax = target_layer.zmax
 
-            hl = (port.length or port.width) / 2
-            if port.direction in ("x", "-x"):
-                surfacetag = gmsh_utils.create_port_rectangle(
-                    kernel, x - hl, y - hw, z, x + hl, y + hw, z
+            if port.port_type == PortType.LUMPED:
+                hl = (port.length or port.width) / 2
+                if port.direction in ("x", "-x"):
+                    surfacetag = gmsh_utils.create_port_rectangle(
+                        kernel, x - hl, y - hw, zmin, x + hl, y + hw, zmin
+                    )
+                    length = 2 * hl
+                    width = port.width
+                else:
+                    surfacetag = gmsh_utils.create_port_rectangle(
+                        kernel, x - hw, y - hl, zmin, x + hw, y + hl, zmin
+                    )
+                    length = port.width
+                    width = 2 * hl
+
+                port_tags[f"P{port_num}"] = [surfacetag]
+                port_info.append(
+                    {
+                        "portnumber": port_num,
+                        "name": port.name,
+                        "R0": port.resistance,
+                        "L0": port.inductance,
+                        "C0": port.capacitance,
+                        "type": "lumped",
+                        "direction": port.direction.upper(),
+                        "length": length,
+                        "width": width,
+                        "xmin": x - hl if port.direction in ("x", "-x") else x - hw,
+                        "xmax": x + hl if port.direction in ("x", "-x") else x + hw,
+                        "ymin": y - hw if port.direction in ("x", "-x") else y - hl,
+                        "ymax": y + hw if port.direction in ("x", "-x") else y + hl,
+                        "zmin": zmin,
+                        "zmax": zmin,
+                    }
                 )
-                length = 2 * hl
-                width = port.width
             else:
+                layer_zmin, layer_zmax = stack.get_z_range()
+
+                if port.max_size:
+                    # Fill the full simulation domain
+                    zmin = layer_zmin
+                    zmax = layer_zmax
+                else:
+                    zmin = zmin - port.z_margin
+                    zmax = zmax + port.z_margin
+                    zmin = max(zmin, layer_zmin)
+                    zmax = min(zmax, layer_zmax)
+
+                angle = port.orientation % 360
+                is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
+
+                if port.max_size:
+                    if domain_bbox is None:
+                        raise ValueError(
+                            f"Port '{port.name}' has max_size=True but "
+                            "domain_bbox was not provided to add_ports()"
+                        )
+                    dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
+                    if is_y_axis:
+                        xmin = dom_xmin
+                        xmax = dom_xmax
+                        ymin = y
+                        ymax = y
+                    else:
+                        xmin = x
+                        xmax = x
+                        ymin = dom_ymin
+                        ymax = dom_ymax
+                elif is_y_axis:
+                    xmin = x - hw - port.lateral_margin
+                    xmax = x + hw + port.lateral_margin
+                    ymin = y
+                    ymax = y
+                else:
+                    xmin = x
+                    xmax = x
+                    ymin = y - hw - port.lateral_margin
+                    ymax = y + hw + port.lateral_margin
                 surfacetag = gmsh_utils.create_port_rectangle(
-                    kernel, x - hw, y - hl, z, x + hw, y + hl, z
+                    kernel, xmin, ymin, zmin, xmax, ymax, zmax
                 )
-                length = port.width
-                width = 2 * hl
+                port_tags[f"P{port_num}"] = [surfacetag]
 
-            port_tags[f"P{port_num}"] = [surfacetag]
-            port_info.append(
-                {
-                    "portnumber": port_num,
-                    "name": port.name,
-                    "Z0": port.impedance,
-                    "type": "lumped",
-                    "direction": port.direction.upper(),
-                    "length": length,
-                    "width": width,
-                    "xmin": x - hl if port.direction in ("x", "-x") else x - hw,
-                    "xmax": x + hl if port.direction in ("x", "-x") else x + hw,
-                    "ymin": y - hw if port.direction in ("x", "-x") else y - hl,
-                    "ymax": y + hw if port.direction in ("x", "-x") else y + hl,
-                    "zmin": z,
-                    "zmax": z,
-                }
-            )
+                effective_width = xmax - xmin if is_y_axis else ymax - ymin
 
+                port_info.append(
+                    {
+                        "portnumber": port_num,
+                        "type": "waveport",
+                        "width": effective_width,
+                        "xmin": xmin,
+                        "xmax": xmax,
+                        "ymin": ymin,
+                        "ymax": ymax,
+                        "zmin": zmin,
+                        "zmax": zmax,
+                    }
+                )
         port_num += 1
 
     kernel.synchronize()

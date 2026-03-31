@@ -18,6 +18,8 @@ class MeshConfig(BaseModel):
         max_mesh_size: Maximum mesh size in air/dielectric (um)
         cells_per_wavelength: Number of mesh cells per wavelength
         margin: XY margin around design (um)
+        margin_x: X-axis margin override (um). Falls back to margin.
+        margin_y: Y-axis margin override (um). Falls back to margin.
         airbox_margin: Extra airbox around stack (um); 0 = disabled
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
@@ -33,6 +35,16 @@ class MeshConfig(BaseModel):
     max_mesh_size: float = Field(default=300.0, gt=0)
     cells_per_wavelength: int = Field(default=10, ge=1)
     margin: float = Field(default=50.0, ge=0)
+    margin_x: float | None = Field(
+        default=None,
+        ge=0,
+        description="X margin override (um). Falls back to margin.",
+    )
+    margin_y: float | None = Field(
+        default=None,
+        ge=0,
+        description="Y margin override (um). Falls back to margin.",
+    )
     airbox_margin: float = Field(default=0.0, ge=0)
     fmax: float = Field(default=100e9, gt=0)
     boundary_conditions: list[str] | None = None
@@ -41,6 +53,16 @@ class MeshConfig(BaseModel):
     merge_via_distance: float = Field(default=2.0, ge=0)
     show_gui: bool = False
     preview_only: bool = False
+
+    @property
+    def effective_margin_x(self) -> float:
+        """Resolved X margin (margin_x if set, else margin)."""
+        return self.margin_x if self.margin_x is not None else self.margin
+
+    @property
+    def effective_margin_y(self) -> float:
+        """Resolved Y margin (margin_y if set, else margin)."""
+        return self.margin_y if self.margin_y is not None else self.margin
 
     @model_validator(mode="after")
     def set_default_boundary_conditions(self) -> Self:

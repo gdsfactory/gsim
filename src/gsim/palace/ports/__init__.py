@@ -21,6 +21,7 @@ from gsim.palace.ports.config import (
     configure_cpw_port,
     configure_inplane_port,
     configure_via_port,
+    configure_wave_port,
     extract_ports,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "configure_cpw_port",
     "configure_inplane_port",
     "configure_via_port",
+    "configure_wave_port",
     "extract_ports",
 ]

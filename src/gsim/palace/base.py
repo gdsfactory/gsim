@@ -308,6 +308,8 @@ class PalaceSimMixin:
         fmax: float | None,
         planar_conductors: bool | None,
         show_gui: bool,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides."""
         from gsim.palace.models import MeshConfig
@@ -338,6 +340,10 @@ class PalaceSimMixin:
             mesh_config.max_mesh_size = max_mesh_size
         if margin is not None:
             mesh_config.margin = margin
+        if margin_x is not None:
+            mesh_config.margin_x = margin_x
+        if margin_y is not None:
+            mesh_config.margin_y = margin_y
         if airbox_margin is not None:
             mesh_config.airbox_margin = airbox_margin
         if fmax is not None:
@@ -438,8 +444,12 @@ class PalaceSimMixin:
                         errors.append(
                             "config.json has no Conductivity or PEC boundaries."
                         )
-                    if not boundaries.get("LumpedPort"):
-                        errors.append("config.json has no LumpedPort entries.")
+                    if not boundaries.get("LumpedPort") and not boundaries.get(
+                        "WavePort"
+                    ):
+                        errors.append(
+                            "config.json has no LumpedPort or WavePort entries."
+                        )
                 except json.JSONDecodeError as e:
                     errors.append(f"config.json is invalid JSON: {e}")
 

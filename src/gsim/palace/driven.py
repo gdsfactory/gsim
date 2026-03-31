@@ -24,6 +24,7 @@ from gsim.palace.models import (
     PortConfig,
     SimulationResult,
     ValidationResult,
+    WavePortConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Port configurations
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    wave_ports: list[WavePortConfig] = Field(default_factory=list)
 
     # Driven simulation config
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
@@ -108,10 +110,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         from_layer: str | None = None,
         to_layer: str | None = None,
         length: float | None = None,
-        impedance: float = 50.0,
-        resistance: float | None = None,
-        inductance: float | None = None,
-        capacitance: float | None = None,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
         geometry: Literal["inplane", "via"] = "inplane",
     ) -> None:
@@ -123,7 +124,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             from_layer: Bottom layer for via ports
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
-            impedance: Port impedance (Ohms)
             resistance: Series resistance (Ohms)
             inductance: Series inductance (H)
             capacitance: Shunt capacitance (F)
@@ -146,7 +146,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 from_layer=from_layer,
                 to_layer=to_layer,
                 length=length,
-                impedance=impedance,
                 resistance=resistance,
                 inductance=inductance,
                 capacitance=capacitance,
@@ -164,7 +163,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         gap_width: float,
         length: float = 0.1,
         offset: float = 0.0,
-        impedance: float = 50.0,
+        resistance: float = 50.0,
+        inductance: float = 0.0,
+        capacitance: float = 0.0,
         excited: bool = True,
     ) -> None:
         """Add a coplanar waveguide (CPW) port.
@@ -190,7 +191,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             length: Port extent along direction (um)
             offset: Shift the port inward along the waveguide (um).
                 Positive moves away from the boundary, into the conductor.
-            impedance: Port impedance (Ohms)
+            resistance: Series resistance (Ohms)
+            inductance: Series inductance (H)
+            capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
 
         Example:
@@ -207,8 +210,62 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 gap_width=gap_width,
                 length=length,
                 offset=offset,
-                impedance=impedance,
+                resistance=resistance,
+                inductance=inductance,
+                capacitance=capacitance,
                 excited=excited,
+            )
+        )
+
+    def add_wave_port(
+        self,
+        name: str,
+        *,
+        layer: str | None = None,
+        z_margin: float = 0.0,
+        lateral_margin: float = 0.0,
+        max_size: bool = False,
+        mode: int = 1,
+        excited: bool = True,
+        offset: float = 0.0,
+    ) -> None:
+        """Add a single element wave port.
+
+        Args:
+            name: Port name (must match a component port at the signal center)
+            layer: Target conductor layer (e.g., "topmetal2")
+            z_margin: Margin in z direction
+            lateral_margin: Margin in x/y directions
+              Ignores lateral margin and port_width.
+            max_size: When True, automatically set z_margin and lateral_margin
+                to fill the full simulation domain boundary on that side.
+                Overrides z_margin and lateral_margin values.
+            mode: Mode number to excite.
+            excited: Whether this port is excited
+            offset: Offset distance used for scattering parameter de-embedding.
+
+        Example:
+            >>> sim.add_wave_port(
+            ...     "w1",
+            ...     layer="topmetal2",
+            ...     max_size=True,
+            ...     mode=1,
+            ...     excited=True,
+            ...     offset=0.0,
+            ... )
+        """
+        self.wave_ports = [p for p in self.wave_ports if p.name != name]
+
+        self.wave_ports.append(
+            WavePortConfig(
+                name=name,
+                layer=layer,
+                z_margin=z_margin,
+                lateral_margin=lateral_margin,
+                max_size=max_size,
+                mode=mode,
+                excited=excited,
+                offset=offset,
             )
         )
 
@@ -230,6 +287,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         excitation_port: str | None = None,
         save_step: int = 0,
         save_fields_at: list[float] | None = None,
+        save_freq: str | None = None,
     ) -> None:
         """Configure driven (frequency sweep) simulation.
 
@@ -250,12 +308,29 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             compute_s_params: Compute S-parameters
             reference_impedance: Reference impedance for S-params (Ohms)
             excitation_port: Port to excite (None = first port)
-            save_step: Save fields every N frequency steps for ParaView (0 = disabled)
-            save_fields_at: Specific frequencies (Hz) at which to save fields
+            save_step: Save fields every N frequency steps for ParaView
+                (0 = disabled)
+            save_fields_at: Specific frequencies (Hz) at which to save
+                fields for ParaView visualisation.
+            save_freq: Convenience shorthand for saving fields at a named
+                frequency.  ``"center"`` saves at ``(fmin + fmax) / 2``.
+                Appended to *save_fields_at* if both are given.
 
         Example:
             >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
+            >>> sim.set_driven(fmin=1e9, fmax=100e9, save_freq="center")
         """
+        fields_at: list[float] = list(save_fields_at or [])
+
+        if save_freq is not None:
+            if save_freq == "center":
+                fields_at.append((fmin + fmax) / 2)
+            else:
+                raise ValueError(
+                    f"Unknown save_freq value: {save_freq!r}. "
+                    "Supported values: 'center'."
+                )
+
         self.driven = DrivenConfig(
             fmin=fmin,
             fmax=fmax,
@@ -267,7 +342,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             reference_impedance=reference_impedance,
             excitation_port=excitation_port,
             save_step=save_step,
-            save_fields_at=save_fields_at or [],
+            save_fields_at=fields_at,
         )
 
     # -------------------------------------------------------------------------
@@ -294,10 +369,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             )
 
         # Check ports
-        has_ports = bool(self.ports) or bool(self.cpw_ports)
+        has_ports = bool(self.ports) or bool(self.cpw_ports) or bool(self.wave_ports)
         if not has_ports:
             warnings_list.append(
-                "No ports configured. Call add_port() or add_cpw_port()."
+                "No ports configured. Call any of add_port(), add_cpw_port(),"
+                "or add_wave_port()"
             )
         else:
             # Validate port configurations
@@ -318,12 +394,19 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 for cpw in self.cpw_ports
                 if not cpw.layer
             )
+            # Validate wave ports
+            errors.extend(
+                f"Wave port '{wp.name}': 'layer' is required"
+                for wp in self.wave_ports
+                if not wp.layer
+            )
 
         # Validate excitation port if specified
         if self.driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
             cpw_names = [cpw.name for cpw in self.cpw_ports]
-            all_port_names = port_names + cpw_names
+            wave_names = [wp.name for wp in self.wave_ports]
+            all_port_names = port_names + cpw_names + wave_names
             if self.driven.excitation_port not in all_port_names:
                 errors.append(
                     f"Excitation port '{self.driven.excitation_port}' not found. "
@@ -337,12 +420,28 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Internal helpers
     # -------------------------------------------------------------------------
 
+    def _find_gf_port(self, port_name: str):
+        """Find a gdsfactory port by name."""
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            raise ValueError("No component set")
+
+        for p in component.ports:
+            if p.name == port_name:
+                return p
+
+        raise ValueError(
+            f"Port '{port_name}' not found on component. "
+            f"Available ports: {[p.name for p in component.ports]}"
+        )
+
     def _configure_ports_on_component(self, stack: LayerStack) -> None:  # noqa: ARG002
         """Configure ports on the component using legacy functions."""
         from gsim.palace.ports import (
             configure_cpw_port,
             configure_inplane_port,
             configure_via_port,
+            configure_wave_port,
         )
 
         component = self.geometry.component if self.geometry else None
@@ -355,24 +454,16 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 continue
 
             # Find matching gdsfactory port
-            gf_port = None
-            for p in component.ports:
-                if p.name == port_config.name:
-                    gf_port = p
-                    break
-
-            if gf_port is None:
-                raise ValueError(
-                    f"Port '{port_config.name}' not found on component. "
-                    f"Available ports: {[p.name for p in component.ports]}"
-                )
+            gf_port = self._find_gf_port(port_config.name)
 
             if port_config.geometry == "inplane" and port_config.layer is not None:
                 configure_inplane_port(
                     gf_port,
                     layer=port_config.layer,
                     length=port_config.length or gf_port.width,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
             elif port_config.geometry == "via" and (
@@ -382,31 +473,18 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     gf_port,
                     from_layer=port_config.from_layer,
                     to_layer=port_config.to_layer,
-                    impedance=port_config.impedance,
+                    resistance=port_config.resistance,
+                    inductance=port_config.inductance,
+                    capacitance=port_config.capacitance,
                     excited=port_config.excited,
                 )
 
-            # Attach RLC values to port info for downstream consumers
-            if port_config.resistance is not None:
-                gf_port.info["resistance"] = port_config.resistance
-            if port_config.inductance is not None:
-                gf_port.info["inductance"] = port_config.inductance
-            if port_config.capacitance is not None:
-                gf_port.info["capacitance"] = port_config.capacitance
-
         # Configure CPW ports
         for cpw_config in self.cpw_ports:
+            if cpw_config.name is None:
+                continue
             # Find the single gdsfactory port at the signal center
-            gf_port = None
-            for p in component.ports:
-                if p.name == cpw_config.name:
-                    gf_port = p
-                    break
-            if gf_port is None:
-                raise ValueError(
-                    f"CPW port '{cpw_config.name}' not found on component. "
-                    f"Available: {[p.name for p in component.ports]}"
-                )
+            gf_port = self._find_gf_port(cpw_config.name)
 
             configure_cpw_port(
                 gf_port,
@@ -414,10 +492,32 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 s_width=cpw_config.s_width,
                 gap_width=cpw_config.gap_width,
                 length=cpw_config.length,
-                impedance=cpw_config.impedance,
+                resistance=cpw_config.resistance,
+                inductance=cpw_config.inductance,
+                capacitance=cpw_config.capacitance,
                 excited=cpw_config.excited,
                 offset=cpw_config.offset,
             )
+
+        # Configure wave ports
+        for port_config in self.wave_ports:
+            if port_config.name is None:
+                continue
+
+            # Find matching gdsfactory port
+            gf_port = self._find_gf_port(port_config.name)
+
+            if port_config.layer is not None:
+                configure_wave_port(
+                    gf_port,
+                    layer=port_config.layer,
+                    z_margin=port_config.z_margin,
+                    lateral_margin=port_config.lateral_margin,
+                    max_size=port_config.max_size,
+                    excited=port_config.excited,
+                    mode=port_config.mode,
+                    offset=port_config.offset,
+                )
 
         self._configured_ports = True
 
@@ -447,6 +547,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
+            margin_x=mesh_config.margin_x,
+            margin_y=mesh_config.margin_y,
             airbox_margin=mesh_config.airbox_margin,
             fmax=effective_fmax,
             show_gui=mesh_config.show_gui,
@@ -505,6 +607,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -519,6 +623,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             refined_mesh_size: Mesh size near conductors (um)
             max_mesh_size: Max mesh size in air/dielectric (um)
             margin: XY margin around design (um)
+            margin_x: X-axis margin (um). Overrides margin for X.
+            margin_y: Y-axis margin (um). Overrides margin for Y.
             airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz)
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -543,6 +649,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
+            margin_x=margin_x,
+            margin_y=margin_y,
             airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
@@ -561,6 +669,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
+            margin_x=mesh_config.margin_x,
+            margin_y=mesh_config.margin_y,
             airbox_margin=mesh_config.airbox_margin,
             fmax=mesh_config.fmax,
             show_gui=show_gui,
@@ -592,6 +702,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -611,6 +723,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             refined_mesh_size: Mesh size near conductors (um), overrides preset
             max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
             margin: XY margin around design (um), overrides preset
+            margin_x: X-axis margin (um). Overrides margin for X.
+            margin_y: Y-axis margin (um). Overrides margin for Y.
             airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz), overrides preset
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -642,6 +756,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
+            margin_x=margin_x,
+            margin_y=margin_y,
             airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
@@ -676,8 +792,6 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     def write_config(self) -> Path:
         """Write Palace config.json after mesh generation.
 
-        Use this when mesh() was called with write_config=False.
-
         Returns:
             Path to the generated config.json
 
@@ -685,7 +799,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             ValueError: If mesh() hasn't been called yet
 
         Example:
-            >>> result = sim.mesh("./sim", write_config=False)
+            >>> result = sim.mesh("./sim")
             >>> config_path = sim.write_config()
         """
         from gsim.palace.mesh.generator import write_config as gen_write_config
@@ -957,12 +1071,12 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
                 num_processes = os.cpu_count() or 1
 
-        # Build command
+        # Build command — -np sets MPI processes (not -nt which sets OpenMP threads)
         cmd = [
             "apptainer",
             "run",
             str(sif_path),
-            "-nt",
+            "-np",
             str(num_processes),
             "config.json",
         ]
@@ -974,25 +1088,42 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         # Run simulation
         try:
-            result = subprocess.run(  # noqa: S603
-                cmd,
-                cwd=output_dir,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            if verbose:
+                # Stream output in real-time so the user can monitor
+                # solver convergence
+                import sys
 
-            # Log output if verbose
-            if verbose and result.stdout:
-                logger.info(result.stdout)
-            if verbose and result.stderr:
-                logger.warning(result.stderr)
+                proc = subprocess.Popen(  # noqa: S603
+                    cmd,
+                    cwd=output_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                assert proc.stdout is not None  # noqa: S101
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                proc.wait()
+                if proc.returncode != 0:
+                    raise subprocess.CalledProcessError(proc.returncode, cmd)  # noqa: TRY301
+            else:
+                result = subprocess.run(  # noqa: S603
+                    cmd,
+                    cwd=output_dir,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.stderr:
+                    logger.warning(result.stderr)
 
         except subprocess.CalledProcessError as e:
             error_msg = f"Palace simulation failed with return code {e.returncode}"
-            if e.stdout:
+            if hasattr(e, "stdout") and e.stdout:
                 error_msg += f"\n\nStdout:\n{e.stdout}"
-            if e.stderr:
+            if hasattr(e, "stderr") and e.stderr:
                 error_msg += f"\n\nStderr:\n{e.stderr}"
             raise RuntimeError(error_msg) from e
         except FileNotFoundError as e:

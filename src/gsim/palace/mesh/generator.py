@@ -144,7 +144,8 @@ def generate_mesh(
     model_name: str = "palace",
     refined_mesh_size: float = 5.0,
     max_mesh_size: float = 300.0,
-    margin: float = 50.0,
+    margin_x: float = 50.0,
+    margin_y: float = 50.0,
     air_margin: float = 50.0,
     fmax: float = 100e9,
     show_gui: bool = False,
@@ -165,7 +166,8 @@ def generate_mesh(
         model_name: Base name for output files
         refined_mesh_size: Mesh size near conductors (um)
         max_mesh_size: Max mesh size in air/dielectric (um)
-        margin: XY margin around design (um)
+        margin_x: X-axis margin around design (um)
+        margin_y: Y-axis margin around design (um)
         air_margin: Air box margin (um)
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
@@ -216,10 +218,18 @@ def generate_mesh(
             pec_block_tags = add_pec_blocks(kernel, component, pec_blocks, stack)
 
         logger.info("Adding ports...")
-        port_tags, port_info = add_ports(kernel, ports, stack)
+        domain_bbox = (
+            geometry.bbox[0] - margin_x,
+            geometry.bbox[1] - margin_y,
+            geometry.bbox[2] + margin_x,
+            geometry.bbox[3] + margin_y,
+        )
+        port_tags, port_info = add_ports(kernel, ports, stack, domain_bbox=domain_bbox)
 
         logger.info("Adding dielectrics...")
-        dielectric_tags = add_dielectrics(kernel, geometry, stack, margin, air_margin)
+        dielectric_tags = add_dielectrics(
+            kernel, geometry, stack, margin_x, margin_y, air_margin
+        )
 
         # Build entities and run boolean pipeline
         logger.info("Running boolean pipeline...")

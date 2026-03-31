@@ -72,6 +72,8 @@ class MeshConfig:
 
     # Geometry margins
     margin: float = 50.0  # XY margin around design (um)
+    margin_x: float | None = None  # X margin override (um)
+    margin_y: float | None = None  # Y margin override (um)
     airbox_margin: float = 0.0  # Extra airbox around stack (um); 0 = disabled
 
     # Ground plane (optional - for microstrip structures)
@@ -94,6 +96,16 @@ class MeshConfig:
     # GUI control
     show_gui: bool = False  # Show gmsh GUI during meshing
     preview_only: bool = False  # Show geometry without meshing
+
+    @property
+    def effective_margin_x(self) -> float:
+        """Resolved X margin (margin_x if set, else margin)."""
+        return self.margin_x if self.margin_x is not None else self.margin
+
+    @property
+    def effective_margin_y(self) -> float:
+        """Resolved Y margin (margin_y if set, else margin)."""
+        return self.margin_y if self.margin_y is not None else self.margin
 
     def __post_init__(self) -> None:
         """Initializes default boundary conditions if not provided."""
@@ -214,7 +226,8 @@ def generate_mesh(
         model_name=model_name,
         refined_mesh_size=config.refined_mesh_size,
         max_mesh_size=config.max_mesh_size,
-        margin=config.margin,
+        margin_x=config.effective_margin_x,
+        margin_y=config.effective_margin_y,
         air_margin=config.airbox_margin,
         fmax=config.fmax,
         show_gui=config.show_gui,
