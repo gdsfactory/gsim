@@ -216,7 +216,13 @@ def generate_mesh(
             pec_block_tags = add_pec_blocks(kernel, component, pec_blocks, stack)
 
         logger.info("Adding ports...")
-        port_tags, port_info = add_ports(kernel, ports, stack)
+        domain_bbox = (
+            geometry.bbox[0] - margin,
+            geometry.bbox[1] - margin,
+            geometry.bbox[2] + margin,
+            geometry.bbox[3] + margin,
+        )
+        port_tags, port_info = add_ports(kernel, ports, stack, domain_bbox=domain_bbox)
 
         logger.info("Adding dielectrics...")
         dielectric_tags = add_dielectrics(kernel, geometry, stack, margin, air_margin)

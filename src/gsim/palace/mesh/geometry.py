@@ -760,6 +760,7 @@ def add_ports(
     kernel,
     ports: list[PalacePort],
     stack: LayerStack,
+    domain_bbox: tuple[float, float, float, float] | None = None,
 ) -> tuple[dict, list]:
     """Add port surfaces to gmsh.
 
@@ -767,6 +768,9 @@ def add_ports(
         kernel: gmsh OCC kernel
         ports: List of PalacePort objects (single or multi-element)
         stack: Layer stack
+        domain_bbox: (xmin, ymin, xmax, ymax) of the simulation domain
+            (geometry bbox with margin applied). Required when any port
+            has ``max_size=True``.
 
     Returns:
         (port_tags dict, port_info list)
@@ -930,13 +934,38 @@ def add_ports(
                 )
             else:
                 layer_zmin, layer_zmax = stack.get_z_range()
-                zmin = zmin - port.z_margin
-                zmax = zmax + port.z_margin
-                zmin = max(zmin, layer_zmin)
-                zmax = min(zmax, layer_zmax)
+
+                if port.max_size:
+                    # Fill the full simulation domain
+                    zmin = layer_zmin
+                    zmax = layer_zmax
+                else:
+                    zmin = zmin - port.z_margin
+                    zmax = zmax + port.z_margin
+                    zmin = max(zmin, layer_zmin)
+                    zmax = min(zmax, layer_zmax)
+
                 angle = port.orientation % 360
                 is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
-                if is_y_axis:
+
+                if port.max_size:
+                    if domain_bbox is None:
+                        raise ValueError(
+                            f"Port '{port.name}' has max_size=True but "
+                            "domain_bbox was not provided to add_ports()"
+                        )
+                    dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
+                    if is_y_axis:
+                        xmin = dom_xmin
+                        xmax = dom_xmax
+                        ymin = y
+                        ymax = y
+                    else:
+                        xmin = x
+                        xmax = x
+                        ymin = dom_ymin
+                        ymax = dom_ymax
+                elif is_y_axis:
                     xmin = x - hw - port.lateral_margin
                     xmax = x + hw + port.lateral_margin
                     ymin = y
@@ -950,11 +979,14 @@ def add_ports(
                     kernel, xmin, ymin, zmin, xmax, ymax, zmax
                 )
                 port_tags[f"P{port_num}"] = [surfacetag]
+
+                effective_width = xmax - xmin if is_y_axis else ymax - ymin
+
                 port_info.append(
                     {
                         "portnumber": port_num,
                         "type": "waveport",
-                        "width": port.width + 2 * port.lateral_margin,
+                        "width": effective_width,
                         "xmin": xmin,
                         "xmax": xmax,
                         "ymin": ymin,

@@ -69,6 +69,7 @@ class PalacePort:
     # Waveport specific settings
     z_margin: float = 0.0  # For waveports: height margin in um
     lateral_margin: float = 0.0
+    max_size: bool = False  # When True, fill the full simulation domain
     mode: int = 1  # Mode number to excite.
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
@@ -259,6 +260,7 @@ def configure_wave_port(
     layer: str,
     z_margin: float = 0.0,
     lateral_margin: float = 0.0,
+    max_size: bool = False,
     mode: int = 1,
     excited: bool = True,
     offset: float = 0.0,
@@ -272,6 +274,8 @@ def configure_wave_port(
         layer: Target conductor layer name (e.g., 'topmetal2')
         z_margin: Margin in the z-direction for the wave port
         lateral_margin: Margin in the x/y direction
+        max_size: When True, automatically set z_margin and lateral_margin
+            to fill the full simulation domain boundary on that side.
         mode: Mode number to excite.
         offset: Offset distance used for scattering parameter de-embedding.
         excited: Whether port is excited vs just measured (default: True)
@@ -294,6 +298,7 @@ def configure_wave_port(
         port.info["layer"] = layer
         port.info["z_margin"] = z_margin
         port.info["lateral_margin"] = lateral_margin
+        port.info["max_size"] = max_size
         port.info["mode"] = mode
         port.info["offset"] = offset
         port.info["excited"] = excited
@@ -439,6 +444,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             capacitance=info.get("capacitance", 0.0),
             z_margin=info.get("z_margin", 0.0),
             lateral_margin=info.get("lateral_margin", 0.0),
+            max_size=info.get("max_size", False),
             excited=info.get("excited", True),
             mode=info.get("mode", 1),
             offset=info.get("offset", 0.0),

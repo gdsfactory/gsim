@@ -224,6 +224,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         layer: str | None = None,
         z_margin: float = 0.0,
         lateral_margin: float = 0.0,
+        max_size: bool = False,
         mode: int = 1,
         excited: bool = True,
         offset: float = 0.0,
@@ -236,6 +237,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             z_margin: Margin in z direction
             lateral_margin: Margin in x/y directions
               Ignores lateral margin and port_width.
+            max_size: When True, automatically set z_margin and lateral_margin
+                to fill the full simulation domain boundary on that side.
+                Overrides z_margin and lateral_margin values.
             mode: Mode number to excite.
             excited: Whether this port is excited
             offset: Offset distance used for scattering parameter de-embedding.
@@ -244,7 +248,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             >>> sim.add_wave_port(
             ...     "w1",
             ...     layer="topmetal2",
-            ...     length=5.0,
+            ...     max_size=True,
             ...     mode=1,
             ...     excited=True,
             ...     offset=0.0,
@@ -258,6 +262,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 layer=layer,
                 z_margin=z_margin,
                 lateral_margin=lateral_margin,
+                max_size=max_size,
                 mode=mode,
                 excited=excited,
                 offset=offset,
@@ -490,6 +495,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     layer=port_config.layer,
                     z_margin=port_config.z_margin,
                     lateral_margin=port_config.lateral_margin,
+                    max_size=port_config.max_size,
                     excited=port_config.excited,
                     mode=port_config.mode,
                     offset=port_config.offset,

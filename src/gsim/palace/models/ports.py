@@ -140,6 +140,13 @@ class WavePortConfig(BaseModel):
     layer: str | None = None
     z_margin: float = Field(default=0, ge=0)
     lateral_margin: float = Field(default=0.0, ge=0)
+    max_size: bool = Field(
+        default=False,
+        description=(
+            "When True, set z_margin and lateral_margin"
+            " to fill the full simulation domain"
+        ),
+    )
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
     excited: bool = True
