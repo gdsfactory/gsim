@@ -387,13 +387,14 @@ def plot_cross_section(
     # --- colour normalisation -------------------------------------------
     if log:
         pos = mag_grid[mag_grid > 0] if np.any(mag_grid > 0) else None
-        vmin = np.nanpercentile(pos, 2) if pos is not None else 1e-10
-        norm = LogNorm(vmin=vmin, vmax=np.nanpercentile(mag_grid, 98))
-        extra_kw: dict[str, float] = {}
+        pmin = np.nanpercentile(pos, 2) if pos is not None else 1e-10
+        norm = LogNorm(vmin=pmin, vmax=np.nanpercentile(mag_grid, 98))
+        plot_vmin: float | None = None
+        plot_vmax: float | None = None
     else:
         norm = None
-        vmax: float = float(np.nanpercentile(mag_grid, 98))
-        extra_kw = {"vmin": 0.0, "vmax": vmax}
+        plot_vmin = 0.0
+        plot_vmax = float(np.nanpercentile(mag_grid, 98))
 
     # --- plot -----------------------------------------------------------
     fig, ax = plt.subplots(figsize=figsize)
@@ -404,14 +405,15 @@ def plot_cross_section(
         cmap=cmap,
         shading="auto",
         norm=norm,
-        **extra_kw,  # type: ignore[arg-type]  # vmin/vmax are valid kwargs
+        vmin=plot_vmin,
+        vmax=plot_vmax,
     )
 
     if quiver:
         Fh_grid = griddata(coords_2d, raw[:, axes[0]], (Hi, Vi), method="linear")
         Fv_grid = griddata(coords_2d, raw[:, axes[1]], (Hi, Vi), method="linear")
         skip = 8
-        ref_scale = (extra_kw.get("vmax") or np.nanpercentile(mag_grid, 98)) * 15
+        ref_scale = (plot_vmax or np.nanpercentile(mag_grid, 98)) * 15
         ax.quiver(
             Hi[::skip, ::skip],
             Vi[::skip, ::skip],
