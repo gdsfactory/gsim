@@ -278,7 +278,8 @@ class LayeredComponentBase(BaseModel):
         self,
     ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """3D bounding box as ((xmin, ymin, zmin), (xmax, ymax, zmax))."""
-        return (*self._gds_bbox[0], self.zmin), (*self._gds_bbox[1], self.zmax)
+        (xmin, ymin), (xmax, ymax) = self._gds_bbox
+        return (xmin, ymin, self.zmin), (xmax, ymax, self.zmax)
 
     @property
     def center(self) -> tuple[float, float, float]:
@@ -303,7 +304,8 @@ class LayeredComponentBase(BaseModel):
         if layername == self.top_layer:
             zmax += self.pad_z
 
-        return (*bounds_xy[:2], zmin), (*bounds_xy[2:], zmax)
+        xmin, ymin, xmax, ymax = bounds_xy
+        return (xmin, ymin, zmin), (xmax, ymax, zmax)
 
     def get_layer_center(self, layername: str) -> tuple[float, float, float]:
         """Return 3D center of a single layer."""
