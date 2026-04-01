@@ -175,7 +175,6 @@ class EigenmodeConfig(BaseModel):
     num_modes: int = Field(
         default=10,
         ge=1,
-        alias="N",
         description="Number of resonant modes to find.",
     )
     target: float | None = Field(
