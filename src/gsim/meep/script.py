@@ -815,7 +815,7 @@ def save_field_snapshot(sim, config, cell_center):
         logger.warning("Field snapshot failed: %s", e)
 
 
-def save_animation_field(sim, xy_plane, frame_counter):
+def save_animation_field(sim, xy_plane, frame_counter, animation_dir="frames"):
     """Save raw 2D field data during time-stepping (no plotting).
 
     Saves a compressed .npz with the Ey field array and timestamp.
@@ -827,16 +827,16 @@ def save_animation_field(sim, xy_plane, frame_counter):
     field_data = np.real(sim.get_array(vol=xy_plane, component=mp.Ey))
     t = sim.meep_time()
     if mp.am_master():
-        os.makedirs("frames", exist_ok=True)
+        os.makedirs(animation_dir, exist_ok=True)
         np.savez_compressed(
-            f"frames/meep_field_{frame_counter:04d}.npz",
+            f"{animation_dir}/meep_field_{frame_counter:04d}.npz",
             field=field_data,
             time=t,
         )
     return frame_counter + 1
 
 
-def render_animation_frames(eps_data, extent):
+def render_animation_frames(eps_data, extent, animation_dir="frames"):
     """Render saved field .npz files into PNGs with fixed global colorbar.
 
     Two-pass: first finds the global field maximum across all frames,
@@ -853,7 +853,7 @@ def render_animation_frames(eps_data, extent):
         )
         return
 
-    npz_files = sorted(glob.glob("frames/meep_field_*.npz"))
+    npz_files = sorted(glob.glob(f"{animation_dir}/meep_field_*.npz"))
     if not npz_files:
         logger.warning("No field data files found to render")
         return
@@ -898,7 +898,7 @@ def render_animation_frames(eps_data, extent):
         ax.set_xlabel("x (um)")
         ax.set_ylabel("y (um)")
         fig.tight_layout()
-        fig.savefig(f"frames/meep_frame_{i:04d}.png", dpi=150)
+        fig.savefig(f"{animation_dir}/meep_frame_{i:04d}.png", dpi=150)
         plt.close(fig)
 
     # Clean up .npz intermediates
@@ -908,7 +908,7 @@ def render_animation_frames(eps_data, extent):
     logger.info("Rendered %d frames with fixed colorbar", len(npz_files))
 
 
-def compile_animation_mp4(fps=15):
+def compile_animation_mp4(fps=15, animation_dir="frames"):
     """Stitch meep_frame_*.png into meep_animation.mp4 via ffmpeg.
 
     Falls back gracefully if ffmpeg is not available — frame PNGs
@@ -917,31 +917,32 @@ def compile_animation_mp4(fps=15):
     import glob
     import subprocess
 
-    frames = sorted(glob.glob("frames/meep_frame_*.png"))
+    frames = sorted(glob.glob(f"{animation_dir}/meep_frame_*.png"))
     if not frames:
         logger.warning("No animation frames found to compile")
         return
 
-    logger.info("Compiling %d frames into meep_animation.mp4 ...", len(frames))
+    mp4_path = f"{animation_dir}/meep_animation.mp4"
+    logger.info("Compiling %d frames into %s ...", len(frames), mp4_path)
     try:
         subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-framerate", str(fps),
-                "-i", "frames/meep_frame_%04d.png",
+                "-i", f"{animation_dir}/meep_frame_%04d.png",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
-                "meep_animation.mp4",
+                mp4_path,
             ],
             check=True,
             capture_output=True,
         )
-        logger.info("Saved meep_animation.mp4")
+        logger.info("Saved %s", mp4_path)
     except FileNotFoundError:
         logger.warning("ffmpeg not found — frame PNGs saved but MP4 not created")
     except subprocess.CalledProcessError as e:
         logger.warning("ffmpeg failed: %s", e.stderr.decode()[:500])
-        logger.info("Frame PNGs are still available in frames/")
+        logger.info("Frame PNGs are still available in %s/", animation_dir)
 
 
 def save_epsilon_raw(sim, config, cell_center):
@@ -1118,6 +1119,7 @@ def main():
     # Animation field capture step function (raw data, no plotting yet)
     diag_animation = diagnostics["save_animation"]
     animation_interval = diagnostics["animation_interval"]
+    animation_dir = diagnostics.get("animation_dir", "frames")
     _frame_counter = [0]  # mutable container for closure
     _anim_plane = None
 
@@ -1132,7 +1134,7 @@ def main():
 
         def _capture_frame(sim_obj):
             _frame_counter[0] = save_animation_field(
-                sim_obj, _anim_plane, _frame_counter[0]
+                sim_obj, _anim_plane, _frame_counter[0], animation_dir
             )
 
         step_funcs.append(mp.at_every(animation_interval, _capture_frame))
@@ -1227,8 +1229,8 @@ def main():
                 _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
                 _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
             ]
-            render_animation_frames(eps_data, _extent)
-            compile_animation_mp4()
+            render_animation_frames(eps_data, _extent, animation_dir)
+            compile_animation_mp4(animation_dir=animation_dir)
 
     logger.info("Extracting S-parameters...")
     s_params, debug_data = extract_s_params(config, sim, monitors)

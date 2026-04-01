@@ -251,6 +251,10 @@ class DiagnosticsConfig(BaseModel):
         gt=0,
         description="MEEP time units between animation frames",
     )
+    animation_dir: str = Field(
+        default="frames",
+        description="Directory for animation frame files and MP4 output",
+    )
     preview_only: bool = Field(
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )

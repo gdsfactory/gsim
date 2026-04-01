@@ -278,10 +278,6 @@ convention = "google"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.ty.analysis]
-# Optional runtime dependencies that are not always installed locally
-allowed-unresolved-imports = ["open3d", "open3d.**", "meep", "meep.**"]
-
 [[tool.ty.overrides]]
 include = ["tests/**"]
 
@@ -294,6 +290,8 @@ possibly-missing-attribute = "ignore"
 # Suppress rules that generate many false-positives in this codebase
 # (optional deps, third-party stubs, matplotlib Axes|None, etc.)
 unused-ignore-comment = "ignore"
+# Optional runtime dependencies that are not always installed locally
+unresolved-import = "ignore"
 
 [tool.ty.src]
 include = ["src"]

@@ -383,6 +383,7 @@ class Simulation(BaseModel):
             save_epsilon_raw=self.solver.save_epsilon_raw,
             save_animation=self.solver.save_animation,
             animation_interval=self.solver.animation_interval,
+            animation_dir=self.solver.animation_dir,
             preview_only=self.solver.preview_only,
             verbose_interval=self.solver.verbose_interval,
         )

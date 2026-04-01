@@ -14,6 +14,34 @@ from pydantic import BaseModel, ConfigDict, Field
 logger = logging.getLogger(__name__)
 
 
+def _detect_animation_files(base_dir: Path, diagnostic_images: dict[str, str]) -> None:
+    """Find animation MP4 and frame PNGs in *base_dir* or its subdirectories."""
+    mp4_name = "meep_animation.mp4"
+
+    # Check base dir first, then one level of subdirs
+    for candidate in [
+        base_dir,
+        *sorted(base_dir.iterdir() if base_dir.is_dir() else []),
+    ]:
+        if not candidate.is_dir():
+            continue
+        mp4 = candidate / mp4_name
+        if mp4.exists():
+            diagnostic_images["animation"] = str(mp4)
+            break
+
+    for candidate in [
+        base_dir,
+        *sorted(base_dir.iterdir() if base_dir.is_dir() else []),
+    ]:
+        if not candidate.is_dir():
+            continue
+        frame_pngs = sorted(candidate.glob("meep_frame_*.png"))
+        if frame_pngs:
+            diagnostic_images["animation_frames"] = str(candidate)
+            break
+
+
 class SParameterResult(BaseModel):
     """S-parameter results from MEEP simulation.
 
@@ -105,16 +133,13 @@ class SParameterResult(BaseModel):
             ("geometry_xz", "meep_geometry_xz.png"),
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
-            ("animation", "meep_animation.mp4"),
         ]:
             img_path = path.parent / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
 
-        # Detect animation frame PNGs
-        frame_pngs = sorted(path.parent.glob("meep_frame_*.png"))
-        if frame_pngs:
-            diagnostic_images["animation_frames"] = str(path.parent)
+        # Detect animation MP4 and frame PNGs (may be in a subdirectory)
+        _detect_animation_files(path.parent, diagnostic_images)
 
         return cls(
             wavelengths=wavelengths,
@@ -155,16 +180,13 @@ class SParameterResult(BaseModel):
             ("geometry_xz", "meep_geometry_xz.png"),
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
-            ("animation", "meep_animation.mp4"),
         ]:
             img_path = directory / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
 
-        # Detect animation frame PNGs
-        frame_pngs = sorted(directory.glob("meep_frame_*.png"))
-        if frame_pngs:
-            diagnostic_images["animation_frames"] = str(directory)
+        # Detect animation MP4 and frame PNGs (may be in a subdirectory)
+        _detect_animation_files(directory, diagnostic_images)
 
         return cls(
             debug_info=debug_info,
