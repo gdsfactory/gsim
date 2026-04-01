@@ -108,6 +108,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         from_layer: str | None = None,
         to_layer: str | None = None,
         length: float | None = None,
+        offset: float = 0.0,
         impedance: float = 50.0,
         resistance: float | None = None,
         inductance: float | None = None,
@@ -123,6 +124,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             from_layer: Bottom layer for via ports
             to_layer: Top layer for via ports
             length: Port extent along direction (um)
+            offset: Shift the port inward along the waveguide (um).
+                Positive moves away from the boundary, into the conductor.
             impedance: Port impedance (Ohms)
             resistance: Series resistance (Ohms)
             inductance: Series inductance (H)
@@ -132,6 +135,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
         Example:
             >>> sim.add_port("o1", layer="topmetal2", length=5.0)
+            >>> sim.add_port("o1", layer="topmetal2", length=5.0, offset=2.0)
             >>> sim.add_port(
             ...     "feed", from_layer="metal1", to_layer="topmetal2", geometry="via"
             ... )
@@ -146,6 +150,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 from_layer=from_layer,
                 to_layer=to_layer,
                 length=length,
+                offset=offset,
                 impedance=impedance,
                 resistance=resistance,
                 inductance=inductance,
@@ -374,6 +379,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     length=port_config.length or gf_port.width,
                     impedance=port_config.impedance,
                     excited=port_config.excited,
+                    offset=port_config.offset,
                 )
             elif port_config.geometry == "via" and (
                 port_config.from_layer is not None and port_config.to_layer is not None

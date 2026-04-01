@@ -734,7 +734,7 @@ def build_entities(
                 Entity(
                     name=port_name,
                     dim=2,
-                    mesh_order=1,
+                    mesh_order=-1,
                     tags=surf_tags,
                 )
             )

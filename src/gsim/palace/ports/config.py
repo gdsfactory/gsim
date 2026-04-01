@@ -87,6 +87,7 @@ def configure_inplane_port(
     length: float,
     impedance: float = 50.0,
     excited: bool = True,
+    offset: float = 0.0,
 ):
     """Configure gdsfactory port(s) as inplane (lumped) ports for Palace simulation.
 
@@ -99,10 +100,13 @@ def configure_inplane_port(
         length: Port extent along direction in um (perpendicular to port width)
         impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
+        offset: Shift port inward along the waveguide (um).
+            Positive moves away from the boundary, into the conductor.
 
     Examples:
         ```python
         configure_inplane_port(c.ports["o1"], layer="topmetal2", length=5.0)
+        configure_inplane_port(c.ports["o1"], layer="topmetal2", length=5.0, offset=2.0)
         configure_inplane_port(c.ports, layer="topmetal2", length=5.0)  # all ports
         ```
     """
@@ -115,6 +119,8 @@ def configure_inplane_port(
         port.info["length"] = length
         port.info["impedance"] = impedance
         port.info["excited"] = excited
+        port.info["offset"] = offset
+
 
 
 def configure_via_port(
@@ -336,6 +342,20 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                     layer = stack.layers[layer_name]
                     zmin = layer.zmin
                     zmax = layer.zmax
+                
+                # Apply longitudinal offset for inplane ports
+                offset = info.get("offset", 0.0)
+                if offset != 0.0:
+                    import numpy as np
+
+                    orientation_rad = np.deg2rad(
+                        float(port.orientation) if port.orientation is not None else 0.0
+                    )
+                    longitudinal = np.array(
+                        [np.cos(orientation_rad), np.sin(orientation_rad)]
+                    )
+                    shifted = np.array([center[0], center[1]]) - longitudinal * offset
+                    center = (float(shifted[0]), float(shifted[1]))
             else:
                 raise ValueError(f"Lumped port '{port.name}' missing layer info")
 

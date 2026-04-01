@@ -26,6 +26,8 @@ class PortConfig(BaseModel):
         from_layer: Bottom layer for via ports
         to_layer: Top layer for via ports
         length: Port extent along direction (um)
+        offset: Shift the port along the waveguide direction (um).
+            Positive moves in the port orientation direction.
         impedance: Port impedance (Ohms)
         excited: Whether this port is excited
         geometry: Port geometry type ("inplane" or "via")
@@ -48,6 +50,11 @@ class PortConfig(BaseModel):
     )
     excited: bool = True
     geometry: Literal["inplane", "via"] = "inplane"
+    offset: float = Field(
+        default=0.0,
+        description="Shift port inward along the waveguide (um). "
+        "Positive moves away from the boundary, into the conductor.",
+    )
 
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
