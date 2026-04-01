@@ -10,12 +10,11 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 dependencies = [
-  "gdsfactory==9.39.3",
-  "gdsfactoryplus==1.7.0",
+  "gdsfactory~=9.39",
+  "gdsfactoryplus",
   "gmsh==4.15.1",
   "meshio==5.3.5",
   "plotly==6.6.0",
-  "pydantic==2.12.5",
   "pyvista==0.47.1"
 ]
 description = ""
