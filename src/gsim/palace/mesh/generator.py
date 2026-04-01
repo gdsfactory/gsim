@@ -173,8 +173,9 @@ def generate_mesh(
         air_margin: Air box margin (um)
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
-        simulation_type: str = "driven",
+        simulation_type: Type of simulation (driven, eigenmode or electrostatics)
         driven_config: Optional DrivenConfig for frequency sweep settings
+        eigenmode_config: Optional EigenmodeConfig for eigenmode problems
         write_config: Whether to write config.json (default True)
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         refine_from_curves: Refine mesh based on distance to conductor edges
