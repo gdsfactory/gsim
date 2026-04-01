@@ -252,7 +252,7 @@ class SParams:
             arrays[f"S_{to_p}_{from_p}_db"] = sp.db
             arrays[f"S_{to_p}_{from_p}_deg"] = sp.deg
 
-        np.savez_compressed(filepath, **arrays)
+        np.savez_compressed(filepath, **arrays)  # ty: ignore[invalid-argument-type]
         logger.info("S-parameters saved to %s", filepath)
         return filepath
 
