@@ -21,7 +21,6 @@ dependencies = [
   "gmsh",
   "meshio>=5.0.0",
   "plotly",
-  "pydantic>=2.10.6",
   "pyvista>=0.43.0",
   "trame",
   "trame-vtk",

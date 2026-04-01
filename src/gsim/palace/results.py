@@ -232,6 +232,57 @@ class SParams:
         fig.update_layout(title="S-Parameters", height=600)
         return fig
 
+    def save(self, filepath: str | Path) -> Path:
+        """Save S-parameters to a ``.npz`` file.
+
+        The file can be reloaded with :meth:`SParams.from_file`.
+
+        Args:
+            filepath: Destination path (``.npz`` suffix added if missing).
+
+        Returns:
+            The resolved file path.
+        """
+        filepath = Path(filepath).with_suffix(".npz")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        arrays: dict[str, NDArray] = {"freq": self._freq}
+        arrays["port_names"] = np.array(self._port_names)
+        for (to_p, from_p), sp in self._data.items():
+            arrays[f"S_{to_p}_{from_p}_db"] = sp.db
+            arrays[f"S_{to_p}_{from_p}_deg"] = sp.deg
+
+        np.savez_compressed(filepath, **arrays)
+        logger.info("S-parameters saved to %s", filepath)
+        return filepath
+
+    @classmethod
+    def from_file(cls, filepath: str | Path) -> "SParams":
+        """Load S-parameters from a ``.npz`` file written by :meth:`save`.
+
+        Args:
+            filepath: Path to the ``.npz`` file.
+
+        Returns:
+            Reconstructed :class:`SParams` object.
+        """
+        filepath = Path(filepath).with_suffix(".npz")
+        npz = np.load(filepath, allow_pickle=False)
+
+        freq = npz["freq"]
+        port_names = list(npz["port_names"])
+
+        data: dict[tuple[str, str], SParam] = {}
+        for to_p in port_names:
+            for from_p in port_names:
+                db_key = f"S_{to_p}_{from_p}_db"
+                deg_key = f"S_{to_p}_{from_p}_deg"
+                if db_key in npz and deg_key in npz:
+                    data[(to_p, from_p)] = SParam(db=npz[db_key], deg=npz[deg_key])
+
+        logger.info("S-parameters loaded from %s", filepath)
+        return cls(freq=freq, data=data, port_names=port_names)
+
     def __repr__(self) -> str:
         """Return string representation."""
         n_freq = len(self._freq)

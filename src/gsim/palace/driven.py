@@ -835,6 +835,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         *,
         verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
+        sparams_path: str | Path | None = None,
+        overwrite: bool = False,
     ) -> dict[str, Path] | str:
         """Run simulation on GDSFactory+ cloud.
 
@@ -848,6 +850,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 ``"full"`` stream solver logs.
             wait: If ``True`` (default), block until results are ready.
                 If ``False``, upload + start and return the ``job_id``.
+            sparams_path: Path to save/load cached S-parameters (``.npz``).
+                If the file already exists and ``overwrite`` is ``False``,
+                the simulation is skipped and cached results are returned.
+            overwrite: Re-run simulation even if ``sparams_path`` exists.
 
         Returns:
             ``dict[str, Path]`` of output files when ``wait=True``,
@@ -858,9 +864,17 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             RuntimeError: If simulation fails
 
         Example:
-            >>> results = sim.run()
+            >>> results = sim.run(sparams_path="my_sim.npz")
             >>> print(f"S-params saved to: {results['port-S.csv']}")
         """
+        from gsim.palace.results import load_sparams
+
+        if sparams_path is not None:
+            sparams_path = Path(sparams_path).with_suffix(".npz")
+            if sparams_path.exists() and not overwrite:
+                logger.info("Cached S-parameters found at %s, skipping simulation", sparams_path)
+                return {"sparams": sparams_path}
+
         self.upload(verbose=False)
         self.start(verbose=verbose != "quiet")
         if not wait:
@@ -868,7 +882,13 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 msg = "job_id not set — call upload() first"
                 raise RuntimeError(msg)
             return self._job_id
-        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+        results = self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+
+        if sparams_path is not None and isinstance(results, dict):
+            sp = load_sparams(results)
+            sp.save(sparams_path)
+
+        return results
 
     def run_local(
         self,
@@ -876,6 +896,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         palace_sif_path: str | Path | None = None,
         num_processes: int | None = None,
         verbose: bool = True,
+        sparams_path: str | Path | None = None,
+        overwrite: bool = False,
     ) -> dict[str, Path]:
         """Run simulation locally using Palace via Apptainer.
 
@@ -887,6 +909,10 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 If None, uses PALACE_SIF environment variable.
             num_processes: Number of MPI processes (default: CPU count - 2)
             verbose: Print progress messages
+            sparams_path: Path to save/load cached S-parameters (``.npz``).
+                If the file already exists and ``overwrite`` is ``False``,
+                the simulation is skipped and cached results are returned.
+            overwrite: Re-run simulation even if ``sparams_path`` exists.
 
         Returns:
             Dict mapping result filenames to local paths
@@ -897,15 +923,16 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             RuntimeError: If simulation fails
 
         Example:
-            >>> # Using environment variable
-            >>> import os
-            >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
-            >>> results = sim.simulate_local()
-            >>>
-            >>> # Or specify path directly
-            >>> results = sim.simulate_local(palace_sif_path="/path/to/Palace.sif")
+            >>> results = sim.run_local(sparams_path="my_sim.npz")
             >>> print(f"S-params: {results['port-S.csv']}")
         """
+        from gsim.palace.results import load_sparams
+
+        if sparams_path is not None:
+            sparams_path = Path(sparams_path).with_suffix(".npz")
+            if sparams_path.exists() and not overwrite:
+                logger.info("Cached S-parameters found at %s, skipping simulation", sparams_path)
+                return {"sparams": sparams_path}
         import os
         import subprocess
 
@@ -1008,11 +1035,17 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         if verbose:
             logger.info("Results saved to %s", postpro_dir)
 
-        return {
+        results = {
             file.name: file
             for file in postpro_dir.iterdir()
             if file.is_file() and not file.name.startswith(".")
         }
+
+        if sparams_path is not None:
+            sp = load_sparams(results)
+            sp.save(sparams_path)
+
+        return results
 
 
 __all__ = ["DrivenSim"]
