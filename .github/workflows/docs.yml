@@ -1,111 +1,40 @@
 name: Docs
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
-    paths:
-      - "src/**"
-      - "nbs/**"
-      - "docs/**"
-      - "mkdocs.yml"
   workflow_dispatch:
 env:
   GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
   PLOTLY_RENDERER: notebook_connected
 jobs:
-  # Discover all notebooks and output as JSON array for the matrix
-  list-notebooks:
-    runs-on: ubuntu-latest
-    outputs:
-      notebooks: ${{ steps.find.outputs.notebooks }}
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      - name: Find notebooks referenced in docs
-        id: find
-        run: |
-          nbs=$(grep -oE 'nbs/[^ ]+\.md' mkdocs.yml | sed 's/\.md$/.ipynb/' | sort | jq -Rsc 'split("\n") | map(select(. != ""))')
-          echo "notebooks=$nbs" >> "$GITHUB_OUTPUT"
-  # Run each notebook in parallel
-  run-notebook:
-    runs-on: ubuntu-latest
-    needs: list-notebooks
-    strategy:
-      matrix:
-        notebook: ${{ fromJson(needs.list-notebooks.outputs.notebooks) }}
-      fail-fast: false
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      - name: Install UV
-        uses: astral-sh/setup-uv@v5
-      - name: Install Just
-        uses: taiki-e/install-action@just
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
-      - name: Create environment
-        run: just dev
-      - name: Install notebook PDK
-        run: |
-          nb="${{ matrix.notebook }}"
-          case "$nb" in
-            *qpdk*) uv pip install "qpdk @ git+https://github.com/gdsfactory/quantum-rf-pdk.git" ;;
-            *palace*) uv pip install ihp-gdsfactory ;;
-            *meep*) uv pip install ubcpdk ;;
-          esac
-      - name: Create ipykernel
-        run: uv run --no-sync python -m ipykernel install --user --name gsim
-      - name: Run notebook
-        run: |
-          dir=$(dirname "${{ matrix.notebook }}")
-          filename=$(basename "${{ matrix.notebook }}")
-          cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim
-      - name: Upload executed notebook
-        uses: actions/upload-artifact@v4
-        with:
-          name: nb-${{ hashFiles(matrix.notebook) }}
-          path: ${{ matrix.notebook }}
-          retention-days: 1
   build:
     name: Build Docs
     runs-on: ubuntu-latest
-    needs: run-notebook
-    if: "!cancelled()"
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
       - name: Install UV
         uses: astral-sh/setup-uv@v5
       - name: Install Just
         uses: taiki-e/install-action@just
       - name: Install svgbob
         run: cargo install svgbob_cli
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
       - name: Create environment
         run: just dev
-      - name: Download executed notebooks
-        uses: actions/download-artifact@v4
-        with:
-          pattern: nb-*
-          merge-multiple: true
-          path: executed-nbs
-      - name: Keep only successfully executed notebooks
+      - name: Install all notebook PDKs
         run: |
-          for nb in nbs/*.ipynb; do
+          uv pip install ubcpdk ihp-gdsfactory
+          uv pip install "qpdk @ git+https://github.com/gdsfactory/quantum-rf-pdk.git"
+      - name: Create ipykernel
+        run: uv run --no-sync python -m ipykernel install --user --name gsim
+      - name: Find and run notebooks
+        run: |
+          nbs=$(grep -oE 'nbs/[^ ]+\.md' mkdocs.yml | sed 's/\.md$/.ipynb/' | sort)
+          for nb in $nbs; do
+            echo "=== Running $nb ==="
+            dir=$(dirname "$nb")
             filename=$(basename "$nb")
-            if [ -f "executed-nbs/$filename" ]; then
-              cp "executed-nbs/$filename" "$nb"
-            else
-              echo "Removing failed notebook: $filename"
-              rm "$nb"
-            fi
+            cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim && cd -
           done
       - name: Build docs
         run: |
@@ -119,7 +48,6 @@ jobs:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') && !contains(github.ref_name, 'post'))))
     permissions:
       pages: write
       id-token: write
