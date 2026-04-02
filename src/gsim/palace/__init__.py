@@ -167,9 +167,14 @@ __all__ = [
 ]
 
 
-def _parse_palace_result(run_result: RunResult) -> dict:
-    """Parse Palace cloud results — returns the files dict."""
-    return run_result.files
+def _parse_palace_result(run_result: RunResult) -> SParams | dict:
+    """Parse Palace cloud results into SParams."""
+    from gsim.palace.results import load_sparams
+
+    try:
+        return load_sparams(run_result.files)
+    except FileNotFoundError:
+        return run_result.files
 
 
 register_result_parser("palace", _parse_palace_result)
