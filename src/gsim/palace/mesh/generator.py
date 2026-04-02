@@ -29,7 +29,7 @@ from .groups import assign_physical_groups
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig
+    from gsim.palace.models import DrivenConfig, EigenmodeConfig
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 
@@ -148,12 +148,16 @@ def generate_mesh(
     air_margin: float = 50.0,
     fmax: float = 100e9,
     show_gui: bool = False,
+    simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: EigenmodeConfig | None = None,
     write_config: bool = True,
     planar_conductors: bool = False,
-    refine_from_curves: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
+    absorbing_boundary: bool = True,
+    refine_from_curves: bool = False,
     merge_via_distance: float = 2.0,
+    verbosity: int = 3,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -169,11 +173,16 @@ def generate_mesh(
         air_margin: Air box margin (um)
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
+        simulation_type: Type of simulation (driven, eigenmode or electrostatics)
         driven_config: Optional DrivenConfig for frequency sweep settings
+        eigenmode_config: Optional EigenmodeConfig for eigenmode problems
         write_config: Whether to write config.json (default True)
+        pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
+        absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
         refine_from_curves: Refine mesh based on distance to conductor edges
         merge_via_distance: Max gap between vias to merge (um)
+        verbosity: Sets gmsh verbosity level
 
     Returns:
         MeshResult with paths and metadata
@@ -191,7 +200,7 @@ def generate_mesh(
 
     # Initialize gmsh
     gmsh.initialize()
-    gmsh.option.setNumber("General.Verbosity", 3)
+    gmsh.option.setNumber("General.Verbosity", verbosity)
 
     if "palace_mesh" in gmsh.model.list():
         gmsh.model.setCurrent("palace_mesh")
@@ -289,7 +298,10 @@ def generate_mesh(
                 output_dir,
                 model_name,
                 fmax,
+                simulation_type,
                 driven_config,
+                eigenmode_config,
+                absorbing_boundary,
             )
 
     finally:
