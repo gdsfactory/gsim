@@ -20,6 +20,7 @@ dependencies = [
   "gdsfactoryplus>=1.6.4",
   "gmsh",
   "meshio>=5.0.0",
+  "nest_asyncio2",
   "plotly",
   "pydantic>=2.10.6",
   "pyvista>=0.43.0",
