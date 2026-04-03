@@ -21,21 +21,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
       - name: Create environment
         run: just dev
-      - name: Install all notebook PDKs
-        run: |
-          uv pip install ubcpdk ihp-gdsfactory
-          uv pip install "qpdk @ git+https://github.com/gdsfactory/quantum-rf-pdk.git"
-      - name: Create ipykernel
-        run: uv run --no-sync python -m ipykernel install --user --name gsim
-      - name: Find and run notebooks
-        run: |
-          nbs=$(grep -oE 'nbs/[^ ]+\.md' mkdocs.yml | sed 's/\.md$/.ipynb/' | sort)
-          for nb in $nbs; do
-            echo "=== Running $nb ==="
-            dir=$(dirname "$nb")
-            filename=$(basename "$nb")
-            cd "$dir" && xvfb-run -a uv run --no-sync papermill "$filename" "$filename" -k gsim && cd -
-          done
       - name: Build docs
         run: |
           just nbdocs

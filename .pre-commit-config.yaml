@@ -34,7 +34,7 @@ repos:
     rev: v2.4.1
     hooks:
       - id: codespell
-        args: [--skip="*.ipynb"]
+        args: ["--skip=*.ipynb"]
         additional_dependencies:
           - tomli
   - repo: https://github.com/rbubley/mirrors-prettier
@@ -49,6 +49,7 @@ repos:
         entry: just nbclean
         language: system
         files: \.(ipynb)$
+        exclude: ^nbs/
   - repo: local
     hooks:
       - id: ty
