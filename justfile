@@ -6,6 +6,7 @@ dev:
   uv sync --dev
   uv pip install -e .
   uvx pre-commit install
+  git config diff.ipynb.textconv "jupyter nbconvert --to script --stdout"
 
 # Version bumping
 [linux,macos]
@@ -39,11 +40,19 @@ docs:
 serve:
   uv run mkdocs serve -a localhost:8080
 
-nbrun: ipykernel
-  find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run papermill {} {} -k gsim :::
+# Run a notebook for docs (with Plotly HTML renderer): just nbrun-docs nbs/foo.ipynb
+nbrun-docs +notebooks: ipykernel
+  for nb in {{notebooks}}; do \
+    PLOTLY_RENDERER=notebook_connected PYVISTA_OFF_SCREEN=true PYVISTA_JUPYTER_BACKEND=static uv run papermill "$nb" "$nb" -k gsim; \
+    uv run python scripts/strip_notebook_paths.py "$nb"; \
+    uv run jupyter nbconvert --to markdown --embed-images "$nb" --output-dir docs/nbs; \
+  done
 
-nbdocs:
-  find nbs -maxdepth 1 -mindepth 1 -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs parallel -j `nproc --all` uv run jupyter nbconvert --to markdown --embed-images {} --output-dir docs/nbs ':::'
+# Convert notebooks to markdown for docs: just nbdocs nbs/foo.ipynb nbs/bar.ipynb
+nbdocs +notebooks:
+  for nb in {{notebooks}}; do \
+    uv run jupyter nbconvert --to markdown --embed-images "$nb" --output-dir docs/nbs; \
+  done
 
 nbclean-all:
   find . -name "*.ipynb" -not -path "*/.ipynb_checkpoints/*" -not -path "./.venv/*" | xargs just nbclean
