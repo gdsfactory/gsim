@@ -16,8 +16,8 @@ classifiers = [
   "Programming Language :: Python :: 3.12"
 ]
 dependencies = [
-  "gdsfactory>=9.32.0",
-  "gdsfactoryplus>=1.6.4",
+  "gdsfactory~=9.39",
+  "gdsfactoryplus",
   "gmsh",
   "meshio>=5.0.0",
   "plotly",
