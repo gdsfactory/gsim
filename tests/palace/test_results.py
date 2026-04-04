@@ -172,11 +172,14 @@ class TestSParams:
         assert "S11" in names
         assert "S21" in names
 
-    def test_plot_interactive_hides_reflections(self, sim_dir: Path) -> None:
+    def test_plot_interactive_visibility(self, sim_dir: Path) -> None:
         sp = load_sparams(sim_dir)
         fig = sp.plot_interactive()
+        # First excitation column (Si1) should be visible
         for trace in fig.data:
-            if trace.name[1] == trace.name[2]:  # reflection
+            if trace.name.endswith("1"):  # S11, S21, S31
+                assert trace.visible is True
+            else:
                 assert trace.visible == "legendonly"
 
 

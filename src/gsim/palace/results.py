@@ -248,8 +248,9 @@ class SParams:
 
         Uses ``Sij`` notation (e.g. S11, S21) and prints the port
         mapping so you know which index corresponds to which port.
-        Reflections (Sii) are hidden by default; first 4 transmission
-        traces are visible, the rest are togglable via the legend.
+        By default shows the first excitation column (S11, S21, S31, ...)
+        and hides symmetric/redundant entries. All traces are togglable
+        via the legend.
 
         Args:
             phase: If True, plot phase (deg). Default is magnitude (dB).
@@ -264,15 +265,17 @@ class SParams:
         mapping = ", ".join(f"Port {i}: {name}" for name, i in idx.items())
         print(f"Port mapping: {mapping}")  # noqa: T201
 
-        # Build ordered labels with reflection detection
-        entries: list[tuple[str, SParam]] = []
+        # Build entries with Sij labels
+        entries: list[tuple[str, str, SParam]] = []
         for (to_p, from_p), sp in self._data.items():
-            entries.append((self._sij_label(to_p, from_p), sp))
+            entries.append((self._sij_label(to_p, from_p), from_p, sp))
 
-        transmission = [(l, sp) for l, sp in entries if l[1] != l[2]]
-        reflections = [(l, sp) for l, sp in entries if l[1] == l[2]]
-        ordered = transmission + reflections
-        visible_set = {l for l, _ in transmission[:4]}
+        # Show first excitation column by default (Si1), hide the rest
+        first_from = self._port_names[0] if self._port_names else None
+        first_col = [(l, sp) for l, fp, sp in entries if fp == first_from]
+        rest = [(l, sp) for l, fp, sp in entries if fp != first_from]
+        ordered = first_col + rest
+        visible_set = {l for l, _ in first_col}
 
         fig = go.Figure()
 
