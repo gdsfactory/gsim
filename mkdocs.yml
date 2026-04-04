@@ -27,7 +27,6 @@ nav:
       - "Parallel Simulations: Width Sweep": nbs/palace_width_sweep.md
       - QPDK Resonator: nbs/palace_qpdk_resonator.md
       - CPW Via Transition: nbs/palace_cpw_via.md
-      - CPW (Interactive): nbs/palace_cpw_interactive.md
       - Field Visualization: nbs/palace_cpw_fields.md
   - API Reference:
       - Palace: api/palace.md
