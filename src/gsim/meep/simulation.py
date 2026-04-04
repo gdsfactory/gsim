@@ -533,7 +533,7 @@ class Simulation(BaseModel):
             verbose_interval=diagnostics_cfg.verbose_interval,
             symmetries=symmetry_entries,
         )
-        # Forward any private hints into the config (e.g. _mpi_process_count)
+        # Forward any private hints into the config
         if self._hints:
             sim_config._hints.update(self._hints)  # noqa: SLF001
 
