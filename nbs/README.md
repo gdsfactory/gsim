@@ -14,7 +14,7 @@ self-contained HTML and PyVista renders as static images.
 You can run multiple at once:
 
 ```bash
-just nbrun-docs nbs/meep_ybranch.ipynb nbs/palace_demo_cpw.ipynb
+just nbrun-docs nbs/meep_ybranch.ipynb nbs/palace_cpw.ipynb
 ```
 
 ## Preview docs locally
