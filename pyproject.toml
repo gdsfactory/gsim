@@ -17,7 +17,7 @@ classifiers = [
 ]
 dependencies = [
   "gdsfactory~=9.39",
-  "gdsfactoryplus",
+  "gdsfactoryplus>=1.6.4",
   "gmsh",
   "meshio>=5.0.0",
   "plotly",
