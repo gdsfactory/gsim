@@ -235,6 +235,9 @@ select = ["ALL"]
   "SLF001",  # private-member-access
   "T201",  # print
 ]
+"src/gsim/common/viz/render3d_threejs.py" = [
+  "E501",  # line-too-long (embedded HTML/JS template)
+]
 "docs/hooks.py" = [
   "ARG001",  # unused-function-argument (MkDocs hooks require specific signatures)
   "INP001",  # implicit-namespace-package

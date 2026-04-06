@@ -5,7 +5,7 @@ This module provides visualization tools for meshes and simulation results.
 
 from __future__ import annotations
 
-__all__ = ["plot_mesh"]
+__all__ = ["plot_mesh", "plot_mesh_threejs"]
 
 import hashlib
 import logging
@@ -18,6 +18,12 @@ import pyvista as pv
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Re-export Three.js viewer
+# ---------------------------------------------------------------------------
+
+from gsim.common.viz.render3d_threejs import plot_mesh_threejs  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Public API
