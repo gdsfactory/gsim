@@ -61,7 +61,9 @@ repos:
     rev: v0.7.14
     hooks:
       - id: tombi-format
+        exclude: uv\.lock
       - id: tombi-lint
+        exclude: uv\.lock
   - repo: https://github.com/google/yamlfmt
     rev: v0.20.0
     hooks:
