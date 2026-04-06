@@ -44,7 +44,6 @@ local_settings.py
 nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt
-uv.lock
 .DS_Store
 
 # folders
