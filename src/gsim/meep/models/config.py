@@ -10,7 +10,15 @@ import json
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, PrivateAttr, Tag, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    PrivateAttr,
+    Tag,
+    computed_field,
+)
 
 
 class SymmetryEntry(BaseModel):

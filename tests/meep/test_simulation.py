@@ -216,6 +216,7 @@ class TestFieldAssignment:
 
     def test_source_port(self):
         sim = Simulation()
+        assert isinstance(sim.source, ModeSource)
         sim.source.port = "o1"
         assert sim.source.port == "o1"
 
@@ -307,6 +308,7 @@ class TestCallableAPI:
         sim = Simulation()
         result = sim.source(port="o1", wavelength=1.31, wavelength_span=0.05)
         assert result is sim.source
+        assert isinstance(sim.source, ModeSource)
         assert sim.source.port == "o1"
         assert sim.source.wavelength == 1.31
         assert sim.source.wavelength_span == 0.05
@@ -550,6 +552,8 @@ class TestImports:
 
 
 class TestFiberSource:
+    """Test FiberSource model defaults and validation."""
+
     def test_defaults(self):
         s = FiberSource()
         assert s.wavelength == 1.55
