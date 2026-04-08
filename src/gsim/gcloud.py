@@ -56,7 +56,18 @@ def _is_transient_error(exc: Exception) -> bool:
     return isinstance(exc, HTTPStatusError) and exc.response.status_code >= 500
 
 
+def _is_forbidden_error(exc: Exception) -> bool:
+    """Return True if *exc* is an HTTP 403 Forbidden error."""
+    try:
+        from httpx import HTTPStatusError
+    except ImportError:  # pragma: no cover
+        return False
+
+    return isinstance(exc, HTTPStatusError) and exc.response.status_code == 403
+
+
 __all__ = [
+    "CloudSimulationNotEnabledError",
     "RunResult",
     "get_status",
     "print_job_summary",
@@ -576,6 +587,10 @@ def _print_status_table(
 # ---------------------------------------------------------------------------
 
 
+class CloudSimulationNotEnabledError(Exception):
+    """Raised when the user's account does not have cloud simulation enabled."""
+
+
 def upload_simulation_dir(input_dir: str | Path, job_type: str):
     """Upload a simulation directory for cloud execution.
 
@@ -585,10 +600,22 @@ def upload_simulation_dir(input_dir: str | Path, job_type: str):
 
     Returns:
         PreJob object from gdsfactoryplus
+
+    Raises:
+        CloudSimulationNotEnabledError: If the account lacks cloud simulation access.
     """
     input_dir = Path(input_dir)
     job_definition = _get_job_definition(job_type)
-    return sim.upload_simulation(path=input_dir, job_definition=job_definition)
+    try:
+        return sim.upload_simulation(path=input_dir, job_definition=job_definition)
+    except Exception as exc:
+        if _is_forbidden_error(exc):
+            raise CloudSimulationNotEnabledError(
+                "Cloud simulation is not enabled for your account.\n"
+                "Please contact support@gdsfactory.com or visit https://gdsfactory.com "
+                "to enable cloud simulation access."
+            ) from exc
+        raise
 
 
 def run_simulation(
