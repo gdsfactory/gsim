@@ -567,7 +567,6 @@ def build_fiber_source(config, cell_x=None, cell_y=None, dpml=None):
         src=mp.GaussianSource(frequency=fcen, fwidth=fwidth),
         center=center,
         size=size,
-        beam_x0=mp.Vector3(position[0], position[1], z_position),
         beam_kdir=beam_kdir,
         beam_w0=beam_waist,
         beam_E0=beam_E0,
@@ -1054,7 +1053,7 @@ def save_animation_field(sim, xy_plane, frame_counter):
     return frame_counter + 1
 
 
-def render_animation_frames(eps_data, extent):
+def render_animation_frames(eps_data, extent, plane="xy"):
     """Render saved field .npz files into PNGs with fixed global colorbar.
 
     Two-pass: first finds the global field maximum across all frames,
@@ -1091,6 +1090,9 @@ def render_animation_frames(eps_data, extent):
 
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+    xlabel = "x (um)"
+    ylabel = "z (um)" if plane == "xz" else "y (um)"
+
     # Pass 2 — render each frame
     for i, path in enumerate(npz_files):
         d = np.load(path)
@@ -1112,9 +1114,9 @@ def render_animation_frames(eps_data, extent):
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="4%", pad=0.06)
         fig.colorbar(im, cax=cax, label="Ey")
-        ax.set_title(f"Ey  t={t:.2f}")
-        ax.set_xlabel("x (um)")
-        ax.set_ylabel("y (um)")
+        ax.set_title(f"Ey ({plane.upper()})  t={t:.2f}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         fig.tight_layout()
         fig.savefig(f"frames/meep_frame_{i:04d}.png", dpi=150)
         plt.close(fig)
@@ -1375,14 +1377,21 @@ def main():
     _frame_counter = [0]  # mutable container for closure
     _anim_plane = None
 
+    _anim_plane_id = diagnostics.get("animation_plane", "xy")
     if diag_animation:
         z_min_anim = min(l["zmin"] for l in config["layer_stack"])
         z_max_anim = max(l["zmax"] for l in config["layer_stack"])
         z_core_anim = (z_min_anim + z_max_anim) / 2
-        _anim_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
+        if _anim_plane_id == "xz":
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, cell_center.z),
+                size=mp.Vector3(sim.cell_size.x, 0, sim.cell_size.z),
+            )
+        else:
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
 
         def _capture_frame(sim_obj):
             _frame_counter[0] = save_animation_field(
@@ -1391,8 +1400,8 @@ def main():
 
         step_funcs.append(mp.at_every(animation_interval, _capture_frame))
         logger.info(
-            "Animation: saving field data every %s time units",
-            animation_interval,
+            "Animation (%s plane): saving field data every %s time units",
+            _anim_plane_id, animation_interval,
         )
 
     stop_mode = stopping["mode"]
@@ -1475,11 +1484,17 @@ def main():
         if mp.am_master():
             _ctr = _anim_plane.center
             _sz = _anim_plane.size
-            _extent = [
-                _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
-                _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
-            ]
-            render_animation_frames(eps_data, _extent)
+            if _anim_plane_id == "xz":
+                _extent = [
+                    _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
+                    _ctr.z - _sz.z / 2, _ctr.z + _sz.z / 2,
+                ]
+            else:
+                _extent = [
+                    _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
+                    _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
+                ]
+            render_animation_frames(eps_data, _extent, plane=_anim_plane_id)
             compile_animation_mp4()
 
     if source_type == "fiber" and incident_flux is not None:

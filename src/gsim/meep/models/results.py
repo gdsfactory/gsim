@@ -471,6 +471,17 @@ class CouplingResult(BaseModel):
                 result[name] = -100.0
         return result
 
+    def show_animation(self) -> None:
+        """Display field animation MP4 in Jupyter."""
+        mp4_path = self.diagnostic_images.get("animation")
+        if mp4_path is None:
+            logger.info("No animation MP4 available.")
+            return
+
+        from IPython.display import Video, display
+
+        display(Video(mp4_path, embed=True, mimetype="video/mp4"))
+
     def plot(self, db: bool = True, **kwargs: Any) -> Any:
         """Plot coupling efficiency vs wavelength.
 

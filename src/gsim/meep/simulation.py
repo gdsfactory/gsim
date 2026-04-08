@@ -448,6 +448,7 @@ class Simulation(BaseModel):
             save_epsilon_raw=self.solver.save_epsilon_raw,
             save_animation=self.solver.save_animation,
             animation_interval=self.solver.animation_interval,
+            animation_plane=self.solver.animation_plane,
             preview_only=self.solver.preview_only,
             verbose_interval=self.solver.verbose_interval,
         )
@@ -791,6 +792,21 @@ class Simulation(BaseModel):
 
         result = self.build_config()
 
+        # Build fiber source overlay if applicable
+        fiber_overlay = None
+        if isinstance(self.source, FiberSource):
+            from gsim.meep.overlay import FiberSourceOverlay
+
+            src_cfg = result.config.source
+            fiber_overlay = FiberSourceOverlay(
+                position=(src_cfg.position[0], src_cfg.position[1]),
+                z_position=src_cfg.z_position,
+                beam_waist=src_cfg.beam_waist,
+                angle_theta=src_cfg.angle_theta,
+                angle_phi=src_cfg.angle_phi,
+                direction=src_cfg.direction,
+            )
+
         return plot_2d(
             component=result.component,
             stack=self.geometry.stack,
@@ -799,6 +815,7 @@ class Simulation(BaseModel):
             extend_ports_length=0,
             port_data=result.config.ports,
             component_bbox=result.config.component_bbox,
+            fiber_source=fiber_overlay,
             **kwargs,
         )
 

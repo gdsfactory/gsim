@@ -289,6 +289,10 @@ class DiagnosticsConfig(BaseModel):
         gt=0,
         description="MEEP time units between animation frames",
     )
+    animation_plane: Literal["xy", "xz"] = Field(
+        default="xy",
+        description="Cross-section plane for field animation: 'xy' or 'xz'",
+    )
     preview_only: bool = Field(
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )

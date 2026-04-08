@@ -396,5 +396,6 @@ class FDTD(BaseModel):
     save_epsilon_raw: bool = Field(default=False)
     save_animation: bool = Field(default=False)
     animation_interval: float = Field(default=0.5, gt=0)
+    animation_plane: Literal["xy", "xz"] = Field(default="xy")
     preview_only: bool = Field(default=False)
     verbose_interval: float = Field(default=0, ge=0)
