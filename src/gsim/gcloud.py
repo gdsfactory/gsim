@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import logging
 import re
 import shutil
 import time
@@ -39,6 +40,21 @@ from gdsfactoryplus import sim
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Return True if *exc* is a transient HTTP/network error worth retrying."""
+    try:
+        from httpx import ConnectError, HTTPStatusError, TimeoutException
+    except ImportError:  # pragma: no cover
+        return False
+
+    if isinstance(exc, (TimeoutException, ConnectError)):
+        return True
+    return isinstance(exc, HTTPStatusError) and exc.response.status_code >= 500
+
 
 __all__ = [
     "RunResult",
@@ -427,7 +443,13 @@ def wait_for_results(
 
         for jid, job in jobs.items():
             if job.status not in terminal:
-                jobs[jid] = sim.get_job(jid)
+                try:
+                    jobs[jid] = sim.get_job(jid)
+                except Exception as exc:
+                    if _is_transient_error(exc):
+                        logger.debug("Transient error polling job %s: %s", jid, exc)
+                        continue
+                    raise
                 # Stream logs when running
                 if verbose == "full" and jobs[jid].status == sim.SimStatus.RUNNING:
                     log_cursors[jid] = _fetch_and_print_logs(jid, log_cursors[jid])
