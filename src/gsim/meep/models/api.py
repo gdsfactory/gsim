@@ -91,15 +91,24 @@ class ModeSource(BaseModel):
 
 
 class FiberSource(BaseModel):
-    """Gaussian beam source simulating fiber-to-chip coupling.
+    """Fiber-to-chip coupling via the reciprocal method.
 
-    Launches a Gaussian beam from above (or below) to model grating
-    coupler excitation. Normalization uses an incident flux monitor
-    rather than eigenmode decomposition at the source.
+    Simulates grating coupler coupling efficiency by launching an
+    eigenmode source from the waveguide port and measuring coupling
+    into a fiber-like mode above the grating. By reciprocity, this
+    gives the same S-parameters as fiber→waveguide.
+
+    The fiber monitor parameters (angle_theta, beam_waist, position,
+    z_offset) define where and how the fiber mode is measured above
+    the chip, not a physical source.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
+    port: str | None = Field(
+        default=None,
+        description="Waveguide port to excite. None = auto-select first port.",
+    )
     wavelength: float = Field(
         default=1.55,
         gt=0,
@@ -124,7 +133,7 @@ class FiberSource(BaseModel):
         default=10.0,
         ge=0,
         lt=90,
-        description="Polar angle from vertical in degrees",
+        description="Fiber angle from vertical in degrees",
     )
     angle_phi: float = Field(
         default=0.0,
@@ -132,20 +141,20 @@ class FiberSource(BaseModel):
     )
     polarization: Literal["TE", "TM"] = Field(
         default="TE",
-        description="Beam polarization",
+        description="Fiber polarization",
     )
     position: list[float] | None = Field(
         default=None,
-        description="Beam center [x, y]. None = auto (component bbox center).",
+        description="Fiber center [x, y] above grating. None = auto (bbox center).",
     )
     z_offset: float = Field(
         default=1.0,
         gt=0,
-        description="Distance above stack top to place source plane (um)",
+        description="Distance above core top to place fiber monitor plane (um)",
     )
     direction: Literal["down", "up"] = Field(
         default="down",
-        description="Beam propagation direction ('down' = into chip)",
+        description="Fiber direction ('down' = fiber above chip looking down)",
     )
 
     def __call__(self, **kwargs: Any) -> FiberSource:

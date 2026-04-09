@@ -174,11 +174,12 @@ class SourceConfig(BaseModel):
 
 
 class FiberSourceConfig(BaseModel):
-    """Gaussian beam source config for fiber-to-chip coupling simulation.
+    """Reciprocal fiber coupling config for grating coupler simulation.
 
-    Sent as JSON to the cloud runner, which builds an ``mp.GaussianBeamSource``.
-    The ``z_position`` is the absolute z-coordinate of the source plane
-    (resolved from the API-level ``z_offset`` + stack top).
+    Sent as JSON to the cloud runner. The runner builds an
+    ``mp.EigenModeSource`` at the waveguide ``port`` and a fiber
+    mode monitor at ``z_position``. By reciprocity, the coupling
+    into the fiber mode equals the fiber→waveguide coupling.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -187,15 +188,21 @@ class FiberSourceConfig(BaseModel):
         default="fiber",
         description="Source type discriminator.",
     )
-    beam_waist: float = Field(gt=0, description="Gaussian beam waist radius in um")
+    port: str | None = Field(
+        default=None,
+        description="Waveguide port for EigenModeSource. None = auto (first port).",
+    )
+    beam_waist: float = Field(gt=0, description="Fiber mode waist radius in um")
     angle_theta: float = Field(
-        ge=0, lt=90, description="Polar angle from vertical (deg)"
+        ge=0, lt=90, description="Fiber angle from vertical (deg)"
     )
     angle_phi: float = Field(description="Azimuthal angle (deg)")
     polarization: Literal["TE", "TM"]
     direction: Literal["down", "up"]
-    position: list[float] = Field(description="Beam center [x, y]")
-    z_position: float = Field(description="Absolute z-coordinate of source plane")
+    position: list[float] = Field(description="Fiber center [x, y] above grating")
+    z_position: float = Field(
+        description="Absolute z-coordinate of fiber monitor plane"
+    )
     fwidth: float = Field(gt=0, description="Source fwidth in frequency units")
 
 

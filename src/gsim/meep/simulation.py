@@ -334,10 +334,10 @@ class Simulation(BaseModel):
         )
 
     def _fiber_source_config(self, stack: Any) -> Any:
-        """Translate FiberSource → FiberSourceConfig.
+        """Translate FiberSource → FiberSourceConfig (reciprocal method).
 
-        Resolves position (auto-center on component bbox) and computes
-        absolute z from stack top + z_offset.
+        Resolves fiber monitor position and the waveguide port for
+        the EigenModeSource.
         """
         from gsim.meep.models.config import FiberSourceConfig
 
@@ -357,8 +357,6 @@ class Simulation(BaseModel):
             ]
 
         # Compute absolute z from core layer top + offset.
-        # Use the highest-n layer (waveguide core) as reference, NOT the
-        # topmost layer (which could be a metal far above the grating).
         from gsim.meep.ports import _find_highest_n_layer
 
         core_layer, _ = _find_highest_n_layer(stack)
@@ -366,7 +364,6 @@ class Simulation(BaseModel):
             z_ref_top = core_layer.zmax
             z_ref_bottom = core_layer.zmin
         else:
-            # Fallback: use full stack extent
             z_ref_top = max(layer.zmax for layer in stack.layers.values())
             z_ref_bottom = min(layer.zmin for layer in stack.layers.values())
 
@@ -375,11 +372,12 @@ class Simulation(BaseModel):
         else:
             z_position = z_ref_bottom - src.z_offset
 
-        # Compute fwidth
+        # Compute fwidth (same as ModeSource — eigenmode source)
         wl_cfg = self._wavelength_config()
         fwidth = max(3 * wl_cfg.df, 0.2 * wl_cfg.fcen)
 
         return FiberSourceConfig(
+            port=src.port,
             beam_waist=src.beam_waist,
             angle_theta=src.angle_theta,
             angle_phi=src.angle_phi,
@@ -564,9 +562,17 @@ class Simulation(BaseModel):
             )
             used_materials.add(diel["material"])
 
-        # Extract port info from original component
+        # Extract port info from original component.
+        # For fiber (reciprocal): the waveguide port IS the EigenModeSource.
         if is_fiber:
-            port_infos = extract_port_info(original_component, stack, mark_source=False)
+            fiber_port = source_cfg.port
+            port_infos = extract_port_info(
+                original_component, stack, source_port=fiber_port
+            )
+            # Resolve auto-selected port name back into config
+            if fiber_port is None and port_infos:
+                resolved_port = next((p.name for p in port_infos if p.is_source), None)
+                source_cfg = source_cfg.model_copy(update={"port": resolved_port})
         else:
             port_infos = extract_port_info(
                 original_component, stack, source_port=source_cfg.port
@@ -577,7 +583,7 @@ class Simulation(BaseModel):
             used_materials, overrides=self._material_overrides()
         )
 
-        # Compute source fwidth (for mode source only; fiber already has fwidth)
+        # Compute source fwidth
         if is_fiber:
             source_for_config = source_cfg
         else:

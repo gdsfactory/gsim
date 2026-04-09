@@ -1547,33 +1547,26 @@ class TestCouplingResult:
 
 
 class TestScriptFiberSource:
-    """Test that the runner script includes fiber source support."""
+    """Test that the runner script includes reciprocal fiber coupling support."""
 
-    def test_script_has_gaussian_beam(self):
+    def test_script_has_fiber_monitor_builder(self):
         from gsim.meep.script import generate_meep_script
 
         script = generate_meep_script()
-        assert "GaussianBeamSource" in script
+        assert "build_fiber_monitor" in script
 
-    def test_script_has_fiber_source_builder(self):
+    def test_script_has_fiber_coupling_extractor(self):
         from gsim.meep.script import generate_meep_script
 
         script = generate_meep_script()
-        assert "build_fiber_source" in script
-
-    def test_script_has_incident_flux(self):
-        from gsim.meep.script import generate_meep_script
-
-        script = generate_meep_script()
-        assert "build_incident_flux_monitor" in script
-        assert "add_flux" in script
-
-    def test_script_has_coupling_efficiency(self):
-        from gsim.meep.script import generate_meep_script
-
-        script = generate_meep_script()
-        assert "extract_coupling_efficiency" in script
+        assert "extract_fiber_coupling" in script
         assert "save_ce_results" in script
+
+    def test_script_has_n_at_z_helper(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "_get_n_at_z" in script
 
     def test_script_branches_on_source_type(self):
         from gsim.meep.script import generate_meep_script

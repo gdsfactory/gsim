@@ -106,15 +106,11 @@ class SParameterResult(BaseModel):
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
             ("animation", "meep_animation.mp4"),
+            ("animation_data", "meep_animation_data.npz"),
         ]:
             img_path = path.parent / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
-
-        # Detect animation frame PNGs
-        frame_pngs = sorted(path.parent.glob("meep_frame_*.png"))
-        if frame_pngs:
-            diagnostic_images["animation_frames"] = str(path.parent)
 
         return cls(
             wavelengths=wavelengths,
@@ -156,15 +152,11 @@ class SParameterResult(BaseModel):
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
             ("animation", "meep_animation.mp4"),
+            ("animation_data", "meep_animation_data.npz"),
         ]:
             img_path = directory / filename
             if img_path.exists():
                 diagnostic_images[key] = str(img_path)
-
-        # Detect animation frame PNGs
-        frame_pngs = sorted(directory.glob("meep_frame_*.png"))
-        if frame_pngs:
-            diagnostic_images["animation_frames"] = str(directory)
 
         return cls(
             debug_info=debug_info,
@@ -195,6 +187,30 @@ class SParameterResult(BaseModel):
         from IPython.display import Video, display
 
         display(Video(mp4_path, embed=True, mimetype="video/mp4"))
+
+    def load_animation_data(self) -> dict[str, Any] | None:
+        """Load raw animation frame data from the consolidated .npz.
+
+        Returns:
+            Dict with keys ``fields`` (N, H, W), ``times`` (N,),
+            ``eps_data`` (H, W), ``extent`` (4,), ``plane`` (str),
+            or None if not available.
+        """
+        npz_path = self.diagnostic_images.get("animation_data")
+        if npz_path is None:
+            logger.info("No animation data .npz available.")
+            return None
+
+        import numpy as np
+
+        data = np.load(npz_path)
+        return {
+            "fields": data["fields"],
+            "times": data["times"],
+            "eps_data": data["eps_data"],
+            "extent": data["extent"],
+            "plane": str(data["plane"]),
+        }
 
     def plot(
         self,
@@ -439,6 +455,7 @@ class CouplingResult(BaseModel):
             ("geometry_yz", "meep_geometry_yz.png"),
             ("fields_xy", "meep_fields_xy.png"),
             ("animation", "meep_animation.mp4"),
+            ("animation_data", "meep_animation_data.npz"),
         ]:
             img_path = path.parent / filename
             if img_path.exists():
@@ -481,6 +498,30 @@ class CouplingResult(BaseModel):
         from IPython.display import Video, display
 
         display(Video(mp4_path, embed=True, mimetype="video/mp4"))
+
+    def load_animation_data(self) -> dict[str, Any] | None:
+        """Load raw animation frame data from the consolidated .npz.
+
+        Returns:
+            Dict with keys ``fields`` (N, H, W), ``times`` (N,),
+            ``eps_data`` (H, W), ``extent`` (4,), ``plane`` (str),
+            or None if not available.
+        """
+        npz_path = self.diagnostic_images.get("animation_data")
+        if npz_path is None:
+            logger.info("No animation data .npz available.")
+            return None
+
+        import numpy as np
+
+        data = np.load(npz_path)
+        return {
+            "fields": data["fields"],
+            "times": data["times"],
+            "eps_data": data["eps_data"],
+            "extent": data["extent"],
+            "plane": str(data["plane"]),
+        }
 
     def plot(self, db: bool = True, **kwargs: Any) -> Any:
         """Plot coupling efficiency vs wavelength.
