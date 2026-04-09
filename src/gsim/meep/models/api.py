@@ -170,11 +170,11 @@ class FDTD(BaseModel):
 
     # Stopping criteria (flat fields instead of variant classes)
     stopping: Literal["fixed", "field_decay", "dft_decay", "energy_decay"] = Field(
-        default="field_decay",
+        default="energy_decay",
         description=(
-            "Stopping mode: 'field_decay' (recommended, matches MEEP tutorials) "
-            "monitors a field component at a point; 'energy_decay' monitors "
-            "total field energy; 'dft_decay' waits for DFT convergence; "
+            "Stopping mode: 'energy_decay' (recommended) monitors total EM energy; "
+            "'field_decay' monitors a field component at a point; "
+            "'dft_decay' waits for DFT convergence; "
             "'fixed' runs for max_time."
         ),
     )
@@ -182,7 +182,7 @@ class FDTD(BaseModel):
         default=2000.0, gt=0, description="Max run time after sources (um/c)"
     )
     stopping_threshold: float = Field(
-        default=0.05, gt=0, lt=1, description="Decay/convergence threshold"
+        default=0.01, gt=0, lt=1, description="Decay/convergence threshold"
     )
     stopping_min_time: float = Field(
         default=100.0,
@@ -196,7 +196,7 @@ class FDTD(BaseModel):
         default="Ey", description="Field component for field_decay mode"
     )
     stopping_dt: float = Field(
-        default=50.0,
+        default=20.0,
         gt=0,
         description="Decay measurement window for field_decay/energy_decay modes",
     )
@@ -226,7 +226,7 @@ class FDTD(BaseModel):
     # -- Convenience methods for stopping configuration --
 
     def stop_when_energy_decayed(
-        self, dt: float = 50.0, decay_by: float = 0.05
+        self, dt: float = 20.0, decay_by: float = 0.01
     ) -> FDTD:
         """Stop when total field energy in the cell decays (recommended).
 
@@ -236,7 +236,7 @@ class FDTD(BaseModel):
 
         Args:
             dt: Time window between energy checks (MEEP time units).
-            decay_by: Fractional energy decay threshold (e.g. 0.05 = 5%).
+            decay_by: Fractional energy decay threshold (e.g. 0.01 = 1%).
 
         Returns:
             self (for fluent chaining).

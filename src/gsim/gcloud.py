@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import logging
 import re
 import shutil
 import time
@@ -40,7 +41,33 @@ from gdsfactoryplus import sim
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+logger = logging.getLogger(__name__)
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Return True if *exc* is a transient HTTP/network error worth retrying."""
+    try:
+        from httpx import ConnectError, HTTPStatusError, TimeoutException
+    except ImportError:  # pragma: no cover
+        return False
+
+    if isinstance(exc, (TimeoutException, ConnectError)):
+        return True
+    return isinstance(exc, HTTPStatusError) and exc.response.status_code >= 500
+
+
+def _is_forbidden_error(exc: Exception) -> bool:
+    """Return True if *exc* is an HTTP 403 Forbidden error."""
+    try:
+        from httpx import HTTPStatusError
+    except ImportError:  # pragma: no cover
+        return False
+
+    return isinstance(exc, HTTPStatusError) and exc.response.status_code == 403
+
+
 __all__ = [
+    "CloudSimulationNotEnabledError",
     "RunResult",
     "get_status",
     "print_job_summary",
@@ -427,7 +454,13 @@ def wait_for_results(
 
         for jid, job in jobs.items():
             if job.status not in terminal:
-                jobs[jid] = sim.get_job(jid)
+                try:
+                    jobs[jid] = sim.get_job(jid)
+                except Exception as exc:
+                    if _is_transient_error(exc):
+                        logger.debug("Transient error polling job %s: %s", jid, exc)
+                        continue
+                    raise
                 # Stream logs when running
                 if verbose == "full" and jobs[jid].status == sim.SimStatus.RUNNING:
                     log_cursors[jid] = _fetch_and_print_logs(jid, log_cursors[jid])
@@ -554,6 +587,10 @@ def _print_status_table(
 # ---------------------------------------------------------------------------
 
 
+class CloudSimulationNotEnabledError(Exception):
+    """Raised when the user's account does not have cloud simulation enabled."""
+
+
 def upload_simulation_dir(input_dir: str | Path, job_type: str):
     """Upload a simulation directory for cloud execution.
 
@@ -563,10 +600,22 @@ def upload_simulation_dir(input_dir: str | Path, job_type: str):
 
     Returns:
         PreJob object from gdsfactoryplus
+
+    Raises:
+        CloudSimulationNotEnabledError: If the account lacks cloud simulation access.
     """
     input_dir = Path(input_dir)
     job_definition = _get_job_definition(job_type)
-    return sim.upload_simulation(path=input_dir, job_definition=job_definition)
+    try:
+        return sim.upload_simulation(path=input_dir, job_definition=job_definition)
+    except Exception as exc:
+        if _is_forbidden_error(exc):
+            raise CloudSimulationNotEnabledError(
+                "Cloud simulation is not enabled for your account.\n"
+                "Please contact support@gdsfactory.com or visit https://gdsfactory.com "
+                "to enable cloud simulation access."
+            ) from exc
+        raise
 
 
 def run_simulation(

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import gmsh
 
@@ -15,7 +15,7 @@ from gsim.palace.ports.config import PortType
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig
+    from gsim.palace.models import DrivenConfig, EigenmodeConfig
     from gsim.palace.ports.config import PalacePort
 
 
@@ -27,7 +27,11 @@ def generate_palace_config(
     output_path: Path,
     model_name: str,
     fmax: float,
+    simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: EigenmodeConfig | None = None,
+    absorbing_boundary: bool = True,
+    hints: dict[str, Any] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -40,11 +44,15 @@ def generate_palace_config(
         model_name: Base name for output files
         fmax: Maximum frequency (Hz) - used as fallback if driven_config not provided
         driven_config: Optional DrivenConfig for frequency sweep settings
+        eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
 
     Returns:
         Path to the generated config.json
     """
     from gsim.palace.ports.config import PortGeometry
+
+    if simulation_type not in ("driven", "eigenmode", "electrostatics"):
+        raise ValueError(f"Unsupported simulation type: {simulation_type}")
 
     # Use driven_config if provided, otherwise fall back to legacy parameters
     if driven_config is not None:
@@ -55,7 +63,7 @@ def generate_palace_config(
         solver_driven = {
             "Samples": [
                 {
-                    "Type": "Linear",
+                    "Type": "Driven",
                     "MinFreq": 1.0,  # 1 GHz
                     "MaxFreq": fmax / 1e9,
                     "FreqStep": freq_step,
@@ -65,9 +73,56 @@ def generate_palace_config(
             "AdaptiveTol": 0.02,
         }
 
+    if eigenmode_config is not None:
+        solver_eigenmode = eigenmode_config.to_palace_config()
+    else:
+        # Legacy behavior - compute from fmax
+        solver_eigenmode = (
+            {
+                "N": 10,
+                "Tol": 1.0e-6,
+                "Target": fmax,
+            },
+        )
+
+    linear_conf: dict[str, object] = {
+        "Type": "Default",
+        "KSPType": "GMRES",
+        "Tol": 1e-6,
+        "MaxIts": 400,
+    }
+    # TODO: Add MUMPS support
+    # linear_conf: dict[str, object] = {
+    #     "Type": "MUMPS",
+    #     "KSPType": "GMRES",
+    #     "Tol": 1e-6,
+    #     "MaxIts": 1,
+    #     "MGMaxLevels": 1,
+    #     "EstimatorMaxIts": 0,
+    #     "EstimatorTol": 1e-6,
+    #     "DivFreeTol": 1e-6,
+    #     "DivFreeMaxIts": 0,
+    #     "PCMatReal": False,
+    #     "ComplexCoarseSolve": True,
+    # }
+
+    solver_conf: dict[str, object] = {
+        "Linear": linear_conf,
+        "Order": 2,
+        "Device": "CPU",
+    }
+
+    if simulation_type == "driven":
+        solver_conf["Driven"] = solver_driven
+    elif simulation_type == "eigenmode":
+        solver_conf["Eigenmode"] = solver_eigenmode
+    else:
+        raise NotImplementedError
+        # solver_conf["Electrostatics"] = solver_driven
+
     config: dict[str, object] = {
         "Problem": {
-            "Type": "Driven",
+            "Type": simulation_type.capitalize(),
             "Verbose": 3,
             "Output": f"output/{model_name}",
         },
@@ -80,17 +135,7 @@ def generate_palace_config(
                 "MaxIts": 0,
             },
         },
-        "Solver": {
-            "Linear": {
-                "Type": "Default",
-                "KSPType": "GMRES",
-                "Tol": 1e-6,
-                "MaxIts": 400,
-            },
-            "Order": 2,
-            "Device": "CPU",
-            "Driven": solver_driven,
-        },
+        "Solver": solver_conf,
     }
 
     # Build domains section
@@ -177,6 +222,8 @@ def generate_palace_config(
     port_idx = 1
 
     for port in ports:
+        if simulation_type != "driven":
+            port.excited = False
         port_key = f"P{port_idx}"
         if port_key in groups["port_surfaces"]:
             port_group = groups["port_surfaces"][port_key]
@@ -184,37 +231,21 @@ def generate_palace_config(
             if port.multi_element:
                 # Multi-element port (CPW)
                 if port_group.get("type") == "cpw":
-                    if port.port_type == PortType.LUMPED:
-                        elements = [
-                            {
-                                "Attributes": [elem["phys_group"]],
-                                "Direction": elem["direction"],
-                            }
-                            for elem in port_group["elements"]
-                        ]
-                        lumped_ports.append(
-                            {
-                                "Index": port_idx,
-                                "R": port.resistance,
-                                "L": port.inductance,
-                                "C": port.capacitance,
-                                "Excitation": port_idx if port.excited else False,
-                                "Elements": elements,
-                            }
-                        )
-                    else:
-                        attributes = [
-                            elem["phys_group"] for elem in port_group["elements"]
-                        ]
-                        wave_ports.append(
-                            {
-                                "Index": port_idx,
-                                "Mode": port.mode,
-                                "Offset": port.offset,
-                                "Excitation": port_idx if port.excited else False,
-                                "Attributes": attributes,
-                            }
-                        )
+                    elements = [
+                        {
+                            "Attributes": [elem["phys_group"]],
+                            "Direction": elem["direction"],
+                        }
+                        for elem in port_group["elements"]
+                    ]
+                    lumped_ports.append(
+                        {
+                            "Index": port_idx,
+                            "R": port.impedance,
+                            "Excitation": port_idx if port.excited else False,
+                            "Elements": elements,
+                        }
+                    )
             else:
                 # Single-element port
                 if port.port_type == PortType.LUMPED:
@@ -225,13 +256,17 @@ def generate_palace_config(
                     )
                     port_entry: dict[str, object] = {
                         "Index": port_idx,
-                        "R": port.resistance,
-                        "L": port.inductance,
-                        "C": port.capacitance,
+                        "R": port.impedance,
                         "Direction": direction,
                         "Excitation": port_idx if port.excited else False,
                         "Attributes": [port_group["phys_group"]],
                     }
+                    if port.resistance is not None:
+                        port_entry["Rs"] = port.resistance
+                    if port.inductance is not None:
+                        port_entry["L"] = port.inductance
+                    if port.capacitance is not None:
+                        port_entry["C"] = port.capacitance
                     lumped_ports.append(port_entry)
                 else:
                     wave_ports.append(
@@ -255,7 +290,7 @@ def generate_palace_config(
     if pec_attrs:
         boundaries["PEC"] = {"Attributes": pec_attrs}
 
-    if "absorbing" in groups["boundary_surfaces"]:
+    if "absorbing" in groups["boundary_surfaces"] and absorbing_boundary:
         absorbing_pg = groups["boundary_surfaces"]["absorbing"]["phys_group"]
         # phys_group may be a list (multiple __None groups) or a single int
         attrs = absorbing_pg if isinstance(absorbing_pg, list) else [absorbing_pg]
@@ -265,6 +300,10 @@ def generate_palace_config(
         }
 
     config["Boundaries"] = boundaries
+
+    # Merge any extra hints into the config
+    if hints:
+        config.update(hints)
 
     # Write config file
     config_path = output_path / "config.json"
@@ -395,7 +434,11 @@ def write_config(
     mesh_result,
     stack: LayerStack,
     ports: list[PalacePort],
+    simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
+    eigenmode_config: EigenmodeConfig | None = None,
+    absorbing_boundary: bool = True,
+    hints: dict[str, Any] | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -430,7 +473,11 @@ def write_config(
         output_path=mesh_result.output_dir,
         model_name=mesh_result.model_name,
         fmax=mesh_result.fmax,
+        simulation_type=simulation_type,
         driven_config=driven_config,
+        eigenmode_config=eigenmode_config,
+        absorbing_boundary=absorbing_boundary,
+        hints=hints,
     )
 
     # Update the mesh_result with the config path

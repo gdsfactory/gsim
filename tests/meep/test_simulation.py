@@ -92,12 +92,12 @@ class TestStoppingFields:
 
     def test_defaults(self):
         f = FDTD()
-        assert f.stopping == "field_decay"
+        assert f.stopping == "energy_decay"
         assert f.max_time == 2000.0
-        assert f.stopping_threshold == 0.05
+        assert f.stopping_threshold == 0.01
         assert f.stopping_min_time == 100.0
         assert f.stopping_component == "Ey"
-        assert f.stopping_dt == 50.0
+        assert f.stopping_dt == 20.0
         assert f.stopping_monitor_port is None
 
     def test_fixed_mode(self):
@@ -140,7 +140,7 @@ class TestFDTD:
     def test_defaults(self):
         f = FDTD()
         assert f.resolution == 32
-        assert f.stopping == "field_decay"
+        assert f.stopping == "energy_decay"
         assert f.max_time == 2000.0
         assert f.subpixel is False
         assert f.simplify_tol == 0.0

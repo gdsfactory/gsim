@@ -825,9 +825,7 @@ def add_ports(
                 {
                     "portnumber": port_num,
                     "name": port.name,
-                    "R0": port.resistance,
-                    "L0": port.inductance,
-                    "C0": port.capacitance,
+                    "Z0": port.impedance,
                     "type": "cpw",
                     "elements": [
                         {"surface_idx": i, "direction": port.directions[i]}
@@ -874,9 +872,7 @@ def add_ports(
                 {
                     "portnumber": port_num,
                     "name": port.name,
-                    "R0": port.resistance,
-                    "L0": port.inductance,
-                    "C0": port.capacitance,
+                    "Z0": port.impedance,
                     "type": "via",
                     "direction": "Z",
                     "length": zmax - zmin,
@@ -923,9 +919,7 @@ def add_ports(
                     {
                         "portnumber": port_num,
                         "name": port.name,
-                        "R0": port.resistance,
-                        "L0": port.inductance,
-                        "C0": port.capacitance,
+                        "Z0": port.impedance,
                         "type": "lumped",
                         "direction": port.direction.upper(),
                         "length": length,

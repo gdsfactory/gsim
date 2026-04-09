@@ -53,7 +53,7 @@ class PalacePort:
     # Port geometry
     length: float | None = None  # Port extent along direction (um)
 
-    # Multi-element support (for lumped CPW)
+    # Multi-element support (for CPW)
     multi_element: bool = False
     centers: list[tuple[float, float]] | None = None  # Multiple centers for CPW
     directions: list[str] | None = (
@@ -61,9 +61,10 @@ class PalacePort:
     )
 
     # Electrical properties
-    resistance: float = 50.0  # Ohms
-    inductance: float = 0.0  # H
-    capacitance: float = 0.0  # F
+    impedance: float = 50.0  # Ohms
+    resistance: float | None = None  # Ohms
+    inductance: float | None = None  # H
+    capacitance: float | None = None  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
     # Waveport specific settings
@@ -91,9 +92,7 @@ def configure_inplane_port(
     ports,
     layer: str,
     length: float,
-    resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    impedance: float = 50.0,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as inplane (lumped) ports for Palace simulation.
@@ -105,9 +104,7 @@ def configure_inplane_port(
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         layer: Target conductor layer name (e.g., 'topmetal2')
         length: Port extent along direction in um (perpendicular to port width)
-        resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -123,9 +120,7 @@ def configure_inplane_port(
         port.info["palace_type"] = "lumped"
         port.info["layer"] = layer
         port.info["length"] = length
-        port.info["resistance"] = resistance
-        port.info["inductance"] = inductance
-        port.info["capacitance"] = capacitance
+        port.info["impedance"] = impedance
         port.info["excited"] = excited
 
 
@@ -133,9 +128,7 @@ def configure_via_port(
     ports,
     from_layer: str,
     to_layer: str,
-    resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    impedance: float = 50.0,
     excited: bool = True,
 ):
     """Configure gdsfactory port(s) as via (vertical) lumped ports.
@@ -167,9 +160,7 @@ def configure_via_port(
         port.info["palace_type"] = "lumped"
         port.info["from_layer"] = from_layer
         port.info["to_layer"] = to_layer
-        port.info["resistance"] = resistance
-        port.info["inductance"] = inductance
-        port.info["capacitance"] = capacitance
+        port.info["impedance"] = impedance
         port.info["excited"] = excited
 
 
@@ -179,9 +170,7 @@ def configure_cpw_port(
     s_width: float,
     gap_width: float,
     length: float,
-    resistance: float = 50.0,
-    inductance: float = 0.0,
-    capacitance: float = 0.0,
+    impedance: float = 50.0,
     excited: bool = True,
     offset: float = 0.0,
 ):
@@ -196,10 +185,8 @@ def configure_cpw_port(
         layer: Target conductor layer name (e.g., 'topmetal2')
         s_width: Signal conductor width in um
         gap_width: Gap width between signal and ground in um
-        length: Port extent along direction in um
-        resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        length: Port extent along direction (um)
+        impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited (default: True)
         offset: Shift port inward along the waveguide (um).
             Positive moves away from the boundary, into the conductor.
@@ -243,12 +230,10 @@ def configure_cpw_port(
     lower_center = center - transverse * gap_offset
 
     # Store computed CPW element info on the single port
-    port.info["palace_type"] = "cpw_lumped"
+    port.info["palace_type"] = "cpw"
     port.info["layer"] = layer
     port.info["length"] = length
-    port.info["resistance"] = resistance
-    port.info["inductance"] = inductance
-    port.info["capacitance"] = capacitance
+    port.info["impedance"] = impedance
     port.info["excited"] = excited
     port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
     port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
@@ -325,7 +310,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         if palace_type is None:
             continue
 
-        if palace_type == "cpw_lumped":
+        if palace_type == "cpw":
             # Single-port CPW: gap centers were pre-computed by configure_cpw_port
             layer_name = info.get("layer")
             zmin, zmax = 0.0, 0.0
@@ -333,8 +318,6 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 layer = stack.layers[layer_name]
                 zmin = layer.zmin
                 zmax = layer.zmax
-            else:
-                raise ValueError(f"CPW Lumped port '{port.name}' missing layer info")
 
             upper_center = info["cpw_upper_center"]
             lower_center = info["cpw_lower_center"]
@@ -381,9 +364,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 multi_element=True,
                 centers=centers,
                 directions=directions,
-                resistance=info.get("resistance", 50.0),
-                inductance=info.get("inductance", 0.0),
-                capacitance=info.get("capacitance", 0.0),
+                impedance=info.get("impedance", 50.0),
                 excited=info.get("excited", True),
             )
             palace_ports.append(cpw_port)
@@ -423,7 +404,6 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
                 layer = stack.layers[layer_name]
                 zmin = layer.zmin
                 zmax = layer.zmax
-
         else:
             raise ValueError(f"Unknown port type: {palace_type}")
 
@@ -439,9 +419,8 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             layer=layer_name,
             from_layer=from_layer,
             to_layer=to_layer,
-            resistance=info.get("resistance", 50.0),
-            inductance=info.get("inductance", 0.0),
-            capacitance=info.get("capacitance", 0.0),
+            length=info.get("length"),
+            impedance=info.get("impedance", 50.0),
             z_margin=info.get("z_margin", 0.0),
             lateral_margin=info.get("lateral_margin", 0.0),
             max_size=info.get("max_size", False),

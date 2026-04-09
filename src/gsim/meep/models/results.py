@@ -196,11 +196,17 @@ class SParameterResult(BaseModel):
 
         display(Video(mp4_path, embed=True, mimetype="video/mp4"))
 
-    def plot(self, db: bool = True, **kwargs: Any) -> Any:
+    def plot(
+        self,
+        db: bool = True,
+        keys: list[str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Plot S-parameters vs wavelength.
 
         Args:
             db: If True, plot in dB scale
+            keys: S-parameter names to plot (e.g. ["s21", "s31"]). Plots all if None.
             **kwargs: Passed to matplotlib plot()
 
         Returns:
@@ -212,7 +218,9 @@ class SParameterResult(BaseModel):
         plt.close(fig)  # prevent double display in notebooks
 
         ylabel = "|S| (dB)" if db else "|S|"
-        for name, values in self.s_params.items():
+        names = self._resolve_keys(keys)
+        for name in names:
+            values = self.s_params[name]
             magnitudes = [abs(v) for v in values]
             if db:
                 import math
@@ -230,4 +238,131 @@ class SParameterResult(BaseModel):
         ax.set_title("S-Parameters")
         fig.tight_layout()
 
+        return fig
+
+    def _resolve_keys(self, keys: list[str] | None) -> list[str]:
+        """Resolve key names with case-insensitive lookup."""
+        if keys is None:
+            return list(self.s_params.keys())
+        lower_map = {k.lower(): k for k in self.s_params}
+        return [lower_map.get(k.lower(), k) for k in keys]
+
+    def plot_plotly(self, keys: list[str] | None = None) -> Any:
+        """Plot S-parameters with Plotly (interactive).
+
+        Returns a ``plotly.graph_objects.Figure`` with magnitude (dB)
+        and phase subplots.
+
+        Args:
+            keys: S-parameter names to plot (e.g. ["s21", "s31"]). Plots all if None.
+
+        Returns:
+            plotly Figure
+        """
+        import cmath
+        import math
+
+        from plotly.subplots import make_subplots  # type: ignore[import-untyped]
+
+        names = self._resolve_keys(keys)
+
+        fig = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.08,
+            subplot_titles=("Magnitude (dB)", "Phase (deg)"),
+        )
+        for name in names:
+            values = self.s_params[name]
+            db = [20 * math.log10(abs(v)) if abs(v) > 0 else -100 for v in values]
+            phase = [math.degrees(cmath.phase(v)) for v in values]
+
+            fig.add_scatter(
+                x=self.wavelengths,
+                y=db,
+                mode="lines+markers",
+                name=name,
+                legendgroup=name,
+                row=1,
+                col=1,
+            )
+            fig.add_scatter(
+                x=self.wavelengths,
+                y=phase,
+                mode="lines+markers",
+                name=name,
+                legendgroup=name,
+                showlegend=False,
+                row=2,
+                col=1,
+            )
+        fig.update_xaxes(title_text="Wavelength (um)", row=2, col=1)
+        fig.update_yaxes(title_text="dB", row=1, col=1)
+        fig.update_yaxes(title_text="deg", row=2, col=1)
+        fig.update_layout(title="S-Parameters", height=600)
+        return fig
+
+    def plot_interactive(self, phase: bool = False) -> Any:
+        """Plot S-parameters with interactive legend toggling.
+
+        Args:
+            phase: If True, plot phase (deg). Default is magnitude (dB).
+
+        Returns:
+            plotly Figure
+        """
+        import cmath
+        import math
+
+        import plotly.graph_objects as go  # type: ignore[import-untyped]
+
+        names = list(self.s_params.keys())
+
+        # Hide reflections (Sii) and cap visible at 4
+        def _is_reflection(name: str) -> bool:
+            clean = name.upper().lstrip("S")
+            return len(clean) >= 2 and clean[0] == clean[1]
+
+        transmission = [n for n in names if not _is_reflection(n)]
+        reflections = [n for n in names if _is_reflection(n)]
+        ordered = transmission + reflections
+        visible_set = set(transmission[:4])
+
+        fig = go.Figure()
+
+        for name in ordered:
+            values = self.s_params[name]
+            if phase:
+                y = [math.degrees(cmath.phase(v)) for v in values]
+            else:
+                y = [20 * math.log10(abs(v)) if abs(v) > 0 else -100 for v in values]
+            vis = True if name in visible_set else "legendonly"
+            fig.add_scatter(
+                x=self.wavelengths,
+                y=y,
+                mode="lines+markers",
+                name=name,
+                visible=vis,
+            )
+
+        ylabel = "Phase (deg)" if phase else "|S| (dB)"
+        fig.update_layout(
+            xaxis_title="Wavelength (µm)",
+            yaxis_title=ylabel,
+            width=700,
+            height=400,
+            margin=dict(t=40, b=40, l=60, r=10),
+            legend=dict(
+                groupclick="toggleitem",
+                itemclick="toggle",
+                itemdoubleclick="toggleothers",
+                itemsizing="constant",
+                bordercolor="#888",
+                borderwidth=1,
+                bgcolor="rgba(245,245,245,0.9)",
+                entrywidthmode="pixels",
+                entrywidth=70,
+            ),
+        )
         return fig

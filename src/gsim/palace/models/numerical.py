@@ -34,8 +34,6 @@ class NumericalConfig(BaseModel):
             "BoomerAMG" is an algebraic multigrid alternative.
         device: Compute device. "GPU" enables GPU-accelerated assembly and
             solves if Palace was built with GPU support.
-        num_processors: Number of MPI processes for parallel execution.
-            None = auto-detect based on cloud instance.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -79,11 +77,6 @@ class NumericalConfig(BaseModel):
         default="CPU",
         description="Compute device. 'GPU' enables GPU-accelerated assembly "
         "and solves if Palace was built with GPU support.",
-    )
-
-    num_processors: int | None = Field(
-        default=None,
-        description="Number of MPI processes. None = auto-detect.",
     )
 
     def to_palace_config(self) -> dict:

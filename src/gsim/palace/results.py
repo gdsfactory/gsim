@@ -91,11 +91,13 @@ class SParams:
         freq: NDArray,
         data: dict[tuple[str, str], SParam],
         port_names: list[str],
+        files: dict[str, Path] | None = None,
     ) -> None:
         """Create from frequency array, S-parameter data, and port names."""
         self._freq = freq
         self._data = data
         self._port_names = port_names
+        self.files = files or {}
 
     @property
     def freq(self) -> NDArray:
@@ -232,6 +234,134 @@ class SParams:
         fig.update_layout(title="S-Parameters", height=600)
         return fig
 
+    def _port_index_map(self) -> dict[str, int]:
+        """Return ``{port_name: 1-based index}`` mapping."""
+        return {name: i + 1 for i, name in enumerate(self._port_names)}
+
+    def _sij_label(self, to_port: str, from_port: str) -> str:
+        """Return ``Sij`` label for a port pair."""
+        idx = self._port_index_map()
+        return f"S{idx[to_port]}{idx[from_port]}"
+
+    def plot_interactive(self, phase: bool = False):
+        """Plot S-parameters with interactive legend toggling.
+
+        Uses ``Sij`` notation (e.g. S11, S21) and prints the port
+        mapping so you know which index corresponds to which port.
+        By default shows the first excitation column (S11, S21, S31, ...)
+        and hides symmetric/redundant entries. All traces are togglable
+        via the legend.
+
+        Args:
+            phase: If True, plot phase (deg). Default is magnitude (dB).
+
+        Returns:
+            plotly Figure
+        """
+        import plotly.graph_objects as go  # type: ignore[import-untyped]
+
+        # Print port mapping
+        idx = self._port_index_map()
+        mapping = ", ".join(f"Port {i}: {name}" for name, i in idx.items())
+        print(f"Port mapping: {mapping}")  # noqa: T201
+
+        # Build entries with Sij labels
+        entries: list[tuple[str, str, SParam]] = []
+        for (to_p, from_p), sp in self._data.items():
+            entries.append((self._sij_label(to_p, from_p), from_p, sp))
+
+        # Show first excitation column by default (Si1), hide the rest
+        first_from = self._port_names[0] if self._port_names else None
+        first_col = [(l, sp) for l, fp, sp in entries if fp == first_from]
+        rest = [(l, sp) for l, fp, sp in entries if fp != first_from]
+        ordered = first_col + rest
+        visible_set = {l for l, _ in first_col}
+
+        fig = go.Figure()
+
+        for label, sp in ordered:
+            y = sp.deg if phase else sp.db
+            vis = True if label in visible_set else "legendonly"
+            fig.add_scatter(
+                x=self._freq,
+                y=y,
+                mode="lines",
+                name=label,
+                visible=vis,
+            )
+
+        ylabel = "Phase (deg)" if phase else "|S| (dB)"
+        fig.update_layout(
+            xaxis_title="Frequency (GHz)",
+            yaxis_title=ylabel,
+            width=700,
+            height=400,
+            margin=dict(t=40, b=40, l=60, r=10),
+            legend=dict(
+                groupclick="toggleitem",
+                itemclick="toggle",
+                itemdoubleclick="toggleothers",
+                itemsizing="constant",
+                bordercolor="#888",
+                borderwidth=1,
+                bgcolor="rgba(245,245,245,0.9)",
+                entrywidthmode="pixels",
+                entrywidth=70,
+            ),
+        )
+        return fig
+
+    def save_npz(self, filepath: str | Path) -> Path:
+        """Save S-parameters to a ``.npz`` file.
+
+        The file can be reloaded with :meth:`SParams.from_file`.
+
+        Args:
+            filepath: Destination path (``.npz`` suffix added if missing).
+
+        Returns:
+            The resolved file path.
+        """
+        filepath = Path(filepath).with_suffix(".npz")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        arrays: dict[str, NDArray] = {"freq": self._freq}
+        arrays["port_names"] = np.array(self._port_names)
+        for (to_p, from_p), sp in self._data.items():
+            arrays[f"S_{to_p}_{from_p}_db"] = sp.db
+            arrays[f"S_{to_p}_{from_p}_deg"] = sp.deg
+
+        np.savez_compressed(filepath, **arrays)  # ty: ignore[invalid-argument-type]
+        logger.info("S-parameters saved to %s", filepath)
+        return filepath
+
+    @classmethod
+    def from_file(cls, filepath: str | Path) -> SParams:
+        """Load S-parameters from a ``.npz`` file written by :meth:`save_npz`.
+
+        Args:
+            filepath: Path to the ``.npz`` file.
+
+        Returns:
+            Reconstructed :class:`SParams` object.
+        """
+        filepath = Path(filepath).with_suffix(".npz")
+        npz = np.load(filepath, allow_pickle=False)
+
+        freq = npz["freq"]
+        port_names = list(npz["port_names"])
+
+        data: dict[tuple[str, str], SParam] = {}
+        for to_p in port_names:
+            for from_p in port_names:
+                db_key = f"S_{to_p}_{from_p}_db"
+                deg_key = f"S_{to_p}_{from_p}_deg"
+                if db_key in npz and deg_key in npz:
+                    data[(to_p, from_p)] = SParam(db=npz[db_key], deg=npz[deg_key])
+
+        logger.info("S-parameters loaded from %s", filepath)
+        return cls(freq=freq, data=data, port_names=port_names)
+
     def __repr__(self) -> str:
         """Return string representation."""
         n_freq = len(self._freq)
@@ -312,7 +442,8 @@ def load_sparams(
         deg = parts.get("deg", np.zeros(len(freq)))
         data[(to_name, from_name)] = SParam(db=db, deg=deg)
 
-    return SParams(freq=freq, data=data, port_names=port_names)
+    files = dict(source) if isinstance(source, dict) else None
+    return SParams(freq=freq, data=data, port_names=port_names, files=files)
 
 
 def get_port_map(source: str | Path | dict) -> dict[int, str]:

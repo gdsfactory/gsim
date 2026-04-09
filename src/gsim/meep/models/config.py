@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 
 class SymmetryEntry(BaseModel):
@@ -333,7 +333,9 @@ class SimConfig(BaseModel):
     diagnostics: DiagnosticsConfig
     symmetries: list[SymmetryEntry]
     split_chunks_evenly: bool = Field(default=False)
-    meep_np: int = Field(default=1, ge=1, description="Recommended MPI process count")
+
+    # Extra hints merged into JSON but excluded from the Pydantic schema.
+    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.
@@ -346,5 +348,8 @@ class SimConfig(BaseModel):
         """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.model_dump(by_alias=True), indent=2))
+        data = self.model_dump(by_alias=True)
+        if self._hints:
+            data.update(self._hints)
+        path.write_text(json.dumps(data, indent=2))
         return path

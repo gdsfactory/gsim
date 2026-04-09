@@ -159,6 +159,29 @@ class TestSParams:
         sp.plot()
         plt.close("all")
 
+    def test_plot_interactive_runs(self, sim_dir: Path) -> None:
+        sp = load_sparams(sim_dir)
+        fig = sp.plot_interactive()
+        assert len(fig.data) == len(sp.keys())
+
+    def test_plot_interactive_labels(self, sim_dir: Path) -> None:
+        sp = load_sparams(sim_dir)
+        fig = sp.plot_interactive()
+        names = [trace.name for trace in fig.data]
+        # 3 ports → S11, S21, S31 etc.
+        assert "S11" in names
+        assert "S21" in names
+
+    def test_plot_interactive_visibility(self, sim_dir: Path) -> None:
+        sp = load_sparams(sim_dir)
+        fig = sp.plot_interactive()
+        # First excitation column (Si1) should be visible
+        for trace in fig.data:
+            if trace.name.endswith("1"):  # S11, S21, S31
+                assert trace.visible is True
+            else:
+                assert trace.visible == "legendonly"
+
 
 class TestLoadSparamsSource:
     """Tests for source resolution (dir, subdir, dict)."""
@@ -202,3 +225,30 @@ class TestGetPortMap:
     def test_legacy_numeric_fallback(self, sim_dir_no_names: Path) -> None:
         pm = get_port_map(sim_dir_no_names)
         assert pm == {1: "p1", 2: "p2"}
+
+
+class TestSParamsSaveLoad:
+    """Tests for SParams save_npz/from_file round-trip."""
+
+    def test_round_trip(self, sim_dir: Path, tmp_path: Path) -> None:
+        sp = load_sparams(sim_dir)
+        out = sp.save_npz(tmp_path / "cached")
+        assert out.suffix == ".npz"
+        assert out.exists()
+
+        loaded = SParams.from_file(out)
+        assert loaded.port_names == sp.port_names
+        assert len(loaded.freq) == len(sp.freq)
+        np.testing.assert_allclose(loaded.freq, sp.freq)
+        for key in sp._data:
+            np.testing.assert_allclose(loaded[key].db, sp[key].db)
+            np.testing.assert_allclose(loaded[key].deg, sp[key].deg)
+
+    def test_adds_npz_suffix(self, sim_dir: Path, tmp_path: Path) -> None:
+        sp = load_sparams(sim_dir)
+        out = sp.save_npz(tmp_path / "no_ext")
+        assert out.name == "no_ext.npz"
+
+    def test_from_file_missing_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            SParams.from_file(tmp_path / "nonexistent.npz")

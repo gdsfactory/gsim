@@ -239,14 +239,21 @@ _COMPONENT_MAP = {
 }
 
 
-def _make_time_cap(cap):
-    """Wrap a numeric time cap as a callable for until_after_sources lists.
+def _make_or_condition(*fns):
+    """Combine stopping conditions with OR logic.
 
-    When until_after_sources receives a list, every element must be callable.
-    This wraps a float (time units) into a function that returns True once
-    ``cap`` time units have elapsed since the first call (i.e. after sources
-    turn off).
+    meep treats lists passed to ``until_after_sources`` as AND (all must
+    be True).  This helper wraps multiple callables into a single function
+    that returns True when ANY condition fires — the intended behaviour
+    for "decay check OR time-cap safety net".
     """
+    def _check(sim_obj):
+        return any(fn(sim_obj) for fn in fns)
+    return _check
+
+
+def _make_time_cap(cap):
+    """Return a callable that fires once *cap* sim-time units have elapsed."""
     _t0 = [None]
     def _check(sim_obj):
         if _t0[0] is None:
@@ -256,12 +263,7 @@ def _make_time_cap(cap):
 
 
 def _make_wall_time_cap(wall_seconds):
-    """Wrap a wall-clock time limit as a callable for until_after_sources lists.
-
-    Returns True once ``wall_seconds`` of real (wall) time have elapsed
-    since the first call.  This provides a safety net orthogonal to any
-    sim-time stopping condition.
-    """
+    """Return a callable that fires once *wall_seconds* of real time have elapsed."""
     _deadline = [None]
     def _check(sim_obj):
         if _deadline[0] is None:
@@ -1110,9 +1112,19 @@ def main():
     verbose_interval = config["verbose_interval"]
     if verbose_interval > 0:
         _wall_start = time.time()
+        _cell_vol = [None]
         def _verbose_print(sim_obj):
             elapsed = time.time() - _wall_start
-            logger.info("t=%.2f | wall=%.1fs", sim_obj.meep_time(), elapsed)
+            if _cell_vol[0] is None:
+                _cell_vol[0] = mp.Volume(
+                    center=sim_obj.geometry_center,
+                    size=sim_obj.cell_size,
+                )
+            energy = sim_obj.field_energy_in_box(box=_cell_vol[0])
+            logger.info(
+                "t=%.2f | wall=%.1fs | energy=%.6e",
+                sim_obj.meep_time(), elapsed, energy,
+            )
         step_funcs.append(mp.at_every(verbose_interval, _verbose_print))
 
     # Animation field capture step function (raw data, no plotting yet)
@@ -1161,11 +1173,10 @@ def main():
             minimum_run_time=min_time,
             maximum_run_time=run_after,
         )
+        cond = dft_fn
         if wall_time_max > 0:
-            conds = [dft_fn, _make_wall_time_cap(wall_time_max)]
-            sim.run(*step_funcs, until_after_sources=conds)
-        else:
-            sim.run(*step_funcs, until_after_sources=dft_fn)
+            cond = _make_or_condition(dft_fn, _make_wall_time_cap(wall_time_max))
+        sim.run(*step_funcs, until_after_sources=cond)
     elif stop_mode == "energy_decay":
         dt = stopping["decay_dt"]
         decay_by = stopping["decay_by"]
@@ -1175,10 +1186,10 @@ def main():
             dt, decay_by, run_after,
         )
         energy_fn = mp.stop_when_energy_decayed(dt=dt, decay_by=decay_by)
-        conds = [energy_fn, _make_time_cap(run_after)]
+        parts = [energy_fn, _make_time_cap(run_after)]
         if wall_time_max > 0:
-            conds.append(_make_wall_time_cap(wall_time_max))
-        sim.run(*step_funcs, until_after_sources=conds)
+            parts.append(_make_wall_time_cap(wall_time_max))
+        sim.run(*step_funcs, until_after_sources=_make_or_condition(*parts))
     elif stop_mode == "field_decay":
         dt = stopping["decay_dt"]
         comp_name = stopping["decay_component"]
@@ -1188,20 +1199,19 @@ def main():
         logger.info("Running simulation (field_decay mode: component=%s, dt=%s, "
                      "decay_by=%s, cap=%.1f)...", comp_name, dt, decay_by, run_after)
 
-        # Decay condition + numeric time cap (list = OR logic, first wins)
         decay_fn = mp.stop_when_fields_decayed(dt, comp, monitor_pt, decay_by)
-        conds = [decay_fn, _make_time_cap(run_after)]
+        parts = [decay_fn, _make_time_cap(run_after)]
         if wall_time_max > 0:
-            conds.append(_make_wall_time_cap(wall_time_max))
-        sim.run(*step_funcs, until_after_sources=conds)
+            parts.append(_make_wall_time_cap(wall_time_max))
+        sim.run(*step_funcs, until_after_sources=_make_or_condition(*parts))
     else:
         logger.info("Running simulation (until_after_sources=%.1f)...", run_after)
         if wall_time_max > 0:
-            conds = [
+            cond = _make_or_condition(
                 _make_time_cap(run_after),
                 _make_wall_time_cap(wall_time_max),
-            ]
-            sim.run(*step_funcs, until_after_sources=conds)
+            )
+            sim.run(*step_funcs, until_after_sources=cond)
         else:
             sim.run(*step_funcs, until_after_sources=run_after)
 
