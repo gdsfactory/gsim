@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
     from gsim.common import Geometry, LayerStack
+    from gsim.palace.results import SParams
 
 logger = logging.getLogger(__name__)
 
@@ -1253,7 +1254,7 @@ class PalaceSimMixin:
         num_processes: int = 1,
         num_threads: int | None = None,
         verbose: bool = True,
-    ) -> dict[str, Path]:
+    ) -> SParams | dict[str, Path]:
         """Run simulation locally using Palace.
 
         Requires mesh() and write_config() to be called first.
@@ -1274,7 +1275,10 @@ class PalaceSimMixin:
             verbose: Print progress messages
 
         Returns:
-            Dict mapping result filenames to local paths
+            Parsed Palace result object (``SParams``) when ``port-S.csv`` is
+            present, matching :meth:`run` behavior. Falls back to a
+            ``dict[str, Path]`` mapping filenames to local paths when S-params
+            are unavailable.
 
         Raises:
             ValueError: If output_dir not set or Palace not configured
@@ -1445,11 +1449,20 @@ class PalaceSimMixin:
         if verbose:
             logger.info("Results saved to %s", postpro_dir)
 
-        return {
+        files = {
             file.name: file
             for file in postpro_dir.iterdir()
             if file.is_file() and not file.name.startswith(".")
         }
+
+        # Match cloud run() behavior for Palace: return parsed SParams when
+        # possible, else fall back to raw files dict.
+        from gsim.palace.results import load_sparams
+
+        try:
+            return load_sparams(files)
+        except FileNotFoundError:
+            return files
 
     # -------------------------------------------------------------------------
     # Port methods
