@@ -492,6 +492,210 @@ def build_monitors(config, sim):
 
 
 # ---------------------------------------------------------------------------
+# Fiber source: Gaussian beam + incident flux
+# ---------------------------------------------------------------------------
+
+def build_fiber_monitor(config, sim):
+    """Build a fiber mode monitor for reciprocal coupling measurement.
+
+    Creates a horizontal mode monitor at the fiber position above (or
+    below) the grating. The runner will later call
+    ``get_eigenmode_coefficients`` on this monitor with an oblique
+    kpoint matching the fiber angle to extract the coupling coefficient.
+
+    Returns:
+        meep ModeMonitor object
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    df = fdtd["df"]
+    nfreq = fdtd["num_freqs"]
+    src_cfg = config["source"]
+    position = src_cfg["position"]
+    z_position = src_cfg["z_position"]
+    domain = config["domain"]
+    dpml = domain["dpml"]
+
+    sx = sim.cell_size.x - 2 * dpml
+    sy = sim.cell_size.y - 2 * dpml
+
+    center = mp.Vector3(position[0], position[1], z_position)
+    size = mp.Vector3(sx, sy, 0)
+
+    fiber_mon = sim.add_mode_monitor(
+        fcen, df, nfreq,
+        mp.ModeRegion(center=center, size=size),
+    )
+    return fiber_mon
+
+
+def _get_n_at_z(config, z):
+    """Find the refractive index of the dielectric region at height z.
+
+    Walks through the dielectrics list in the config and returns
+    the refractive index of the first region that contains z.
+    Falls back to 1.0 (air) if no region contains z.
+    """
+    materials = config.get("materials", {})
+    for diel in config.get("dielectrics", []):
+        if diel["zmin"] <= z <= diel["zmax"]:
+            mat_name = diel["material"]
+            mat = materials.get(mat_name)
+            if mat and "refractive_index" in mat:
+                return mat["refractive_index"]
+    return 1.0
+
+
+def extract_fiber_coupling(config, sim, monitors, fiber_monitor):
+    """Extract fiber coupling via reciprocal eigenmode decomposition.
+
+    An EigenModeSource at the waveguide port launches light toward the
+    grating. This function measures:
+
+    1. The incident eigenmode coefficient at the source port (for
+       normalization).
+    2. The coupling into the fiber mode at the fiber monitor plane
+       using ``get_eigenmode_coefficients`` with ``direction=NO_DIRECTION``
+       and an oblique kpoint matching the fiber angle (gplugins approach).
+
+    CE = |alpha_fiber|^2 / |alpha_incident|^2
+
+    Returns:
+        (ce_params, debug_data) tuple
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    nfreq = fdtd["num_freqs"]
+    df = fdtd["df"]
+    freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
+
+    src_cfg = config["source"]
+    theta_deg = src_cfg["angle_theta"]
+    phi_deg = src_cfg["angle_phi"]
+    direction = src_cfg["direction"]
+    z_position = src_cfg["z_position"]
+
+    # --- Incident coefficient at waveguide source port ---
+    source_port = None
+    for p in config["ports"]:
+        if p["is_source"]:
+            source_port = p
+            break
+    if source_port is None:
+        logger.error("No source port found for fiber coupling extraction")
+        return {}, {}
+
+    src_kp = _port_kpoint(source_port)
+    src_ob = sim.get_eigenmode_coefficients(
+        monitors[source_port["name"]], [1], eig_parity=mp.NO_PARITY,
+        kpoint_func=lambda f, n, kp=src_kp: kp,
+    )
+    src_dir = source_port["direction"]
+    # Incoming direction for the source port
+    in_idx = 0 if src_dir == "+" else 1
+    incident_coeffs = src_ob.alpha[0, :, in_idx]
+
+    # --- Fiber mode kpoint ---
+    theta = math.radians(theta_deg)
+    phi = math.radians(phi_deg)
+    n_clad = _get_n_at_z(config, z_position)
+    logger.info("Fiber monitor n_clad=%.3f at z=%.3f", n_clad, z_position)
+
+    # k-direction for the fiber mode (unit vector)
+    if direction == "down":
+        kx = math.sin(theta) * math.cos(phi)
+        ky = math.sin(theta) * math.sin(phi)
+        kz = -math.cos(theta)
+    else:
+        kx = math.sin(theta) * math.cos(phi)
+        ky = math.sin(theta) * math.sin(phi)
+        kz = math.cos(theta)
+
+    # Scale kpoint by fcen * n_clad (gplugins convention)
+    fiber_kpoint = mp.Vector3(kx, ky, kz) * (fcen * n_clad)
+
+    # --- Eigenmode decomposition at fiber monitor ---
+    fiber_ob = sim.get_eigenmode_coefficients(
+        fiber_monitor, [1],
+        eig_parity=mp.NO_PARITY,
+        direction=mp.NO_DIRECTION,
+        kpoint_func=lambda f, n, kp=fiber_kpoint: kp,
+    )
+
+    # With NO_DIRECTION, pick the coefficient with larger magnitude
+    a0 = fiber_ob.alpha[0, :, 0]
+    a1 = fiber_ob.alpha[0, :, 1]
+    fiber_alpha = np.where(np.abs(a0) >= np.abs(a1), a0, a1)
+
+    debug_data = {
+        "incident_coefficients": {
+            "port": source_port["name"],
+            "alpha_mag": [float(abs(c)) for c in incident_coeffs],
+        },
+        "fiber_coefficients": {
+            "alpha_0_mag": [float(abs(a)) for a in a0],
+            "alpha_1_mag": [float(abs(a)) for a in a1],
+            "alpha_used_mag": [float(abs(a)) for a in fiber_alpha],
+            "n_clad": n_clad,
+            "kpoint": [float(fiber_kpoint.x), float(fiber_kpoint.y),
+                       float(fiber_kpoint.z)],
+        },
+        "eigenmode_info": {},
+    }
+
+    # --- CE = |alpha_fiber|^2 / |alpha_incident|^2 ---
+    ce_params = {}
+    ce = np.zeros(nfreq)
+    for fi in range(nfreq):
+        if abs(incident_coeffs[fi]) > 0:
+            ce[fi] = float(
+                abs(fiber_alpha[fi]) ** 2 / abs(incident_coeffs[fi]) ** 2
+            )
+    ce_params["fiber"] = ce
+
+    debug_data["eigenmode_info"]["fiber"] = {
+        "alpha_mag": [float(abs(a)) for a in fiber_alpha],
+        "ce": [float(c) for c in ce],
+    }
+
+    logger.info(
+        "Fiber CE at center freq: %.4e (%.2f dB)",
+        ce[nfreq // 2],
+        10 * np.log10(max(ce[nfreq // 2], 1e-30)),
+    )
+
+    return ce_params, debug_data
+
+
+def save_ce_results(config, ce_params, output_path="coupling_efficiency.csv"):
+    """Save coupling efficiency to CSV.  Only rank 0 writes."""
+    if not mp.am_master():
+        return
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    df = fdtd["df"]
+    nfreq = fdtd["num_freqs"]
+
+    freqs = np.linspace(fcen - df / 2, fcen + df / 2, nfreq)
+    wavelengths = 1.0 / freqs
+
+    port_names = sorted(ce_params.keys())
+    fieldnames = ["wavelength"] + port_names
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for i, wl in enumerate(wavelengths):
+            row = {"wavelength": f"{wl:.6f}"}
+            for name in port_names:
+                row[name] = f"{float(ce_params[name][i]):.8f}"
+            writer.writerow(row)
+
+    logger.info("Coupling efficiency saved to %s", output_path)
+
+
+# ---------------------------------------------------------------------------
 # S-parameter extraction
 # ---------------------------------------------------------------------------
 
@@ -699,6 +903,8 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
             "stopping_mode": stopping["mode"],
         },
         "eigenmode_info": debug_data.get("eigenmode_info", {}),
+        "incident_flux": debug_data.get("incident_flux", []),
+        "incident_flux_raw": debug_data.get("incident_flux_raw", []),
         "incident_coefficients": debug_data.get("incident_coefficients", {}),
         "raw_coefficients": debug_data.get("raw_coefficients", {}),
         "power_conservation": debug_data.get("power_conservation", []),
@@ -817,29 +1023,139 @@ def save_field_snapshot(sim, config, cell_center):
         logger.warning("Field snapshot failed: %s", e)
 
 
-def save_animation_field(sim, xy_plane, frame_counter):
-    """Save raw 2D field data during time-stepping (no plotting).
+def save_animation_field(sim, anim_plane, frame_counter, plane_id="xy"):
+    """Save animation frame via MEEP's native HDF5 output (MPI-safe).
 
-    Saves a compressed .npz with the Ey field array and timestamp.
-    Rendering with a globally fixed colorbar happens after sim.run().
+    Uses ``mp.output_efield_y`` with ``mp.in_volume`` which is
+    properly MPI-collective without the ``get_array`` vol-mismatch
+    bug on cross-section planes.  HDF5 files are rendered to PNG
+    after ``sim.run()`` completes.
 
     Returns:
         Incremented frame counter.
     """
-    field_data = np.real(sim.get_array(vol=xy_plane, component=mp.Ey))
+    os.makedirs("frames", exist_ok=True)
+    # MEEP's output functions handle MPI natively
+    mp.output_efield_y(sim, mp.Volume(
+        center=anim_plane.center, size=anim_plane.size,
+    ))
+    # MEEP writes ey-TTTTTT.TT.h5 — rename to our naming convention
     t = sim.meep_time()
     if mp.am_master():
-        os.makedirs("frames", exist_ok=True)
-        np.savez_compressed(
-            f"frames/meep_field_{frame_counter:04d}.npz",
-            field=field_data,
-            time=t,
-        )
+        # Find the most recently written h5 file
+        import glob
+        h5_files = sorted(glob.glob("ey-*.h5"), key=os.path.getmtime)
+        if h5_files:
+            latest = h5_files[-1]
+            dest = f"frames/field_{frame_counter:04d}.h5"
+            os.rename(latest, dest)
     return frame_counter + 1
 
 
-def render_animation_frames(eps_data, extent):
-    """Render saved field .npz files into PNGs with fixed global colorbar.
+def render_h5_animation_frames(plane_id="xy"):
+    """Render HDF5 field data to PNG frames after simulation completes.
+
+    Reads per-step .h5 files saved by ``save_animation_field`` and
+    renders them with a globally consistent colorbar.
+    """
+    if not HAS_MATPLOTLIB or not mp.am_master():
+        return
+    import glob
+
+    try:
+        import h5py
+    except ImportError:
+        logger.warning("h5py not available — skipping animation frame rendering")
+        return
+
+    h5_files = sorted(glob.glob("frames/field_*.h5"))
+    if not h5_files:
+        logger.warning("No HDF5 field data found for animation")
+        return
+
+    # First pass: find global min/max for consistent colorbar
+    vmax = 0
+    for path in h5_files:
+        with h5py.File(path, "r") as hf:
+            key = list(hf.keys())[0]
+            data = hf[key][:]
+            vmax = max(vmax, np.max(np.abs(data)))
+
+    if vmax == 0:
+        vmax = 1.0
+
+    # Second pass: render frames
+    for i, path in enumerate(h5_files):
+        with h5py.File(path, "r") as hf:
+            key = list(hf.keys())[0]
+            data = hf[key][:]
+
+        fig, ax = plt.subplots(figsize=(12, 4))
+        im = ax.imshow(
+            data.T if data.ndim == 2 else data.squeeze().T,
+            origin="lower", cmap="RdBu_r",
+            vmin=-vmax, vmax=vmax, aspect="auto",
+        )
+        ax.set_title(f"Ey ({plane_id.upper()})  frame {i}")
+        plt.colorbar(im, ax=ax, label="Ey")
+        fig.savefig(
+            f"frames/meep_frame_{i:04d}.png",
+            dpi=100, bbox_inches="tight",
+        )
+        plt.close(fig)
+
+    logger.info("Rendered %d animation frames from HDF5 data", len(h5_files))
+
+
+def consolidate_animation_data(eps_data, extent, plane="xy"):
+    """Consolidate per-frame .npz files into a single meep_animation_data.npz.
+
+    Loads all per-frame field snapshots, bundles them with the epsilon
+    background and extent into one file, then removes the per-frame files.
+
+    Returns:
+        Path to the consolidated file, or None if no frames found.
+    """
+    import glob
+
+    npz_files = sorted(glob.glob("frames/meep_field_*.npz"))
+    if not npz_files:
+        logger.warning("No field data files found to consolidate")
+        return None
+
+    fields = []
+    times = []
+    for path in npz_files:
+        d = np.load(path)
+        fields.append(d["field"])
+        times.append(float(d["time"]))
+
+    np.savez_compressed(
+        "meep_animation_data.npz",
+        fields=np.array(fields),
+        times=np.array(times),
+        eps_data=eps_data,
+        extent=np.array(extent),
+        plane=plane,
+    )
+
+    # Clean up per-frame intermediates
+    for path in npz_files:
+        os.remove(path)
+    # Remove frames dir if empty
+    try:
+        os.rmdir("frames")
+    except OSError:
+        pass
+
+    logger.info(
+        "Consolidated %d frames into meep_animation_data.npz", len(npz_files)
+    )
+    return "meep_animation_data.npz"
+
+
+def render_animation_frames(anim_data_path="meep_animation_data.npz"):
+    """Render frames from consolidated .npz into PNGs for MP4 compilation.
 
     Two-pass: first finds the global field maximum across all frames,
     then renders every frame with the same vmin/vmax so field decay is
@@ -847,47 +1163,48 @@ def render_animation_frames(eps_data, extent):
 
     Call only on master rank after sim.run().
     """
-    import glob
-
     if not HAS_MATPLOTLIB:
         logger.warning(
-            "matplotlib not available, .npz field files kept but not rendered"
+            "matplotlib not available, animation data kept in .npz"
         )
         return
 
-    npz_files = sorted(glob.glob("frames/meep_field_*.npz"))
-    if not npz_files:
-        logger.warning("No field data files found to render")
+    if not os.path.exists(anim_data_path):
+        logger.warning("No animation data file found: %s", anim_data_path)
         return
 
-    # Pass 1 — global max
-    global_max = 0.0
-    for path in npz_files:
-        d = np.load(path)
-        global_max = max(global_max, float(np.max(np.abs(d["field"]))))
+    data = np.load(anim_data_path)
+    fields = data["fields"]
+    times = data["times"]
+    eps_data = data["eps_data"]
+    extent = data["extent"].tolist()
+    plane = str(data["plane"])
+
+    n_frames = len(fields)
+    global_max = float(np.max(np.abs(fields)))
     if global_max == 0:
         global_max = 1.0
 
     logger.info(
         "Rendering %d frames (Ey global max = %.4g) ...",
-        len(npz_files), global_max,
+        n_frames, global_max,
     )
 
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    # Pass 2 — render each frame
-    for i, path in enumerate(npz_files):
-        d = np.load(path)
-        field = d["field"]
-        t = float(d["time"])
+    xlabel = "x (um)"
+    ylabel = "z (um)" if plane == "xz" else "y (um)"
+
+    os.makedirs("frames", exist_ok=True)
+    for i in range(n_frames):
+        field = fields[i]
+        t = float(times[i])
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 4))
-        # Epsilon background (grayscale)
         ax.imshow(
             eps_data.T, origin="lower", extent=extent,
             cmap="binary", interpolation="none",
         )
-        # Field overlay with fixed colorbar
         im = ax.imshow(
             field.T, origin="lower", extent=extent,
             cmap="RdBu", interpolation="spline36", alpha=0.8,
@@ -896,27 +1213,25 @@ def render_animation_frames(eps_data, extent):
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="4%", pad=0.06)
         fig.colorbar(im, cax=cax, label="Ey")
-        ax.set_title(f"Ey  t={t:.2f}")
-        ax.set_xlabel("x (um)")
-        ax.set_ylabel("y (um)")
+        ax.set_title(f"Ey ({plane.upper()})  t={t:.2f}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         fig.tight_layout()
         fig.savefig(f"frames/meep_frame_{i:04d}.png", dpi=150)
         plt.close(fig)
 
-    # Clean up .npz intermediates
-    for path in npz_files:
-        os.remove(path)
-
-    logger.info("Rendered %d frames with fixed colorbar", len(npz_files))
+    logger.info("Rendered %d frames with fixed colorbar", n_frames)
 
 
 def compile_animation_mp4(fps=15):
     """Stitch meep_frame_*.png into meep_animation.mp4 via ffmpeg.
 
-    Falls back gracefully if ffmpeg is not available — frame PNGs
-    are still kept as individual files.
+    On success, removes the intermediate frame PNGs (raw data is
+    preserved in meep_animation_data.npz).  Falls back gracefully
+    if ffmpeg is not available.
     """
     import glob
+    import shutil
     import subprocess
 
     frames = sorted(glob.glob("frames/meep_frame_*.png"))
@@ -939,11 +1254,13 @@ def compile_animation_mp4(fps=15):
             capture_output=True,
         )
         logger.info("Saved meep_animation.mp4")
+        # Clean up intermediate PNGs — raw data lives in .npz
+        shutil.rmtree("frames", ignore_errors=True)
     except FileNotFoundError:
-        logger.warning("ffmpeg not found — frame PNGs saved but MP4 not created")
+        logger.warning("ffmpeg not found — frame PNGs kept in frames/")
     except subprocess.CalledProcessError as e:
         logger.warning("ffmpeg failed: %s", e.stderr.decode()[:500])
-        logger.info("Frame PNGs are still available in frames/")
+        logger.info("Frame PNGs kept in frames/")
 
 
 def save_epsilon_raw(sim, config, cell_center):
@@ -991,12 +1308,8 @@ def main():
     # Background slabs first, then patterned prisms (later objects take precedence)
     geometry = background_slabs + geometry
 
-    logger.info("Building sources...")
-    sources = build_sources(config)
-
-    if not sources:
-        logger.error("No source port found in config")
-        sys.exit(1)
+    source_type = config["source"].get("source_type", "mode")
+    logger.info("Source type: %s", source_type)
 
     resolution = config["resolution"]["pixels_per_um"]
     fdtd = config["fdtd"]
@@ -1025,6 +1338,15 @@ def main():
     dpml = domain["dpml"]
     margin_xy = domain["margin_xy"]
 
+    # For fiber source, ensure the cell extends to include the fiber monitor z
+    if source_type == "fiber":
+        mon_z = config["source"]["z_position"]
+        mon_dir = config["source"]["direction"]
+        if mon_dir == "down" and mon_z > z_max:
+            z_max = mon_z + 0.5  # 0.5 um margin above fiber monitor
+        elif mon_dir == "up" and mon_z < z_min:
+            z_min = mon_z - 0.5
+
     # XY: margin_xy is gap between geometry bbox and PML
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
     cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
@@ -1036,6 +1358,14 @@ def main():
         (bbox_top + bbox_bottom) / 2,
         (z_max + z_min) / 2,
     )
+
+    # Build eigenmode sources — same for both mode and fiber (reciprocal) paths
+    logger.info("Building eigenmode sources...")
+    sources = build_sources(config)
+
+    if not sources:
+        logger.error("No source found in config")
+        sys.exit(1)
 
     logger.info("Cell size: %.2f x %.2f x %.2f um", cell_x, cell_y, cell_z)
     logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
@@ -1079,6 +1409,9 @@ def main():
     spx_tol = accuracy["subpixel_tol"]
     if spx_tol != 1e-4:
         sim_kwargs["subpixel_tol"] = spx_tol
+    # Suppress meep's C++ geometry dump (vertex lists for every prism).
+    # All important info is already logged by this script.
+    mp.verbosity(0)
     sim = mp.Simulation(**sim_kwargs)
 
     # --- Diagnostics & preview mode ---
@@ -1103,6 +1436,12 @@ def main():
 
     logger.info("Building monitors...")
     monitors = build_monitors(config, sim)
+
+    # For fiber source, build the fiber mode monitor (reciprocal method)
+    fiber_monitor = None
+    if source_type == "fiber":
+        logger.info("Building fiber mode monitor (reciprocal)...")
+        fiber_monitor = build_fiber_monitor(config, sim)
 
     stopping = config["stopping"]
     run_after = stopping["run_after_sources"]
@@ -1133,24 +1472,50 @@ def main():
     _frame_counter = [0]  # mutable container for closure
     _anim_plane = None
 
+    _anim_plane_id = diagnostics.get("animation_plane", "xy")
     if diag_animation:
         z_min_anim = min(l["zmin"] for l in config["layer_stack"])
         z_max_anim = max(l["zmax"] for l in config["layer_stack"])
         z_core_anim = (z_min_anim + z_max_anim) / 2
-        _anim_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
+
+        # Snap coordinates to grid and shrink slightly to avoid MPI
+        # chunk boundary issues with get_array on cross-section planes.
+        dx = 1.0 / resolution
+        def _snap(val):
+            return round(val * resolution) / resolution
+
+        if _anim_plane_id == "xz":
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(
+                    _snap(cell_center.x), _snap(cell_center.y),
+                    _snap(cell_center.z),
+                ),
+                size=mp.Vector3(
+                    sim.cell_size.x - 2 * dx, 0,
+                    sim.cell_size.z - 2 * dx,
+                ),
+            )
+        else:
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(
+                    _snap(cell_center.x), _snap(cell_center.y),
+                    _snap(z_core_anim),
+                ),
+                size=mp.Vector3(
+                    sim.cell_size.x - 2 * dx,
+                    sim.cell_size.y - 2 * dx, 0,
+                ),
+            )
 
         def _capture_frame(sim_obj):
             _frame_counter[0] = save_animation_field(
-                sim_obj, _anim_plane, _frame_counter[0]
+                sim_obj, _anim_plane, _frame_counter[0], _anim_plane_id
             )
 
         step_funcs.append(mp.at_every(animation_interval, _capture_frame))
         logger.info(
-            "Animation: saving field data every %s time units",
-            animation_interval,
+            "Animation (%s plane): saving field data every %s time units",
+            _anim_plane_id, animation_interval,
         )
 
     stop_mode = stopping["mode"]
@@ -1227,29 +1592,33 @@ def main():
     if diag_fields:
         save_field_snapshot(sim, config, cell_center)
 
-    if diag_animation and _frame_counter[0] > 0 and _anim_plane is not None:
-        # get_array is collective — all ranks must call
-        eps_data = sim.get_array(vol=_anim_plane, component=mp.Dielectric)
+    if diag_animation and _frame_counter[0] > 0:
+        # Render HDF5 field data to PNG frames, then compile MP4
+        render_h5_animation_frames(plane=_anim_plane_id)
         if mp.am_master():
-            _ctr = _anim_plane.center
-            _sz = _anim_plane.size
-            _extent = [
-                _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
-                _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
-            ]
-            render_animation_frames(eps_data, _extent)
             compile_animation_mp4()
 
-    logger.info("Extracting S-parameters...")
-    s_params, debug_data = extract_s_params(config, sim, monitors)
+    if source_type == "fiber" and fiber_monitor is not None:
+        logger.info("Extracting fiber coupling (reciprocal method)...")
+        ce_params, debug_data = extract_fiber_coupling(
+            config, sim, monitors, fiber_monitor
+        )
+        debug_data["_meep_time"] = sim.meep_time()
+        debug_data["_timesteps"] = sim.timestep()
+        debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
 
-    # Attach simulation metadata to debug_data
-    debug_data["_meep_time"] = sim.meep_time()
-    debug_data["_timesteps"] = sim.timestep()
-    debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
+        save_ce_results(config, ce_params)
+        save_debug_log(config, {}, debug_data, wall_seconds=wall_seconds)
+    else:
+        logger.info("Extracting S-parameters...")
+        s_params, debug_data = extract_s_params(config, sim, monitors)
+        debug_data["_meep_time"] = sim.meep_time()
+        debug_data["_timesteps"] = sim.timestep()
+        debug_data["_cell_size"] = [cell_x, cell_y, cell_z]
 
-    save_results(config, s_params)
-    save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
+        save_results(config, s_params)
+        save_debug_log(config, s_params, debug_data, wall_seconds=wall_seconds)
+
     logger.info("Done!")
 
 

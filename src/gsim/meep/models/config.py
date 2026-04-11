@@ -8,9 +8,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    PrivateAttr,
+    Tag,
+    computed_field,
+)
 
 
 class SymmetryEntry(BaseModel):
@@ -111,7 +119,7 @@ class StoppingConfig(BaseModel):
 
 
 class SourceConfig(BaseModel):
-    """Source excitation configuration.
+    """Eigenmode source excitation configuration.
 
     Controls the Gaussian source bandwidth and which port is excited.
     When ``bandwidth`` is ``None`` (auto), ``compute_fwidth`` returns a
@@ -122,6 +130,10 @@ class SourceConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    source_type: Literal["mode"] = Field(
+        default="mode",
+        description="Source type discriminator.",
+    )
     bandwidth: float | None = Field(
         default=None,
         description=(
@@ -159,6 +171,39 @@ class SourceConfig(BaseModel):
             wl_max = wl_center + self.bandwidth / 2
             return 1.0 / wl_min - 1.0 / wl_max
         return max(3 * monitor_df, 0.2 * fcen)
+
+
+class FiberSourceConfig(BaseModel):
+    """Reciprocal fiber coupling config for grating coupler simulation.
+
+    Sent as JSON to the cloud runner. The runner builds an
+    ``mp.EigenModeSource`` at the waveguide ``port`` and a fiber
+    mode monitor at ``z_position``. By reciprocity, the coupling
+    into the fiber mode equals the fiber→waveguide coupling.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    source_type: Literal["fiber"] = Field(
+        default="fiber",
+        description="Source type discriminator.",
+    )
+    port: str | None = Field(
+        default=None,
+        description="Waveguide port for EigenModeSource. None = auto (first port).",
+    )
+    beam_waist: float = Field(gt=0, description="Fiber mode waist radius in um")
+    angle_theta: float = Field(
+        ge=0, lt=90, description="Fiber angle from vertical (deg)"
+    )
+    angle_phi: float = Field(description="Azimuthal angle (deg)")
+    polarization: Literal["TE", "TM"]
+    direction: Literal["down", "up"]
+    position: list[float] = Field(description="Fiber center [x, y] above grating")
+    z_position: float = Field(
+        description="Absolute z-coordinate of fiber monitor plane"
+    )
+    fwidth: float = Field(gt=0, description="Source fwidth in frequency units")
 
 
 class WavelengthConfig(BaseModel):
@@ -251,6 +296,10 @@ class DiagnosticsConfig(BaseModel):
         gt=0,
         description="MEEP time units between animation frames",
     )
+    animation_plane: Literal["xy", "xz"] = Field(
+        default="xy",
+        description="Cross-section plane for field animation: 'xy' or 'xz'",
+    )
     preview_only: bool = Field(
         description="Init sim and save geometry diagnostics, skip FDTD run",
     )
@@ -322,7 +371,11 @@ class SimConfig(BaseModel):
     ports: list[PortData]
     materials: dict[str, MaterialData]
     wavelength: WavelengthConfig = Field(serialization_alias="fdtd")
-    source: SourceConfig
+    source: Annotated[
+        Annotated[SourceConfig, Tag("mode")]
+        | Annotated[FiberSourceConfig, Tag("fiber")],
+        Discriminator("source_type"),
+    ]
     stopping: StoppingConfig
     resolution: ResolutionConfig
     domain: DomainConfig

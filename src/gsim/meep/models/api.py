@@ -90,6 +90,80 @@ class ModeSource(BaseModel):
         return self
 
 
+class FiberSource(BaseModel):
+    """Fiber-to-chip coupling via the reciprocal method.
+
+    Simulates grating coupler coupling efficiency by launching an
+    eigenmode source from the waveguide port and measuring coupling
+    into a fiber-like mode above the grating. By reciprocity, this
+    gives the same S-parameters as fiber→waveguide.
+
+    The fiber monitor parameters (angle_theta, beam_waist, position,
+    z_offset) define where and how the fiber mode is measured above
+    the chip, not a physical source.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    port: str | None = Field(
+        default=None,
+        description="Waveguide port to excite. None = auto-select first port.",
+    )
+    wavelength: float = Field(
+        default=1.55,
+        gt=0,
+        description="Center wavelength in um",
+    )
+    wavelength_span: float = Field(
+        default=0.1,
+        ge=0,
+        description="Wavelength span of the measurement frequency grid in um.",
+    )
+    num_freqs: int = Field(
+        default=11,
+        ge=1,
+        description="Number of frequency points",
+    )
+    beam_waist: float = Field(
+        default=5.2,
+        gt=0,
+        description="Gaussian beam waist radius in um (SMF-28 MFD/2 ≈ 5.2)",
+    )
+    angle_theta: float = Field(
+        default=10.0,
+        ge=0,
+        lt=90,
+        description="Fiber angle from vertical in degrees",
+    )
+    angle_phi: float = Field(
+        default=0.0,
+        description="Azimuthal angle in degrees (0 = tilted in XZ plane)",
+    )
+    polarization: Literal["TE", "TM"] = Field(
+        default="TE",
+        description="Fiber polarization",
+    )
+    position: list[float] | None = Field(
+        default=None,
+        description="Fiber center [x, y] above grating. None = auto (bbox center).",
+    )
+    z_offset: float = Field(
+        default=1.0,
+        gt=0,
+        description="Distance above core top to place fiber monitor plane (um)",
+    )
+    direction: Literal["down", "up"] = Field(
+        default="down",
+        description="Fiber direction ('down' = fiber above chip looking down)",
+    )
+
+    def __call__(self, **kwargs: Any) -> FiberSource:
+        """Update fields in place. Returns self for chaining."""
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Domain
 # ---------------------------------------------------------------------------
@@ -331,5 +405,6 @@ class FDTD(BaseModel):
     save_epsilon_raw: bool = Field(default=False)
     save_animation: bool = Field(default=False)
     animation_interval: float = Field(default=0.5, gt=0)
+    animation_plane: Literal["xy", "xz"] = Field(default="xy")
     preview_only: bool = Field(default=False)
     verbose_interval: float = Field(default=0, ge=0)

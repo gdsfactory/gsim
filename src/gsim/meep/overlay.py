@@ -56,6 +56,27 @@ class DielectricOverlay:
 
 
 @dataclass(frozen=True)
+class FiberSourceOverlay:
+    """Fiber (Gaussian beam) source metadata for 2D overlay rendering.
+
+    Attributes:
+        position: (x, y) beam center on the chip surface.
+        z_position: Absolute z-coordinate of the source plane.
+        beam_waist: Gaussian beam waist radius in um.
+        angle_theta: Polar angle from vertical in degrees.
+        angle_phi: Azimuthal angle in degrees (0 = tilted in XZ plane).
+        direction: "down" (into chip) or "up".
+    """
+
+    position: tuple[float, float]
+    z_position: float
+    beam_waist: float
+    angle_theta: float
+    angle_phi: float
+    direction: str
+
+
+@dataclass(frozen=True)
 class SimOverlay:
     """Simulation cell metadata for 2D visualization overlays.
 
@@ -65,6 +86,7 @@ class SimOverlay:
         dpml: PML absorber thickness in um.
         ports: List of port overlays for rendering.
         dielectrics: List of background dielectric slabs for rendering.
+        fiber_source: Optional fiber source overlay.
     """
 
     cell_min: tuple[float, float, float]
@@ -72,6 +94,7 @@ class SimOverlay:
     dpml: float
     ports: list[PortOverlay] = field(default_factory=list)
     dielectrics: list[DielectricOverlay] = field(default_factory=list)
+    fiber_source: FiberSourceOverlay | None = None
 
 
 def build_sim_overlay(
@@ -81,6 +104,7 @@ def build_sim_overlay(
     z_span: float | None = None,
     dielectrics: list[dict[str, Any]] | None = None,
     component_bbox: tuple[float, float, float, float] | None = None,
+    fiber_source: FiberSourceOverlay | None = None,
 ) -> SimOverlay:
     """Build a SimOverlay from geometry model, domain config, and port data.
 
@@ -94,6 +118,7 @@ def build_sim_overlay(
             port extension.  When provided, cell XY boundaries are computed from
             this bbox instead of the geometry model bbox (which may include
             extended waveguides).
+        fiber_source: Optional fiber source overlay metadata.
 
     Returns:
         SimOverlay with computed cell boundaries and port overlays.
@@ -161,4 +186,5 @@ def build_sim_overlay(
         dpml=dpml,
         ports=ports,
         dielectrics=diel_overlays,
+        fiber_source=fiber_source,
     )

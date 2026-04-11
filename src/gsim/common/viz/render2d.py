@@ -15,7 +15,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Polygon, Rectangle
+from matplotlib.patches import Circle, FancyArrowPatch, Polygon, Rectangle
 
 from gsim.common.geometry_model import GeometryModel
 
@@ -618,6 +618,11 @@ def _draw_overlay(
     elif y is not None:
         _draw_overlay_xz(ax, cmin, cmax, pml, overlay.ports, y)
 
+    # Draw fiber source overlay
+    fiber = getattr(overlay, "fiber_source", None)
+    if fiber is not None:
+        _draw_fiber_source(ax, fiber, x=x, y=y, z=z)
+
 
 def _draw_overlay_xy(
     ax: plt.Axes,
@@ -844,6 +849,154 @@ def _draw_overlay_xz(
                 color=color,
                 zorder=96,
             )
+
+
+_FIBER_COLOR = (0.2, 0.7, 0.2)  # green
+_FIBER_BEAM_ALPHA = 0.15
+
+
+def _draw_fiber_source(
+    ax: plt.Axes,
+    fiber: Any,
+    *,
+    x: float | None,
+    y: float | None,
+    z: float | None,
+) -> None:
+    """Draw fiber source Gaussian beam indicator on 2D slices.
+
+    - **XZ** (y-slice): beam cone from source plane toward chip
+    - **YZ** (x-slice): beam cone if beam center is near x-slice
+    - **XY** (z-slice): beam footprint circle at the slice z
+    """
+    fx, fy = fiber.position
+    fz = fiber.z_position
+    w0 = fiber.beam_waist
+    theta = np.radians(fiber.angle_theta)
+    phi = np.radians(fiber.angle_phi)
+    sign = -1.0 if fiber.direction == "down" else 1.0
+
+    if y is not None:
+        # XZ view — draw beam if center is near the y-slice
+        if abs(fy - y) > w0:
+            return
+        _draw_fiber_beam_side(ax, fx, fz, w0, theta, phi, sign, axis="xz")
+    elif x is not None:
+        # YZ view — draw beam if center is near the x-slice
+        if abs(fx - x) > w0:
+            return
+        _draw_fiber_beam_side(ax, fy, fz, w0, theta, phi, sign, axis="yz")
+    elif z is not None:
+        # XY view — draw beam footprint circle
+        _draw_fiber_beam_xy(ax, fx, fy, fz, z, w0, theta, phi, sign)
+
+
+def _draw_fiber_beam_side(
+    ax: plt.Axes,
+    h_center: float,
+    z_src: float,
+    w0: float,
+    theta: float,
+    phi: float,
+    sign: float,
+    axis: str = "xz",
+) -> None:
+    """Draw the Gaussian beam cone on XZ or YZ side views."""
+    # Beam propagation length (visual, extends to source z ± some distance)
+    beam_len = 4.0 * w0
+
+    # Direction components: theta is tilt from vertical, phi selects plane
+    phi_comp = np.cos(phi) if axis == "xz" else np.sin(phi)
+    dh = np.sin(theta) * phi_comp
+    dz = sign * np.cos(theta)
+
+    # Beam center line endpoints
+    h0, z0 = h_center, z_src
+    h1 = h0 + dh * beam_len
+    z1 = z0 + dz * beam_len
+
+    # Draw beam envelope (expanding cone)
+    # At source: width = w0, at end: width = w0 * 1.5 (divergence visual)
+    perp_h = -dz  # perpendicular in 2D
+    perp_z = dh
+
+    norm = np.sqrt(perp_h**2 + perp_z**2)
+    if norm > 0:
+        perp_h /= norm
+        perp_z /= norm
+
+    cone = Polygon(
+        [
+            (h0 + perp_h * w0, z0 + perp_z * w0),
+            (h0 - perp_h * w0, z0 - perp_z * w0),
+            (h1 - perp_h * w0 * 1.5, z1 - perp_z * w0 * 1.5),
+            (h1 + perp_h * w0 * 1.5, z1 + perp_z * w0 * 1.5),
+        ],
+        facecolor=(*_FIBER_COLOR, _FIBER_BEAM_ALPHA),
+        edgecolor=(*_FIBER_COLOR, 0.5),
+        linewidth=0.8,
+        zorder=92,
+        label="Fiber source",
+    )
+    ax.add_patch(cone)
+
+    # Central beam axis arrow
+    ax.add_patch(
+        FancyArrowPatch(
+            (h0, z0),
+            (h1, z1),
+            arrowstyle="->",
+            color=_FIBER_COLOR,
+            linewidth=1.5,
+            zorder=93,
+        )
+    )
+
+    # Source plane marker (horizontal line at z_src)
+    ax.plot(
+        [h0 - w0, h0 + w0],
+        [z0, z0],
+        color=_FIBER_COLOR,
+        linewidth=2,
+        linestyle="-",
+        zorder=93,
+    )
+
+
+def _draw_fiber_beam_xy(
+    ax: plt.Axes,
+    fx: float,
+    fy: float,
+    fz: float,
+    z_slice: float,
+    w0: float,
+    theta: float,
+    phi: float,
+    sign: float,
+) -> None:
+    """Draw the Gaussian beam footprint on an XY (z-slice) view."""
+    # Offset the beam center based on propagation from source to slice
+    dz = z_slice - fz
+    if abs(dz) < 1e-6:
+        cx, cy = fx, fy
+    else:
+        # Lateral shift due to tilt
+        cx = fx + dz * np.tan(theta) * np.cos(phi) / sign
+        cy = fy + dz * np.tan(theta) * np.sin(phi) / sign
+
+    ax.add_patch(
+        Circle(
+            (cx, cy),
+            w0,
+            facecolor=(*_FIBER_COLOR, _FIBER_BEAM_ALPHA),
+            edgecolor=_FIBER_COLOR,
+            linewidth=1.5,
+            linestyle="--",
+            zorder=92,
+            label="Fiber source",
+        )
+    )
+    ax.plot(cx, cy, "+", color=_FIBER_COLOR, markersize=8, zorder=93)
 
 
 def _add_pml_rect(
