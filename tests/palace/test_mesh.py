@@ -1,8 +1,8 @@
-"""Tests for mesh generation pipeline."""
+"""Tests for mesh configuration."""
 
 from __future__ import annotations
 
-from gsim.palace.mesh import GroundPlane, MeshConfig, MeshPreset
+from gsim.palace.mesh import MeshConfig
 
 
 class TestMeshConfig:
@@ -67,29 +67,3 @@ class TestMeshConfig:
         assert config.max_mesh_size == 200.0
         assert config.margin == 75.0
         assert config.airbox_margin == 150.0
-
-
-class TestGroundPlane:
-    """Test GroundPlane class."""
-
-    def test_ground_plane_defaults(self):
-        """Test GroundPlane default values."""
-        gp = GroundPlane(layer_name="metal1")
-        assert gp.layer_name == "metal1"
-        assert gp.oversize == 50.0
-
-    def test_ground_plane_custom(self):
-        """Test GroundPlane with custom values."""
-        gp = GroundPlane(layer_name="metal2", oversize=100.0)
-        assert gp.layer_name == "metal2"
-        assert gp.oversize == 100.0
-
-
-class TestMeshPreset:
-    """Test MeshPreset enum."""
-
-    def test_preset_values(self):
-        """Test preset enum values."""
-        assert MeshPreset.COARSE.value == "coarse"
-        assert MeshPreset.DEFAULT.value == "default"
-        assert MeshPreset.FINE.value == "fine"

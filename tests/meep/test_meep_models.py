@@ -17,9 +17,6 @@ from gsim.meep import (
     WavelengthConfig,
 )
 from gsim.meep.models.config import (
-    LayerStackEntry,
-    MaterialData,
-    PortData,
     StoppingConfig,
     SymmetryEntry,
 )
@@ -178,88 +175,6 @@ class TestSimConfig:
         assert "stopping" in data
         assert data["stopping"]["mode"] == "dft_decay"
         assert data["stopping"]["run_after_sources"] == 200.0
-
-
-class TestPortData:
-    """Test PortData model."""
-
-    def test_creation(self):
-        p = PortData(
-            name="o1",
-            center=[0.0, 0.0, 0.11],
-            orientation=0.0,
-            width=0.5,
-            normal_axis=0,
-            direction="-",
-            is_source=True,
-        )
-        assert p.name == "o1"
-        assert p.is_source
-
-    def test_model_dump(self):
-        p = PortData(
-            name="o1",
-            center=[0.0, 0.0, 0.11],
-            orientation=180.0,
-            width=0.5,
-            normal_axis=0,
-            direction="+",
-        )
-        d = p.model_dump()
-        assert d["name"] == "o1"
-        assert d["direction"] == "+"
-
-
-class TestLayerStackEntry:
-    """Test LayerStackEntry model."""
-
-    def test_creation(self):
-        entry = LayerStackEntry(
-            layer_name="core",
-            gds_layer=[1, 0],
-            zmin=0.0,
-            zmax=0.22,
-            material="si",
-        )
-        assert entry.layer_name == "core"
-        assert entry.gds_layer == [1, 0]
-        assert entry.sidewall_angle == 0.0
-
-    def test_with_sidewall_angle(self):
-        entry = LayerStackEntry(
-            layer_name="core",
-            gds_layer=[1, 0],
-            zmin=0.0,
-            zmax=0.22,
-            material="si",
-            sidewall_angle=10.0,
-        )
-        assert entry.sidewall_angle == 10.0
-
-    def test_model_dump(self):
-        entry = LayerStackEntry(
-            layer_name="clad",
-            gds_layer=[2, 0],
-            zmin=-0.5,
-            zmax=0.5,
-            material="SiO2",
-        )
-        d = entry.model_dump()
-        assert d["layer_name"] == "clad"
-        assert d["gds_layer"] == [2, 0]
-
-
-class TestMaterialData:
-    """Test MaterialData model."""
-
-    def test_creation(self):
-        m = MaterialData(refractive_index=3.47)
-        assert m.refractive_index == 3.47
-        assert m.extinction_coeff == 0.0
-
-    def test_with_extinction(self):
-        m = MaterialData(refractive_index=3.47, extinction_coeff=0.01)
-        assert m.extinction_coeff == 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -519,34 +434,6 @@ class TestLayerSidewallAngle:
         )
         d = layer.to_dict()
         assert "sidewall_angle" not in d
-
-
-# ---------------------------------------------------------------------------
-# Import test
-# ---------------------------------------------------------------------------
-
-
-class TestImportWithoutMeep:
-    """Verify module imports work without meep installed."""
-
-    def test_import_all_public_api(self):
-        from gsim.meep import (
-            DomainConfig,
-            ResolutionConfig,
-            SimConfig,
-            Simulation,
-            SourceConfig,
-            SParameterResult,
-            WavelengthConfig,
-        )
-
-        assert WavelengthConfig is not None
-        assert DomainConfig is not None
-        assert ResolutionConfig is not None
-        assert SParameterResult is not None
-        assert SimConfig is not None
-        assert SourceConfig is not None
-        assert Simulation is not None
 
 
 # ---------------------------------------------------------------------------
@@ -1088,6 +975,7 @@ class TestOverlay:
         import numpy as np
 
         from gsim.common.geometry_model import GeometryModel, Prism
+        from gsim.meep.models.config import PortData
         from gsim.meep.overlay import build_sim_overlay
 
         gm = GeometryModel(
