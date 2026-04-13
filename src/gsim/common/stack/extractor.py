@@ -356,7 +356,9 @@ def extract_layer_stack(
         zmax = zmin + thickness
         material = layer_level.material or "unknown"
         gds_layer = get_gds_layer_tuple(layer_level) or (0, 0)
-        layer_type = classify_layer_type(layer_name, material)
+        # Check for explicit layer_type in LayerLevel.info (PDK override)
+        info = getattr(layer_level, "info", None) or {}
+        layer_type = info.get("layer_type") or classify_layer_type(layer_name, material)
         sidewall_angle = getattr(layer_level, "sidewall_angle", 0.0) or 0.0
 
         if layer_type == "substrate" and not include_substrate:
