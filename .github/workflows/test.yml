@@ -20,3 +20,25 @@ jobs:
         run: uv sync --dev --all-extras
       - name: Run tests
         run: uv run pytest
+  test_coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+      - name: Install UV
+        uses: astral-sh/setup-uv@v6
+      - name: Install Just
+        uses: taiki-e/install-action@just
+      - name: Create environment
+        run: uv sync --dev --all-extras
+      - name: Run tests with coverage
+        run: just cov
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
