@@ -51,7 +51,12 @@ def generate_palace_config(
     """
     from gsim.palace.ports.config import PortGeometry
 
-    if simulation_type not in ("driven", "eigenmode", "electrostatics"):
+    if simulation_type not in (
+        "driven",
+        "eigenmode",
+        "electrostatic",
+        "electrostatics",
+    ):
         raise ValueError(f"Unsupported simulation type: {simulation_type}")
 
     # Use driven_config if provided, otherwise fall back to legacy parameters

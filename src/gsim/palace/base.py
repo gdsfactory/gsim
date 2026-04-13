@@ -688,7 +688,7 @@ class PalaceSimMixin:
             raise ValueError("No component set")
 
         # Configure regular ports
-        for port_config in self.ports:
+        for port_config in self.ports or []:
             if self.simulation_type != "driven":
                 port_config.excited = False
             if port_config.name is None:
@@ -731,7 +731,7 @@ class PalaceSimMixin:
                 gf_port.info["capacitance"] = port_config.capacitance
 
         # Configure CPW ports
-        for cpw_config in self.cpw_ports:
+        for cpw_config in self.cpw_ports or []:
             # Find the single gdsfactory port at the signal center
             gf_port = self._find_gf_port(cpw_config.name)
 

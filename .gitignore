@@ -4,6 +4,8 @@ palace-sim-*/
 meep-sim-*/
 sim_*/
 
+uv.lock
+
 # files
 *.c
 *.cover

@@ -34,6 +34,9 @@ ipykernel:
 test:
   uv run pytest -s -n logical --cov-report=term-missing --cov-report=html --cov-report=xml --cov=src/gsim
 
+cov:
+  uv run pytest --cov=gsim --cov-report=term-missing:skip-covered --cov-report=xml
+
 docs:
   uv run mkdocs build
 
