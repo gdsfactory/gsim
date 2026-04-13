@@ -105,7 +105,46 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
 
             processed_in_dim = [e for e in current_group if e.dimtags]
         else:
-            # Keep existing priority-cut logic for dim=2,1,0
+            # --- Pre-step: fragment current-dim entities against higher-dim
+            # entities BEFORE priority cuts.
+            #
+            # The dim=3 fragment can merge floating conductor surfaces that are
+            # coincident with dielectric volume faces, assigning them new tags.
+            # If priority cuts run first (with the old tags), OCC raises
+            # "Unknown entity of dimension N with tag T".  Fragmenting against
+            # the higher-dim entities here refreshes all surface tags so the
+            # subsequent priority cuts operate on valid geometry.
+            if processed_higher_dims:
+                object_dimtags = [dt for e in current_group for dt in e.dimtags]
+                tool_dimtags_hd = [
+                    dt for e in processed_higher_dims for dt in e.dimtags
+                ]
+
+                if object_dimtags and tool_dimtags_hd:
+                    _, out_map = gmsh.model.occ.fragment(
+                        object_dimtags,
+                        tool_dimtags_hd,
+                        removeObject=True,
+                        removeTool=True,
+                    )
+                    gmsh.model.occ.synchronize()
+
+                    idx = 0
+                    for entity in current_group:
+                        new_dimtags: list[tuple[int, int]] = []
+                        for _ in entity.dimtags:
+                            new_dimtags.extend(out_map[idx])
+                            idx += 1
+                        entity.dimtags = list(set(new_dimtags))
+
+                    for entity in processed_higher_dims:
+                        new_dimtags = []
+                        for _ in entity.dimtags:
+                            new_dimtags.extend(out_map[idx])
+                            idx += 1
+                        entity.dimtags = list(set(new_dimtags))
+
+            # Priority cuts among same-dim entities (tags are now fresh).
             for entity in current_group:
                 tool_dimtags = [dt for prev in processed_in_dim for dt in prev.dimtags]
 
@@ -123,7 +162,11 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
                     processed_in_dim.append(entity)
 
         # --- B. Fragment against higher dimensions ---
-        if processed_higher_dims and processed_in_dim:
+        # For dim < 3 this was already done in the pre-step above, so
+        # processed_higher_dims dimtags are already up to date.
+        # For dim == 3 processed_higher_dims is always empty (first iteration),
+        # so this block is effectively a no-op in all cases — kept for clarity.
+        if processed_higher_dims and processed_in_dim and dim == 3:
             object_dimtags = [dt for e in processed_in_dim for dt in e.dimtags]
             tool_dimtags = [dt for e in processed_higher_dims for dt in e.dimtags]
 
@@ -135,7 +178,6 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
             )
             gmsh.model.occ.synchronize()
 
-            # Update tags using the mapping
             idx = 0
             for entity in processed_in_dim:
                 new_dimtags: list[tuple[int, int]] = []

@@ -314,9 +314,12 @@ def add_metals(
                     # Defer shell extraction until after removeAllDuplicates
                     _conductor_volumes.setdefault(layer_name, []).append(volumetag)
 
-    # Record bounding boxes of via volumes BEFORE removeAllDuplicates
-    # so we can re-identify them after tags get renumbered.
+    # Record bounding boxes of BOTH via and conductor volumes BEFORE
+    # removeAllDuplicates. That call renumbers ALL entity tags globally —
+    # not just the ones it merges — so original tags are never trustworthy
+    # afterwards. We re-identify volumes by bbox after the call.
     _via_bboxes: dict[str, list[tuple[float, ...]]] = {}
+    _conductor_bboxes: dict[str, list[tuple[float, ...]]] = {}
     kernel.synchronize()
     for layer_name, tag_info in metal_tags.items():
         for vtag in tag_info["volumes"]:
@@ -324,35 +327,65 @@ def add_metals(
                 bbox = kernel.getBoundingBox(3, vtag)
                 _via_bboxes.setdefault(layer_name, []).append(bbox)
 
+    for layer_name, vol_tags in _conductor_volumes.items():
+        for vtag in vol_tags:
+            try:
+                bbox = kernel.getBoundingBox(3, vtag)
+                _conductor_bboxes.setdefault(layer_name, []).append(bbox)
+            except Exception:
+                logger.debug(
+                    "Could not get bbox for conductor volume %d, skipping", vtag
+                )
+
     kernel.removeAllDuplicates()
     kernel.synchronize()
 
-    # Re-identify via volumes by matching bounding boxes
+    # Build a single bbox lookup for all post-dedup volumes (avoids O(n²) calls).
     all_vols = kernel.getEntities(3)
+    all_vol_bboxes: dict[int, tuple] = {}
+    for _, vtag in all_vols:
+        try:
+            all_vol_bboxes[vtag] = kernel.getBoundingBox(3, vtag)
+        except Exception:
+            logger.debug("Could not get bbox for volume %d after dedup", vtag)
+
+    # Re-identify via volumes by matching bounding boxes.
     for layer_name, bboxes in _via_bboxes.items():
         metal_tags[layer_name]["volumes"] = []
         for target_bbox in bboxes:
-            for _, vtag in all_vols:
-                try:
-                    bbox = kernel.getBoundingBox(3, vtag)
-                except Exception:
-                    logger.debug("Could not get bbox for volume %d, skipping", vtag)
-                    continue
+            for vtag, bbox in all_vol_bboxes.items():
                 if all(
                     abs(a - b) < 0.01 for a, b in zip(bbox, target_bbox, strict=True)
                 ):
                     metal_tags[layer_name]["volumes"].append(vtag)
                     break
 
-    # Extract shell surfaces from conductor volumes.
-    # After removeAllDuplicates, some volume tags may have been invalidated
-    # (e.g., a conductor volume that shared faces with a via volume).
-    current_vols = {t for _, t in kernel.getEntities(3)}
+    # Re-identify conductor volumes by bbox and update _conductor_volumes.
+    # Without this, removeAllDuplicates()'s global renumbering makes every
+    # original tag appear missing, so all conductors are silently dropped.
+    for layer_name, bboxes in _conductor_bboxes.items():
+        new_vol_tags = []
+        for target_bbox in bboxes:
+            for vtag, bbox in all_vol_bboxes.items():
+                if all(
+                    abs(a - b) < 0.01 for a, b in zip(bbox, target_bbox, strict=True)
+                ):
+                    new_vol_tags.append(vtag)
+                    break
+            else:
+                logger.warning(
+                    "Conductor volume on %s lost during dedup (no bbox match)",
+                    layer_name,
+                )
+        _conductor_volumes[layer_name] = new_vol_tags
+
+    # Extract shell surfaces from conductor volumes (now with correct post-dedup tags).
+    current_vols = {t for _, t in all_vols}
     for layer_name, vol_tags in _conductor_volumes.items():
         for volumetag in vol_tags:
             if volumetag not in current_vols:
                 logger.warning(
-                    "Conductor volume %d on %s invalidated by dedup",
+                    "Conductor volume %d on %s missing after bbox re-identification",
                     volumetag,
                     layer_name,
                 )
