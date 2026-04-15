@@ -418,6 +418,8 @@ class Simulation(BaseModel):
         if not validation.valid:
             raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
+        is_3d = self.solver.is_3d
+
         # Resolve stack
         self._ensure_stack()
         if self.geometry.stack is None:
@@ -425,8 +427,9 @@ class Simulation(BaseModel):
         if self.geometry.component is None:
             raise ValueError("No geometry set.")
 
-        # Apply z-crop if requested
-        self._apply_z_crop()
+        # Apply z-crop if requested (only meaningful in 3D)
+        if is_3d:
+            self._apply_z_crop()
 
         import gdsfactory as gf
 
@@ -489,7 +492,7 @@ class Simulation(BaseModel):
 
         # Extract port info from original component
         port_infos = extract_port_info(
-            original_component, stack, source_port=source_cfg.port
+            original_component, stack, source_port=source_cfg.port, is_3d=is_3d
         )
 
         # Resolve materials
@@ -517,6 +520,7 @@ class Simulation(BaseModel):
 
         # Build SimConfig
         sim_config = SimConfig(
+            is_3d=is_3d,
             gds_filename="layout.gds",
             component_bbox=original_bbox,
             layer_stack=layer_stack_entries,

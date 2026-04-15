@@ -166,6 +166,15 @@ class FDTD(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    is_3d: bool = Field(
+        default=True,
+        description=(
+            "Run a full 3D simulation (True) or an effective-index 2D "
+            "simulation (False). 2D collapses the z-dimension, ignores "
+            "sidewall angles, and enforces transverse-electric parity "
+            "(EVEN_Y+ODD_Z)."
+        ),
+    )
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
 
     # Stopping criteria (flat fields instead of variant classes)

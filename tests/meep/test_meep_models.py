@@ -864,6 +864,160 @@ class TestSourceConfig:
 # ---------------------------------------------------------------------------
 
 
+class TestSimConfig2D:
+    """Test SimConfig is_3d field."""
+
+    @pytest.fixture
+    def sim_kwargs(self):
+        """Returns default keyword arguments for SimConfig."""
+        from gsim.meep.models.config import AccuracyConfig, DiagnosticsConfig
+
+        return dict(
+            gds_filename="layout.gds",
+            verbose_interval=0,
+            layer_stack=[],
+            dielectrics=[],
+            ports=[],
+            materials={},
+            wavelength=WavelengthConfig(wavelength=1.55, bandwidth=0.1, num_freqs=11),
+            source=SourceConfig(),
+            stopping=StoppingConfig(
+                mode="fixed",
+                max_time=100.0,
+                decay_dt=50.0,
+                decay_component="Ey",
+                threshold=0.05,
+                dft_min_run_time=100,
+            ),
+            resolution=ResolutionConfig(pixels_per_um=32),
+            domain=DomainConfig(
+                dpml=1.0,
+                margin_xy=0.5,
+                margin_z_above=0.5,
+                margin_z_below=0.5,
+                port_margin=0.5,
+                extend_ports=0.0,
+                source_port_offset=0.1,
+                distance_source_to_monitors=0.2,
+            ),
+            accuracy=AccuracyConfig(
+                eps_averaging=False,
+                subpixel_maxeval=0,
+                subpixel_tol=1e-4,
+                simplify_tol=0.0,
+            ),
+            diagnostics=DiagnosticsConfig(
+                save_geometry=True,
+                save_fields=True,
+                save_epsilon_raw=False,
+                save_animation=False,
+                animation_interval=0.5,
+                preview_only=False,
+                verbose_interval=0,
+            ),
+            symmetries=[],
+        )
+
+    def test_default_is_3d(self, sim_kwargs):
+        cfg = SimConfig(**sim_kwargs)
+        assert cfg.is_3d is True
+
+    def test_set_2d(self, sim_kwargs):
+        cfg = SimConfig(**sim_kwargs, is_3d=False)
+        assert cfg.is_3d is False
+
+    def test_json_roundtrip_2d(self, tmp_path, sim_kwargs):
+        cfg = SimConfig(**sim_kwargs, is_3d=False)
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+        assert data["is_3d"] is False
+
+    def test_json_roundtrip_3d(self, tmp_path, sim_kwargs):
+        cfg = SimConfig(**sim_kwargs, is_3d=True)
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+        assert data["is_3d"] is True
+
+
+class TestPortExtraction2D:
+    """Test port extraction in 2D mode (z=0)."""
+
+    def test_ports_z_zero_in_2d(self):
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.ports import extract_port_info
+
+        stack = LayerStack(
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+            }
+        )
+
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+        ports = extract_port_info(c, stack, is_3d=False)
+        for p in ports:
+            assert p.center[2] == 0.0, "2D ports must have z=0"
+
+    def test_ports_z_nonzero_in_3d(self):
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.ports import extract_port_info
+
+        stack = LayerStack(
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+            }
+        )
+
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+        ports = extract_port_info(c, stack, is_3d=True)
+        for p in ports:
+            assert p.center[2] != 0.0, "3D ports must have nonzero z"
+
+
+class TestScript2D:
+    """Test that the runner script includes 2D mode support."""
+
+    def test_script_has_is_3d_check(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "is_3d" in script
+
+    def test_script_has_te_parity(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        assert "EVEN_Y" in script
+        assert "ODD_Z" in script
+
+    def test_script_valid_python_with_2d(self):
+        from gsim.meep.script import generate_meep_script
+
+        script = generate_meep_script()
+        ast.parse(script)
+
+
 class TestScriptSymmetry:
     """Test that the runner script includes symmetry support."""
 

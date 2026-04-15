@@ -201,7 +201,12 @@ def build_background_slabs(config, materials):
     These infinite-XY slabs fill the simulation cell at each z-range with
     the correct cladding/substrate material.  They must come FIRST in the
     geometry list so that patterned prisms (added later) take precedence.
+
+    Skipped entirely in 2D mode (no z-dimension).
     """
+    if not config.get("is_3d", True):
+        return []
+
     slabs = []
     for diel in sorted(config["dielectrics"], key=lambda d: d["zmin"]):
         mat = materials.get(diel["material"])
@@ -305,12 +310,16 @@ def build_geometry(config, materials):
       1. Extract polygons from the GDS for that layer's gds_layer
       2. Extrude to 3D as mp.Prism with correct z-range and material
       3. Handle polygon holes via Delaunay triangulation
+
+    In 2D mode (is_3d=False), all prisms are placed at z=0 and sidewall
+    angles are ignored, matching gplugins behaviour.
     """
     gds_filename = config["gds_filename"]
     component = load_gds_component(gds_filename)
 
     accuracy = config["accuracy"]
     simplify_tol = accuracy["simplify_tol"]
+    is_3d = config.get("is_3d", True)
 
     geometry = []
     total_vertices = 0
@@ -318,12 +327,15 @@ def build_geometry(config, materials):
     for layer_entry in config["layer_stack"]:
         material_name = layer_entry["material"]
         mat = materials.get(material_name, mp.Medium())
-        zmin = layer_entry["zmin"]
+        zmin = layer_entry["zmin"] if is_3d else 0
         zmax = layer_entry["zmax"]
-        height = zmax - zmin
+        height = zmax - zmin if is_3d else (layer_entry["zmax"] - layer_entry["zmin"])
         gds_layer = layer_entry["gds_layer"]
         sidewall_angle_deg = layer_entry["sidewall_angle"]
-        sw_rad = math.radians(sidewall_angle_deg) if sidewall_angle_deg else 0
+        if is_3d and sidewall_angle_deg:
+            sw_rad = math.radians(sidewall_angle_deg)
+        else:
+            sw_rad = 0
 
         if height <= 0:
             continue
@@ -371,7 +383,13 @@ def build_geometry(config, materials):
 # ---------------------------------------------------------------------------
 
 def get_port_z_span(config):
-    """Get z-span for ports from layer stack."""
+    """Get z-span for ports from layer stack.
+
+    In 2D mode returns an arbitrary large value (20 um) since the
+    z-dimension is collapsed and the size doesn't affect the simulation.
+    """
+    if not config.get("is_3d", True):
+        return 20
     zmin = min(l["zmin"] for l in config["layer_stack"])
     zmax = max(l["zmax"] for l in config["layer_stack"])
     return zmax - zmin
@@ -384,6 +402,9 @@ def build_sources(config):
     along the propagation direction (into the device).  This separates
     the soft source from the port monitor so eigenmode coefficients
     measure the true incident amplitude rather than half of it.
+
+    In 2D mode (is_3d=False), enforces transverse-electric parity
+    (EVEN_Y + ODD_Z) to match gplugins 2D convention.
     """
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
@@ -392,6 +413,8 @@ def build_sources(config):
     z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
     source_port_offset = config["domain"].get("source_port_offset", 0.1)
+    is_3d = config.get("is_3d", True)
+    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
 
     sources = []
     for port in config["ports"]:
@@ -430,6 +453,7 @@ def build_sources(config):
             direction=prop_axis,
             eig_kpoint=kpoint,
             eig_match_freq=True,
+            eig_parity=eig_parity,
         )
         sources.append(eig_src)
 
@@ -515,6 +539,9 @@ def extract_s_params(config, sim, monitors):
       alpha[band, freq, 0] = forward (+normal_axis) coefficient
       alpha[band, freq, 1] = backward (-normal_axis) coefficient
 
+    In 2D mode, uses transverse-electric parity (EVEN_Y + ODD_Z) for
+    eigenmode decomposition.
+
     Port "direction" field = direction of incoming mode along normal_axis:
       "+" -> incoming goes +normal, outgoing (reflected/transmitted) goes -normal
       "-" -> incoming goes -normal, outgoing (reflected/transmitted) goes +normal
@@ -576,10 +603,13 @@ def extract_s_params(config, sim, monitors):
         return info
 
     # Get incident coefficient at source port for normalization
+    is_3d = config.get("is_3d", True)
+    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
+
     src_dir = ports[source_port]["direction"]
     src_kp = _port_kpoint(ports[source_port])
     src_ob = sim.get_eigenmode_coefficients(
-        monitors[source_port], [1], eig_parity=mp.NO_PARITY,
+        monitors[source_port], [1], eig_parity=eig_parity,
         kpoint_func=lambda f, n, kp=src_kp: kp,
     )
     incident_coeffs = src_ob.alpha[0, :, _incoming_idx(src_dir)]
@@ -606,7 +636,7 @@ def extract_s_params(config, sim, monitors):
 
             port_kp = _port_kpoint(ports[port_i])
             ob = sim.get_eigenmode_coefficients(
-                monitors[port_i], [1], eig_parity=mp.NO_PARITY,
+                monitors[port_i], [1], eig_parity=eig_parity,
                 kpoint_func=lambda f, n, kp=port_kp: kp,
             )
 
@@ -722,20 +752,26 @@ def save_geometry_diagnostics(sim, config, cell_center):
         # plot2D is collective — all ranks call it, only master saves
         pass
 
-    domain = config["domain"]
-    dpml = domain["dpml"]
-    z_min = min(l["zmin"] for l in config["layer_stack"])
-    z_max = max(l["zmax"] for l in config["layer_stack"])
-    z_core = (z_min + z_max) / 2
+    is_3d = config.get("is_3d", True)
+
+    if is_3d:
+        z_min = min(l["zmin"] for l in config["layer_stack"])
+        z_max = max(l["zmax"] for l in config["layer_stack"])
+        z_core = (z_min + z_max) / 2
+    else:
+        z_core = 0
 
     # XY cross-section at z=core center
     try:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        xy_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
-        sim.plot2D(ax=ax, output_plane=xy_plane)
+        if is_3d:
+            xy_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
+            sim.plot2D(ax=ax, output_plane=xy_plane)
+        else:
+            sim.plot2D(ax=ax)
         ax.set_title(f"XY cross-section at z={z_core:.3f} um (core center)")
         ax.set_xlabel("x (um)")
         ax.set_ylabel("y (um)")
@@ -794,17 +830,24 @@ def save_field_snapshot(sim, config, cell_center):
         logger.warning("matplotlib not available, skipping field snapshot")
         return
 
-    z_min = min(l["zmin"] for l in config["layer_stack"])
-    z_max = max(l["zmax"] for l in config["layer_stack"])
-    z_core = (z_min + z_max) / 2
+    is_3d = config.get("is_3d", True)
+    if is_3d:
+        z_min = min(l["zmin"] for l in config["layer_stack"])
+        z_max = max(l["zmax"] for l in config["layer_stack"])
+        z_core = (z_min + z_max) / 2
+    else:
+        z_core = 0
 
     try:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        xy_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
-        sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
+        if is_3d:
+            xy_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
+            sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
+        else:
+            sim.plot2D(ax=ax, fields=mp.Ey)
         ax.set_title(f"Ey field at z={z_core:.3f} um (post-run)")
         ax.set_xlabel("x (um)")
         ax.set_ylabel("y (um)")
@@ -948,15 +991,25 @@ def compile_animation_mp4(fps=15):
 
 def save_epsilon_raw(sim, config, cell_center):
     """Save raw epsilon array as .npy for XY slice at core center."""
-    z_min = min(l["zmin"] for l in config["layer_stack"])
-    z_max = max(l["zmax"] for l in config["layer_stack"])
-    z_core = (z_min + z_max) / 2
+    is_3d = config.get("is_3d", True)
+    if is_3d:
+        z_min = min(l["zmin"] for l in config["layer_stack"])
+        z_max = max(l["zmax"] for l in config["layer_stack"])
+        z_core = (z_min + z_max) / 2
+    else:
+        z_core = 0
 
     try:
-        xy_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
+        if is_3d:
+            xy_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, z_core),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
+        else:
+            xy_plane = mp.Volume(
+                center=cell_center,
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
         eps_data = sim.get_array(vol=xy_plane, component=mp.Dielectric)
         if mp.am_master():
             np.save("meep_epsilon_xy.npy", eps_data)
@@ -1000,6 +1053,7 @@ def main():
 
     resolution = config["resolution"]["pixels_per_um"]
     fdtd = config["fdtd"]
+    is_3d = config.get("is_3d", True)
 
     # Compute simulation cell from component bounds + layer z-range
     # Use original component bbox if available (port extension changes GDS bbox)
@@ -1011,16 +1065,6 @@ def main():
         bbox_left, bbox_right = bbox.left, bbox.right
         bbox_bottom, bbox_top = bbox.bottom, bbox.top
 
-    # Use both layers and dielectrics for z-range so that PDKs without
-    # explicit box/clad layers (e.g. cspdk) still get enough headroom.
-    z_vals = [l["zmin"] for l in config["layer_stack"]] + [
-        l["zmax"] for l in config["layer_stack"]
-    ]
-    for d in config.get("dielectrics", []):
-        z_vals.extend((d["zmin"], d["zmax"]))
-    z_min = min(z_vals)
-    z_max = max(z_vals)
-
     domain = config["domain"]
     dpml = domain["dpml"]
     margin_xy = domain["margin_xy"]
@@ -1028,16 +1072,39 @@ def main():
     # XY: margin_xy is gap between geometry bbox and PML
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
     cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
-    # Z: margin_z_above/below is already baked into the stack via z_crop,
-    #    so only add dpml beyond the stack extent
-    cell_z = (z_max - z_min) + 2 * dpml
-    cell_center = mp.Vector3(
-        (bbox_right + bbox_left) / 2,
-        (bbox_top + bbox_bottom) / 2,
-        (z_max + z_min) / 2,
-    )
 
-    logger.info("Cell size: %.2f x %.2f x %.2f um", cell_x, cell_y, cell_z)
+    if is_3d:
+        # Use both layers and dielectrics for z-range so that PDKs without
+        # explicit box/clad layers (e.g. cspdk) still get enough headroom.
+        z_vals = [l["zmin"] for l in config["layer_stack"]] + [
+            l["zmax"] for l in config["layer_stack"]
+        ]
+        for d in config.get("dielectrics", []):
+            z_vals.extend((d["zmin"], d["zmax"]))
+        z_min = min(z_vals)
+        z_max = max(z_vals)
+
+        # Z: margin_z_above/below is already baked into the stack via z_crop,
+        #    so only add dpml beyond the stack extent
+        cell_z = (z_max - z_min) + 2 * dpml
+        cell_center = mp.Vector3(
+            (bbox_right + bbox_left) / 2,
+            (bbox_top + bbox_bottom) / 2,
+            (z_max + z_min) / 2,
+        )
+    else:
+        # 2D mode: collapse z-dimension
+        cell_z = 0
+        cell_center = mp.Vector3(
+            (bbox_right + bbox_left) / 2,
+            (bbox_top + bbox_bottom) / 2,
+            0,
+        )
+
+    logger.info(
+        "Cell size: %.2f x %.2f x %.2f um (%s)",
+        cell_x, cell_y, cell_z, "3D" if is_3d else "2D",
+    )
     logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
     logger.info("Resolution: %s pixels/um", resolution)
 
@@ -1134,9 +1201,12 @@ def main():
     _anim_plane = None
 
     if diag_animation:
-        z_min_anim = min(l["zmin"] for l in config["layer_stack"])
-        z_max_anim = max(l["zmax"] for l in config["layer_stack"])
-        z_core_anim = (z_min_anim + z_max_anim) / 2
+        if is_3d:
+            z_min_anim = min(l["zmin"] for l in config["layer_stack"])
+            z_max_anim = max(l["zmax"] for l in config["layer_stack"])
+            z_core_anim = (z_min_anim + z_max_anim) / 2
+        else:
+            z_core_anim = 0
         _anim_plane = mp.Volume(
             center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
             size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),

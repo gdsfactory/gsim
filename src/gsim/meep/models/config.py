@@ -310,6 +310,16 @@ class SimConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
+    is_3d: bool = Field(
+        default=True,
+        description=(
+            "True for full 3D FDTD, False for effective-index 2D. "
+            "When False the runner collapses cell_z to 0, skips "
+            "background slabs, places geometry at z=0, and uses "
+            "transverse-electric parity (EVEN_Y+ODD_Z) for "
+            "eigenmode sources."
+        ),
+    )
     gds_filename: str = Field(description="GDS file with 2D layout")
     component_bbox: list[float] | None = Field(
         default=None,

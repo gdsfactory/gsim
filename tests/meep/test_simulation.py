@@ -404,3 +404,100 @@ class TestConfigTranslation:
         cfg = sim._diagnostics_config()
         assert cfg.save_animation is True
         assert cfg.preview_only is True
+
+
+# ---------------------------------------------------------------------------
+# 2D mode tests
+# ---------------------------------------------------------------------------
+
+
+class Test2DMode:
+    """Tests for 2D simulation mode (is_3d=False)."""
+
+    def test_fdtd_is_3d_default_true(self):
+        f = FDTD()
+        assert f.is_3d is True
+
+    def test_fdtd_is_3d_false(self):
+        f = FDTD(is_3d=False)
+        assert f.is_3d is False
+
+    def test_solver_assignment(self):
+        sim = Simulation()
+        sim.solver.is_3d = False
+        assert sim.solver.is_3d is False
+
+    def test_solver_callable(self):
+        sim = Simulation()
+        sim.solver(is_3d=False)
+        assert sim.solver.is_3d is False
+
+    def test_build_config_2d_port_z_zero(self):
+        """In 2D mode, build_config produces port z-centers at 0."""
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+
+        sim = Simulation()
+        sim.geometry.component = c
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.source.port = "o1"
+        sim.monitors = ["o1", "o2"]
+        sim.solver.is_3d = False
+
+        result = sim.build_config()
+        for port in result.config.ports:
+            assert port.center[2] == 0.0
+
+    def test_build_config_2d_is_3d_false_in_config(self):
+        """build_config with is_3d=False sets is_3d=False in SimConfig."""
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+
+        sim = Simulation()
+        sim.geometry.component = c
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.source.port = "o1"
+        sim.monitors = ["o1", "o2"]
+        sim.solver.is_3d = False
+
+        result = sim.build_config()
+        assert result.config.is_3d is False
+
+    def test_build_config_3d_default(self):
+        """Default build_config should be 3D."""
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+
+        sim = Simulation()
+        sim.geometry.component = c
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.source.port = "o1"
+        sim.monitors = ["o1", "o2"]
+
+        result = sim.build_config()
+        assert result.config.is_3d is True
+
+    def test_write_config_2d_json(self, tmp_path):
+        """write_config with is_3d=False produces JSON with is_3d=false."""
+        import json
+
+        import gdsfactory as gf
+
+        c = gf.components.straight(length=10, width=0.5)
+
+        sim = Simulation()
+        sim.geometry.component = c
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.source.port = "o1"
+        sim.monitors = ["o1", "o2"]
+        sim.solver.is_3d = False
+
+        out = sim.write_config(tmp_path / "sim2d")
+        config_data = json.loads((out / "sim_config.json").read_text())
+        assert config_data["is_3d"] is False
+        # Ports should have z=0
+        for port in config_data["ports"]:
+            assert port["center"][2] == 0.0
