@@ -2,6 +2,14 @@
 
 This module handles extracting polygons from gdsfactory components
 and creating 3D geometry in gmsh.
+
+TODO: Via meshing improvements (tracked 2026-04-14)
+  - Via volumes should use conductivity values from the stack/PDK.
+    The PDK layer_stack should define material/conductivity per via layer.
+  - If conductivity info is missing: warn/log and fall back to 2D PEC surface.
+  - If via is too thin to mesh as 3D (below min_volume_thickness): warn/log
+    and fall back to 2D PEC surface.
+  - Currently all vias are forced to PEC surfaces for testing (line ~293).
 """
 
 from __future__ import annotations
@@ -285,8 +293,15 @@ def add_metals(
         if not surfaces:
             continue
 
-        if layer_type == "conductor" and (planar_conductors or thickness == 0):
-            # Zero-thickness or explicitly planar → 2D PEC surface
+        min_volume_thickness = 0.05  # um — thinner volumes can't mesh as 3D
+        is_planar = (
+            planar_conductors or thickness == 0 or thickness < min_volume_thickness
+        )
+        if layer_type == "conductor" and is_planar:
+            # Zero/thin-thickness or explicitly planar → 2D PEC surface
+            metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+        elif layer_type == "via":
+            # Force all vias to 2D PEC surfaces (test)
             metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
         elif thickness > 0:
             # Fuse overlapping same-layer surfaces before extrusion so that
