@@ -19,6 +19,7 @@ from gsim.palace.models import (
     MaterialConfig,
     NumericalConfig,
     TerminalConfig,
+    WavePortConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     driven: None = None
     ports: None = None
     cpw_ports: None = None
+    wave_ports: list[WavePortConfig] = Field(default_factory=list)
     # Composed objects (from common)
     geometry: Geometry | None = None
     stack: LayerStack | None = None

@@ -20,6 +20,7 @@ from gsim.palace.models import (
     MaterialConfig,
     NumericalConfig,
     PortConfig,
+    WavePortConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
     driven: None = None
     terminals: None = None
+    wave_ports: list[WavePortConfig] = Field(default_factory=list)
     # Composed objects (from common)
     geometry: Geometry | None = None
     stack: LayerStack | None = None
