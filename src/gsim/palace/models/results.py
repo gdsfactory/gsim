@@ -5,9 +5,15 @@ This module contains Pydantic models for simulation results and validation.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+def _supports_color_output() -> bool:
+    """Return True when stdout is an interactive terminal supporting ANSI."""
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
 
 
 class ValidationResult(BaseModel):
@@ -35,7 +41,10 @@ class ValidationResult(BaseModel):
         if self.valid:
             lines.append("Validation: PASSED")
         else:
-            lines.append("Validation: FAILED")
+            failed = "Validation: FAILED"
+            if _supports_color_output():
+                failed = f"\033[31m{failed}\033[0m"
+            lines.append(failed)
         if self.errors:
             lines.append("Errors:")
             lines.extend([f"  - {e}" for e in self.errors])

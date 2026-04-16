@@ -106,6 +106,18 @@ class TestDrivenSimWorkflow:
         result = sim.validate_config()
         assert result.valid, f"Validation failed: {result}"
 
+    def test_validate_mesh_raises_before_mesh(self, cpw_component, tmp_path):
+        sim = DrivenSim()
+        sim.set_output_dir(str(tmp_path / "val-no-mesh"))
+        sim.set_geometry(cpw_component)
+        sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+        sim.add_cpw_port("o1", layer="metal1", s_width=10, gap_width=6, length=5.0)
+        sim.add_cpw_port("o2", layer="metal1", s_width=10, gap_width=6, length=5.0)
+        sim.set_driven(fmin=1e9, fmax=100e9)
+
+        with pytest.raises(RuntimeError, match="No mesh generated"):
+            sim.validate_mesh()
+
     def test_mesh_creates_file(self, driven_sim):
         mesh_path = Path(driven_sim._output_dir) / "palace.msh"
         assert mesh_path.exists()
@@ -183,6 +195,82 @@ class TestDrivenSimInplanePorts:
     def test_validate_mesh_passes(self, inplane_sim):
         result = inplane_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
+
+
+def test_validate_mesh_autogenerates_config(tmp_path, cpw_component):
+    """validate_mesh should write config.json when it does not exist yet."""
+    sim = DrivenSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim-autoconfig"))
+    sim.set_geometry(cpw_component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.add_port("o1", layer="metal1", length=5.0, impedance=50.0)
+    sim.add_port("o2", layer="metal1", length=5.0, impedance=50.0)
+    sim.set_driven(fmin=1e9, fmax=50e9, num_points=20)
+    sim.mesh(preset="coarse")
+
+    assert sim._output_dir is not None
+    config_path = Path(sim._output_dir) / "config.json"
+    if config_path.exists():
+        config_path.unlink()
+
+    result = sim.validate_mesh()
+    assert result.valid, f"Mesh validation failed: {result}"
+    assert config_path.exists(), "validate_mesh should auto-generate config.json"
+
+
+def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):
+    """Reactive parameters must go into a passive LumpedPort (Active: false).
+
+    Driven simulations forbid L/C on excited ports in Palace.  The fix is to
+    emit an additional passive port entry (Active: false) on the same boundary
+    surface carrying the reactive R/L/C, while the excited port gets only R.
+    """
+    sim = DrivenSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim-reactive"))
+    sim.set_geometry(cpw_component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.add_port(
+        "o1",
+        layer="metal1",
+        length=5.0,
+        impedance=50.0,
+        resistance=2.5,
+        inductance=10e-9,
+        capacitance=1e-15,
+    )
+    sim.add_port("o2", layer="metal1", length=5.0, impedance=50.0)
+    sim.set_driven(fmin=1e9, fmax=50e9, num_points=20)
+    sim.mesh(preset="coarse")
+    sim.write_config()
+
+    assert sim._output_dir is not None
+    config_path = Path(sim._output_dir) / "config.json"
+    config = json.loads(config_path.read_text())
+    boundaries = config["Boundaries"]
+
+    assert "LumpedPort" in boundaries
+    # 2 primary ports + 1 passive reactive port
+    assert len(boundaries["LumpedPort"]) == 3
+    assert "LumpedElement" not in boundaries
+
+    # Excited port 1 must have only R (no reactive terms)
+    p1 = next(port for port in boundaries["LumpedPort"] if port["Index"] == 1)
+    assert p1["R"] == 50.0
+    assert "L" not in p1
+    assert "C" not in p1
+
+    # Passive reactive port must be Active: false and carry R/L/C
+    passive = [p for p in boundaries["LumpedPort"] if not p.get("Active", True)]
+    assert len(passive) == 1
+    rp = passive[0]
+    assert rp.get("Active") is False
+    assert rp["R"] == 2.5
+    assert rp["L"] == 10e-9
+    assert rp["C"] == 1e-15
+    assert "Attributes" in rp
+    assert "Direction" in rp
+    # Passive port must share the same boundary attributes as the excited port
+    assert rp["Attributes"] == p1["Attributes"]
 
 
 # ---------------------------------------------------------------------------
