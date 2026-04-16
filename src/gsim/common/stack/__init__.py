@@ -60,6 +60,8 @@ def get_stack(
         **kwargs: Additional args passed to the stack builder:
             - substrate_thickness: Thickness below z=0 in um (default: 2.0)
             - air_above: Air box height above top metal in um (default: 200)
+                        - air_below: Air box height below substrate/oxide in um
+                            (default: 0)
             - include_substrate: Include lossy silicon substrate (default: False).
               When False, omits substrate for RF simulation.
 

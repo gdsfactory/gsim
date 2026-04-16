@@ -102,10 +102,16 @@ from gsim.palace.ports import (
 )
 
 # Results utilities
-from gsim.palace.results import SParam, SParams, get_port_map, load_sparams
+from gsim.palace.results import (
+    SParam,
+    SParams,
+    get_port_map,
+    load_fields,
+    load_sparams,
+)
 
 # Visualization
-from gsim.viz import plot_mesh
+from gsim.viz import plot_cross_section, plot_mesh
 
 __all__ = [
     "MATERIALS_DB",
@@ -153,11 +159,13 @@ __all__ = [
     "get_material_properties",
     "get_port_map",
     "get_stack",
+    "load_fields",
     "load_sparams",
     "load_stack_yaml",
     "material_is_conductor",
     "material_is_dielectric",
     "parse_layer_stack",
+    "plot_cross_section",
     "plot_mesh",
     "plot_stack",
     "print_job_summary",

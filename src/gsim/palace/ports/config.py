@@ -67,6 +67,13 @@ class PalacePort:
     capacitance: float | None = None  # F
     excited: bool = True  # Whether this port is excited (vs just measured)
 
+    # Waveport specific settings
+    z_margin: float = 0.0  # For waveports: height margin in um
+    lateral_margin: float = 0.0
+    max_size: bool = False  # When True, fill the full simulation domain
+    mode: int = 1  # Mode number to excite.
+    offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
+
     @property
     def direction(self) -> str:
         """Get direction from orientation."""
@@ -133,7 +140,9 @@ def configure_via_port(
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         from_layer: Bottom conductor layer name (e.g., 'metal1')
         to_layer: Top conductor layer name (e.g., 'topmetal2')
-        impedance: Port impedance in Ohms (default: 50)
+        resistance: Series resistance in Ohms (default: 50)
+        inductance: Series inductance in Henries (default: 0)
+        capacitance: Shunt capacitance in Farads (default: 0)
         excited: Whether port is excited vs just measured (default: True)
 
     Examples:
@@ -229,6 +238,55 @@ def configure_cpw_port(
     port.info["cpw_upper_center"] = (float(upper_center[0]), float(upper_center[1]))
     port.info["cpw_lower_center"] = (float(lower_center[0]), float(lower_center[1]))
     port.info["cpw_gap_width"] = gap_width
+
+
+def configure_wave_port(
+    ports,
+    layer: str,
+    z_margin: float = 0.0,
+    lateral_margin: float = 0.0,
+    max_size: bool = False,
+    mode: int = 1,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure gdsfactory port(s) as wave ports for Palace simulation.
+
+    Wave ports are domain boundary ports where mode solving is needed.
+
+    Args:
+        ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
+        layer: Target conductor layer name (e.g., 'topmetal2')
+        z_margin: Margin in the z-direction for the wave port
+        lateral_margin: Margin in the x/y direction
+        max_size: When True, automatically set z_margin and lateral_margin
+            to fill the full simulation domain boundary on that side.
+        mode: Mode number to excite.
+        offset: Offset distance used for scattering parameter de-embedding.
+        excited: Whether port is excited vs just measured (default: True)
+
+    Examples:
+        ```python
+        configure_wave_port(
+            c.ports["o1"], name="o1", layer="topmetal2", z_margin=5.0, mode=1
+        )
+        configure_wave_port(
+            c.ports, name="all_ports", layer="topmetal2", z_margin=5.0, mode=1
+        )  # all ports
+        ```
+    """
+    # Handle single port or iterable
+    port_list = [ports] if hasattr(ports, "info") else ports
+
+    for port in port_list:
+        port.info["palace_type"] = "waveport"
+        port.info["layer"] = layer
+        port.info["z_margin"] = z_margin
+        port.info["lateral_margin"] = lateral_margin
+        port.info["max_size"] = max_size
+        port.info["mode"] = mode
+        port.info["offset"] = offset
+        port.info["excited"] = excited
 
 
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
@@ -342,8 +400,10 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         elif palace_type == "waveport":
             port_type = PortType.WAVEPORT
             geometry = PortGeometry.INPLANE  # Waveport geometry TBD
-            zmin, zmax = stack.get_z_range()
-
+            if layer_name in stack.layers:
+                layer = stack.layers[layer_name]
+                zmin = layer.zmin
+                zmax = layer.zmax
         else:
             raise ValueError(f"Unknown port type: {palace_type}")
 
@@ -361,10 +421,12 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             to_layer=to_layer,
             length=info.get("length"),
             impedance=info.get("impedance", 50.0),
-            resistance=info.get("resistance"),
-            inductance=info.get("inductance"),
-            capacitance=info.get("capacitance"),
+            z_margin=info.get("z_margin", 0.0),
+            lateral_margin=info.get("lateral_margin", 0.0),
+            max_size=info.get("max_size", False),
             excited=info.get("excited", True),
+            mode=info.get("mode", 1),
+            offset=info.get("offset", 0.0),
         )
         palace_ports.append(palace_port)
 

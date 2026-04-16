@@ -20,6 +20,7 @@ from gsim.palace.models import (
     MeshConfig,
     NumericalConfig,
     PortConfig,
+    WavePortConfig,
 )
 
 
@@ -67,6 +68,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Port configurations
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    wave_ports: list[WavePortConfig] = Field(default_factory=list)
     terminals: None = None
 
     # Driven simulation config
@@ -113,6 +115,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         excitation_port: str | None = None,
         save_step: int = 0,
         save_fields_at: list[float] | None = None,
+        save_freq: str | None = None,
     ) -> None:
         """Configure driven (frequency sweep) simulation.
 
@@ -133,12 +136,29 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             compute_s_params: Compute S-parameters
             reference_impedance: Reference impedance for S-params (Ohms)
             excitation_port: Port to excite (None = first port)
-            save_step: Save fields every N frequency steps for ParaView (0 = disabled)
-            save_fields_at: Specific frequencies (Hz) at which to save fields
+            save_step: Save fields every N frequency steps for ParaView
+                (0 = disabled)
+            save_fields_at: Specific frequencies (Hz) at which to save
+                fields for ParaView visualisation.
+            save_freq: Convenience shorthand for saving fields at a named
+                frequency.  ``"center"`` saves at ``(fmin + fmax) / 2``.
+                Appended to *save_fields_at* if both are given.
 
         Example:
             >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
+            >>> sim.set_driven(fmin=1e9, fmax=100e9, save_freq="center")
         """
+        fields_at: list[float] = list(save_fields_at or [])
+
+        if save_freq is not None:
+            if save_freq == "center":
+                fields_at.append((fmin + fmax) / 2)
+            else:
+                raise ValueError(
+                    f"Unknown save_freq value: {save_freq!r}. "
+                    "Supported values: 'center'."
+                )
+
         self.driven = DrivenConfig(
             fmin=fmin,
             fmax=fmax,
@@ -150,7 +170,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             reference_impedance=reference_impedance,
             excitation_port=excitation_port,
             save_step=save_step,
-            save_fields_at=save_fields_at or [],
+            save_fields_at=fields_at,
         )
 
 

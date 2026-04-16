@@ -18,11 +18,13 @@ class MeshConfig(BaseModel):
         max_mesh_size: Maximum mesh size in air/dielectric (um)
         cells_per_wavelength: Number of mesh cells per wavelength
         margin: XY margin around design (um)
+        margin_x: X-axis margin override (um). Falls back to margin.
+        margin_y: Y-axis margin override (um). Falls back to margin.
         airbox_margin: Extra airbox around stack (um); 0 = disabled
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
-        refine_from_curves: Refine mesh based on distance to conductor edges
+        refine_near_conductor_curves: Refine mesh based on distance to conductor curves
         show_gui: Show gmsh GUI during meshing
         preview_only: Generate preview only, don't save mesh
     """
@@ -33,14 +35,34 @@ class MeshConfig(BaseModel):
     max_mesh_size: float = Field(default=300.0, gt=0)
     cells_per_wavelength: int = Field(default=10, ge=1)
     margin: float = Field(default=50.0, ge=0)
+    margin_x: float | None = Field(
+        default=None,
+        ge=0,
+        description="X margin override (um). Falls back to margin.",
+    )
+    margin_y: float | None = Field(
+        default=None,
+        ge=0,
+        description="Y margin override (um). Falls back to margin.",
+    )
     airbox_margin: float = Field(default=0.0, ge=0)
     fmax: float = Field(default=100e9, gt=0)
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False
-    refine_from_curves: bool = False
+    refine_near_conductor_curves: bool = False
     merge_via_distance: float = Field(default=2.0, ge=0)
     show_gui: bool = False
     preview_only: bool = False
+
+    @property
+    def effective_margin_x(self) -> float:
+        """Resolved X margin (margin_x if set, else margin)."""
+        return self.margin_x if self.margin_x is not None else self.margin
+
+    @property
+    def effective_margin_y(self) -> float:
+        """Resolved Y margin (margin_y if set, else margin)."""
+        return self.margin_y if self.margin_y is not None else self.margin
 
     @model_validator(mode="after")
     def set_default_boundary_conditions(self) -> Self:
@@ -48,6 +70,28 @@ class MeshConfig(BaseModel):
         if self.boundary_conditions is None:
             self.boundary_conditions = ["ABC", "ABC", "ABC", "ABC", "ABC", "ABC"]
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def _map_legacy_refine_field(cls, data: Any) -> Any:
+        """Map legacy refine_from_curves input to the new field name."""
+        if (
+            isinstance(data, dict)
+            and "refine_from_curves" in data
+            and "refine_near_conductor_curves" not in data
+        ):
+            data["refine_near_conductor_curves"] = data["refine_from_curves"]
+        return data
+
+    @property
+    def refine_from_curves(self) -> bool:
+        """Backward-compatible alias for refine_near_conductor_curves."""
+        return self.refine_near_conductor_curves
+
+    @refine_from_curves.setter
+    def refine_from_curves(self, value: bool) -> None:
+        """Set refine_near_conductor_curves via legacy alias."""
+        self.refine_near_conductor_curves = value
 
     @classmethod
     def coarse(cls, **kwargs: Any) -> Self:
@@ -91,7 +135,7 @@ class MeshConfig(BaseModel):
             "refined_mesh_size": 5.0,
             "max_mesh_size": 300.0,
             "cells_per_wavelength": 10,
-            "refine_from_curves": True,
+            "refine_near_conductor_curves": True,
         }
         defaults.update(kwargs)
         return cls(**defaults)
@@ -107,7 +151,7 @@ class MeshConfig(BaseModel):
             "refined_mesh_size": 2.0,
             "max_mesh_size": 70.0,
             "cells_per_wavelength": 20,
-            "refine_from_curves": True,
+            "refine_near_conductor_curves": True,
         }
         defaults.update(kwargs)
         return cls(**defaults)

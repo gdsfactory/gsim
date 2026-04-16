@@ -128,8 +128,9 @@ class TestMixinMethods:
         """Test set_stack works on all sim classes."""
         for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim]:
             sim = cls()
-            sim.set_stack(air_above=500.0)
+            sim.set_stack(air_above=500.0, air_below=25.0)
             assert sim._stack_kwargs["air_above"] == 500.0
+            assert sim._stack_kwargs["air_below"] == 25.0
 
     def test_set_material(self):
         """Test set_material works on all sim classes."""

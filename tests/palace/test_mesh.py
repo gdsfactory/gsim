@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from gsim.palace.mesh import MeshConfig
+from gsim.palace.models.mesh import MeshConfig as ModelMeshConfig
 
 
 class TestMeshConfig:
@@ -67,3 +68,19 @@ class TestMeshConfig:
         assert config.max_mesh_size == 200.0
         assert config.margin == 75.0
         assert config.airbox_margin == 150.0
+
+    def test_refine_from_curves_alias_setter(self):
+        """Legacy refine_from_curves alias setter updates new field."""
+        config = MeshConfig()
+        config.refine_from_curves = True
+        assert config.refine_near_conductor_curves is True
+
+
+class TestModelMeshConfig:
+    """Test Pydantic mesh model compatibility aliases."""
+
+    def test_model_refine_from_curves_alias_setter(self):
+        """Model alias property setter updates the new field."""
+        config = ModelMeshConfig()
+        config.refine_from_curves = True
+        assert config.refine_near_conductor_curves is True

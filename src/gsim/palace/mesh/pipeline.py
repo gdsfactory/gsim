@@ -72,6 +72,8 @@ class MeshConfig:
 
     # Geometry margins
     margin: float = 50.0  # XY margin around design (um)
+    margin_x: float | None = None  # X margin override (um)
+    margin_y: float | None = None  # Y margin override (um)
     airbox_margin: float = 0.0  # Extra airbox around stack (um); 0 = disabled
 
     # Ground plane (optional - for microstrip structures)
@@ -86,7 +88,7 @@ class MeshConfig:
 
     # Conductor modeling
     planar_conductors: bool = False  # Treat conductors as 2D PEC surfaces
-    refine_from_curves: bool = False  # Refine mesh near conductor edges
+    refine_near_conductor_curves: bool = False  # Refine mesh near conductor curves
 
     # Via merging: merge nearby via polygons within this distance (um)
     merge_via_distance: float = 2.0
@@ -95,11 +97,31 @@ class MeshConfig:
     show_gui: bool = False  # Show gmsh GUI during meshing
     preview_only: bool = False  # Show geometry without meshing
 
+    @property
+    def effective_margin_x(self) -> float:
+        """Resolved X margin (margin_x if set, else margin)."""
+        return self.margin_x if self.margin_x is not None else self.margin
+
+    @property
+    def effective_margin_y(self) -> float:
+        """Resolved Y margin (margin_y if set, else margin)."""
+        return self.margin_y if self.margin_y is not None else self.margin
+
     def __post_init__(self) -> None:
         """Initializes default boundary conditions if not provided."""
         if self.boundary_conditions is None:
             # Default: ABC everywhere
             self.boundary_conditions = ["ABC", "ABC", "ABC", "ABC", "ABC", "ABC"]
+
+    @property
+    def refine_from_curves(self) -> bool:
+        """Backward-compatible alias for refine_near_conductor_curves."""
+        return self.refine_near_conductor_curves
+
+    @refine_from_curves.setter
+    def refine_from_curves(self, value: bool) -> None:
+        """Set refine_near_conductor_curves via legacy alias."""
+        self.refine_near_conductor_curves = value
 
     @classmethod
     def coarse(cls, **kwargs) -> MeshConfig:
@@ -131,7 +153,7 @@ class MeshConfig:
             refined_mesh_size=refined,
             max_mesh_size=max_size,
             cells_per_wavelength=cpw,
-            refine_from_curves=True,
+            refine_near_conductor_curves=True,
             **kwargs,
         )
 
@@ -143,7 +165,7 @@ class MeshConfig:
             refined_mesh_size=refined,
             max_mesh_size=max_size,
             cells_per_wavelength=cpw,
-            refine_from_curves=True,
+            refine_near_conductor_curves=True,
             **kwargs,
         )
 
@@ -218,7 +240,8 @@ def generate_mesh(
         model_name=model_name,
         refined_mesh_size=config.refined_mesh_size,
         max_mesh_size=config.max_mesh_size,
-        margin=config.margin,
+        margin_x=config.effective_margin_x,
+        margin_y=config.effective_margin_y,
         air_margin=config.airbox_margin,
         fmax=config.fmax,
         show_gui=config.show_gui,
@@ -227,7 +250,7 @@ def generate_mesh(
         eigenmode_config=eigenmode_config,
         write_config=write_config,
         planar_conductors=config.planar_conductors,
-        refine_from_curves=config.refine_from_curves,
+        refine_near_conductor_curves=config.refine_near_conductor_curves,
         pec_blocks=pec_blocks,
         merge_via_distance=config.merge_via_distance,
         absorbing_boundary=absorbing_boundary,

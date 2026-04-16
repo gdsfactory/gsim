@@ -328,6 +328,7 @@ def extract_layer_stack(
     pdk_name: str = "unknown",
     substrate_thickness: float = 2.0,
     air_above: float = 200.0,
+    air_below: float = 0.0,
     boundary_margin: float = 30.0,
     include_substrate: bool = False,
 ) -> LayerStack:
@@ -338,6 +339,7 @@ def extract_layer_stack(
         pdk_name: Name of the PDK (for documentation)
         substrate_thickness: Thickness of substrate in um (default: 2.0)
         air_above: Height of air box above top metal in um (default: 200)
+        air_below: Height of air box below substrate/oxide in um (default: 0)
         boundary_margin: Lateral margin from GDS bbox in um (default: 30)
         include_substrate: Whether to include lossy substrate (default: False)
 
@@ -443,9 +445,20 @@ def extract_layer_stack(
         }
     )
 
+    if air_below > 0:
+        stack.dielectrics.append(
+            {
+                "name": "air_box_bottom",
+                "zmin": -substrate_thickness - air_below,
+                "zmax": -substrate_thickness,
+                "material": "air",
+            }
+        )
+
     stack.simulation = {
         "boundary_margin": boundary_margin,
         "air_above": air_above,
+        "air_below": air_below,
         "substrate_thickness": substrate_thickness,
         "include_substrate": include_substrate,
     }

@@ -20,6 +20,7 @@ from gsim.palace.models import (
     NumericalConfig,
     PortConfig,
     TerminalConfig,
+    WavePortConfig,
 )
 from gsim.palace.models.results import SimulationResult, ValidationResult
 
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
     from gsim.common import Geometry, LayerStack
+    from gsim.palace.results import SParams
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ class PalaceSimMixin:
     eigenmode: EigenmodeConfig
     ports: list[PortConfig]
     cpw_ports: list[CPWPortConfig]
+    wave_ports: list[WavePortConfig]
     terminals: list[TerminalConfig]
     simulation_type: Literal["driven", "eigenmode", "electrostatic"]
     _output_dir: Path | None
@@ -119,6 +122,7 @@ class PalaceSimMixin:
         *,
         yaml_path: str | Path | None = None,
         air_above: float = 200.0,
+        air_below: float = 0.0,
         substrate_thickness: float = 2.0,
         include_substrate: bool = False,
         **kwargs,
@@ -143,6 +147,7 @@ class PalaceSimMixin:
             stack: Custom gsim LayerStack (bypasses PDK extraction).
             yaml_path: Path to custom YAML stack file.
             air_above: Air box height above top metal in um.
+            air_below: Air box height below substrate/oxide in um.
             substrate_thickness: Thickness below z=0 in um.
             include_substrate: Include lossy silicon substrate.
             **kwargs: Additional args passed to extract_layer_stack.
@@ -159,6 +164,7 @@ class PalaceSimMixin:
         self._stack_kwargs = {
             "yaml_path": yaml_path,
             "air_above": air_above,
+            "air_below": air_below,
             "substrate_thickness": substrate_thickness,
             "include_substrate": include_substrate,
             **kwargs,
@@ -323,6 +329,8 @@ class PalaceSimMixin:
         fmax: float | None,
         planar_conductors: bool | None,
         show_gui: bool,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides."""
         # Build mesh config from preset
@@ -351,6 +359,10 @@ class PalaceSimMixin:
             mesh_config.max_mesh_size = max_mesh_size
         if margin is not None:
             mesh_config.margin = margin
+        if margin_x is not None:
+            mesh_config.margin_x = margin_x
+        if margin_y is not None:
+            mesh_config.margin_y = margin_y
         if airbox_margin is not None:
             mesh_config.airbox_margin = airbox_margin
         if fmax is not None:
@@ -453,9 +465,14 @@ class PalaceSimMixin:
                         )
                     if (
                         not boundaries.get("LumpedPort")
-                        and self.simulation_type == "driven"
+                        and not boundaries.get("WavePort")
+                    ) and (
+                        self.simulation_type == "driven"
+                        or self.simulation_type == "waveport"
                     ):
-                        errors.append("config.json has no LumpedPort entries.")
+                        errors.append(
+                            "config.json has no LumpedPort nor Waveport entries."
+                        )
                 except json.JSONDecodeError as e:
                     errors.append(f"config.json is invalid JSON: {e}")
 
@@ -576,11 +593,12 @@ class PalaceSimMixin:
 
         # Check ports
 
-        has_ports = bool(self.ports) or bool(self.cpw_ports)
+        has_ports = bool(self.ports) or bool(self.cpw_ports) or bool(self.wave_ports)
         if not has_ports:
             if self.simulation_type == "driven":
                 warnings_list.append(
-                    "No ports configured. Call add_port() or add_cpw_port()."
+                    "No ports configured. Call add_port(), add_cpw_port(),"
+                    " or add_wave_port()."
                 )
             elif self.simulation_type == "eigenmode":
                 warnings_list.append(
@@ -604,6 +622,12 @@ class PalaceSimMixin:
                 f"CPW port '{cpw.name}': 'layer' is required"
                 for cpw in self.cpw_ports
                 if not cpw.layer
+            )
+            # Validate wave ports
+            errors.extend(
+                f"Wave port '{wp.name}': 'layer' is required"
+                for wp in self.wave_ports
+                if not wp.layer
             )
 
         # Validate excitation port if specified
@@ -638,12 +662,28 @@ class PalaceSimMixin:
     # Internal helpers
     # -------------------------------------------------------------------------
 
+    def _find_gf_port(self, port_name: str):
+        """Find a gdsfactory port by name."""
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            raise ValueError("No component set")
+
+        for p in component.ports:
+            if p.name == port_name:
+                return p
+
+        raise ValueError(
+            f"Port '{port_name}' not found on component. "
+            f"Available ports: {[p.name for p in component.ports]}"
+        )
+
     def _configure_ports_on_component(self, stack: LayerStack) -> None:  # noqa: ARG002
         """Configure ports on the component using legacy functions."""
         from gsim.palace.ports import (
             configure_cpw_port,
             configure_inplane_port,
             configure_via_port,
+            configure_wave_port,
         )
 
         component = self.geometry.component if self.geometry else None
@@ -658,11 +698,7 @@ class PalaceSimMixin:
                 continue
 
             # Find matching gdsfactory port
-            gf_port = None
-            for p in component.ports:
-                if p.name == port_config.name:
-                    gf_port = p
-                    break
+            gf_port = self._find_gf_port(port_config.name)
 
             if gf_port is None:
                 raise ValueError(
@@ -700,11 +736,8 @@ class PalaceSimMixin:
         # Configure CPW ports
         for cpw_config in self.cpw_ports or []:
             # Find the single gdsfactory port at the signal center
-            gf_port = None
-            for p in component.ports:
-                if p.name == cpw_config.name:
-                    gf_port = p
-                    break
+            gf_port = self._find_gf_port(cpw_config.name)
+
             if gf_port is None:
                 raise ValueError(
                     f"CPW port '{cpw_config.name}' not found on component. "
@@ -721,6 +754,25 @@ class PalaceSimMixin:
                 excited=cpw_config.excited,
                 offset=cpw_config.offset,
             )
+        # Configure wave ports
+        for port_config in self.wave_ports:
+            if port_config.name is None:
+                continue
+
+            # Find matching gdsfactory port
+            gf_port = self._find_gf_port(port_config.name)
+
+            if port_config.layer is not None:
+                configure_wave_port(
+                    gf_port,
+                    layer=port_config.layer,
+                    z_margin=port_config.z_margin,
+                    lateral_margin=port_config.lateral_margin,
+                    max_size=port_config.max_size,
+                    excited=port_config.excited,
+                    mode=port_config.mode,
+                    offset=port_config.offset,
+                )
 
         self._configured_ports = True
 
@@ -750,12 +802,14 @@ class PalaceSimMixin:
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
+            margin_x=mesh_config.margin_x,
+            margin_y=mesh_config.margin_y,
             airbox_margin=mesh_config.airbox_margin,
             fmax=effective_fmax,
             show_gui=mesh_config.show_gui,
             preview_only=mesh_config.preview_only,
             planar_conductors=mesh_config.planar_conductors,
-            refine_from_curves=mesh_config.refine_from_curves,
+            refine_near_conductor_curves=mesh_config.refine_near_conductor_curves,
         )
 
         # Resolve stack
@@ -811,6 +865,8 @@ class PalaceSimMixin:
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -825,6 +881,8 @@ class PalaceSimMixin:
             refined_mesh_size: Mesh size near conductors (um)
             max_mesh_size: Max mesh size in air/dielectric (um)
             margin: XY margin around design (um)
+            margin_x: X-axis margin (um). Overrides margin for X.
+            margin_y: Y-axis margin (um). Overrides margin for Y.
             airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz)
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -849,6 +907,8 @@ class PalaceSimMixin:
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
+            margin_x=margin_x,
+            margin_y=margin_y,
             airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
@@ -867,12 +927,14 @@ class PalaceSimMixin:
             max_mesh_size=mesh_config.max_mesh_size,
             cells_per_wavelength=mesh_config.cells_per_wavelength,
             margin=mesh_config.margin,
+            margin_x=mesh_config.margin_x,
+            margin_y=mesh_config.margin_y,
             airbox_margin=mesh_config.airbox_margin,
             fmax=mesh_config.fmax,
             show_gui=show_gui,
             preview_only=True,
             planar_conductors=mesh_config.planar_conductors,
-            refine_from_curves=mesh_config.refine_from_curves,
+            refine_near_conductor_curves=mesh_config.refine_near_conductor_curves,
         )
 
         # Generate mesh in temp directory
@@ -901,6 +963,8 @@ class PalaceSimMixin:
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
         margin: float | None = None,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -920,6 +984,8 @@ class PalaceSimMixin:
             refined_mesh_size: Mesh size near conductors (um), overrides preset
             max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
             margin: XY margin around design (um), overrides preset
+            margin_x: X-axis margin (um). Overrides margin for X.
+            margin_y: Y-axis margin (um). Overrides margin for Y.
             airbox_margin: Extra airbox around stack (um); 0 = disabled
             fmax: Max frequency for mesh sizing (Hz), overrides preset
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -951,6 +1017,8 @@ class PalaceSimMixin:
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
             margin=margin,
+            margin_x=margin_x,
+            margin_y=margin_y,
             airbox_margin=airbox_margin,
             fmax=fmax,
             planar_conductors=planar_conductors,
@@ -985,8 +1053,6 @@ class PalaceSimMixin:
     def write_config(self) -> Path:
         """Write Palace config.json after mesh generation.
 
-        Use this when mesh() was called with write_config=False.
-
         Returns:
             Path to the generated config.json
 
@@ -994,7 +1060,7 @@ class PalaceSimMixin:
             ValueError: If mesh() hasn't been called yet
 
         Example:
-            >>> result = sim.mesh("./sim", write_config=False)
+            >>> result = sim.mesh("./sim")
             >>> config_path = sim.write_config()
         """
         from gsim.palace.mesh.generator import write_config as gen_write_config
@@ -1191,7 +1257,7 @@ class PalaceSimMixin:
         num_processes: int = 1,
         num_threads: int | None = None,
         verbose: bool = True,
-    ) -> dict[str, Path]:
+    ) -> SParams | dict[str, Path]:
         """Run simulation locally using Palace.
 
         Requires mesh() and write_config() to be called first.
@@ -1212,7 +1278,10 @@ class PalaceSimMixin:
             verbose: Print progress messages
 
         Returns:
-            Dict mapping result filenames to local paths
+            Parsed Palace result object (``SParams``) when ``port-S.csv`` is
+            present, matching :meth:`run` behavior. Falls back to a
+            ``dict[str, Path]`` mapping filenames to local paths when S-params
+            are unavailable.
 
         Raises:
             ValueError: If output_dir not set or Palace not configured
@@ -1383,11 +1452,20 @@ class PalaceSimMixin:
         if verbose:
             logger.info("Results saved to %s", postpro_dir)
 
-        return {
+        files = {
             file.name: file
             for file in postpro_dir.iterdir()
             if file.is_file() and not file.name.startswith(".")
         }
+
+        # Match cloud run() behavior for Palace: return parsed SParams when
+        # possible, else fall back to raw files dict.
+        from gsim.palace.results import load_sparams
+
+        try:
+            return load_sparams(files)
+        except FileNotFoundError:
+            return files
 
     # -------------------------------------------------------------------------
     # Port methods
@@ -1497,5 +1575,57 @@ class PalaceSimMixin:
                 offset=offset,
                 impedance=impedance,
                 excited=excited,
+            )
+        )
+
+    def add_wave_port(
+        self,
+        name: str,
+        *,
+        layer: str | None = None,
+        z_margin: float = 0.0,
+        lateral_margin: float = 0.0,
+        max_size: bool = False,
+        mode: int = 1,
+        excited: bool = True,
+        offset: float = 0.0,
+    ) -> None:
+        """Add a single element wave port.
+
+        Args:
+            name: Port name (must match a component port at the signal center)
+            layer: Target conductor layer (e.g., "topmetal2")
+            z_margin: Margin in z direction
+            lateral_margin: Margin in x/y directions
+              Ignores lateral margin and port_width.
+            max_size: When True, automatically set z_margin and lateral_margin
+                to fill the full simulation domain boundary on that side.
+                Overrides z_margin and lateral_margin values.
+            mode: Mode number to excite.
+            excited: Whether this port is excited
+            offset: Offset distance used for scattering parameter de-embedding.
+
+        Example:
+            >>> sim.add_wave_port(
+            ...     "w1",
+            ...     layer="topmetal2",
+            ...     max_size=True,
+            ...     mode=1,
+            ...     excited=True,
+            ...     offset=0.0,
+            ... )
+        """
+        self.wave_ports = [p for p in self.wave_ports if p.name != name]
+
+        self.wave_ports.append(
+            WavePortConfig(
+                name=name,
+                layer=layer,
+                z_margin=z_margin,
+                lateral_margin=lateral_margin,
+                max_size=max_size,
+                mode=mode,
+                excited=excited,
+                offset=offset,
             )
         )
