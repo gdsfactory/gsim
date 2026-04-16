@@ -106,6 +106,18 @@ class TestDrivenSimWorkflow:
         result = sim.validate_config()
         assert result.valid, f"Validation failed: {result}"
 
+    def test_validate_mesh_raises_before_mesh(self, cpw_component, tmp_path):
+        sim = DrivenSim()
+        sim.set_output_dir(str(tmp_path / "val-no-mesh"))
+        sim.set_geometry(cpw_component)
+        sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+        sim.add_cpw_port("o1", layer="metal1", s_width=10, gap_width=6, length=5.0)
+        sim.add_cpw_port("o2", layer="metal1", s_width=10, gap_width=6, length=5.0)
+        sim.set_driven(fmin=1e9, fmax=100e9)
+
+        with pytest.raises(RuntimeError, match="No mesh generated"):
+            sim.validate_mesh()
+
     def test_mesh_creates_file(self, driven_sim):
         mesh_path = Path(driven_sim._output_dir) / "palace.msh"
         assert mesh_path.exists()
@@ -183,6 +195,27 @@ class TestDrivenSimInplanePorts:
     def test_validate_mesh_passes(self, inplane_sim):
         result = inplane_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
+
+
+def test_validate_mesh_autogenerates_config(tmp_path, cpw_component):
+    """validate_mesh should write config.json when it does not exist yet."""
+    sim = DrivenSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim-autoconfig"))
+    sim.set_geometry(cpw_component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.add_port("o1", layer="metal1", length=5.0, impedance=50.0)
+    sim.add_port("o2", layer="metal1", length=5.0, impedance=50.0)
+    sim.set_driven(fmin=1e9, fmax=50e9, num_points=20)
+    sim.mesh(preset="coarse")
+
+    assert sim._output_dir is not None
+    config_path = Path(sim._output_dir) / "config.json"
+    if config_path.exists():
+        config_path.unlink()
+
+    result = sim.validate_mesh()
+    assert result.valid, f"Mesh validation failed: {result}"
+    assert config_path.exists(), "validate_mesh should auto-generate config.json"
 
 
 def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):

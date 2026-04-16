@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
 from gsim.palace.mesh import MeshConfig
+from gsim.palace.mesh import validation as mesh_validation
 from gsim.palace.models.mesh import MeshConfig as ModelMeshConfig
 
 
@@ -84,3 +88,39 @@ class TestModelMeshConfig:
         config = ModelMeshConfig()
         config.refine_from_curves = True
         assert config.refine_near_conductor_curves is True
+
+
+class TestValidationHelpers:
+    """Test helper routines used by mesh validation."""
+
+    def test_parse_direction(self):
+        """Direction parser returns normalized vectors and rejects unknown keys."""
+        vec = mesh_validation._parse_direction("+X")
+        assert np.allclose(vec, np.array([1.0, 0.0, 0.0]))
+
+        with pytest.raises(ValueError, match="Unknown port direction"):
+            mesh_validation._parse_direction("north")
+
+    def test_perp_dist(self):
+        """Perpendicular distance to an axis-aligned line is computed correctly."""
+        v = np.array([0.0, 3.0, 4.0])
+        origin = np.zeros(3)
+        normals = [np.array([1.0, 0.0, 0.0])]
+        dist = mesh_validation._perp_dist(v, normals, origin)
+        assert dist == pytest.approx(5.0)
+
+    def test_palace_obb_planar_rectangle(self):
+        """OBB helper handles a simple planar rectangle point cloud."""
+        pts = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
+        _center, axes, planar = mesh_validation._palace_obb(pts)
+        lengths = [2.0 * float(np.linalg.norm(ax)) for ax in axes]
+        assert planar is True
+        assert max(lengths) == pytest.approx(2.0)
+        assert min(lengths) == pytest.approx(0.0)

@@ -385,99 +385,22 @@ class PalaceSimMixin:
         Call after mesh() and before run().
 
         Returns:
-            ValidationResult with validation status and messages
+            ValidationResult with validation status and messages when valid.
+
+        Raises:
+            RuntimeError: If mesh/config validation fails.
 
         Example:
             >>> sim.mesh(preset="coarse")
             >>> result = sim.validate_mesh()
             >>> print(result)
         """
-        errors = []
-        warnings_list = []
+        from gsim.palace.mesh.validation import validate_mesh as _validate_mesh
 
-        mesh_result = getattr(self, "_mesh_result", None) or getattr(
-            self, "_last_mesh_result", None
-        )
-        if mesh_result is None:
-            errors.append("No mesh generated. Call mesh() first.")
-            return ValidationResult(valid=False, errors=errors, warnings=warnings_list)
-
-        groups = mesh_result.groups
-
-        # Check dielectric volumes
-        if not groups.get("volumes"):
-            errors.append("No dielectric volumes in mesh.")
-        else:
-            vol_names = list(groups["volumes"].keys())
-            warnings_list.append(f"Volumes: {vol_names}")
-
-        # Check conductor surfaces (volumetric or PEC)
-        has_conductors = bool(groups.get("conductor_surfaces"))
-        has_pec = bool(groups.get("pec_surfaces"))
-        if not has_conductors and not has_pec:
-            errors.append(
-                "No conductor surfaces in mesh. "
-                "Check that conductor layers have polygons and correct layer_type."
-            )
-        else:
-            if has_conductors:
-                warnings_list.append(
-                    f"Conductor surfaces: {list(groups['conductor_surfaces'].keys())}"
-                )
-            if has_pec:
-                warnings_list.append(
-                    f"PEC surfaces: {list(groups['pec_surfaces'].keys())}"
-                )
-
-        # Check ports
-        port_surfaces = groups.get("port_surfaces", {})
-        if not port_surfaces and self.simulation_type == "driven":
-            errors.append("No port surfaces in mesh.")
-        else:
-            for port_name, port_info in port_surfaces.items():
-                if port_info.get("type") == "cpw":
-                    n_elems = len(port_info.get("elements", []))
-                    if n_elems < 2:
-                        errors.append(
-                            f"CPW port '{port_name}' has {n_elems} elements "
-                            f"(expected >= 2)."
-                        )
-
-        # Check absorbing boundary
-        if not groups.get("boundary_surfaces", {}).get("absorbing"):
-            warnings_list.append(
-                "No absorbing boundary found. This is expected if airbox_margin=0."
-            )
-
-        # Validate config.json if it exists
-        output_dir = getattr(self, "_output_dir", None)
-        if output_dir is not None:
-            import json
-
-            config_path = output_dir / "config.json"
-            if config_path.exists():
-                try:
-                    config = json.loads(config_path.read_text())
-                    boundaries = config.get("Boundaries", {})
-                    if not boundaries.get("Conductivity") and not boundaries.get("PEC"):
-                        errors.append(
-                            "config.json has no Conductivity or PEC boundaries."
-                        )
-                    if (
-                        not boundaries.get("LumpedPort")
-                        and not boundaries.get("WavePort")
-                    ) and (
-                        self.simulation_type == "driven"
-                        or self.simulation_type == "waveport"
-                    ):
-                        errors.append(
-                            "config.json has no LumpedPort nor Waveport entries."
-                        )
-                except json.JSONDecodeError as e:
-                    errors.append(f"config.json is invalid JSON: {e}")
-
-        valid = len(errors) == 0
-        return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
+        result = _validate_mesh(self)
+        if not result.valid:
+            raise RuntimeError(f"Mesh validation failed:\n{result}")
+        return result
 
     # -------------------------------------------------------------------------
     # Convenience methods
@@ -725,7 +648,13 @@ class PalaceSimMixin:
                     excited=port_config.excited,
                 )
 
-            # Attach RLC values to port info for downstream consumers
+            # Clear any stale reactive metadata from previous simulations.
+            # kfactory Info is mapping-like (get/setitem) but has no pop/delitem.
+            gf_port.info["resistance"] = None
+            gf_port.info["inductance"] = None
+            gf_port.info["capacitance"] = None
+
+            # Attach RLC values to port info for downstream consumers.
             if port_config.resistance is not None:
                 gf_port.info["resistance"] = port_config.resistance
             if port_config.inductance is not None:
@@ -1050,7 +979,7 @@ class PalaceSimMixin:
             write_config=False,
         )
 
-    def write_config(self) -> Path:
+    def write_config(self, *, validate_mesh: bool = True) -> Path:
         """Write Palace config.json after mesh generation.
 
         Returns:
@@ -1086,10 +1015,9 @@ class PalaceSimMixin:
             hints=self._hints,
         )
 
-        # Validate mesh and config
-        validation = self.validate_mesh()
-        if not validation.valid:
-            raise ValueError(f"Mesh validation failed:\n{validation}")
+        # Validate mesh and config unless explicitly skipped.
+        if validate_mesh:
+            self.validate_mesh()
 
         return config_path
 
