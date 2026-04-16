@@ -177,7 +177,12 @@ class TestDrivenSimInplanePorts:
 
 
 def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):
-    """Reactive per-port parameters go to LumpedElement, not LumpedPort."""
+    """Reactive parameters must go into a passive LumpedPort (Active: false).
+
+    Driven simulations forbid L/C on excited ports in Palace.  The fix is to
+    emit an additional passive port entry (Active: false) on the same boundary
+    surface carrying the reactive R/L/C, while the excited port gets only R.
+    """
     sim = DrivenSim()
     sim.set_output_dir(str(tmp_path / "palace-sim-reactive"))
     sim.set_geometry(cpw_component)
@@ -202,23 +207,28 @@ def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):
     boundaries = config["Boundaries"]
 
     assert "LumpedPort" in boundaries
-    assert len(boundaries["LumpedPort"]) == 2
+    # 2 primary ports + 1 passive reactive port
+    assert len(boundaries["LumpedPort"]) == 3
+    assert "LumpedElement" not in boundaries
 
+    # Excited port 1 must have only R (no reactive terms)
     p1 = next(port for port in boundaries["LumpedPort"] if port["Index"] == 1)
     assert p1["R"] == 50.0
-    assert "Rs" not in p1
     assert "L" not in p1
     assert "C" not in p1
 
-    assert "LumpedElement" in boundaries
-    assert len(boundaries["LumpedElement"]) == 1
-
-    elem = boundaries["LumpedElement"][0]
-    assert elem["R"] == 2.5
-    assert elem["L"] == 10e-9
-    assert elem["C"] == 1e-15
-    assert "Attributes" in elem
-    assert "Direction" in elem
+    # Passive reactive port must be Active: false and carry R/L/C
+    passive = [p for p in boundaries["LumpedPort"] if not p.get("Active", True)]
+    assert len(passive) == 1
+    rp = passive[0]
+    assert rp.get("Active") is False
+    assert rp["R"] == 2.5
+    assert rp["L"] == 10e-9
+    assert rp["C"] == 1e-15
+    assert "Attributes" in rp
+    assert "Direction" in rp
+    # Passive port must share the same boundary attributes as the excited port
+    assert rp["Attributes"] == p1["Attributes"]
 
 
 # ---------------------------------------------------------------------------
