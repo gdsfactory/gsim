@@ -185,6 +185,51 @@ class TestDrivenSimInplanePorts:
         assert result.valid, f"Mesh validation failed: {result}"
 
 
+def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):
+    """Reactive per-port parameters go to LumpedElement, not LumpedPort."""
+    sim = DrivenSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim-reactive"))
+    sim.set_geometry(cpw_component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.add_port(
+        "o1",
+        layer="metal1",
+        length=5.0,
+        impedance=50.0,
+        resistance=2.5,
+        inductance=10e-9,
+        capacitance=1e-15,
+    )
+    sim.add_port("o2", layer="metal1", length=5.0, impedance=50.0)
+    sim.set_driven(fmin=1e9, fmax=50e9, num_points=20)
+    sim.mesh(preset="coarse")
+    sim.write_config()
+
+    assert sim._output_dir is not None
+    config_path = Path(sim._output_dir) / "config.json"
+    config = json.loads(config_path.read_text())
+    boundaries = config["Boundaries"]
+
+    assert "LumpedPort" in boundaries
+    assert len(boundaries["LumpedPort"]) == 2
+
+    p1 = next(port for port in boundaries["LumpedPort"] if port["Index"] == 1)
+    assert p1["R"] == 50.0
+    assert "Rs" not in p1
+    assert "L" not in p1
+    assert "C" not in p1
+
+    assert "LumpedElement" in boundaries
+    assert len(boundaries["LumpedElement"]) == 1
+
+    elem = boundaries["LumpedElement"][0]
+    assert elem["R"] == 2.5
+    assert elem["L"] == 10e-9
+    assert elem["C"] == 1e-15
+    assert "Attributes" in elem
+    assert "Direction" in elem
+
+
 # ---------------------------------------------------------------------------
 # EigenmodeSim workflow
 # ---------------------------------------------------------------------------

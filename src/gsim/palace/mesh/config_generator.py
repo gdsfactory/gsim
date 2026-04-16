@@ -219,6 +219,7 @@ def generate_palace_config(
 
     lumped_ports: list[dict[str, object]] = []
     wave_ports: list[dict[str, object]] = []
+    lumped_elements: list[dict[str, object]] = []
     port_idx = 1
 
     for port in ports:
@@ -254,6 +255,12 @@ def generate_palace_config(
                         if port.geometry == PortGeometry.VIA
                         else port.direction.upper()
                     )
+                    has_reactive_element = (
+                        port.resistance is not None
+                        or (port.inductance is not None and port.inductance > 0)
+                        or (port.capacitance is not None and port.capacitance > 0)
+                    )
+
                     port_entry: dict[str, object] = {
                         "Index": port_idx,
                         "R": port.impedance,
@@ -261,14 +268,21 @@ def generate_palace_config(
                         "Excitation": port_idx if port.excited else False,
                         "Attributes": [port_group["phys_group"]],
                     }
-                    if port.resistance is not None:
-                        port_entry["Rs"] = port.resistance
-                    if port.inductance is not None:
-                        port_entry["L"] = port.inductance
-                    if port.capacitance is not None:
-                        port_entry["C"] = port.capacitance
                     lumped_ports.append(port_entry)
-                else:
+
+                    if has_reactive_element:
+                        element_entry: dict[str, object] = {
+                            "Direction": direction,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                        if port.resistance is not None:
+                            element_entry["R"] = port.resistance
+                        if port.inductance is not None and port.inductance > 0:
+                            element_entry["L"] = port.inductance
+                        if port.capacitance is not None and port.capacitance > 0:
+                            element_entry["C"] = port.capacitance
+                        lumped_elements.append(element_entry)
+                elif port.port_type == PortType.WAVEPORT:
                     wave_ports.append(
                         {
                             "Index": port_idx,
@@ -283,6 +297,7 @@ def generate_palace_config(
     boundaries: dict[str, object] = {
         "Conductivity": conductors,
         "LumpedPort": lumped_ports,
+        "LumpedElement": lumped_elements,
         "WavePort": wave_ports,
     }
 
