@@ -342,9 +342,13 @@ class PalaceSimMixin:
         else:
             mesh_config = MeshConfig.default()
 
-        # For the default preset, scale refined_mesh_size to the smallest
-        # conductor feature when the user didn't specify one explicitly.
-        if preset in (None, "default") and refined_mesh_size is None:
+        # Scale refined_mesh_size to the smallest conductor feature (polygon
+        # bbox or inter-polygon gap) when the user didn't specify an explicit
+        # value. Runs for every preset — the min(preset, auto) floor inside
+        # auto_refined_mesh_size() means large-feature designs keep the
+        # preset's size, while small-feature designs get proportional
+        # refinement regardless of whether coarse/default/fine was chosen.
+        if refined_mesh_size is None:
             component = self.geometry.component if self.geometry else None
             if component is not None:
                 from gsim.palace.mesh.auto_size import auto_refined_mesh_size
