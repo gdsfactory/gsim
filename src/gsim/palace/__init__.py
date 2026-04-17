@@ -61,9 +61,7 @@ from gsim.palace.electrostatic import ElectrostaticSim
 
 # Mesh utilities
 from gsim.palace.mesh import (
-    GroundPlane,
     MeshConfig,
-    MeshPreset,
     MeshResult,
     generate_mesh,
 )
@@ -85,9 +83,6 @@ from gsim.palace.models import (
     TransientConfig,
     ValidationResult,
     WavePortConfig,
-)
-from gsim.palace.models import (
-    MeshConfig as MeshConfigModel,
 )
 
 # Port utilities
@@ -124,15 +119,12 @@ __all__ = [
     "ElectrostaticSim",
     "Geometry",
     "GeometryConfig",
-    "GroundPlane",
     "Layer",
     "LayerStack",
     "MagnetostaticConfig",
     "MaterialConfig",
     "MaterialProperties",
     "MeshConfig",
-    "MeshConfigModel",
-    "MeshPreset",
     "MeshResult",
     "NumericalConfig",
     "PECBlockConfig",

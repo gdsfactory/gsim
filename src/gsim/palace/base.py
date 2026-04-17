@@ -812,8 +812,7 @@ class PalaceSimMixin:
         write_config: bool = True,
     ) -> SimulationResult:
         """Internal mesh generation."""
-        from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
-        from gsim.palace.mesh import generate_mesh
+        from gsim.palace.mesh.generator import generate_mesh
 
         component = self.geometry.component if self.geometry else None
 
@@ -821,20 +820,6 @@ class PalaceSimMixin:
         effective_fmax = mesh_config.fmax
         if driven_config is not None and mesh_config.fmax == 100e9:
             effective_fmax = driven_config.fmax
-
-        legacy_mesh_config = LegacyMeshConfig(
-            refined_mesh_size=mesh_config.refined_mesh_size,
-            max_mesh_size=mesh_config.max_mesh_size,
-            cells_per_wavelength=mesh_config.cells_per_wavelength,
-            margin=mesh_config.margin,
-            margin_x=mesh_config.margin_x,
-            margin_y=mesh_config.margin_y,
-            airbox_margin=mesh_config.airbox_margin,
-            fmax=effective_fmax,
-            show_gui=mesh_config.show_gui,
-            preview_only=mesh_config.preview_only,
-            planar_conductors=mesh_config.planar_conductors,
-        )
 
         # Resolve stack
         stack = self._resolve_stack()
@@ -847,14 +832,22 @@ class PalaceSimMixin:
             stack=stack,
             ports=ports,
             output_dir=output_dir,
-            config=legacy_mesh_config,
             model_name=model_name,
+            refined_mesh_size=mesh_config.refined_mesh_size,
+            max_mesh_size=mesh_config.max_mesh_size,
+            margin_x=mesh_config.effective_margin_x,
+            margin_y=mesh_config.effective_margin_y,
+            air_margin=mesh_config.airbox_margin,
+            fmax=effective_fmax,
+            show_gui=mesh_config.show_gui,
+            simulation_type=self.simulation_type,
             driven_config=driven_config,
             eigenmode_config=self.eigenmode,
-            simulation_type=self.simulation_type,
             write_config=write_config,
-            absorbing_boundary=self.absorbing_boundary,
+            planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
+            absorbing_boundary=self.absorbing_boundary,
+            merge_via_distance=mesh_config.merge_via_distance,
             verbosity=3,
         )
 
@@ -915,8 +908,7 @@ class PalaceSimMixin:
         Example:
             >>> sim.preview(preset="fine", planar_conductors=True, show_gui=True)
         """
-        from gsim.palace.mesh import MeshConfig as LegacyMeshConfig
-        from gsim.palace.mesh import generate_mesh
+        from gsim.palace.mesh.generator import generate_mesh
 
         component = self.geometry.component if self.geometry else None
 
@@ -945,21 +937,6 @@ class PalaceSimMixin:
         # Get ports
         ports = self._get_ports_for_preview(stack)
 
-        # Build legacy mesh config with preview mode
-        legacy_mesh_config = LegacyMeshConfig(
-            refined_mesh_size=mesh_config.refined_mesh_size,
-            max_mesh_size=mesh_config.max_mesh_size,
-            cells_per_wavelength=mesh_config.cells_per_wavelength,
-            margin=mesh_config.margin,
-            margin_x=mesh_config.margin_x,
-            margin_y=mesh_config.margin_y,
-            airbox_margin=mesh_config.airbox_margin,
-            fmax=mesh_config.fmax,
-            show_gui=show_gui,
-            preview_only=True,
-            planar_conductors=mesh_config.planar_conductors,
-        )
-
         # Generate mesh in temp directory
         with tempfile.TemporaryDirectory() as tmpdir:
             generate_mesh(
@@ -967,12 +944,20 @@ class PalaceSimMixin:
                 stack=stack,
                 ports=ports,
                 output_dir=tmpdir,
-                config=legacy_mesh_config,
+                refined_mesh_size=mesh_config.refined_mesh_size,
+                max_mesh_size=mesh_config.max_mesh_size,
+                margin_x=mesh_config.effective_margin_x,
+                margin_y=mesh_config.effective_margin_y,
+                air_margin=mesh_config.airbox_margin,
+                fmax=mesh_config.fmax,
+                show_gui=True,
+                simulation_type=self.simulation_type,
                 driven_config=self.driven,
                 eigenmode_config=self.eigenmode,
-                simulation_type=self.simulation_type,
-                absorbing_boundary=self.absorbing_boundary,
+                planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
+                absorbing_boundary=self.absorbing_boundary,
+                merge_via_distance=mesh_config.merge_via_distance,
             )
 
     # -------------------------------------------------------------------------

@@ -22,7 +22,11 @@ Usage:
         stack=stack,
         ports=ports,
         output_dir="./sim_output",
-        config=config,
+        refined_mesh_size=config.refined_mesh_size,
+        max_mesh_size=config.max_mesh_size,
+        margin_x=config.effective_margin_x,
+        margin_y=config.effective_margin_y,
+        fmax=config.fmax,
     )
 """
 
@@ -30,33 +34,19 @@ from __future__ import annotations
 
 from gsim.palace.mesh.generator import (
     GeometryData,
-    write_config,
-)
-from gsim.palace.mesh.generator import (
-    MeshResult as MeshResultDirect,
-)
-from gsim.palace.mesh.generator import (
-    generate_mesh as generate_mesh_direct,
-)
-from gsim.palace.mesh.pipeline import (
-    GroundPlane,
-    MeshConfig,
-    MeshPreset,
     MeshResult,
     generate_mesh,
+    write_config,
 )
+from gsim.palace.models.mesh import MeshConfig
 
 from . import gmsh_utils
 
 __all__ = [
     "GeometryData",
-    "GroundPlane",
     "MeshConfig",
-    "MeshPreset",
     "MeshResult",
-    "MeshResultDirect",
     "generate_mesh",
-    "generate_mesh_direct",
     "gmsh_utils",
     "write_config",
 ]
