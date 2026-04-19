@@ -235,34 +235,46 @@ class Simulation(BaseModel):
         if stack is None:
             raise ValueError("No stack configured for z-crop.")
 
+        z_crop_setting = self.geometry.z_crop
+
         # Find reference layer
         ref: Layer | None = None
-        if self.geometry.z_crop == "auto":
+        ref_name: str
+        if z_crop_setting == "auto":
             ref, best_n = _find_highest_n_layer(stack)
             if ref is None or best_n <= 1.5:
                 raise ValueError(
                     "Could not auto-detect core layer (no layer with n > 1.5). "
                     "Set geometry.z_crop to an explicit layer name."
                 )
+            ref_name = next(
+                (n for n, layer in stack.layers.items() if layer is ref),
+                "auto",
+            )
         else:
-            layer_name = self.geometry.z_crop
-            if layer_name not in stack.layers:
+            ref_name = z_crop_setting
+            if ref_name not in stack.layers:
                 raise ValueError(
-                    f"Layer '{layer_name}' not found. "
+                    f"Layer '{ref_name}' not found. "
                     f"Available: {list(stack.layers.keys())}"
                 )
-            ref = stack.layers[layer_name]
+            ref = stack.layers[ref_name]
 
         z_lo = ref.zmin - self.domain.margin_z_below
         z_hi = ref.zmax + self.domain.margin_z_above
 
         # Filter and clip layers
         cropped: dict[str, Layer] = {}
+        trimmed_names: list[str] = []
+        removed_names: list[str] = []
         for name, layer in stack.layers.items():
             if layer.zmax <= z_lo or layer.zmin >= z_hi:
+                removed_names.append(name)
                 continue
             new_zmin = max(layer.zmin, z_lo)
             new_zmax = min(layer.zmax, z_hi)
+            if new_zmin != layer.zmin or new_zmax != layer.zmax:
+                trimmed_names.append(name)
             cropped[name] = layer.model_copy(
                 update={
                     "zmin": new_zmin,
@@ -292,7 +304,22 @@ class Simulation(BaseModel):
             dielectrics=cropped_dielectrics,
             simulation=stack.simulation,
         )
-        # Mark as applied by clearing the z_crop setting
+        logger.info(
+            "z_crop=%r applied (ref=%r, z=[%.4g, %.4g]); trimmed %d layer(s): %s; "
+            "removed %d layer(s) fully outside crop: %s",
+            z_crop_setting,
+            ref_name,
+            z_lo,
+            z_hi,
+            len(trimmed_names),
+            trimmed_names,
+            len(removed_names),
+            removed_names,
+        )
+        # Clear z_crop so repeat calls to build_config() (e.g. plot_2d then run)
+        # don't re-crop an already-cropped stack. Invariant: after this method
+        # runs successfully, self.geometry.stack is the cropped stack and
+        # self.geometry.z_crop is None.
         self.geometry.z_crop = None
 
     # -------------------------------------------------------------------------
@@ -500,7 +527,6 @@ class Simulation(BaseModel):
             used_materials, overrides=self._material_overrides()
         )
 
-        # Compute source fwidth
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
