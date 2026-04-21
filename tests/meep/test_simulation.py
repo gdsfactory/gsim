@@ -418,18 +418,24 @@ class Test2DMode:
         f = FDTD()
         assert f.is_3d is True
 
-    def test_fdtd_is_3d_false(self):
-        f = FDTD(is_3d=False)
+    def test_fdtd_simulation_plane_xy(self):
+        f = FDTD(simulation_plane="xy")
         assert f.is_3d is False
+        assert f.simulation_plane == "xy"
+
+    def test_fdtd_compat_is_3d_false(self):
+        f = FDTD.model_validate({"is_3d": False})
+        assert f.is_3d is False
+        assert f.simulation_plane == "xy"
 
     def test_solver_assignment(self):
         sim = Simulation()
-        sim.solver.is_3d = False
+        sim.solver.simulation_plane = "xy"
         assert sim.solver.is_3d is False
 
     def test_solver_callable(self):
         sim = Simulation()
-        sim.solver(is_3d=False)
+        sim.solver(simulation_plane="xy")
         assert sim.solver.is_3d is False
 
     def test_build_config_2d_port_z_zero(self):
@@ -443,14 +449,14 @@ class Test2DMode:
         sim.materials = {"si": 3.47, "SiO2": 1.44}
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver.simulation_plane = "xy"
 
         result = sim.build_config()
         for port in result.config.ports:
             assert port.center[2] == 0.0
 
     def test_build_config_2d_is_3d_false_in_config(self):
-        """build_config with is_3d=False sets is_3d=False in SimConfig."""
+        """build_config with simulation_plane=xy sets is_3d=False in SimConfig."""
         import gdsfactory as gf
 
         c = gf.components.straight(length=10, width=0.5)
@@ -460,10 +466,11 @@ class Test2DMode:
         sim.materials = {"si": 3.47, "SiO2": 1.44}
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver.simulation_plane = "xy"
 
         result = sim.build_config()
         assert result.config.is_3d is False
+        assert result.config.simulation_plane == "xy"
 
     def test_build_config_3d_default(self):
         """Default build_config should be 3D."""
@@ -481,7 +488,7 @@ class Test2DMode:
         assert result.config.is_3d is True
 
     def test_write_config_2d_json(self, tmp_path):
-        """write_config with is_3d=False produces JSON with is_3d=false."""
+        """write_config with is_3d=False produces JSON with simulation_plane=xy."""
         import json
 
         import gdsfactory as gf
@@ -493,11 +500,11 @@ class Test2DMode:
         sim.materials = {"si": 3.47, "SiO2": 1.44}
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver.simulation_plane = "xy"
 
         out = sim.write_config(tmp_path / "sim2d")
         config_data = json.loads((out / "sim_config.json").read_text())
-        assert config_data["is_3d"] is False
+        assert config_data["simulation_plane"] == "xy"
         # Ports should have z=0
         for port in config_data["ports"]:
             assert port["center"][2] == 0.0

@@ -923,22 +923,29 @@ class TestSimConfig2D:
         assert cfg.is_3d is True
 
     def test_set_2d(self, sim_kwargs):
-        cfg = SimConfig(**sim_kwargs, is_3d=False)
+        cfg = SimConfig(**sim_kwargs, simulation_plane="xy")
         assert cfg.is_3d is False
 
     def test_json_roundtrip_2d(self, tmp_path, sim_kwargs):
-        cfg = SimConfig(**sim_kwargs, is_3d=False)
+        cfg = SimConfig(**sim_kwargs, simulation_plane="xy")
         path = tmp_path / "config.json"
         cfg.to_json(path)
         data = json.loads(path.read_text())
-        assert data["is_3d"] is False
+        assert data["simulation_plane"] == "xy"
 
     def test_json_roundtrip_3d(self, tmp_path, sim_kwargs):
-        cfg = SimConfig(**sim_kwargs, is_3d=True)
+        cfg = SimConfig(**sim_kwargs, simulation_plane="3d")
         path = tmp_path / "config.json"
         cfg.to_json(path)
         data = json.loads(path.read_text())
-        assert data["is_3d"] is True
+        assert data["simulation_plane"] == "3d"
+
+    def test_json_roundtrip_xz(self, tmp_path, sim_kwargs):
+        cfg = SimConfig(**sim_kwargs, simulation_plane="xz")
+        path = tmp_path / "config.json"
+        cfg.to_json(path)
+        data = json.loads(path.read_text())
+        assert data["simulation_plane"] == "xz"
 
 
 class TestPortExtraction2D:
@@ -965,9 +972,9 @@ class TestPortExtraction2D:
         import gdsfactory as gf
 
         c = gf.components.straight(length=10, width=0.5)
-        ports = extract_port_info(c, stack, is_3d=False)
+        ports = extract_port_info(c, stack, simulation_plane="xy")
         for p in ports:
-            assert p.center[2] == 0.0, "2D ports must have z=0"
+            assert p.center[2] == 0.0, "2D XY ports must have z=0"
 
     def test_ports_z_nonzero_in_3d(self):
         from gsim.common.stack.extractor import Layer, LayerStack
@@ -990,7 +997,7 @@ class TestPortExtraction2D:
         import gdsfactory as gf
 
         c = gf.components.straight(length=10, width=0.5)
-        ports = extract_port_info(c, stack, is_3d=True)
+        ports = extract_port_info(c, stack, simulation_plane="3d")
         for p in ports:
             assert p.center[2] != 0.0, "3D ports must have nonzero z"
 
@@ -998,11 +1005,11 @@ class TestPortExtraction2D:
 class TestScript2D:
     """Test that the runner script includes 2D mode support."""
 
-    def test_script_has_is_3d_check(self):
+    def test_script_has_simulation_plane_check(self):
         from gsim.meep.script import generate_meep_script
 
         script = generate_meep_script()
-        assert "is_3d" in script
+        assert "simulation_plane" in script
 
     def test_script_has_te_parity(self):
         from gsim.meep.script import generate_meep_script

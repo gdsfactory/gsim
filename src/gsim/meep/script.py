@@ -202,9 +202,10 @@ def build_background_slabs(config, materials):
     the correct cladding/substrate material.  They must come FIRST in the
     geometry list so that patterned prisms (added later) take precedence.
 
-    Skipped entirely in 2D mode (no z-dimension).
+    Skipped in XY 2D mode (no z-dimension).  Kept in XZ 2D mode where z is real.
     """
-    if not config.get("is_3d", True):
+    simulation_plane = config.get("simulation_plane", "3d")
+    if simulation_plane == "xy":
         return []
 
     slabs = []
@@ -311,15 +312,17 @@ def build_geometry(config, materials):
       2. Extrude to 3D as mp.Prism with correct z-range and material
       3. Handle polygon holes via Delaunay triangulation
 
-    In 2D mode (is_3d=False), all prisms are placed at z=0 and sidewall
-    angles are ignored, matching gplugins behaviour.
+    In XY 2D mode, all prisms are placed at z=0 and sidewall angles are
+    ignored, matching gplugins behaviour.  In XZ 2D mode, real z-coordinates
+    and sidewall angles are preserved.
     """
     gds_filename = config["gds_filename"]
     component = load_gds_component(gds_filename)
 
     accuracy = config["accuracy"]
     simplify_tol = accuracy["simplify_tol"]
-    is_3d = config.get("is_3d", True)
+    simulation_plane = config.get("simulation_plane", "3d")
+    use_real_z = simulation_plane != "xy"
 
     geometry = []
     total_vertices = 0
@@ -327,12 +330,13 @@ def build_geometry(config, materials):
     for layer_entry in config["layer_stack"]:
         material_name = layer_entry["material"]
         mat = materials.get(material_name, mp.Medium())
-        zmin = layer_entry["zmin"] if is_3d else 0
+        zmin = layer_entry["zmin"] if use_real_z else 0
         zmax = layer_entry["zmax"]
-        height = zmax - zmin if is_3d else (layer_entry["zmax"] - layer_entry["zmin"])
+        raw_h = layer_entry["zmax"] - layer_entry["zmin"]
+        height = zmax - zmin if use_real_z else raw_h
         gds_layer = layer_entry["gds_layer"]
         sidewall_angle_deg = layer_entry["sidewall_angle"]
-        if is_3d and sidewall_angle_deg:
+        if use_real_z and sidewall_angle_deg:
             sw_rad = math.radians(sidewall_angle_deg)
         else:
             sw_rad = 0
@@ -385,10 +389,10 @@ def build_geometry(config, materials):
 def get_port_z_span(config):
     """Get z-span for ports from layer stack.
 
-    In 2D mode returns an arbitrary large value (20 um) since the
-    z-dimension is collapsed and the size doesn't affect the simulation.
+    In XY 2D mode returns an arbitrary large value (20 um) since the
+    z-dimension is collapsed.  In XZ 2D mode returns the real z-span.
     """
-    if not config.get("is_3d", True):
+    if config.get("simulation_plane", "3d") == "xy":
         return 20
     zmin = min(l["zmin"] for l in config["layer_stack"])
     zmax = max(l["zmax"] for l in config["layer_stack"])
@@ -403,8 +407,8 @@ def build_sources(config):
     the soft source from the port monitor so eigenmode coefficients
     measure the true incident amplitude rather than half of it.
 
-    In 2D mode (is_3d=False), enforces transverse-electric parity
-    (EVEN_Y + ODD_Z) to match gplugins 2D convention.
+    In XY 2D mode, enforces transverse-electric parity (EVEN_Y + ODD_Z).
+    In XZ 2D mode, uses NO_PARITY (let MEEP find the correct mode).
     """
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
@@ -413,8 +417,11 @@ def build_sources(config):
     z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
     source_port_offset = config["domain"].get("source_port_offset", 0.1)
-    is_3d = config.get("is_3d", True)
-    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
+    simulation_plane = config.get("simulation_plane", "3d")
+    if simulation_plane == "xy":
+        eig_parity = mp.EVEN_Y + mp.ODD_Z
+    else:
+        eig_parity = mp.NO_PARITY
 
     sources = []
     for port in config["ports"]:
@@ -432,9 +439,13 @@ def build_sources(config):
         center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
-        transverse_axis = 1 - normal_axis
-        size[transverse_axis] = port["width"] + 2 * port_margin
-        size[2] = z_span
+        if simulation_plane == "xz":
+            # y collapsed — port spans z
+            size[2] = z_span
+        else:
+            transverse_axis = 1 - normal_axis
+            size[transverse_axis] = port["width"] + 2 * port_margin
+            size[2] = z_span
 
         # Propagation axis
         prop_axis = mp.X if normal_axis == 0 else mp.Y
@@ -479,6 +490,8 @@ def build_monitors(config, sim):
         "distance_source_to_monitors", 0.2
     )
 
+    simulation_plane = config.get("simulation_plane", "3d")
+
     monitors = {}
     for port in config["ports"]:
         center_list = list(port["center"])
@@ -502,9 +515,13 @@ def build_monitors(config, sim):
         center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
-        transverse_axis = 1 - normal_axis
-        size[transverse_axis] = port["width"] + 2 * port_margin
-        size[2] = z_span
+        if simulation_plane == "xz":
+            # y collapsed — port spans z
+            size[2] = z_span
+        else:
+            transverse_axis = 1 - normal_axis
+            size[transverse_axis] = port["width"] + 2 * port_margin
+            size[2] = z_span
 
         flux = sim.add_mode_monitor(
             fcen, df, nfreq,
@@ -603,8 +620,11 @@ def extract_s_params(config, sim, monitors):
         return info
 
     # Get incident coefficient at source port for normalization
-    is_3d = config.get("is_3d", True)
-    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
+    simulation_plane = config.get("simulation_plane", "3d")
+    if simulation_plane == "xy":
+        eig_parity = mp.EVEN_Y + mp.ODD_Z
+    else:
+        eig_parity = mp.NO_PARITY
 
     src_dir = ports[source_port]["direction"]
     src_kp = _port_kpoint(ports[source_port])
@@ -752,19 +772,36 @@ def save_geometry_diagnostics(sim, config, cell_center):
         # plot2D is collective — all ranks call it, only master saves
         pass
 
-    is_3d = config.get("is_3d", True)
+    simulation_plane = config.get("simulation_plane", "3d")
 
-    if is_3d:
+    if simulation_plane != "xy":
         z_min = min(l["zmin"] for l in config["layer_stack"])
         z_max = max(l["zmax"] for l in config["layer_stack"])
         z_core = (z_min + z_max) / 2
     else:
         z_core = 0
 
+    if simulation_plane == "xz":
+        # XZ 2D: the default plot is already XZ, just plot it
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+            sim.plot2D(ax=ax)
+            ax.set_title("XZ cross-section (2D simulation)")
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("z (um)")
+            fig.tight_layout()
+            if mp.am_master():
+                fig.savefig("meep_geometry_xz.png", dpi=150)
+                logger.info("Saved meep_geometry_xz.png")
+            plt.close(fig)
+        except Exception as e:
+            logger.warning("XZ geometry plot failed: %s", e)
+        return
+
     # XY cross-section at z=core center
     try:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        if is_3d:
+        if simulation_plane == "3d":
             xy_plane = mp.Volume(
                 center=mp.Vector3(cell_center.x, cell_center.y, z_core),
                 size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
@@ -830,8 +867,8 @@ def save_field_snapshot(sim, config, cell_center):
         logger.warning("matplotlib not available, skipping field snapshot")
         return
 
-    is_3d = config.get("is_3d", True)
-    if is_3d:
+    simulation_plane = config.get("simulation_plane", "3d")
+    if simulation_plane != "xy":
         z_min = min(l["zmin"] for l in config["layer_stack"])
         z_max = max(l["zmax"] for l in config["layer_stack"])
         z_core = (z_min + z_max) / 2
@@ -840,21 +877,32 @@ def save_field_snapshot(sim, config, cell_center):
 
     try:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        if is_3d:
+        if simulation_plane == "xz":
+            sim.plot2D(ax=ax, fields=mp.Ey)
+            ax.set_title("Ey field (XZ 2D, post-run)")
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("z (um)")
+            fname = "meep_fields_xz.png"
+        elif simulation_plane == "3d":
             xy_plane = mp.Volume(
                 center=mp.Vector3(cell_center.x, cell_center.y, z_core),
                 size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
             )
             sim.plot2D(ax=ax, output_plane=xy_plane, fields=mp.Ey)
+            ax.set_title(f"Ey field at z={z_core:.3f} um (post-run)")
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("y (um)")
+            fname = "meep_fields_xy.png"
         else:
             sim.plot2D(ax=ax, fields=mp.Ey)
-        ax.set_title(f"Ey field at z={z_core:.3f} um (post-run)")
-        ax.set_xlabel("x (um)")
-        ax.set_ylabel("y (um)")
+            ax.set_title(f"Ey field at z={z_core:.3f} um (post-run)")
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("y (um)")
+            fname = "meep_fields_xy.png"
         fig.tight_layout()
         if mp.am_master():
-            fig.savefig("meep_fields_xy.png", dpi=150)
-            logger.info("Saved meep_fields_xy.png")
+            fig.savefig(fname, dpi=150)
+            logger.info("Saved %s", fname)
         plt.close(fig)
     except Exception as e:
         logger.warning("Field snapshot failed: %s", e)
@@ -990,30 +1038,36 @@ def compile_animation_mp4(fps=15):
 
 
 def save_epsilon_raw(sim, config, cell_center):
-    """Save raw epsilon array as .npy for XY slice at core center."""
-    is_3d = config.get("is_3d", True)
-    if is_3d:
-        z_min = min(l["zmin"] for l in config["layer_stack"])
-        z_max = max(l["zmax"] for l in config["layer_stack"])
-        z_core = (z_min + z_max) / 2
-    else:
-        z_core = 0
+    """Save raw epsilon array as .npy for the primary slice plane."""
+    simulation_plane = config.get("simulation_plane", "3d")
 
     try:
-        if is_3d:
-            xy_plane = mp.Volume(
+        if simulation_plane == "xz":
+            # XZ 2D: default slice is already XZ
+            plane = mp.Volume(
+                center=cell_center,
+                size=mp.Vector3(sim.cell_size.x, 0, sim.cell_size.z),
+            )
+            fname = "meep_epsilon_xz.npy"
+        elif simulation_plane == "3d":
+            z_min = min(l["zmin"] for l in config["layer_stack"])
+            z_max = max(l["zmax"] for l in config["layer_stack"])
+            z_core = (z_min + z_max) / 2
+            plane = mp.Volume(
                 center=mp.Vector3(cell_center.x, cell_center.y, z_core),
                 size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
             )
+            fname = "meep_epsilon_xy.npy"
         else:
-            xy_plane = mp.Volume(
+            plane = mp.Volume(
                 center=cell_center,
                 size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
             )
-        eps_data = sim.get_array(vol=xy_plane, component=mp.Dielectric)
+            fname = "meep_epsilon_xy.npy"
+        eps_data = sim.get_array(vol=plane, component=mp.Dielectric)
         if mp.am_master():
-            np.save("meep_epsilon_xy.npy", eps_data)
-            logger.info("Saved meep_epsilon_xy.npy (shape=%s)", eps_data.shape)
+            np.save(fname, eps_data)
+            logger.info("Saved %s (shape=%s)", fname, eps_data.shape)
     except Exception as e:
         logger.warning("Epsilon raw save failed: %s", e)
 
@@ -1053,7 +1107,7 @@ def main():
 
     resolution = config["resolution"]["pixels_per_um"]
     fdtd = config["fdtd"]
-    is_3d = config.get("is_3d", True)
+    simulation_plane = config.get("simulation_plane", "3d")
 
     # Compute simulation cell from component bounds + layer z-range
     # Use original component bbox if available (port extension changes GDS bbox)
@@ -1073,37 +1127,46 @@ def main():
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
     cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
 
-    if is_3d:
-        # Use both layers and dielectrics for z-range so that PDKs without
-        # explicit box/clad layers (e.g. cspdk) still get enough headroom.
+    def _z_range():
+        """Compute z-range from layers and dielectrics."""
         z_vals = [l["zmin"] for l in config["layer_stack"]] + [
             l["zmax"] for l in config["layer_stack"]
         ]
         for d in config.get("dielectrics", []):
             z_vals.extend((d["zmin"], d["zmax"]))
-        z_min = min(z_vals)
-        z_max = max(z_vals)
+        return min(z_vals), max(z_vals)
 
-        # Z: margin_z_above/below is already baked into the stack via z_crop,
-        #    so only add dpml beyond the stack extent
+    if simulation_plane == "xz":
+        # 2D XZ mode: collapse y-dimension, keep real z
+        z_min, z_max = _z_range()
+        cell_y = 0
         cell_z = (z_max - z_min) + 2 * dpml
         cell_center = mp.Vector3(
             (bbox_right + bbox_left) / 2,
-            (bbox_top + bbox_bottom) / 2,
+            0,
             (z_max + z_min) / 2,
         )
-    else:
-        # 2D mode: collapse z-dimension
+    elif simulation_plane == "xy":
+        # 2D XY mode: collapse z-dimension
         cell_z = 0
         cell_center = mp.Vector3(
             (bbox_right + bbox_left) / 2,
             (bbox_top + bbox_bottom) / 2,
             0,
         )
+    else:
+        # Full 3D
+        z_min, z_max = _z_range()
+        cell_z = (z_max - z_min) + 2 * dpml
+        cell_center = mp.Vector3(
+            (bbox_right + bbox_left) / 2,
+            (bbox_top + bbox_bottom) / 2,
+            (z_max + z_min) / 2,
+        )
 
     logger.info(
         "Cell size: %.2f x %.2f x %.2f um (%s)",
-        cell_x, cell_y, cell_z, "3D" if is_3d else "2D",
+        cell_x, cell_y, cell_z, simulation_plane,
     )
     logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
     logger.info("Resolution: %s pixels/um", resolution)
@@ -1201,16 +1264,24 @@ def main():
     _anim_plane = None
 
     if diag_animation:
-        if is_3d:
+        if simulation_plane == "xz":
+            _anim_plane = mp.Volume(
+                center=cell_center,
+                size=mp.Vector3(sim.cell_size.x, 0, sim.cell_size.z),
+            )
+        elif simulation_plane == "3d":
             z_min_anim = min(l["zmin"] for l in config["layer_stack"])
             z_max_anim = max(l["zmax"] for l in config["layer_stack"])
             z_core_anim = (z_min_anim + z_max_anim) / 2
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
         else:
-            z_core_anim = 0
-        _anim_plane = mp.Volume(
-            center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
-            size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
-        )
+            _anim_plane = mp.Volume(
+                center=mp.Vector3(cell_center.x, cell_center.y, 0),
+                size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),
+            )
 
         def _capture_frame(sim_obj):
             _frame_counter[0] = save_animation_field(
@@ -1303,10 +1374,16 @@ def main():
         if mp.am_master():
             _ctr = _anim_plane.center
             _sz = _anim_plane.size
-            _extent = [
-                _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
-                _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
-            ]
+            if simulation_plane == "xz":
+                _extent = [
+                    _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
+                    _ctr.z - _sz.z / 2, _ctr.z + _sz.z / 2,
+                ]
+            else:
+                _extent = [
+                    _ctr.x - _sz.x / 2, _ctr.x + _sz.x / 2,
+                    _ctr.y - _sz.y / 2, _ctr.y + _sz.y / 2,
+                ]
             render_animation_frames(eps_data, _extent)
             compile_animation_mp4()
 

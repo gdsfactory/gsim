@@ -45,7 +45,7 @@ def extract_port_info(
     layer_stack: LayerStack,
     source_port: str | None = None,
     *,
-    is_3d: bool = True,
+    simulation_plane: str = "3d",
 ) -> list[PortData]:
     """Extract port information from a gdsfactory component.
 
@@ -53,26 +53,28 @@ def extract_port_info(
         component: gdsfactory Component with ports
         layer_stack: LayerStack to determine z-coordinates
         source_port: Name of the source port. If None, first port is the source.
-        is_3d: If False, all port z-centers are set to 0 (2D mode).
+        simulation_plane: "3d", "xy" (collapse z), or "xz" (collapse y).
 
     Returns:
         List of PortData objects ready for JSON serialization
     """
     ports: list[PortData] = []
 
-    z_center = _get_z_center(layer_stack) if is_3d else 0.0
+    z_center = 0.0 if simulation_plane == "xy" else _get_z_center(layer_stack)
 
     for i, gf_port in enumerate(component.ports):
         normal_axis, direction = get_port_normal(gf_port.orientation)
 
         is_source = gf_port.name == source_port if source_port is not None else i == 0
 
+        y_center = 0.0 if simulation_plane == "xz" else float(gf_port.center[1])
+
         ports.append(
             PortData(
                 name=gf_port.name or f"port{i}",
                 center=[
                     float(gf_port.center[0]),
-                    float(gf_port.center[1]),
+                    y_center,
                     z_center,
                 ],
                 orientation=float(gf_port.orientation),

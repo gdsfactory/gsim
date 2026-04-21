@@ -10,7 +10,14 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    computed_field,
+    model_validator,
+)
 
 
 class SymmetryEntry(BaseModel):
@@ -310,16 +317,32 @@ class SimConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    is_3d: bool = Field(
-        default=True,
+    simulation_plane: Literal["3d", "xy", "xz"] = Field(
+        default="3d",
         description=(
-            "True for full 3D FDTD, False for effective-index 2D. "
-            "When False the runner collapses cell_z to 0, skips "
-            "background slabs, places geometry at z=0, and uses "
-            "transverse-electric parity (EVEN_Y+ODD_Z) for "
-            "eigenmode sources."
+            "Simulation dimensionality: '3d' for full 3D FDTD, "
+            "'xy' for 2D collapsing z, "
+            "'xz' for 2D collapsing y (grating couplers)."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_is_3d(cls, data: Any) -> Any:
+        """Accept legacy ``is_3d`` boolean and map to ``simulation_plane``."""
+        if (
+            isinstance(data, dict)
+            and "is_3d" in data
+            and "simulation_plane" not in data
+        ):
+            data["simulation_plane"] = "3d" if data.pop("is_3d") else "xy"
+        return data
+
+    @property
+    def is_3d(self) -> bool:
+        """Whether this is a full 3D simulation."""
+        return self.simulation_plane == "3d"
+
     gds_filename: str = Field(description="GDS file with 2D layout")
     component_bbox: list[float] | None = Field(
         default=None,

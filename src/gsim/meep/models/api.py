@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ---------------------------------------------------------------------------
 # Geometry
@@ -166,15 +166,39 @@ class FDTD(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    is_3d: bool = Field(
-        default=True,
+    simulation_plane: Literal["3d", "xy", "xz"] = Field(
+        default="3d",
         description=(
-            "Run a full 3D simulation (True) or an effective-index 2D "
-            "simulation (False). 2D collapses the z-dimension, ignores "
-            "sidewall angles, and enforces transverse-electric parity "
-            "(EVEN_Y+ODD_Z)."
+            "Simulation dimensionality: '3d' for full 3D FDTD, "
+            "'xy' for 2D collapsing z (effective-index), "
+            "'xz' for 2D collapsing y (grating couplers)."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_is_3d(cls, data: Any) -> Any:
+        """Accept legacy ``is_3d`` boolean and map to ``simulation_plane``."""
+        if (
+            isinstance(data, dict)
+            and "is_3d" in data
+            and "simulation_plane" not in data
+        ):
+            data["simulation_plane"] = "3d" if data.pop("is_3d") else "xy"
+        return data
+
+    @property
+    def is_3d(self) -> bool:
+        """Whether this is a full 3D simulation."""
+        return self.simulation_plane == "3d"
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Support ``solver.is_3d = False`` as shorthand for simulation_plane."""
+        if name == "is_3d":
+            super().__setattr__("simulation_plane", "3d" if value else "xy")
+            return
+        super().__setattr__(name, value)
+
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
 
     # Stopping criteria (flat fields instead of variant classes)
