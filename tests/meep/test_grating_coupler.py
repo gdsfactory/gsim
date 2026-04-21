@@ -88,15 +88,26 @@ class TestGratingCouplerConfig:
         # After z-crop, z-range should be reasonable (not full PDK stack)
         assert max(z_vals) - min(z_vals) < 5.0
 
-    def test_pml_overlap_warning(self, gc_component):
-        """Monitor at stack top should warn about PML overlap."""
+    def test_no_pml_overlap_default(self, gc_sim):
+        """Default config should not warn about PML overlap."""
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            gc_sim.build_config()
+            pml_warnings = [x for x in w if "overlap" in str(x.message).lower()]
+            assert len(pml_warnings) == 0, (
+                f"Unexpected PML overlap: {[str(x.message) for x in pml_warnings]}"
+            )
+
+    def test_pml_overlap_warning_when_forced(self, gc_component):
+        """Forcing offset into PML should trigger a warning."""
         sim = Simulation()
         sim.geometry(component=gc_component, z_crop="auto")
         sim.materials = {"si": 3.47, "SiO2": 1.44}
         sim.source(port="o1", wavelength=1.55, wavelength_span=0.04, num_freqs=51)
         sim.monitors = ["o1", "o2"]
-        # Small margin to trigger overlap
-        sim.domain(pml=1.0, margin=0.2)
+        # Force monitor into PML via offset override
+        sim.port_overrides = {"o2": {"offset": 1.0}}
+        sim.domain(pml=1.0, margin=0.5)
         sim.solver(resolution=20, simulation_plane="xz")
 
         with warnings.catch_warnings(record=True) as w:

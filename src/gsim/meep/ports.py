@@ -62,9 +62,11 @@ def extract_port_info(
 
     z_center = 0.0 if simulation_plane == "xy" else _get_z_center(layer_stack)
 
-    # For XZ mode, compute z_top for vertical port placement
+    # For XZ mode, compute z position for vertical port placement.
+    # Place just inside the PML-free zone (0.1 um below stack top).
+    _VERTICAL_PORT_MARGIN = 0.1
     z_top = (
-        max(l.zmax for l in layer_stack.layers.values())
+        max(l.zmax for l in layer_stack.layers.values()) - _VERTICAL_PORT_MARGIN
         if simulation_plane == "xz"
         else 0.0
     )

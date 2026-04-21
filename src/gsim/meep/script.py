@@ -509,10 +509,14 @@ def build_monitors(config, sim):
         normal_axis = port["normal_axis"]
         direction = port["direction"]
 
-        # Per-port offset override, or domain defaults
+        # Per-port offset override, or domain defaults.
+        # z-normal (flux) ports skip offset by default — no source/monitor
+        # separation concern, and offset would push into PML.
         off_override = port.get("offset_override")
         if off_override is not None:
             offset = off_override
+        elif normal_axis == 2:
+            offset = 0
         elif port["is_source"]:
             offset = source_port_offset + distance_source_to_monitors
         else:
