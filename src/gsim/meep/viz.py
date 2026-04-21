@@ -443,6 +443,7 @@ def plot_2d_interactive(
                     go.Scatter(
                         x=xs,
                         y=ys,
+                        mode="lines",
                         fill="toself",
                         fillcolor=fill_color,
                         line=dict(color=line_color, width=0.5),
@@ -505,6 +506,7 @@ def plot_2d_interactive(
                 go.Scatter(
                     x=[rx0, rx1, rx1, rx0, rx0],
                     y=[ry0, ry0, ry1, ry1, ry0],
+                    mode="lines",
                     fill="toself",
                     fillcolor=pml_color,
                     line=dict(color="gray", width=0.5),
