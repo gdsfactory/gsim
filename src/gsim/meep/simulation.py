@@ -429,6 +429,117 @@ class Simulation(BaseModel):
         return overrides
 
     # -------------------------------------------------------------------------
+    # Monitor-PML overlap check
+    # -------------------------------------------------------------------------
+
+    def _warn_monitor_pml_overlap(
+        self,
+        config: Any,
+        original_bbox: list[float] | None,
+    ) -> None:
+        """Warn if any monitor extends into the PML region."""
+        import warnings
+
+        dpml = config.domain.dpml
+        margin = config.domain.margin_xy
+        port_margin = config.domain.port_margin
+        src_offset = config.domain.source_port_offset
+        d_src_mon = config.domain.distance_source_to_monitors
+        plane = config.simulation_plane
+
+        # Compute cell boundaries
+        if original_bbox is not None:
+            xmin, ymin, xmax, ymax = original_bbox
+        else:
+            return  # can't check without bbox
+
+        cell_xmin = xmin - margin - dpml
+        cell_xmax = xmax + margin + dpml
+        cell_ymin = ymin - margin - dpml
+        cell_ymax = ymax + margin + dpml
+
+        z_vals: list[float] = []
+        for ls in config.layer_stack:
+            z_vals.extend([ls.zmin, ls.zmax])
+        for d in config.dielectrics:
+            z_vals.extend([d["zmin"], d["zmax"]])
+        if z_vals and plane != "xy":
+            cell_zmin = min(z_vals) - dpml
+            cell_zmax = max(z_vals) + dpml
+        else:
+            cell_zmin, cell_zmax = 0.0, 0.0
+
+        # PML inner boundaries (monitors should stay inside these)
+        pml_inner_xmin = cell_xmin + dpml
+        pml_inner_xmax = cell_xmax - dpml
+        pml_inner_zmin = cell_zmin + dpml
+        pml_inner_zmax = cell_zmax - dpml
+
+        for port in config.ports:
+            na = port.normal_axis
+            d = port.direction
+            w = (
+                port.width_override
+                if port.width_override is not None
+                else port.width + 2 * port_margin
+            )
+            off = (
+                port.offset_override
+                if port.offset_override is not None
+                else (src_offset + d_src_mon if port.is_source else src_offset)
+            )
+
+            cx, cy, cz = port.center
+            # Apply offset along normal axis
+            if d == "+":
+                if na == 0:
+                    cx += off
+                elif na == 1:
+                    cy += off
+                else:
+                    cz += off
+            else:
+                if na == 0:
+                    cx -= off
+                elif na == 1:
+                    cy -= off
+                else:
+                    cz -= off
+
+            # Compute monitor extent and check PML overlap
+            issues: list[str] = []
+            if na == 2:
+                # z-normal: spans x
+                if cx - w / 2 < pml_inner_xmin:
+                    issues.append("left PML (x)")
+                if cx + w / 2 > pml_inner_xmax:
+                    issues.append("right PML (x)")
+                if cz < pml_inner_zmin or cz > pml_inner_zmax:
+                    issues.append("PML (z)")
+            elif na == 0:
+                # x-normal: check z extent
+                if plane != "xy":
+                    z_span = max(z_vals) - min(z_vals) if z_vals else 0
+                    if cz - z_span / 2 < pml_inner_zmin:
+                        issues.append("bottom PML (z)")
+                    if cz + z_span / 2 > pml_inner_zmax:
+                        issues.append("top PML (z)")
+                if cx < pml_inner_xmin or cx > pml_inner_xmax:
+                    issues.append("PML (x)")
+            elif na == 1:
+                if cy < cell_ymin + dpml or cy > cell_ymax - dpml:
+                    issues.append("PML (y)")
+
+            if issues:
+                warnings.warn(
+                    f"Port '{port.name}' monitor overlaps with "
+                    f"{', '.join(issues)}. This will produce incorrect "
+                    f"results. Increase domain margins or adjust "
+                    f"port_overrides.",
+                    stacklevel=4,
+                )
+
+    # -------------------------------------------------------------------------
     # build_config — single source of truth
     # -------------------------------------------------------------------------
 
@@ -586,6 +697,9 @@ class Simulation(BaseModel):
         # Forward any private hints into the config
         if self._hints:
             sim_config._hints.update(self._hints)  # noqa: SLF001
+
+        # Validate monitor-PML overlap
+        self._warn_monitor_pml_overlap(sim_config, original_bbox)
 
         return BuildResult(
             config=sim_config,
@@ -760,6 +874,30 @@ class Simulation(BaseModel):
         result = self.build_config()
 
         return plot_2d(
+            component=result.component,
+            stack=self.geometry.stack,
+            domain_config=result.config.domain,
+            source_port=result.config.source.port,
+            extend_ports_length=0,
+            port_data=result.config.ports,
+            component_bbox=result.config.component_bbox,
+            **kwargs,
+        )
+
+    def plot_2d_interactive(self, **kwargs: Any) -> Any:
+        """Interactive 2D cross-section using Plotly.
+
+        Zoomable, pannable figure with toggleable layers via the legend.
+        Click a layer name to hide/show it.
+
+        Accepts the same keyword arguments as
+        :func:`gsim.meep.viz.plot_2d_interactive`.
+        """
+        from gsim.meep.viz import plot_2d_interactive
+
+        result = self.build_config()
+
+        return plot_2d_interactive(
             component=result.component,
             stack=self.geometry.stack,
             domain_config=result.config.domain,
