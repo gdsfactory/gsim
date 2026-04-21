@@ -531,11 +531,15 @@ def build_monitors(config, sim):
             size[transverse_axis] = port["width"] + 2 * port_margin
             size[2] = z_span
 
-        flux = sim.add_mode_monitor(
-            fcen, df, nfreq,
-            mp.ModeRegion(center=center, size=mp.Vector3(*size)),
-        )
-        monitors[port["name"]] = flux
+        region = mp.FluxRegion(center=center, size=mp.Vector3(*size))
+        if normal_axis == 2:
+            # z-normal ports: use flux monitor (no guided eigenmode)
+            flux = sim.add_flux(fcen, df, nfreq, region)
+        else:
+            flux = sim.add_mode_monitor(
+                fcen, df, nfreq, mp.ModeRegion(center=center, size=mp.Vector3(*size)),
+            )
+        monitors[port["name"]] = {"monitor": flux, "normal_axis": normal_axis}
 
     return monitors
 
@@ -638,8 +642,9 @@ def extract_s_params(config, sim, monitors):
 
     src_dir = ports[source_port]["direction"]
     src_kp = _port_kpoint(ports[source_port])
+    src_mon = monitors[source_port]["monitor"]
     src_ob = sim.get_eigenmode_coefficients(
-        monitors[source_port], [1], eig_parity=eig_parity,
+        src_mon, [1], eig_parity=eig_parity,
         kpoint_func=lambda f, n, kp=src_kp: kp,
     )
     incident_coeffs = src_ob.alpha[0, :, _incoming_idx(src_dir)]
@@ -655,6 +660,9 @@ def extract_s_params(config, sim, monitors):
         "backward_mag": [float(abs(src_ob.alpha[0, i, 1])) for i in range(len(freqs))],
     }
 
+    # Compute incident power from eigenmode coefficients for flux normalization
+    incident_power = np.abs(incident_coeffs) ** 2
+
     s_params = {}
 
     for i, port_i in enumerate(port_names):
@@ -663,32 +671,47 @@ def extract_s_params(config, sim, monitors):
                 continue
 
             s_name = f"S{i+1}{j+1}"
+            mon_entry = monitors[port_i]
+            mon_obj = mon_entry["monitor"]
+            mon_normal = mon_entry["normal_axis"]
 
-            port_kp = _port_kpoint(ports[port_i])
-            ob = sim.get_eigenmode_coefficients(
-                monitors[port_i], [1], eig_parity=eig_parity,
-                kpoint_func=lambda f, n, kp=port_kp: kp,
-            )
-
-            # Collect debug info (skip source port — already collected)
-            if port_i != source_port:
-                debug_data["eigenmode_info"][port_i] = _collect_eigenmode_debug(
-                    port_i, ob, freqs)
-                nf = len(freqs)
+            if mon_normal == 2:
+                # z-normal (flux) monitor: S = sqrt(flux / incident_power)
+                flux_data = np.array(mp.get_fluxes(mon_obj))
+                s_mag = np.sqrt(np.abs(flux_data) / np.where(
+                    incident_power > 0, incident_power, 1.0
+                ))
+                # Phase not available from flux — use 0
+                s_params[s_name] = s_mag + 0j
                 debug_data["raw_coefficients"][port_i] = {
-                    "forward_mag": [
-                        float(abs(ob.alpha[0, k, 0])) for k in range(nf)
-                    ],
-                    "backward_mag": [
-                        float(abs(ob.alpha[0, k, 1])) for k in range(nf)
-                    ],
+                    "flux": [float(f) for f in flux_data],
                 }
+            else:
+                port_kp = _port_kpoint(ports[port_i])
+                ob = sim.get_eigenmode_coefficients(
+                    mon_obj, [1], eig_parity=eig_parity,
+                    kpoint_func=lambda f, n, kp=port_kp: kp,
+                )
 
-            # Outgoing direction: reflected at source port, transmitted at output ports
-            port_dir = ports[port_i]["direction"]
-            alpha = ob.alpha[0, :, _outgoing_idx(port_dir)]
+                # Collect debug info (skip source port — already collected)
+                if port_i != source_port:
+                    debug_data["eigenmode_info"][port_i] = (
+                        _collect_eigenmode_debug(port_i, ob, freqs)
+                    )
+                    nf = len(freqs)
+                    debug_data["raw_coefficients"][port_i] = {
+                        "forward_mag": [
+                            float(abs(ob.alpha[0, k, 0])) for k in range(nf)
+                        ],
+                        "backward_mag": [
+                            float(abs(ob.alpha[0, k, 1])) for k in range(nf)
+                        ],
+                    }
 
-            s_params[s_name] = alpha / incident_coeffs
+                # Outgoing direction
+                port_dir = ports[port_i]["direction"]
+                alpha = ob.alpha[0, :, _outgoing_idx(port_dir)]
+                s_params[s_name] = alpha / incident_coeffs
 
     # Power conservation: sum |Sij|^2 per frequency
     power_conservation = np.zeros(len(freqs))

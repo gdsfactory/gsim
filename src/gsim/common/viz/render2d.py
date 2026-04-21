@@ -812,14 +812,16 @@ def _draw_overlay_xz(
     _add_pml_rect(ax, x0 + pml, z0, w - 2 * pml, pml)  # bottom
     _add_pml_rect(ax, x0 + pml, z1 - pml, w - 2 * pml, pml)  # top
 
-    # Ports that intersect this y-slice (y-normal ports at y_slice)
+    # Ports visible on this XZ slice
     labeled: set[str] = set()
     for port in ports:
         cx, cy, cz = port.center
+        color = _SRC_COLOR if port.is_source else _MON_COLOR
+        legend_key = "Source" if port.is_source else "Monitor"
+        label = legend_key if legend_key not in labeled else None
+
         if port.normal_axis == 1 and abs(cy - y_slice) < 0.01:
-            color = _SRC_COLOR if port.is_source else _MON_COLOR
-            legend_key = "Source" if port.is_source else "Monitor"
-            label = legend_key if legend_key not in labeled else None
+            # y-normal port: rectangle spanning (width x z_span)
             labeled.add(legend_key)
             hw = port.width / 2
             hz = port.z_span / 2
@@ -838,6 +840,48 @@ def _draw_overlay_xz(
             ax.annotate(
                 port.name,
                 (cx, cz + hz),
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                color=color,
+                zorder=96,
+            )
+        elif port.normal_axis == 0:
+            # x-normal port: vertical line at x=cx spanning z
+            labeled.add(legend_key)
+            hz = port.z_span / 2
+            ax.plot(
+                [cx, cx],
+                [cz - hz, cz + hz],
+                color=color,
+                linewidth=1.5,
+                label=label,
+                zorder=95,
+            )
+            ax.annotate(
+                port.name,
+                (cx, cz + hz),
+                fontsize=7,
+                ha="center",
+                va="bottom",
+                color=color,
+                zorder=96,
+            )
+        elif port.normal_axis == 2:
+            # z-normal port: horizontal line at z=cz spanning x
+            labeled.add(legend_key)
+            hw = port.width / 2
+            ax.plot(
+                [cx - hw, cx + hw],
+                [cz, cz],
+                color=color,
+                linewidth=1.5,
+                label=label,
+                zorder=95,
+            )
+            ax.annotate(
+                port.name,
+                (cx, cz),
                 fontsize=7,
                 ha="center",
                 va="bottom",
