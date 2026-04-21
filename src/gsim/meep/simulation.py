@@ -826,11 +826,19 @@ class Simulation(BaseModel):
         Uses :meth:`build_config` so the plot shows exactly what meep
         processes — including extended ports and PML boundaries.
 
+        In XZ 2D mode (``solver.plane='xz'``), ``slices`` defaults to
+        ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
+
         Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_2d`.
         """
         from gsim.meep.viz import plot_2d
 
         result = self.build_config()
+
+        if self.solver.plane == "xz":
+            kwargs.setdefault("slices", "y")
+            if kwargs.get("slices") == "y":
+                kwargs.setdefault("y", result.config.y_cut)
 
         return plot_2d(
             component=result.component,
