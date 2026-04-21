@@ -313,6 +313,73 @@ def plot_2d(
     return plot_prism_slices(gm, x, y, z, ax, legend, slices, overlay=overlay)
 
 
+def _polygon_slice_y(vertices: Any, y_val: float) -> list[tuple[float, float]]:
+    """Intersect a 2D polygon with a horizontal line at y=y_val.
+
+    Returns a list of (x_min, x_max) segments where the polygon
+    crosses the line.
+    """
+    from shapely.geometry import LineString
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    poly = ShapelyPolygon(vertices)
+    if poly.is_empty or not poly.is_valid:
+        vx = vertices[:, 0]
+        return [(float(vx.min()), float(vx.max()))]
+
+    xmin, _, xmax, _ = poly.bounds
+    line = LineString([(xmin - 1, y_val), (xmax + 1, y_val)])
+    intersection = poly.intersection(line)
+
+    if intersection.is_empty:
+        return []
+
+    segments = []
+    if hasattr(intersection, "geoms"):
+        for geom in intersection.geoms:
+            coords = list(geom.coords)
+            xs = [c[0] for c in coords]
+            segments.append((min(xs), max(xs)))
+    else:
+        coords = list(intersection.coords)
+        xs = [c[0] for c in coords]
+        segments.append((min(xs), max(xs)))
+    return segments
+
+
+def _polygon_slice_x(vertices: Any, x_val: float) -> list[tuple[float, float]]:
+    """Intersect a 2D polygon with a vertical line at x=x_val.
+
+    Returns a list of (y_min, y_max) segments.
+    """
+    from shapely.geometry import LineString
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    poly = ShapelyPolygon(vertices)
+    if poly.is_empty or not poly.is_valid:
+        vy = vertices[:, 1]
+        return [(float(vy.min()), float(vy.max()))]
+
+    _, ymin, _, ymax = poly.bounds
+    line = LineString([(x_val, ymin - 1), (x_val, ymax + 1)])
+    intersection = poly.intersection(line)
+
+    if intersection.is_empty:
+        return []
+
+    segments = []
+    if hasattr(intersection, "geoms"):
+        for geom in intersection.geoms:
+            coords = list(geom.coords)
+            ys = [c[1] for c in coords]
+            segments.append((min(ys), max(ys)))
+    else:
+        coords = list(intersection.coords)
+        ys = [c[1] for c in coords]
+        segments.append((min(ys), max(ys)))
+    return segments
+
+
 def plot_2d_interactive(
     component: Component,
     stack: LayerStack | None,
@@ -413,47 +480,53 @@ def plot_2d_interactive(
                 if slice_axis == "z" and not (prism.z_base <= sv <= prism.z_top):
                     continue
 
+                rects: list[tuple[list[float], list[float]]] = []
+
                 if slice_axis == "z":
-                    # XY polygon
+                    # XY polygon — draw as-is
                     xs = [v[0] for v in prism.vertices] + [prism.vertices[0][0]]
                     ys = [v[1] for v in prism.vertices] + [prism.vertices[0][1]]
+                    rects.append((xs, ys))
                 elif slice_axis == "y":
-                    # XZ rectangle from prism x-extent and z-extent
-                    vx = prism.vertices[:, 0]
-                    xs = [vx.min(), vx.max(), vx.max(), vx.min(), vx.min()]
-                    ys = [
-                        prism.z_base,
-                        prism.z_base,
-                        prism.z_top,
-                        prism.z_top,
-                        prism.z_base,
-                    ]
+                    # XZ: intersect polygon with y=sv to get x-segments
+                    for x0, x1 in _polygon_slice_y(prism.vertices, sv):
+                        xs = [x0, x1, x1, x0, x0]
+                        ys = [
+                            prism.z_base,
+                            prism.z_base,
+                            prism.z_top,
+                            prism.z_top,
+                            prism.z_base,
+                        ]
+                        rects.append((xs, ys))
                 else:  # x
-                    vy = prism.vertices[:, 1]
-                    xs = [vy.min(), vy.max(), vy.max(), vy.min(), vy.min()]
-                    ys = [
-                        prism.z_base,
-                        prism.z_base,
-                        prism.z_top,
-                        prism.z_top,
-                        prism.z_base,
-                    ]
+                    for y0, y1 in _polygon_slice_x(prism.vertices, sv):
+                        xs = [y0, y1, y1, y0, y0]
+                        ys = [
+                            prism.z_base,
+                            prism.z_base,
+                            prism.z_top,
+                            prism.z_top,
+                            prism.z_base,
+                        ]
+                        rects.append((xs, ys))
 
-                fig.add_trace(
-                    go.Scatter(
-                        x=xs,
-                        y=ys,
-                        mode="lines",
-                        fill="toself",
-                        fillcolor=fill_color,
-                        line=dict(color=line_color, width=0.5),
-                        name=name,
-                        legendgroup=name,
-                        showlegend=first_trace,
-                        hoverinfo="name",
+                for xs, ys in rects:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=xs,
+                            y=ys,
+                            mode="lines",
+                            fill="toself",
+                            fillcolor=fill_color,
+                            line=dict(color=line_color, width=0.5),
+                            name=name,
+                            legendgroup=name,
+                            showlegend=first_trace,
+                            hoverinfo="name",
+                        )
                     )
-                )
-                first_trace = False
+                    first_trace = False
         else:
             # Fill layer — draw bbox rectangle
             x0, x1 = bbox[0][h_idx], bbox[1][h_idx]
