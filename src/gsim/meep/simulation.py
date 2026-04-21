@@ -884,28 +884,41 @@ class Simulation(BaseModel):
             **kwargs,
         )
 
-    def plot_2d_interactive(self, **kwargs: Any) -> Any:
+    def plot_2d_interactive(
+        self,
+        slice_axis: str | None = None,
+        slice_value: float | str | None = None,
+    ) -> Any:
         """Interactive 2D cross-section using Plotly.
 
         Zoomable, pannable figure with toggleable layers via the legend.
         Click a layer name to hide/show it.
 
-        Accepts the same keyword arguments as
-        :func:`gsim.meep.viz.plot_2d_interactive`.
+        Args:
+            slice_axis: Which axis to slice at — ``"x"``, ``"y"``, or
+                ``"z"``.  ``None`` (default) auto-selects based on the
+                simulation plane: ``"z"`` for XY/3D, ``"y"`` for XZ.
+            slice_value: Coordinate or layer name for the slice plane.
+                ``None`` defaults to ``"core"``.
         """
         from gsim.meep.viz import plot_2d_interactive
 
         result = self.build_config()
+
+        if slice_axis is None:
+            plane = result.config.simulation_plane
+            slice_axis = "y" if plane == "xz" else "z"
 
         return plot_2d_interactive(
             component=result.component,
             stack=self.geometry.stack,
             domain_config=result.config.domain,
             source_port=result.config.source.port,
+            slice_axis=slice_axis,
+            slice_value=slice_value,
             extend_ports_length=0,
             port_data=result.config.ports,
             component_bbox=result.config.component_bbox,
-            **kwargs,
         )
 
     def plot_3d(self, **kwargs: Any) -> Any:
