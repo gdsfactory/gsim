@@ -179,7 +179,7 @@ class Simulation(BaseModel):
 
         if self.geometry.component is not None:
             ports = list(self.geometry.component.ports)
-            if not ports:
+            if not ports and self.solver.plane != "xz":
                 errors.append("Component has no ports.")
             elif self.source.port is not None:
                 port_names = [p.name for p in ports]
@@ -469,15 +469,23 @@ class Simulation(BaseModel):
         Raises:
             ValueError: If config is invalid.
         """
+        import math
+
         from gsim.meep.materials import resolve_materials
-        from gsim.meep.models.config import LayerStackEntry, SimConfig, SymmetryEntry
-        from gsim.meep.ports import extract_port_info
+        from gsim.meep.models.config import (
+            FiberSourceConfig,
+            LayerStackEntry,
+            SimConfig,
+            SymmetryEntry,
+        )
+        from gsim.meep.ports import extract_port_info, filter_ports_for_xz
 
         validation = self.validate_config()
         if not validation.valid:
             raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
         is_3d = self.solver.is_3d
+        plane = self.solver.plane
 
         # Resolve stack
         self._ensure_stack()
@@ -494,6 +502,16 @@ class Simulation(BaseModel):
 
         original_component = self.geometry.component.copy()
         stack = self.geometry.stack
+
+        # Resolve y_cut default for XZ 2D sims.
+        if plane == "xz":
+            if self.geometry.y_cut is None:
+                bbox = original_component.dbbox()
+                y_cut: float | None = (bbox.bottom + bbox.top) / 2.0
+            else:
+                y_cut = self.geometry.y_cut
+        else:
+            y_cut = self.geometry.y_cut
 
         # Build config objects
         domain_cfg = self._domain_config()
@@ -554,6 +572,46 @@ class Simulation(BaseModel):
             original_component, stack, source_port=source_cfg.port, is_3d=is_3d
         )
 
+        # Drop ports that don't intersect the XZ cut.
+        if plane == "xz":
+            port_infos = filter_ports_for_xz(
+                port_infos, y_cut=y_cut if y_cut is not None else 0.0
+            )
+
+        # Build FiberSourceConfig (XZ 2D only) with pre-computed k-direction.
+        fiber_source_cfg: FiberSourceConfig | None = None
+        if self.fiber_source is not None:
+            if self.solver.is_3d:
+                raise ValueError("fiber source requires is_3d=False (and plane='xz')")
+            if plane != "xz":
+                raise ValueError("fiber source requires plane='xz'")
+
+            theta = math.radians(self.fiber_source.angle_deg)
+            k_direction = [math.sin(theta), 0.0, -math.cos(theta)]
+
+            cladding_top = max(layer.zmax for layer in stack.layers.values())
+            center_z = cladding_top + self.fiber_source.z_offset
+
+            fiber_source_cfg = FiberSourceConfig(
+                x=self.fiber_source.x,
+                z_offset=self.fiber_source.z_offset,
+                angle_deg=self.fiber_source.angle_deg,
+                waist=self.fiber_source.waist,
+                wavelength=self.fiber_source.wavelength,
+                wavelength_span=self.fiber_source.wavelength_span,
+                num_freqs=self.fiber_source.num_freqs,
+                polarization=self.fiber_source.polarization,
+                k_direction=k_direction,
+                center_z=center_z,
+            )
+
+        if plane == "xz" and not port_infos and fiber_source_cfg is None:
+            raise ValueError(
+                "XZ 2D sim has no valid monitors and no fiber source — "
+                "nothing to observe. Either add a port intersecting y_cut, "
+                "or call sim.source_fiber(...)."
+            )
+
         # Resolve materials
         material_data = resolve_materials(
             used_materials, overrides=self._material_overrides()
@@ -579,6 +637,9 @@ class Simulation(BaseModel):
         # Build SimConfig
         sim_config = SimConfig(
             is_3d=is_3d,
+            plane=plane,
+            y_cut=y_cut,
+            fiber_source=fiber_source_cfg,
             gds_filename="layout.gds",
             component_bbox=original_bbox,
             layer_stack=layer_stack_entries,

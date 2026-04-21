@@ -501,3 +501,169 @@ class Test2DMode:
         # Ports should have z=0
         for port in config_data["ports"]:
             assert port["center"][2] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# XZ 2D build_config wiring
+# ---------------------------------------------------------------------------
+
+
+def _xz_straight_component():
+    """Build a straight-waveguide component with a port on +X."""
+    import gdsfactory as gf
+
+    c = gf.Component()
+    c.add_polygon(
+        [(-5, -0.25), (5, -0.25), (5, 0.25), (-5, 0.25)],
+        layer=(1, 0),
+    )
+    c.add_port(
+        name="o1",
+        center=(5.0, 0.0),
+        orientation=0.0,
+        width=0.5,
+        layer=(1, 0),
+    )
+    return c
+
+
+def _xz_trivial_stack():
+    """Build a trivial 3-layer stack (substrate / core / clad) for XZ tests."""
+    from gsim.common.stack import Layer, LayerStack
+
+    return LayerStack(
+        pdk_name="test",
+        units="um",
+        layers={
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        },
+        materials={},
+        dielectrics=[
+            {"name": "box", "zmin": -2.0, "zmax": 0.0, "material": "SiO2"},
+            {"name": "clad", "zmin": 0.22, "zmax": 1.0, "material": "SiO2"},
+        ],
+        simulation={},
+    )
+
+
+class TestXZBuildConfig:
+    """Tests for XZ 2D fields wired through Simulation.build_config()."""
+
+    def test_y_cut_defaults_to_bbox_center(self):
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+        sim.source_fiber(x=0.0, z_offset=1.0, waist=5.4)
+
+        result = sim.build_config()
+
+        # Straight is centered on y=0 → bbox center is 0.
+        assert result.config.y_cut == pytest.approx(0.0, abs=1e-6)
+
+    def test_y_cut_explicit_override(self):
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.y_cut = 0.1
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+        sim.source_fiber(x=0.0, z_offset=1.0, waist=5.4)
+
+        result = sim.build_config()
+        assert result.config.y_cut == pytest.approx(0.1)
+
+    def test_xz_plane_serializes(self):
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+        sim.source_fiber(x=0.0, z_offset=1.0, waist=5.4)
+
+        result = sim.build_config()
+        assert result.config.plane == "xz"
+        assert result.config.is_3d is False
+
+    def test_fiber_source_serialized_with_k_direction(self):
+        import math
+
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+        sim.source_fiber(x=0.0, z_offset=1.0, angle_deg=14.5, waist=5.4)
+
+        result = sim.build_config()
+        fs = result.config.fiber_source
+        assert fs is not None
+        theta = math.radians(14.5)
+        assert fs.k_direction[0] == pytest.approx(math.sin(theta))
+        assert fs.k_direction[1] == pytest.approx(0.0)
+        assert fs.k_direction[2] == pytest.approx(-math.cos(theta))
+        # clad top is at z=0.22 (only layer in stack.layers) → center_z = 0.22 + 1.0
+        assert fs.center_z == pytest.approx(1.22)
+
+
+class TestXZValidation:
+    """Tests for XZ-only validation in build_config."""
+
+    def test_xz_without_monitors_or_fiber_errors(self):
+        import gdsfactory as gf
+
+        from gsim.common.stack import Layer, LayerStack
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        c = gf.Component()
+        c.add_polygon(
+            [(-5, -0.25), (5, -0.25), (5, 0.25), (-5, 0.25)],
+            layer=(1, 0),
+        )
+        sim.geometry.component = c
+        sim.geometry.stack = LayerStack(
+            pdk_name="test",
+            units="um",
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+            },
+            materials={},
+            dielectrics=[],
+            simulation={},
+        )
+        sim.materials = {"si": 3.47}
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+
+        with pytest.raises(ValueError, match="no valid monitors and no fiber source"):
+            sim.build_config()
