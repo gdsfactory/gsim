@@ -20,6 +20,7 @@ nav:
       - Ring Coupler: nbs/meep_ring_coupler.md
       - Directional Coupler: nbs/meep_dc.md
       - Crossing: nbs/meep_crossing.md
+      - 2D Effective-Index: nbs/meep_2d.md
   - FEM for RF:
       - CPW (Lumped Ports): nbs/palace_cpw_lumped.md
       - CPW (Wave Ports): nbs/palace_cpw_waveport.md
