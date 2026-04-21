@@ -1452,3 +1452,131 @@ class TestRender2dOverlay:
         assert "oxide" in patch_labels
 
         plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# XZ 2D API additions
+# ---------------------------------------------------------------------------
+
+
+class TestGeometryYCut:
+    """Tests for the Geometry.y_cut field."""
+
+    def test_default_is_none(self):
+        from gsim.meep.models.api import Geometry
+
+        g = Geometry()
+        assert g.y_cut is None
+
+    def test_accepts_float(self):
+        from gsim.meep.models.api import Geometry
+
+        g = Geometry(y_cut=1.5)
+        assert g.y_cut == 1.5
+
+
+class TestFDTDPlane:
+    """Tests for the FDTD.plane field and its validator."""
+
+    def test_default_is_xy(self):
+        from gsim.meep.models.api import FDTD
+
+        s = FDTD()
+        assert s.plane == "xy"
+
+    def test_xz_with_is_3d_false_ok(self):
+        from gsim.meep.models.api import FDTD
+
+        s = FDTD(is_3d=False, plane="xz")
+        assert s.plane == "xz"
+
+    def test_xz_with_is_3d_true_errors(self):
+        from gsim.meep.models.api import FDTD
+
+        with pytest.raises(ValidationError, match="plane='xz' requires is_3d=False"):
+            FDTD(is_3d=True, plane="xz")
+
+    def test_setting_plane_xz_when_is_3d_true_errors(self):
+        from gsim.meep.models.api import FDTD
+
+        s = FDTD()
+        with pytest.raises(ValidationError, match="plane='xz' requires is_3d=False"):
+            s.plane = "xz"
+
+
+class TestFiberSource:
+    """Tests for the FiberSource API model."""
+
+    def test_construct_minimal(self):
+        from gsim.meep.models.api import FiberSource
+
+        fs = FiberSource(x=0.0, z_offset=1.0, waist=5.4)
+        assert fs.x == 0.0
+        assert fs.z_offset == 1.0
+        assert fs.waist == 5.4
+        assert fs.angle_deg == 0.0
+        assert fs.wavelength == 1.55
+        assert fs.polarization == "TE"
+
+    def test_construct_grating_coupler_defaults(self):
+        from gsim.meep.models.api import FiberSource
+
+        fs = FiberSource(
+            x=0.0,
+            z_offset=1.0,
+            angle_deg=14.5,
+            waist=5.4,
+            wavelength=1.55,
+            wavelength_span=0.05,
+            num_freqs=21,
+            polarization="TE",
+        )
+        assert fs.angle_deg == 14.5
+        assert fs.num_freqs == 21
+
+    def test_waist_must_be_positive(self):
+        from gsim.meep.models.api import FiberSource
+
+        with pytest.raises(ValidationError):
+            FiberSource(x=0.0, z_offset=1.0, waist=0.0)
+
+    def test_z_offset_must_be_non_negative(self):
+        from gsim.meep.models.api import FiberSource
+
+        with pytest.raises(ValidationError):
+            FiberSource(x=0.0, z_offset=-0.1, waist=5.4)
+
+
+class TestSimulationFiberSource:
+    """Tests for Simulation.source_fiber(...) dispatcher."""
+
+    def test_sim_fiber_helper_replaces_source(self):
+        from gsim.meep.models.api import FiberSource, ModeSource
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.solver.is_3d = False
+        sim.solver.plane = "xz"
+
+        sim.source_fiber(
+            x=0.0,
+            z_offset=1.0,
+            angle_deg=14.5,
+            waist=5.4,
+            wavelength=1.55,
+            wavelength_span=0.05,
+            num_freqs=21,
+            polarization="TE",
+        )
+
+        assert isinstance(sim.fiber_source, FiberSource)
+        assert sim.fiber_source.angle_deg == 14.5
+        # ModeSource is still present but build_config must prefer fiber_source.
+        assert isinstance(sim.source, ModeSource)
+
+    def test_sim_fiber_helper_rejects_when_is_3d_true(self):
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()  # defaults: is_3d=True
+        with pytest.raises(ValueError, match="fiber source requires is_3d=False"):
+            sim.source_fiber(x=0.0, z_offset=1.0, waist=5.4)

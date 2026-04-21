@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from gsim.meep.models.api import (
     FDTD,
     Domain,
+    FiberSource,
     Geometry,
     Material,
     ModeSource,
@@ -78,6 +79,13 @@ class Simulation(BaseModel):
     geometry: Geometry = Field(default_factory=Geometry)
     materials: dict[str, float | Material] = Field(default_factory=dict)
     source: ModeSource = Field(default_factory=ModeSource)
+    fiber_source: FiberSource | None = Field(
+        default=None,
+        description=(
+            "Gaussian-beam fiber source for XZ 2D grating-coupler sims. "
+            "When set, takes precedence over mode-source `source`."
+        ),
+    )
     monitors: list[str] = Field(default_factory=list)
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
@@ -126,6 +134,30 @@ class Simulation(BaseModel):
             else:
                 out[name] = val
         return out
+
+    # -------------------------------------------------------------------------
+    # Fiber source helper
+    # -------------------------------------------------------------------------
+
+    def source_fiber(self, **kwargs: Any) -> FiberSource:
+        """Configure a tilted Gaussian-beam fiber source (XZ 2D only).
+
+        Replaces any previous fiber source. Requires ``solver.is_3d=False``
+        (and eventually ``solver.plane='xz'`` at ``build_config`` time).
+
+        Args:
+            **kwargs: Fields forwarded to :class:`FiberSource`.
+
+        Returns:
+            The newly created :class:`FiberSource` instance.
+        """
+        if self.solver.is_3d:
+            raise ValueError(
+                "fiber source requires is_3d=False (and plane='xz') — "
+                "currently is_3d=True"
+            )
+        self.fiber_source = FiberSource(**kwargs)
+        return self.fiber_source
 
     # -------------------------------------------------------------------------
     # Validation

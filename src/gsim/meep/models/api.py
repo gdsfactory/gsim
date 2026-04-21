@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ---------------------------------------------------------------------------
 # Geometry
@@ -29,6 +29,14 @@ class Geometry(BaseModel):
     z_crop: str | None = Field(
         default=None,
         description='Z-crop mode: "auto" | layer_name | None (no crop)',
+    )
+    y_cut: float | None = Field(
+        default=None,
+        description=(
+            "Y coordinate of the XZ cross-section cut (um). "
+            "Only meaningful when solver.is_3d=False and solver.plane='xz'. "
+            "None → resolved to the component bbox Y-center at build time."
+        ),
     )
 
     def __call__(self, **kwargs: Any) -> Geometry:
@@ -84,6 +92,43 @@ class ModeSource(BaseModel):
     )
 
     def __call__(self, **kwargs: Any) -> ModeSource:
+        """Update fields in place. Returns self for chaining."""
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
+
+
+class FiberSource(BaseModel):
+    """Tilted Gaussian-beam source above the chip (fiber-to-chip coupling).
+
+    The beam center sits ``z_offset`` above the top of the cladding at
+    X=``x``. The beam tilts from the +Z normal by ``angle_deg`` toward +X.
+    Only valid in XZ 2D mode (``solver.is_3d=False, solver.plane='xz'``).
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    x: float = Field(description="Beam-center X on the chip plane (um)")
+    z_offset: float = Field(ge=0, description="Distance above cladding top (um)")
+    angle_deg: float = Field(
+        default=0.0,
+        description="Tilt from +Z normal; positive tilts toward +X (degrees)",
+    )
+    waist: float = Field(gt=0, description="Gaussian beam waist w0 (um)")
+    wavelength: float = Field(default=1.55, gt=0, description="Center wavelength (um)")
+    wavelength_span: float = Field(
+        default=0.05, ge=0, description="Wavelength span (um)"
+    )
+    num_freqs: int = Field(default=21, ge=1, description="Number of frequency points")
+    polarization: Literal["TE", "TM"] = Field(
+        default="TE",
+        description=(
+            "PIC convention. 'TE' → E along waveguide width (Ey, out of XZ "
+            "plane); 'TM' → E in the XZ plane (Ex)."
+        ),
+    )
+
+    def __call__(self, **kwargs: Any) -> FiberSource:
         """Update fields in place. Returns self for chaining."""
         for k, v in kwargs.items():
             setattr(self, k, v)
@@ -173,6 +218,14 @@ class FDTD(BaseModel):
             "simulation (False). 2D collapses the z-dimension, ignores "
             "sidewall angles, and enforces transverse-electric parity "
             "(EVEN_Y+ODD_Z)."
+        ),
+    )
+    plane: Literal["xy", "xz"] = Field(
+        default="xy",
+        description=(
+            "2D simulation plane. 'xy' is the effective-index top-down sim; "
+            "'xz' is a vertical cross-section (for grating couplers and "
+            "edge couplers). Only meaningful when is_3d=False."
         ),
     )
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
@@ -342,3 +395,10 @@ class FDTD(BaseModel):
     animation_interval: float = Field(default=0.5, gt=0)
     preview_only: bool = Field(default=False)
     verbose_interval: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_plane_vs_3d(self) -> FDTD:
+        """Reject ``plane='xz'`` when ``is_3d`` is True."""
+        if self.is_3d and self.plane == "xz":
+            raise ValueError("plane='xz' requires is_3d=False")
+        return self
