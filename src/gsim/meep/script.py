@@ -195,6 +195,161 @@ def triangulate_polygon_with_holes(polygon):
     return triangles if triangles else [list(polygon.exterior.coords[:-1])]
 
 
+def extract_xz_rectangles_runner(component, layer_stack, y_cut, eps=1e-9):
+    """Inlined XZ cross-section cutter (mirrors gsim.common.cross_section)."""
+    from shapely.geometry import LineString
+    from shapely.ops import unary_union
+
+    dbu = getattr(getattr(component, "kcl", None), "dbu", 0.001)
+
+    rects = []
+    for layer_entry in layer_stack:
+        gds_layer_tuple = tuple(layer_entry["gds_layer"])
+        shapely_polys = _xz_runner_layer_polys(component, gds_layer_tuple, dbu)
+        if not shapely_polys:
+            continue
+
+        merged = unary_union(shapely_polys)
+        if merged.is_empty:
+            continue
+
+        minx, miny, maxx, maxy = merged.bounds
+        if y_cut < miny - eps or y_cut > maxy + eps:
+            continue
+
+        cut_line = LineString([(minx - 1.0, y_cut), (maxx + 1.0, y_cut)])
+        intersection = merged.intersection(cut_line)
+        intervals = _xz_runner_line_intervals(intersection)
+
+        for x0, x1 in intervals:
+            if x1 - x0 <= eps:
+                continue
+            rects.append({
+                "x0": x0,
+                "x1": x1,
+                "zmin": layer_entry["zmin"],
+                "zmax": layer_entry["zmax"],
+                "layer_name": layer_entry["layer_name"],
+                "material": layer_entry["material"],
+            })
+    return rects
+
+
+def _xz_runner_layer_polys(component, gds_layer_tuple, dbu):
+    """Return shapely Polygons (with holes) for one GDS layer of component."""
+    from shapely.geometry import Polygon
+
+    raw = component.get_polygons(layers=(gds_layer_tuple,), merge=True)
+    if not isinstance(raw, dict) or not raw:
+        return []
+
+    polys = []
+    for value in raw.values():
+        items = list(value) if isinstance(value, list) else [value]
+        for obj in items:
+            exterior, holes = _xz_runner_poly_to_coords(obj, dbu)
+            if exterior is None or len(exterior) < 3:
+                continue
+            try:
+                poly = Polygon(exterior, holes=holes)
+            except (ValueError, TypeError):
+                continue
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty:
+                continue
+            if hasattr(poly, "geoms"):
+                polys.extend(poly.geoms)
+            else:
+                polys.append(poly)
+    return polys
+
+
+def _xz_runner_poly_to_coords(obj, dbu):
+    """Convert a polygon-like object to (exterior, list_of_holes)."""
+    if hasattr(obj, "each_point_hull"):
+        exterior = [(pt.x * dbu, pt.y * dbu) for pt in obj.each_point_hull()]
+        holes = []
+        try:
+            n_holes = obj.holes()
+        except AttributeError:
+            n_holes = 0
+        for i in range(n_holes):
+            try:
+                holes.append(
+                    [(pt.x * dbu, pt.y * dbu) for pt in obj.each_point_hole(i)]
+                )
+            except (AttributeError, IndexError):
+                continue
+        return exterior, holes
+    if hasattr(obj, "__iter__"):
+        try:
+            return [(float(p[0]), float(p[1])) for p in obj], []
+        except (TypeError, IndexError):
+            return None, []
+    return None, []
+
+
+def _xz_runner_line_intervals(intersection):
+    """Extract sorted (x0, x1) intervals from a shapely line intersection."""
+    from shapely.geometry import LineString, MultiLineString
+
+    if intersection.is_empty:
+        return []
+    lines = []
+    if isinstance(intersection, LineString):
+        lines = [intersection]
+    elif isinstance(intersection, MultiLineString):
+        lines = list(intersection.geoms)
+    else:
+        for geom in getattr(intersection, "geoms", []):
+            if isinstance(geom, LineString):
+                lines.append(geom)
+
+    intervals = []
+    for line in lines:
+        xs = [c[0] for c in line.coords]
+        intervals.append((min(xs), max(xs)))
+    intervals.sort()
+    merged = []
+    for x0, x1 in intervals:
+        if merged and x0 <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], x1)
+        else:
+            merged.append([x0, x1])
+    return [(a, b) for a, b in merged]
+
+
+def _build_geometry_xz(config, materials, component):
+    """Build meep geometry from XZ cross-section rectangles."""
+    y_cut = config.get("y_cut")
+    if y_cut is None:
+        y_cut = 0.0
+
+    rects = extract_xz_rectangles_runner(
+        component, config["layer_stack"], y_cut
+    )
+
+    geometry = []
+    for r in rects:
+        mat = materials.get(r["material"], mp.Medium())
+        width_x = r["x1"] - r["x0"]
+        thickness_z = r["zmax"] - r["zmin"]
+        if width_x <= 0 or thickness_z <= 0:
+            continue
+        center_x = (r["x0"] + r["x1"]) / 2.0
+        center_z = (r["zmin"] + r["zmax"]) / 2.0
+        block = mp.Block(
+            size=mp.Vector3(width_x, mp.inf, thickness_z),
+            center=mp.Vector3(center_x, 0.0, center_z),
+            material=mat,
+        )
+        geometry.append(block)
+
+    logger.info("XZ: %d rectangles extracted at y=%.4f", len(geometry), y_cut)
+    return geometry
+
+
 def build_background_slabs(config, materials):
     """Build background mp.Block slabs from dielectric entries.
 
@@ -315,15 +470,22 @@ def build_geometry(config, materials):
       2. Extrude to 3D as mp.Prism with correct z-range and material
       3. Handle polygon holes via Delaunay triangulation
 
-    In 2D mode (is_3d=False), all prisms are placed at z=0 and sidewall
-    angles are ignored, matching gplugins behaviour.
+    In XY 2D mode (is_3d=False, plane="xy"), all prisms are placed at z=0
+    and sidewall angles are ignored, matching gplugins behaviour.
+
+    In XZ 2D mode (is_3d=False, plane="xz"), the geometry is built from
+    axis-aligned rectangles sliced at y=y_cut (see _build_geometry_xz).
     """
     gds_filename = config["gds_filename"]
     component = load_gds_component(gds_filename)
 
+    is_3d = config.get("is_3d", True)
+    plane = config.get("plane", "xy")
+    if not is_3d and plane == "xz":
+        return _build_geometry_xz(config, materials, component), component
+
     accuracy = config["accuracy"]
     simplify_tol = accuracy["simplify_tol"]
-    is_3d = config.get("is_3d", True)
 
     geometry = []
     total_vertices = 0
