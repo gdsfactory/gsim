@@ -79,6 +79,14 @@ class Simulation(BaseModel):
     materials: dict[str, float | Material] = Field(default_factory=dict)
     source: ModeSource = Field(default_factory=ModeSource)
     monitors: list[str] = Field(default_factory=list)
+    port_overrides: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description=(
+            'Per-port overrides: ``{"o2": {"width": 20, "offset": 0.5}}``. '
+            "``width`` overrides the monitor size (um), "
+            "``offset`` overrides the distance from port center (um)."
+        ),
+    )
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
 
@@ -524,6 +532,15 @@ class Simulation(BaseModel):
             source_port=source_cfg.port,
             simulation_plane=simulation_plane,
         )
+
+        # Apply per-port overrides
+        for p in port_infos:
+            if p.name in self.port_overrides:
+                ovr = self.port_overrides[p.name]
+                if "width" in ovr:
+                    p.width_override = ovr["width"]
+                if "offset" in ovr:
+                    p.offset_override = ovr["offset"]
 
         # Resolve materials
         material_data = resolve_materials(

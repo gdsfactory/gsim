@@ -134,7 +134,11 @@ def build_sim_overlay(
         PortOverlay(
             name=p.name,
             center=(p.center[0], p.center[1], p.center[2]),
-            width=p.width + 2 * port_margin,
+            width=(
+                p.width_override
+                if p.width_override is not None
+                else p.width + 2 * port_margin
+            ),
             normal_axis=p.normal_axis,
             direction=p.direction,
             is_source=p.is_source,

@@ -438,16 +438,22 @@ def build_sources(config):
             center_list[normal_axis] -= source_port_offset
         center = mp.Vector3(*center_list)
 
+        # Monitor width: use override if set, else port width + margin
+        w_override = port.get("width_override")
+        monitor_width = w_override if w_override is not None else (
+            port["width"] + 2 * port_margin
+        )
+
         size = [0, 0, 0]
         if normal_axis == 2:
-            # z-normal port (vertical): spans x with port width
-            size[0] = port["width"] + 2 * port_margin
+            # z-normal port (vertical): spans x
+            size[0] = monitor_width
         elif simulation_plane == "xz":
             # y collapsed — port spans z
             size[2] = z_span
         else:
             transverse_axis = 1 - normal_axis
-            size[transverse_axis] = port["width"] + 2 * port_margin
+            size[transverse_axis] = monitor_width
             size[2] = z_span
 
         # Propagation axis and kpoint
@@ -503,10 +509,11 @@ def build_monitors(config, sim):
         normal_axis = port["normal_axis"]
         direction = port["direction"]
 
-        # All monitors shift inward from port center (matches gplugins):
-        #   source-port monitor: source_port_offset + distance_source_to_monitors
-        #   non-source monitors: source_port_offset
-        if port["is_source"]:
+        # Per-port offset override, or domain defaults
+        off_override = port.get("offset_override")
+        if off_override is not None:
+            offset = off_override
+        elif port["is_source"]:
             offset = source_port_offset + distance_source_to_monitors
         else:
             offset = source_port_offset
@@ -519,16 +526,22 @@ def build_monitors(config, sim):
 
         center = mp.Vector3(*center_list)
 
+        # Monitor width: use override if set, else port width + margin
+        w_override = port.get("width_override")
+        monitor_width = w_override if w_override is not None else (
+            port["width"] + 2 * port_margin
+        )
+
         size = [0, 0, 0]
         if normal_axis == 2:
-            # z-normal port (vertical): spans x with port width
-            size[0] = port["width"] + 2 * port_margin
+            # z-normal port (vertical): spans x
+            size[0] = monitor_width
         elif simulation_plane == "xz":
             # y collapsed — port spans z
             size[2] = z_span
         else:
             transverse_axis = 1 - normal_axis
-            size[transverse_axis] = port["width"] + 2 * port_margin
+            size[transverse_axis] = monitor_width
             size[2] = z_span
 
         region = mp.FluxRegion(center=center, size=mp.Vector3(*size))

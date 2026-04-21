@@ -279,6 +279,16 @@ class PortData(BaseModel):
     normal_axis: int = Field(ge=0, le=2, description="0=x, 1=y, 2=z")
     direction: Literal["+", "-"] = Field(description="Direction along normal axis")
     is_source: bool = False
+    width_override: float | None = Field(
+        default=None,
+        description="Override monitor width (um). "
+        "None = use port width + 2*port_margin.",
+    )
+    offset_override: float | None = Field(
+        default=None,
+        description="Override monitor offset from port center (um). "
+        "None = use domain default.",
+    )
 
 
 class LayerStackEntry(BaseModel):
