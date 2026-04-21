@@ -202,9 +202,13 @@ def build_background_slabs(config, materials):
     the correct cladding/substrate material.  They must come FIRST in the
     geometry list so that patterned prisms (added later) take precedence.
 
-    Skipped entirely in 2D mode (no z-dimension).
+    XY 2D (``plane='xy'``) skips slabs entirely — the z-dimension is
+    collapsed.  XZ 2D (``plane='xz'``) DOES include slabs because they
+    form the vertical stack.  3D always includes slabs.
     """
-    if not config.get("is_3d", True):
+    is_3d = config.get("is_3d", True)
+    plane = config.get("plane", "xy")
+    if not is_3d and plane == "xy":
         return []
 
     slabs = []
@@ -1054,6 +1058,8 @@ def main():
     resolution = config["resolution"]["pixels_per_um"]
     fdtd = config["fdtd"]
     is_3d = config.get("is_3d", True)
+    plane = config.get("plane", "xy")
+    is_xz = plane == "xz"
 
     # Compute simulation cell from component bounds + layer z-range
     # Use original component bbox if available (port extension changes GDS bbox)
@@ -1073,27 +1079,44 @@ def main():
     cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
     cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
 
-    if is_3d:
-        # Use both layers and dielectrics for z-range so that PDKs without
-        # explicit box/clad layers (e.g. cspdk) still get enough headroom.
-        z_vals = [l["zmin"] for l in config["layer_stack"]] + [
-            l["zmax"] for l in config["layer_stack"]
-        ]
-        for d in config.get("dielectrics", []):
-            z_vals.extend((d["zmin"], d["zmax"]))
+    # Z range for 3D and XZ 2D. Include both layers and dielectrics
+    # so PDKs without explicit box/clad layers still have headroom.
+    z_vals = [l["zmin"] for l in config["layer_stack"]] + [
+        l["zmax"] for l in config["layer_stack"]
+    ]
+    for d in config.get("dielectrics", []):
+        z_vals.extend((d["zmin"], d["zmax"]))
+    if z_vals:
         z_min = min(z_vals)
         z_max = max(z_vals)
+    else:
+        z_min, z_max = 0.0, 0.0
 
-        # Z: margin_z_above/below is already baked into the stack via z_crop,
-        #    so only add dpml beyond the stack extent
+    margin_z_above = domain.get("margin_z_above", 0.0)
+    margin_z_below = domain.get("margin_z_below", 0.0)
+
+    if is_3d:
+        # 3D: z-margins are already baked via z_crop; just add dpml.
         cell_z = (z_max - z_min) + 2 * dpml
         cell_center = mp.Vector3(
             (bbox_right + bbox_left) / 2,
             (bbox_top + bbox_bottom) / 2,
             (z_max + z_min) / 2,
         )
+    elif is_xz:
+        # XZ 2D: cell_y collapsed; cell_z spans the full stack with
+        # z-margins and PML added (there is no z_crop in 2D).
+        cell_y = 0.0
+        z_lo = z_min - margin_z_below
+        z_hi = z_max + margin_z_above
+        cell_z = (z_hi - z_lo) + 2 * dpml
+        cell_center = mp.Vector3(
+            (bbox_right + bbox_left) / 2,
+            0.0,
+            (z_hi + z_lo) / 2,
+        )
     else:
-        # 2D mode: collapse z-dimension
+        # XY 2D: collapse z-dimension entirely.
         cell_z = 0
         cell_center = mp.Vector3(
             (bbox_right + bbox_left) / 2,
@@ -1129,13 +1152,26 @@ def main():
                      "Symmetries are only used in preview-only mode.")
     use_symmetries = build_symmetries(config) if preview_only else []
 
+    if is_xz:
+        pml_layers = [
+            mp.PML(thickness=dpml, direction=mp.X),
+            mp.PML(thickness=dpml, direction=mp.Z),
+        ]
+    elif not is_3d:
+        pml_layers = [
+            mp.PML(thickness=dpml, direction=mp.X),
+            mp.PML(thickness=dpml, direction=mp.Y),
+        ]
+    else:
+        pml_layers = [mp.PML(dpml)]
+
     sim_kwargs = dict(
         cell_size=mp.Vector3(cell_x, cell_y, cell_z),
         geometry_center=cell_center,
         geometry=geometry,
         sources=sources,
         resolution=resolution,
-        boundary_layers=[mp.PML(dpml)],
+        boundary_layers=pml_layers,
         symmetries=use_symmetries,
         split_chunks_evenly=config["split_chunks_evenly"],
         eps_averaging=eps_avg,
