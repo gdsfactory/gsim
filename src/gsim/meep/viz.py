@@ -552,11 +552,11 @@ def plot_2d_interactive(
         h0, h1 = cmin[h_idx], cmax[h_idx]
         v0, v1 = cmin[v_idx], cmax[v_idx]
 
-        # Sim cell boundary
+        # Simulation domain boundary
         fig.add_trace(
             go.Scatter(
                 x=[h0, h1, h1, h0, h0],
-                y=[v0, v1, v1, v0, v0],
+                y=[v0, v0, v1, v1, v0],
                 mode="lines",
                 line=dict(color="black", width=1, dash="dash"),
                 name="Simulation domain",
