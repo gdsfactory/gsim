@@ -169,9 +169,10 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short"
+addopts = "--tb=short -m 'not slow'"
 norecursedirs = ["scripts"]
 testpaths = ["tests"]
+markers = ["slow: requires cloud simulation (run with pytest -m slow)"]
 
 [tool.ruff]
 fix = true
