@@ -561,6 +561,52 @@ def get_port_z_span(config):
     return zmax - zmin
 
 
+def _build_fiber_source(config, fiber):
+    """Construct a mp.GaussianBeamSource for XZ 2D fiber coupling.
+
+    Polarization (PIC convention):
+      - TE → E along waveguide width (Ey, out of XZ plane)
+      - TM → E in the XZ plane (Ex)
+    """
+    fdtd = config["fdtd"]
+    fcen = fdtd["fcen"]
+    fwidth = config["source"]["fwidth"]
+
+    k_dir = mp.Vector3(*fiber["k_direction"])
+    if fiber["polarization"] == "TE":
+        e_dir = mp.Vector3(0, 1, 0)
+    else:
+        e_dir = mp.Vector3(1, 0, 0)
+
+    center = mp.Vector3(fiber["x"], 0.0, fiber["center_z"])
+
+    src_x_size = _estimate_source_x_size(config)
+
+    src = mp.GaussianBeamSource(
+        src=mp.GaussianSource(frequency=fcen, fwidth=fwidth, is_integrated=True),
+        center=center,
+        size=mp.Vector3(src_x_size, 0, 0),
+        beam_x0=center,
+        beam_kdir=k_dir,
+        beam_w0=fiber["waist"],
+        beam_E0=e_dir,
+    )
+    return [src]
+
+
+def _estimate_source_x_size(config):
+    """Estimate a source-line X length that spans the interior of the cell."""
+    bbox = config.get("component_bbox")
+    domain = config["domain"]
+    dpml = domain["dpml"]
+    margin_xy = domain["margin_xy"]
+    if bbox is not None:
+        width = bbox[2] - bbox[0]
+    else:
+        width = 20.0
+    return max(width + 2 * margin_xy - 2 * dpml, 2.0)
+
+
 def build_sources(config):
     """Build MEEP source from config port data.
 
@@ -571,7 +617,14 @@ def build_sources(config):
 
     In 2D mode (is_3d=False), enforces transverse-electric parity
     (EVEN_Y + ODD_Z) to match gplugins 2D convention.
+
+    If the config has a fiber_source entry (XZ 2D grating-coupler sim),
+    returns a single GaussianBeamSource instead of port-based EigenModeSources.
     """
+    fiber = config.get("fiber_source")
+    if fiber is not None:
+        return _build_fiber_source(config, fiber)
+
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
     df = fdtd["df"]
@@ -580,7 +633,14 @@ def build_sources(config):
     port_margin = config["domain"]["port_margin"]
     source_port_offset = config["domain"].get("source_port_offset", 0.1)
     is_3d = config.get("is_3d", True)
-    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
+    plane = config.get("plane", "xy")
+    if is_3d:
+        eig_parity = mp.NO_PARITY
+    elif plane == "xz":
+        # XZ 2D: cell_y=0, invariant axis is Y. Use ODD_Y for TE-like modes.
+        eig_parity = mp.ODD_Y
+    else:
+        eig_parity = mp.EVEN_Y + mp.ODD_Z
 
     sources = []
     for port in config["ports"]:
@@ -770,7 +830,14 @@ def extract_s_params(config, sim, monitors):
 
     # Get incident coefficient at source port for normalization
     is_3d = config.get("is_3d", True)
-    eig_parity = mp.NO_PARITY if is_3d else mp.EVEN_Y + mp.ODD_Z
+    plane = config.get("plane", "xy")
+    if is_3d:
+        eig_parity = mp.NO_PARITY
+    elif plane == "xz":
+        # XZ 2D: cell_y=0, invariant axis is Y. Use ODD_Y for TE-like modes.
+        eig_parity = mp.ODD_Y
+    else:
+        eig_parity = mp.EVEN_Y + mp.ODD_Z
 
     src_dir = ports[source_port]["direction"]
     src_kp = _port_kpoint(ports[source_port])
