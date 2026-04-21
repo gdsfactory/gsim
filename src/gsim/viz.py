@@ -93,8 +93,8 @@ def _plot_wireframe(
     mio = meshio.read(msh_path)
     group_map: dict[int, str] = {tag: name for name, (tag, _) in mio.field_data.items()}
 
-    mesh = cast(pv.DataSet, pv.read(msh_path))
-    plotter = cast(Any, _make_plotter(interactive))
+    mesh = cast(pv.DataSet, pv.read(msh_path))  # ty: ignore[redundant-cast]
+    plotter = cast(Any, _make_plotter(interactive))  # ty: ignore[redundant-cast]
 
     if show_groups:
         ids = [
@@ -187,7 +187,7 @@ def _plot_solid(
     transparent_mask = np.isin(plain_names, transparent_groups)
     opaque_mask = ~transparent_mask
 
-    plotter = cast(Any, _make_plotter(interactive))
+    plotter = cast(Any, _make_plotter(interactive))  # ty: ignore[redundant-cast]
 
     # Opaque surfaces with categorical colour map -------------------------
     if np.any(opaque_mask):
@@ -461,7 +461,8 @@ def sample_topview_field(
 
     probe = pv.StructuredGrid(Xi, Yi, Zi)
     sampled = probe.sample(
-        cast(pv.DataSet, source), snap_to_closest_point=snap_to_closest_point
+        cast(pv.DataSet, source),  # ty: ignore[redundant-cast]
+        snap_to_closest_point=snap_to_closest_point,
     )
 
     if field not in sampled.point_data:
@@ -499,7 +500,7 @@ def sample_topview_field(
             )
         )
         if not valid.any() and not snap_to_closest_point:
-            sampled = probe.sample(cast(pv.DataSet, source), snap_to_closest_point=True)
+            sampled = probe.sample(cast(pv.DataSet, source), snap_to_closest_point=True)  # ty: ignore[redundant-cast]
             arr = sampled.point_data[field]
             if arr.ndim == 2:
                 values = (
@@ -605,7 +606,7 @@ def plot_topview(
             msg = "No points available for direct surface plotting."
             raise ValueError(msg)
 
-        surf = source.extract_surface(algorithm="dataset_surface").triangulate()
+        surf = source.extract_surface(algorithm="dataset_surface").triangulate()  # ty: ignore[unknown-argument]
         if surf.n_cells == 0 or field not in surf.point_data:
             logger.warning(
                 "plot_topview: direct surface plot unavailable for %s; "
@@ -875,7 +876,7 @@ def plot_cross_section(
         Z3[:, :] = origin
 
     probe_grid = pv.StructuredGrid(X3, Y3, Z3)
-    sampled = probe_grid.sample(cast(pv.DataSet, sliced))
+    sampled = probe_grid.sample(cast(pv.DataSet, sliced))  # ty: ignore[redundant-cast]
 
     if field not in sampled.point_data:
         available = list(sampled.point_data.keys())
@@ -1158,7 +1159,8 @@ def _sample_topview_field_duplicate(
 
     probe = pv.StructuredGrid(Xi, Yi, Zi)
     sampled = probe.sample(
-        cast(pv.DataSet, source), snap_to_closest_point=snap_to_closest_point
+        cast(pv.DataSet, source),  # ty: ignore[redundant-cast]
+        snap_to_closest_point=snap_to_closest_point,
     )
 
     if field not in sampled.point_data:
@@ -1196,7 +1198,7 @@ def _sample_topview_field_duplicate(
             )
         )
         if not valid.any() and not snap_to_closest_point:
-            sampled = probe.sample(cast(pv.DataSet, source), snap_to_closest_point=True)
+            sampled = probe.sample(cast(pv.DataSet, source), snap_to_closest_point=True)  # ty: ignore[redundant-cast]
             arr = sampled.point_data[field]
             if arr.ndim == 2:
                 values = (
@@ -1302,7 +1304,7 @@ def _plot_topview_duplicate(
             msg = "No points available for direct surface plotting."
             raise ValueError(msg)
 
-        surf = source.extract_surface(algorithm="dataset_surface").triangulate()
+        surf = source.extract_surface(algorithm="dataset_surface").triangulate()  # ty: ignore[unknown-argument]
         if surf.n_cells == 0 or field not in surf.point_data:
             logger.warning(
                 "plot_topview: direct surface plot unavailable for %s; "
@@ -1572,7 +1574,7 @@ def _plot_cross_section_duplicate(
         Z3[:, :] = origin
 
     probe_grid = pv.StructuredGrid(X3, Y3, Z3)
-    sampled = probe_grid.sample(cast(pv.DataSet, sliced))
+    sampled = probe_grid.sample(cast(pv.DataSet, sliced))  # ty: ignore[redundant-cast]
 
     if field not in sampled.point_data:
         available = list(sampled.point_data.keys())
