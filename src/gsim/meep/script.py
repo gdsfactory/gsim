@@ -439,7 +439,10 @@ def build_sources(config):
         center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
-        if simulation_plane == "xz":
+        if normal_axis == 2:
+            # z-normal port (vertical): spans x with port width
+            size[0] = port["width"] + 2 * port_margin
+        elif simulation_plane == "xz":
             # y collapsed — port spans z
             size[2] = z_span
         else:
@@ -447,14 +450,16 @@ def build_sources(config):
             size[transverse_axis] = port["width"] + 2 * port_margin
             size[2] = z_span
 
-        # Propagation axis
-        prop_axis = mp.X if normal_axis == 0 else mp.Y
-
-        # eig_kpoint points INTO the device (direction of incoming mode)
+        # Propagation axis and kpoint
         if normal_axis == 0:
+            prop_axis = mp.X
             kpoint = mp.Vector3(x=1) if direction == "+" else mp.Vector3(x=-1)
-        else:
+        elif normal_axis == 1:
+            prop_axis = mp.Y
             kpoint = mp.Vector3(y=1) if direction == "+" else mp.Vector3(y=-1)
+        else:
+            prop_axis = mp.Z
+            kpoint = mp.Vector3(z=1) if direction == "+" else mp.Vector3(z=-1)
 
         eig_src = mp.EigenModeSource(
             src=mp.GaussianSource(frequency=fcen, fwidth=fwidth),
@@ -515,7 +520,10 @@ def build_monitors(config, sim):
         center = mp.Vector3(*center_list)
 
         size = [0, 0, 0]
-        if simulation_plane == "xz":
+        if normal_axis == 2:
+            # z-normal port (vertical): spans x with port width
+            size[0] = port["width"] + 2 * port_margin
+        elif simulation_plane == "xz":
             # y collapsed — port spans z
             size[2] = z_span
         else:
@@ -545,6 +553,8 @@ def _port_kpoint(port):
     """
     if port["normal_axis"] == 0:
         return mp.Vector3(x=1)
+    if port["normal_axis"] == 2:
+        return mp.Vector3(z=1)
     return mp.Vector3(y=1)
 
 

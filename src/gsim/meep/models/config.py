@@ -276,7 +276,7 @@ class PortData(BaseModel):
     center: list[float] = Field(description="[x, y, z] center coordinates")
     orientation: float = Field(description="Port orientation in degrees")
     width: float = Field(gt=0)
-    normal_axis: int = Field(ge=0, le=1, description="0=x, 1=y")
+    normal_axis: int = Field(ge=0, le=2, description="0=x, 1=y, 2=z")
     direction: Literal["+", "-"] = Field(description="Direction along normal axis")
     is_source: bool = False
 

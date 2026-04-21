@@ -62,28 +62,53 @@ def extract_port_info(
 
     z_center = 0.0 if simulation_plane == "xy" else _get_z_center(layer_stack)
 
+    # For XZ mode, compute z_top for vertical port placement
+    z_top = (
+        max(l.zmax for l in layer_stack.layers.values())
+        if simulation_plane == "xz"
+        else 0.0
+    )
+
     for i, gf_port in enumerate(component.ports):
-        normal_axis, direction = get_port_normal(gf_port.orientation)
-
         is_source = gf_port.name == source_port if source_port is not None else i == 0
+        port_type = getattr(gf_port, "port_type", "optical")
+        is_vertical = port_type in ("vertical_te", "vertical_tm")
 
-        y_center = 0.0 if simulation_plane == "xz" else float(gf_port.center[1])
-
-        ports.append(
-            PortData(
-                name=gf_port.name or f"port{i}",
-                center=[
-                    float(gf_port.center[0]),
-                    y_center,
-                    z_center,
-                ],
-                orientation=float(gf_port.orientation),
-                width=float(gf_port.width),
-                normal_axis=normal_axis,
-                direction=direction,
-                is_source=is_source,
+        if is_vertical and simulation_plane == "xz":
+            # Vertical port in XZ mode: z-normal monitor above the grating
+            ports.append(
+                PortData(
+                    name=gf_port.name or f"port{i}",
+                    center=[
+                        float(gf_port.center[0]),
+                        0.0,
+                        z_top,
+                    ],
+                    orientation=float(gf_port.orientation),
+                    width=float(gf_port.width),
+                    normal_axis=2,
+                    direction="+",
+                    is_source=is_source,
+                )
             )
-        )
+        else:
+            normal_axis, direction = get_port_normal(gf_port.orientation)
+            y_center = 0.0 if simulation_plane == "xz" else float(gf_port.center[1])
+            ports.append(
+                PortData(
+                    name=gf_port.name or f"port{i}",
+                    center=[
+                        float(gf_port.center[0]),
+                        y_center,
+                        z_center,
+                    ],
+                    orientation=float(gf_port.orientation),
+                    width=float(gf_port.width),
+                    normal_axis=normal_axis,
+                    direction=direction,
+                    is_source=is_source,
+                )
+            )
 
     return ports
 
