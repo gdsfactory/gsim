@@ -486,8 +486,8 @@ def plot_2d_interactive(
                 y=[v0, v1, v1, v0, v0],
                 mode="lines",
                 line=dict(color="black", width=1, dash="dash"),
-                name="Sim cell",
-                legendgroup="Sim cell",
+                name="MEEP domain",
+                legendgroup="MEEP domain",
                 hoverinfo="name",
             )
         )
