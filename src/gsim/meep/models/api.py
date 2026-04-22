@@ -22,6 +22,7 @@ class Geometry(BaseModel):
     model_config = ConfigDict(
         validate_assignment=True,
         arbitrary_types_allowed=True,
+        extra="forbid",
     )
 
     component: Any = None
@@ -54,7 +55,7 @@ class Geometry(BaseModel):
 class Material(BaseModel):
     """Optical material properties."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     n: float = Field(gt=0, description="Refractive index")
     k: float = Field(default=0.0, ge=0, description="Extinction coefficient")
@@ -68,7 +69,7 @@ class Material(BaseModel):
 class ModeSource(BaseModel):
     """Mode source excitation and spectral measurement window."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     port: str | None = Field(
         default=None,
@@ -116,7 +117,7 @@ class FiberSource(BaseModel):
     ============  ==========  =========  ==============
     """
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     x: float = Field(description="Beam-center X on the chip plane (um)")
     z: float = Field(description="Absolute Z of the beam plane (um)")
@@ -158,7 +159,7 @@ class FiberSource(BaseModel):
 class Symmetry(BaseModel):
     """Mirror symmetry plane."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     direction: Literal["X", "Y", "Z"]
     phase: Literal[1, -1] = Field(default=1)
@@ -167,7 +168,7 @@ class Symmetry(BaseModel):
 class Domain(BaseModel):
     """Computational domain sizing: PML + margins + symmetries."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     pml: float = Field(default=1.0, ge=0, description="PML thickness in um")
     margin: float = Field(
@@ -224,7 +225,7 @@ class Domain(BaseModel):
 class FDTD(BaseModel):
     """Solver numerics: resolution, stopping, subpixel, diagnostics."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
     is_3d: bool = Field(
         default=True,

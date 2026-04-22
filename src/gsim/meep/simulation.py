@@ -74,6 +74,7 @@ class Simulation(BaseModel):
     model_config = ConfigDict(
         validate_assignment=True,
         arbitrary_types_allowed=True,
+        extra="forbid",
     )
 
     geometry: Geometry = Field(default_factory=Geometry)
