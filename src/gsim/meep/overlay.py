@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gsim.common.geometry_model import GeometryModel
-    from gsim.meep.models.config import DomainConfig, PortData
+    from gsim.meep.models.config import DomainConfig, FiberSourceConfig, PortData
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,25 @@ class DielectricOverlay:
 
 
 @dataclass(frozen=True)
+class FiberOverlay:
+    """Gaussian-beam fiber source metadata for XZ overlay rendering.
+
+    Attributes:
+        x: Beam-center X on the chip plane (um).
+        z: Absolute Z of the beam plane (um).
+        angle_deg: Tilt from +Z normal (degrees).
+        waist: Gaussian beam waist w0 (um).
+        polarization: "TE" or "TM".
+    """
+
+    x: float
+    z: float
+    angle_deg: float
+    waist: float
+    polarization: str
+
+
+@dataclass(frozen=True)
 class SimOverlay:
     """Simulation cell metadata for 2D visualization overlays.
 
@@ -65,6 +84,7 @@ class SimOverlay:
         dpml: PML absorber thickness in um.
         ports: List of port overlays for rendering.
         dielectrics: List of background dielectric slabs for rendering.
+        fiber: Optional Gaussian-beam fiber source overlay (XZ 2D only).
     """
 
     cell_min: tuple[float, float, float]
@@ -72,6 +92,7 @@ class SimOverlay:
     dpml: float
     ports: list[PortOverlay] = field(default_factory=list)
     dielectrics: list[DielectricOverlay] = field(default_factory=list)
+    fiber: FiberOverlay | None = None
 
 
 def build_sim_overlay(
@@ -81,6 +102,7 @@ def build_sim_overlay(
     z_span: float | None = None,
     dielectrics: list[dict[str, Any]] | None = None,
     component_bbox: tuple[float, float, float, float] | None = None,
+    fiber_source: FiberSourceConfig | None = None,
 ) -> SimOverlay:
     """Build a SimOverlay from geometry model, domain config, and port data.
 
@@ -155,10 +177,21 @@ def build_sim_overlay(
             for d in dielectrics
         )
 
+    fiber_overlay: FiberOverlay | None = None
+    if fiber_source is not None:
+        fiber_overlay = FiberOverlay(
+            x=fiber_source.x,
+            z=fiber_source.center_z,
+            angle_deg=fiber_source.angle_deg,
+            waist=fiber_source.waist,
+            polarization=fiber_source.polarization,
+        )
+
     return SimOverlay(
         cell_min=cell_min,
         cell_max=cell_max,
         dpml=dpml,
         ports=ports,
         dielectrics=diel_overlays,
+        fiber=fiber_overlay,
     )

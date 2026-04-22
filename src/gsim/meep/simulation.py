@@ -611,6 +611,12 @@ class Simulation(BaseModel):
             port_infos = filter_ports_for_xz(
                 port_infos, y_cut=y_cut if y_cut is not None else 0.0
             )
+            # When a fiber source drives the sim, no port is the excitation —
+            # demote any auto-tagged source port to a monitor.
+            if self.fiber_source is not None:
+                port_infos = [
+                    p.model_copy(update={"is_source": False}) for p in port_infos
+                ]
 
         # Build FiberSourceConfig (XZ 2D only) with pre-computed k-direction.
         fiber_source_cfg: FiberSourceConfig | None = None
@@ -882,6 +888,7 @@ class Simulation(BaseModel):
             extend_ports_length=0,
             port_data=result.config.ports,
             component_bbox=result.config.component_bbox,
+            fiber_source=result.config.fiber_source,
             **kwargs,
         )
 

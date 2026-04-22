@@ -616,7 +616,9 @@ def _draw_overlay(
     elif x is not None:
         _draw_overlay_yz(ax, cmin, cmax, pml, overlay.ports, x)
     elif y is not None:
-        _draw_overlay_xz(ax, cmin, cmax, pml, overlay.ports, y)
+        _draw_overlay_xz(
+            ax, cmin, cmax, pml, overlay.ports, y, fiber=getattr(overlay, "fiber", None)
+        )
 
 
 def _draw_overlay_xy(
@@ -785,6 +787,7 @@ def _draw_overlay_xz(
     pml: float,
     ports: list,
     y_slice: float,
+    fiber: Any = None,
 ) -> None:
     """Draw overlay elements for an XZ (y-slice) view."""
     x0, z0 = cmin[0], cmin[2]
@@ -812,38 +815,89 @@ def _draw_overlay_xz(
     _add_pml_rect(ax, x0 + pml, z0, w - 2 * pml, pml)  # bottom
     _add_pml_rect(ax, x0 + pml, z1 - pml, w - 2 * pml, pml)  # top
 
-    # Ports that intersect this y-slice (y-normal ports at y_slice)
+    # X-facing waveguide ports whose transverse Y-span contains y_slice:
+    # draw them as vertical lines at fixed X spanning the port's z extent.
     labeled: set[str] = set()
     for port in ports:
         cx, cy, cz = port.center
-        if port.normal_axis == 1 and abs(cy - y_slice) < 0.01:
-            color = _SRC_COLOR if port.is_source else _MON_COLOR
-            legend_key = "Source" if port.is_source else "Monitor"
-            label = legend_key if legend_key not in labeled else None
-            labeled.add(legend_key)
-            hw = port.width / 2
-            hz = port.z_span / 2
-            ax.add_patch(
-                Rectangle(
-                    (cx - hw, cz - hz),
-                    port.width,
-                    port.z_span,
-                    facecolor="none",
-                    edgecolor=color,
-                    linewidth=1.5,
-                    label=label,
-                    zorder=95,
-                )
-            )
-            ax.annotate(
-                port.name,
-                (cx, cz + hz),
-                fontsize=7,
-                ha="center",
-                va="bottom",
-                color=color,
-                zorder=96,
-            )
+        if port.normal_axis != 0:
+            continue
+        if abs(cy - y_slice) > port.width / 2 + 1e-6:
+            continue
+        color = _SRC_COLOR if port.is_source else _MON_COLOR
+        legend_key = "Source" if port.is_source else "Monitor"
+        label = legend_key if legend_key not in labeled else None
+        labeled.add(legend_key)
+        hz = port.z_span / 2
+        ax.plot(
+            [cx, cx],
+            [cz - hz, cz + hz],
+            color=color,
+            linewidth=2,
+            zorder=95,
+            label=label,
+        )
+        dx = 0.3 if port.direction == "+" else -0.3
+        ax.annotate(
+            "",
+            xy=(cx + dx, cz),
+            xytext=(cx, cz),
+            arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+            zorder=96,
+        )
+        ax.annotate(
+            port.name,
+            (cx, cz + hz),
+            fontsize=7,
+            ha="center",
+            va="bottom",
+            color=color,
+            zorder=96,
+        )
+
+    # Fiber source (Gaussian beam above the chip) — draw as a tilted arrow
+    # anchored at the beam center, with a waist-sized bar perpendicular to k.
+    if fiber is not None:
+        import math
+
+        fx, fz = fiber.x, fiber.z
+        theta = math.radians(fiber.angle_deg)
+        # k points into the chip along (sin(theta), 0, -cos(theta)); draw the
+        # arrow from above the beam plane down to it so the direction is clear.
+        arrow_len = max(fiber.waist * 0.6, 1.0)
+        tail_x = fx - math.sin(theta) * arrow_len
+        tail_z = fz + math.cos(theta) * arrow_len
+        ax.annotate(
+            "",
+            xy=(fx, fz),
+            xytext=(tail_x, tail_z),
+            arrowprops=dict(arrowstyle="->", color=_SRC_COLOR, lw=2),
+            zorder=96,
+        )
+        # Waist indicator: perpendicular to k, length = 2 * w0.
+        perp_x = math.cos(theta)
+        perp_z = math.sin(theta)
+        hw = fiber.waist
+        ax.plot(
+            [fx - perp_x * hw, fx + perp_x * hw],
+            [fz - perp_z * hw, fz + perp_z * hw],
+            color=_SRC_COLOR,
+            linewidth=2,
+            zorder=95,
+            label=("Source" if "Source" not in labeled else None),
+        )
+        labeled.add("Source")
+        ax.annotate(
+            f"fiber ({fiber.polarization}, {fiber.angle_deg:.1f}°)",
+            (fx, fz),
+            fontsize=7,
+            ha="center",
+            va="bottom",
+            color=_SRC_COLOR,
+            zorder=96,
+            xytext=(0, 6),
+            textcoords="offset points",
+        )
 
 
 def _add_pml_rect(
