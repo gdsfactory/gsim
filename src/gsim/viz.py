@@ -45,7 +45,7 @@ def plot_mesh(
     Args:
         msh_path: Path to ``.msh`` file.
         output: Output PNG path (only used when ``interactive=False``).
-        show_groups: Group-name patterns to display (``None`` → all).
+        show_groups: Group-name patterns to display (``None`` -> all).
             Example: ``["metal", "P"]`` to show metal layers and ports.
         interactive: If ``True``, open an interactive 3-D viewer.
             If ``False``, save a static PNG to *output*.
@@ -843,7 +843,7 @@ def plot_cross_section(
 
     # Determine the two in-plane axes (h = horizontal, v = vertical)
     axes = [i for i in range(3) if i != axis_idx]
-    h_idx, v_idx = axes  # e.g. normal="x" → h=y(1), v=z(2)
+    h_idx, v_idx = axes  # e.g. normal="x" -> h=y(1), v=z(2)
 
     h_pts = pts[:, h_idx]
     v_pts = pts[:, v_idx]
@@ -1541,7 +1541,7 @@ def _plot_cross_section_duplicate(
 
     # Determine the two in-plane axes (h = horizontal, v = vertical)
     axes = [i for i in range(3) if i != axis_idx]
-    h_idx, v_idx = axes  # e.g. normal="x" → h=y(1), v=z(2)
+    h_idx, v_idx = axes  # e.g. normal="x" -> h=y(1), v=z(2)
 
     h_pts = pts[:, h_idx]
     v_pts = pts[:, v_idx]

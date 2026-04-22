@@ -74,7 +74,7 @@ class TestPlot2DXZ:
     def test_default_slice_when_plane_xz(self):
         sim = _xz_sim_for_viz()
         fig, ax = plt.subplots()
-        # Default: plane='xz' → slices='y'.
+        # Default: plane='xz' -> slices='y'.
         result = sim.plot_2d(ax=ax)
         assert result is ax
         plt.close(fig)

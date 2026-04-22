@@ -120,7 +120,7 @@ class Simulation(BaseModel):
         cls,
         v: dict[str, float | Material | dict],
     ) -> dict[str, float | Material]:
-        """Accept float shorthand: ``{"si": 3.47}`` → ``Material(n=3.47)``."""
+        """Accept float shorthand: ``{"si": 3.47}`` -> ``Material(n=3.47)``."""
         out: dict[str, float | Material] = {}
         for name, val in v.items():
             if isinstance(val, (int, float)):
@@ -449,7 +449,7 @@ class Simulation(BaseModel):
         )
 
     def _source_config(self) -> Any:
-        """Translate ModeSource → SourceConfig."""
+        """Translate ModeSource -> SourceConfig."""
         from gsim.meep.models.config import SourceConfig
 
         return SourceConfig(
@@ -458,7 +458,7 @@ class Simulation(BaseModel):
         )
 
     def _stopping_config(self) -> Any:
-        """Translate FDTD stopping fields → StoppingConfig."""
+        """Translate FDTD stopping fields -> StoppingConfig."""
         from gsim.meep.models.config import StoppingConfig
 
         s = self.solver
@@ -474,7 +474,7 @@ class Simulation(BaseModel):
         )
 
     def _domain_config(self) -> Any:
-        """Translate Domain → DomainConfig."""
+        """Translate Domain -> DomainConfig."""
         from gsim.meep.models.config import DomainConfig
 
         return DomainConfig(
@@ -489,13 +489,13 @@ class Simulation(BaseModel):
         )
 
     def _resolution_config(self) -> Any:
-        """Translate FDTD.resolution → ResolutionConfig."""
+        """Translate FDTD.resolution -> ResolutionConfig."""
         from gsim.meep.models.config import ResolutionConfig
 
         return ResolutionConfig(pixels_per_um=self.solver.resolution)
 
     def _accuracy_config(self) -> Any:
-        """Translate FDTD accuracy fields → AccuracyConfig."""
+        """Translate FDTD accuracy fields -> AccuracyConfig."""
         from gsim.meep.models.config import AccuracyConfig
 
         return AccuracyConfig(
@@ -506,7 +506,7 @@ class Simulation(BaseModel):
         )
 
     def _diagnostics_config(self) -> Any:
-        """Translate FDTD diagnostic fields → DiagnosticsConfig."""
+        """Translate FDTD diagnostic fields -> DiagnosticsConfig."""
         from gsim.meep.models.config import DiagnosticsConfig
 
         return DiagnosticsConfig(
@@ -717,7 +717,7 @@ class Simulation(BaseModel):
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
 
-        # Translate domain.symmetries → SymmetryEntry for config
+        # Translate domain.symmetries -> SymmetryEntry for config
         symmetry_entries = [
             SymmetryEntry(direction=s.direction, phase=s.phase)
             for s in self.domain.symmetries

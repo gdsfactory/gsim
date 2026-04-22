@@ -624,7 +624,7 @@ class TestXZBuildConfig:
 
         result = sim.build_config()
 
-        # Straight is centered on y=0 → bbox center is 0.
+        # Straight is centered on y=0 -> bbox center is 0.
         assert result.config.y_cut == pytest.approx(0.0, abs=1e-6)
 
     def test_y_cut_explicit_override(self):

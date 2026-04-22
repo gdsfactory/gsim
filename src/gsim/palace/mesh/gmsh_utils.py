@@ -37,7 +37,7 @@ class Entity:
 def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
     """Meshwell-style boolean pipeline (minimalistic).
 
-    1. Group entities by dimension (descending: 3 → 0).
+    1. Group entities by dimension (descending: 3 -> 0).
     2. Within each dimension, sort by mesh_order (ascending = higher priority).
     3. For dim=3: fragment all volumes together in one pass (avoids degenerate
        sliver faces from priority cuts on small volumes like vias).
@@ -50,7 +50,7 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
        labelled by the pair of volume names they separate).
 
     Returns:
-        pg_map: mapping from physical-group name → pg tag.
+        pg_map: mapping from physical-group name -> pg tag.
     """
     gmsh.model.occ.synchronize()
 
@@ -204,7 +204,7 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
             if tags:
                 gmsh.model.addPhysicalGroup(3, tags, name=entity.name)
 
-    # 2. Surface → volume ownership map
+    # 2. Surface -> volume ownership map
     vol_entities = [e for e in entities if e.dim == 3 and e.dimtags]
     surf_to_names: dict[int, list[str]] = {}
     for entity in vol_entities:

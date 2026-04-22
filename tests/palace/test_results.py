@@ -168,7 +168,7 @@ class TestSParams:
         sp = load_sparams(sim_dir)
         fig = sp.plot_interactive()
         names = [trace.name for trace in fig.data]
-        # 3 ports → S11, S21, S31 etc.
+        # 3 ports -> S11, S21, S31 etc.
         assert "S11" in names
         assert "S21" in names
 

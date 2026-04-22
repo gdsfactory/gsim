@@ -86,7 +86,7 @@ class RunResult:
 
     Attributes:
         sim_dir: Root directory (``{job_type}_{job_name}/``).
-        files: Flat mapping of filename → Path inside ``output/``.
+        files: Flat mapping of filename -> Path inside ``output/``.
         job_name: Cloud job identifier.
     """
 
@@ -116,8 +116,8 @@ def register_result_parser(solver: str, parser: Callable[[RunResult], Any]) -> N
 def _extract_solver_from_job(job) -> str | None:
     """Extract the solver name from a Job's ``job_def_name``.
 
-    Handles formats like ``"prod-meep-simulation"`` → ``"meep"``,
-    ``"prod-palace-simulation"`` → ``"palace"``, or plain ``"meep"``.
+    Handles formats like ``"prod-meep-simulation"`` -> ``"meep"``,
+    ``"prod-palace-simulation"`` -> ``"palace"``, or plain ``"meep"``.
     """
     name = getattr(job, "job_def_name", "") or ""
     # Try known solver names in the definition string
@@ -142,7 +142,7 @@ def _get_result_parser(solver: str) -> Callable[[RunResult], Any] | None:
 
 
 def _flatten_results(raw_results: dict) -> dict[str, Path]:
-    """Flatten gdsfactoryplus download results to a filename → Path dict.
+    """Flatten gdsfactoryplus download results to a filename -> Path dict.
 
     The SDK may return directories (extracted archives) or individual files.
     This walks everything and returns a flat mapping.

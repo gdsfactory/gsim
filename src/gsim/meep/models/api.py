@@ -36,7 +36,7 @@ class Geometry(BaseModel):
         description=(
             "Y coordinate of the XZ cross-section cut (um). "
             "Only meaningful when solver.is_3d=False and solver.plane='xz'. "
-            "None → resolved to the component bbox Y-center at build time."
+            "None -> resolved to the component bbox Y-center at build time."
         ),
     )
 
@@ -139,8 +139,8 @@ class FiberSource(BaseModel):
     polarization: Literal["TE", "TM"] = Field(
         default="TE",
         description=(
-            "PIC convention. 'TE' → E along waveguide width (Ey, out of XZ "
-            "plane); 'TM' → E in the XZ plane (Ex)."
+            "PIC convention. 'TE' -> E along waveguide width (Ey, out of XZ "
+            "plane); 'TM' -> E in the XZ plane (Ex)."
         ),
     )
 

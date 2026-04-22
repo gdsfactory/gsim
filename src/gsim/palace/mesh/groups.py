@@ -37,7 +37,7 @@ def assign_physical_groups(
         port_tags: Port surface tags (may have multiple surfaces for CPW)
         port_info: Port metadata including type info
         entities: Entity list used in run_boolean_pipeline
-        pg_map: name → physical-group tag returned by run_boolean_pipeline
+        pg_map: name -> physical-group tag returned by run_boolean_pipeline
         _stack: Layer stack used to identify via layers
 
     Returns:
@@ -59,7 +59,7 @@ def assign_physical_groups(
         "boundary_surfaces": {},
     }
 
-    # Helper: entity name → (phys_group, surface_tags)
+    # Helper: entity name -> (phys_group, surface_tags)
     entity_by_name: dict[str, gmsh_utils.Entity] = {e.name: e for e in entities}
 
     # Build set of via layer names

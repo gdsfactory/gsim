@@ -39,7 +39,7 @@ class TestFilterPortsForXZ:
         assert kept == []
 
     def test_partial_overlap_included(self):
-        # Port at y=0.2, width 0.5 → extends from y=-0.05 to y=0.45;
+        # Port at y=0.2, width 0.5 -> extends from y=-0.05 to y=0.45;
         # cut at y=0 falls inside.
         ports = [_port("o1", x=0.0, y=0.2, orientation=180, width=0.5)]
         kept = filter_ports_for_xz(ports, y_cut=0.0)

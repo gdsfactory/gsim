@@ -243,7 +243,7 @@ class TestWaitForResultsSingle:
         mock_sim.download_results.return_value = {"output": output_file}
 
         result = wait_for_results(*["job-1"], verbose="quiet", parent_dir=tmp_path)
-        # Single element list → single result, not a list
+        # Single element list -> single result, not a list
         assert not isinstance(result, list)
 
     def test_empty_raises(self):

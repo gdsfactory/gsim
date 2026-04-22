@@ -608,7 +608,7 @@ def load_fields(
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
             or a path to the simulation directory.
         excitation: Excitation index (1-based) to load.
-        cycle: ParaView cycle number (``None`` → last available).
+        cycle: ParaView cycle number (``None`` -> last available).
         boundary: If ``True``, load boundary surface fields
             (``driven_boundary/``) instead of volume fields
             (``driven/``).  Boundary data includes ``J_s_real``,

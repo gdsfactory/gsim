@@ -160,14 +160,14 @@ If the port only touches one conductor, voltage is undefined - there's no second
 Ground ═══════╡▓▓▓▓▓▓╞═══════ Signal
               ↑     ↑
               └──┬──┘
-           E-field integrated → Voltage
+           E-field integrated -> Voltage
 
 
                 Port touching only signal (WRONG):
 
 Ground ═══════      ▓▓▓▓▓▓═══════ Signal
                     ↑
-                    No reference → Voltage undefined
+                    No reference -> Voltage undefined
 ```
 
 ### Real-World Analogy

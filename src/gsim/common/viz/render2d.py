@@ -223,8 +223,8 @@ def _plot_single_prism_slice(
     )
 
     # Compute total polygon area per layer for draw-order tiebreaking
-    # and alpha assignment.  Larger area → background → draw first / more
-    # transparent.  Smaller area → patterned → draw last / most opaque.
+    # and alpha assignment.  Larger area -> background -> draw first / more
+    # transparent.  Smaller area -> patterned -> draw last / most opaque.
     def _layer_area(name: str) -> float:
         if name not in geometry_model.prisms:
             return float("inf")
@@ -248,7 +248,7 @@ def _plot_single_prism_slice(
         ),
     )
 
-    # Mesh-order → zorder: lower mesh_order = background = lower zorder
+    # Mesh-order -> zorder: lower mesh_order = background = lower zorder
     mesh_orders = np.unique(
         [geometry_model.layer_mesh_orders.get(n, 0) for n in sorted_names]
     )
@@ -272,7 +272,7 @@ def _plot_single_prism_slice(
     _layer_alpha: dict[str, float] = {}
     for n in layer_names:
         ratio = layer_areas.get(n, max_area) / max_area if max_area > 0 else 1.0
-        # Map: ratio 1.0 (largest area) → alpha 0.35, ratio ~0 → alpha 0.90
+        # Map: ratio 1.0 (largest area) -> alpha 0.35, ratio ~0 -> alpha 0.90
         _layer_alpha[n] = 0.90 - 0.55 * ratio
 
     xmin, xmax = np.inf, -np.inf
@@ -483,7 +483,7 @@ def _draw_prism_cross_sections(
     line y=y0 to find x-segments. Each segment becomes a rectangle in
     XZ space: (x_start, z_base) to (x_end, z_top).
 
-    For an x-slice at x=x0, similarly finds y-segments → YZ rectangles.
+    For an x-slice at x=x0, similarly finds y-segments -> YZ rectangles.
 
     Returns True if at least one patch was drawn.
     """
@@ -664,7 +664,7 @@ def _draw_overlay_xy(
         labeled.add(legend_key)
         hw = port.width / 2
 
-        if port.normal_axis == 0:  # x-normal → vertical line
+        if port.normal_axis == 0:  # x-normal -> vertical line
             ax.plot(
                 [cx, cx],
                 [cy - hw, cy + hw],
@@ -681,7 +681,7 @@ def _draw_overlay_xy(
                 arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
                 zorder=96,
             )
-        else:  # y-normal → horizontal line
+        else:  # y-normal -> horizontal line
             ax.plot(
                 [cx - hw, cx + hw],
                 [cy, cy],

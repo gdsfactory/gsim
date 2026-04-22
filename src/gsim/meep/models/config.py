@@ -345,8 +345,8 @@ class SimConfig(BaseModel):
     plane: Literal["xy", "xz"] = Field(
         default="xy",
         description=(
-            "2D simulation plane when is_3d=False. 'xy' → effective-index "
-            "top-down; 'xz' → vertical cross-section at y=y_cut."
+            "2D simulation plane when is_3d=False. 'xy' -> effective-index "
+            "top-down; 'xz' -> vertical cross-section at y=y_cut."
         ),
     )
     y_cut: float | None = Field(

@@ -178,7 +178,7 @@ def _merge_via_polygons(
     if not shapely_polys:
         return polys
 
-    # Oversize → union → undersize
+    # Oversize -> union -> undersize
     buffered = [buffer(p, offset, join_style="mitre") for p in shapely_polys]
     merged = buffer(unary_union(buffered), -offset, join_style="mitre")
 
@@ -200,7 +200,7 @@ def _merge_via_polygons(
     n_after = len(result)
     if n_before != n_after:
         logger.info(
-            "Via merging: %d polygons → %d (distance=%.1f um)",
+            "Via merging: %d polygons -> %d (distance=%.1f um)",
             n_before,
             n_after,
             merge_distance,
@@ -292,7 +292,7 @@ def add_metals(
             planar_conductors or thickness == 0 or thickness < min_volume_thickness
         )
         if layer_type == "conductor" and is_planar:
-            # Zero/thin-thickness or explicitly planar → 2D PEC surface
+            # Zero/thin-thickness or explicitly planar -> 2D PEC surface
             metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
         elif layer_type == "via":
             # Decide between 3D volume (with conductivity) and 2D PEC fallback

@@ -374,9 +374,9 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             # Compute E-field directions from port orientation.
             # transverse = 90° CCW from the longitudinal direction = [-sin, cos]
             # upper_center = signal_center + transverse * gap_offset
-            #   → E-field in upper gap points toward signal: -transverse direction
+            #   -> E-field in upper gap points toward signal: -transverse direction
             # lower_center = signal_center - transverse * gap_offset
-            #   → E-field in lower gap points toward signal: +transverse direction
+            #   -> E-field in lower gap points toward signal: +transverse direction
             import numpy as np
 
             orientation_rad = np.deg2rad(

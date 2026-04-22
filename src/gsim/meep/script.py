@@ -574,8 +574,8 @@ def _build_fiber_source(config, fiber):
     """Construct a mp.GaussianBeamSource for XZ 2D fiber coupling.
 
     Polarization (PIC convention):
-      - TE → E along waveguide width (Ey, out of XZ plane)
-      - TM → E in the XZ plane (Ex)
+      - TE -> E along waveguide width (Ey, out of XZ plane)
+      - TM -> E in the XZ plane (Ex)
     """
     fdtd = config["fdtd"]
     fcen = fdtd["fcen"]
@@ -592,7 +592,7 @@ def _build_fiber_source(config, fiber):
     src_x_size = _estimate_source_x_size(config)
 
     # beam_x0 is the focus offset *relative to* the source center, not an
-    # absolute position (MEEP docs). Focus sits on the source line → zero.
+    # absolute position (MEEP docs). Focus sits on the source line -> zero.
     src = mp.GaussianBeamSource(
         src=mp.GaussianSource(frequency=fcen, fwidth=fwidth, is_integrated=True),
         center=center,
@@ -754,7 +754,7 @@ def build_monitors(config, sim):
 
     When ``config["fiber_source"]`` is set, also builds a flux monitor
     just in front of (below) the Gaussian beam to measure the launched
-    power, used as normalization reference for fiber→waveguide S-params.
+    power, used as normalization reference for fiber->waveguide S-params.
 
     Returns:
         (port_monitors, fiber_flux) where fiber_flux is None unless a
@@ -990,7 +990,7 @@ def extract_s_params(config, sim, monitors, fiber_flux=None):
 
 
 def _extract_s_params_fiber(config, sim, monitors, fiber_flux):
-    """Extract fiber→waveguide S-parameters for a Gaussian-beam source.
+    """Extract fiber->waveguide S-parameters for a Gaussian-beam source.
 
     Normalization reference is the net flux through ``fiber_flux`` (placed
     just in front of the Gaussian beam): P_fiber(f). For each port i,
