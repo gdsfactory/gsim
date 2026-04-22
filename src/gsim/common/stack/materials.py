@@ -156,7 +156,7 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "silicon": MaterialProperties(
         type="semiconductor",
         permittivity=11.9,
-        conductivity=2.0,  # ~50 Ω·cm substrate (IHP SG13G2)
+        conductivity=2.0,  # ~50 ohm·cm substrate (IHP SG13G2)
         refractive_index=3.47,
     ),
     "si": MaterialProperties(

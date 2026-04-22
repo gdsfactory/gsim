@@ -1,4 +1,4 @@
-"""Polygon simplification utilities for KLayout ↔ Shapely workflows.
+"""Polygon simplification utilities for KLayout <-> Shapely workflows.
 
 Provides helpers for reducing polygon vertex counts (decimation) used
 when converting QPDK etch layers to conductor geometry. Works with
@@ -19,7 +19,7 @@ from shapely.geometry.base import BaseGeometry
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# KLayout ↔ Shapely conversion
+# KLayout <-> Shapely conversion
 # ---------------------------------------------------------------------------
 
 

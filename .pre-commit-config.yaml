@@ -51,6 +51,11 @@ repos:
         language: system
         files: \.(ipynb)$
         exclude: ^nbs/
+      - id: check-cp1252
+        name: check-cp1252 (Windows install compat)
+        entry: python scripts/check_cp1252.py
+        language: system
+        types: [python]
   - repo: local
     hooks:
       - id: ty

@@ -157,8 +157,8 @@ class Simulation(BaseModel):
 
         The ``waist`` kwarg is the 1/e² intensity *radius* (= MFD / 2),
         matching MEEP's ``beam_w0``. Typical SMF-28 values:
-        ``waist ≈ 4.6 um`` at 1310 nm (MFD ≈ 9.2 um) and
-        ``waist ≈ 5.2 um`` at 1550 nm (MFD ≈ 10.4 um).
+        ``waist ~= 4.6 um`` at 1310 nm (MFD ~= 9.2 um) and
+        ``waist ~= 5.2 um`` at 1550 nm (MFD ~= 10.4 um).
 
         Args:
             **kwargs: Fields forwarded to :class:`FiberSource`.

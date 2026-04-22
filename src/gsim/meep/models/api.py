@@ -109,7 +109,7 @@ class FiberSource(BaseModel):
     Typical single-mode fibers:
 
     ============  ==========  =========  ==============
-    Fiber         Wavelength  MFD (µm)   waist w₀ (µm)
+    Fiber         Wavelength  MFD (µm)   waist w0 (µm)
     ============  ==========  =========  ==============
     SMF-28        1310 nm     ~9.2       ~4.6
     SMF-28        1550 nm     ~10.4      ~5.2
@@ -129,7 +129,7 @@ class FiberSource(BaseModel):
         gt=0,
         description=(
             "Gaussian beam waist w0 (um) — 1/e² intensity radius = MFD / 2. "
-            "Standard SMF-28 at 1550 nm: w0 ≈ 5.2 um (MFD ≈ 10.4 um)."
+            "Standard SMF-28 at 1550 nm: w0 ~= 5.2 um (MFD ~= 10.4 um)."
         ),
     )
     wavelength: float = Field(default=1.55, gt=0, description="Center wavelength (um)")

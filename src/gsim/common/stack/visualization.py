@@ -140,7 +140,7 @@ def print_stack(pdk) -> str:
     # Title
     title = "Layer Stack"
     lines.append(f"  Z (um){title:^{width + 10}}")
-    lines.append("  " + "─" * (width + 18))
+    lines.append("  " + "-" * (width + 18))
 
     # Sort metal layers by zmax descending for top-down drawing
     metal_layers_sorted = sorted(
@@ -150,7 +150,7 @@ def print_stack(pdk) -> str:
     # Draw top border
     if metal_layers_sorted:
         first_layer = metal_layers_sorted[0]
-        lines.append(f"{first_layer.zmax:7.2f} ┌{'─' * box_width}┐")
+        lines.append(f"{first_layer.zmax:7.2f} +{'-' * box_width}+")
 
     # Draw each metal layer from top to bottom
     for _i, layer in enumerate(metal_layers_sorted):
@@ -166,11 +166,11 @@ def print_stack(pdk) -> str:
         info_part = f"{thickness_str:>10}  {layer_str:<10}"
         content = f"{name_part}{info_part}"
 
-        lines.append(f"{'':>8}│{content:^{box_width}}│")
-        lines.append(f"{layer.zmin:7.2f} ├{'─' * box_width}┤")
+        lines.append(f"{'':>8}|{content:^{box_width}}|")
+        lines.append(f"{layer.zmin:7.2f} +{'-' * box_width}+")
 
     # Dielectric/oxide region
-    lines.append(f"{'':>8}│{'(dielectric / oxide)':^{box_width}}│")
+    lines.append(f"{'':>8}|{'(dielectric / oxide)':^{box_width}}|")
 
     # Active layers (active, poly)
     if active_layers:
@@ -179,31 +179,31 @@ def print_stack(pdk) -> str:
         )
         z_top = max(layer.zmax for layer in active_layers)
         third = box_width // 3
-        tail = "─" * (box_width - 2 * third - 2)
-        lines.append(f"{z_top:7.2f} ├{'─' * third}┬{'─' * third}┬{tail}┤")
+        tail = "-" * (box_width - 2 * third - 2)
+        lines.append(f"{z_top:7.2f} +{'-' * third}+{'-' * third}+{tail}+")
 
         names = "   ".join(layer.name.capitalize() for layer in active_sorted[:2])
         gds_layers = ", ".join(
             str(layer.gds_layer) for layer in active_sorted[:2] if layer.gds_layer
         )
         content = f"{names}  ~{active_sorted[0].thickness:.1f} um  Layer {gds_layers}"
-        lines.append(f"{'':>8}│{content:^{box_width}}│")
-        lines.append(f"{0.00:7.2f} ├{'─' * third}┴{'─' * third}┴{tail}┤")
+        lines.append(f"{'':>8}|{content:^{box_width}}|")
+        lines.append(f"{0.00:7.2f} +{'-' * third}+{'-' * third}+{tail}+")
     else:
-        lines.append(f"{0.00:7.2f} ├{'─' * box_width}┤")
+        lines.append(f"{0.00:7.2f} +{'-' * box_width}+")
 
     # Substrate
     if substrate_layer:
-        lines.append(f"{'':>8}│{'':^{box_width}}│")
-        lines.append(f"{'':>8}│{'Substrate (Si)':^{box_width}}│")
+        lines.append(f"{'':>8}|{'':^{box_width}}|")
+        lines.append(f"{'':>8}|{'Substrate (Si)':^{box_width}}|")
         sub_thickness = f"{abs(substrate_layer.thickness):.0f} um"
-        lines.append(f"{'':>8}│{sub_thickness:^{box_width}}│")
-        lines.append(f"{'':>8}│{'':^{box_width}}│")
-        lines.append(f"{substrate_layer.zmin:7.0f} └{'─' * box_width}┘")
+        lines.append(f"{'':>8}|{sub_thickness:^{box_width}}|")
+        lines.append(f"{'':>8}|{'':^{box_width}}|")
+        lines.append(f"{substrate_layer.zmin:7.0f} +{'-' * box_width}+")
     else:
-        lines.append(f"{'':>8}└{'─' * box_width}┘")
+        lines.append(f"{'':>8}+{'-' * box_width}+")
 
-    lines.append("  " + "─" * (width + 18))
+    lines.append("  " + "-" * (width + 18))
 
     result = "\n".join(lines)
     return result

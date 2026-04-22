@@ -741,7 +741,7 @@ def build_sources(config):
     return sources
 
 
-FIBER_FLUX_OFFSET = 0.3  # μm below fiber source center
+FIBER_FLUX_OFFSET = 0.3  # µm below fiber source center
 
 
 def build_monitors(config, sim):
@@ -1057,7 +1057,7 @@ def _extract_s_params_fiber(config, sim, monitors, fiber_flux):
         alpha_out = ob.alpha[0, :, outgoing_idx]
         s_params[f"S{i+1}0"] = alpha_out / sqrt_p_fiber
 
-    # Coupling efficiency per frequency: Σ |S|² (fraction of launched power
+    # Coupling efficiency per frequency: sum |S|² (fraction of launched power
     # reaching each port mode).
     coupling = np.zeros(len(freqs))
     for s_vals in s_params.values():
