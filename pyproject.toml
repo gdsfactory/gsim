@@ -67,7 +67,9 @@ test = [
   "pytest>=8.3.0",
   "pytest-cov>=6.0.0",
   "pytest-randomly>=3.16.0",
-  "pytest-xdist>=3.6.0"
+  "pytest-regressions>=2.5.0",
+  "pytest-xdist>=3.6.0",
+  "qpdk>=0.3.6"
 ]
 
 [[tool.bver.file]]
@@ -169,7 +171,10 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short"
+addopts = "--tb=short -m 'not cloud'"
+markers = [
+  "cloud: tests that submit jobs to GDSFactory+ cloud servers (deselected by default; run with `pytest -m cloud`)"
+]
 norecursedirs = ["scripts"]
 testpaths = ["tests"]
 

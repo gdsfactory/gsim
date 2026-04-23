@@ -1,0 +1,25 @@
+name: Cloud Test
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+jobs:
+  cloud_test:
+    if: >-
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'run-cloud-tests')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+      - name: Install UV
+        uses: astral-sh/setup-uv@v6
+      - name: Create environment
+        run: uv sync --dev --all-extras
+      - name: Run cloud tests
+        run: uv run pytest -m cloud
+        env:
+          GFP_API__KEY: ${{ secrets.GFP_API_KEY }}
