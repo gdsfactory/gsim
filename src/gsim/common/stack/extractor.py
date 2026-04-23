@@ -402,6 +402,15 @@ def extract_layer_stack(
         stack.materials["SiO2"] = MATERIALS_DB["SiO2"].to_dict()
 
     if include_substrate:
+        if "substrate" in stack.layers:
+            sub = stack.layers["substrate"]
+            stack.layers["substrate"] = sub.model_copy(
+                update={
+                    "zmin": -substrate_thickness,
+                    "zmax": 0.0,
+                    "thickness": substrate_thickness,
+                }
+            )
         stack.dielectrics.append(
             {
                 "name": "substrate",
