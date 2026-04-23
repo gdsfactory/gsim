@@ -812,7 +812,7 @@ class Simulation(BaseModel):
         # Write runner script
         script_path = output_dir / "run_meep.py"
         script_content = generate_meep_script(config_filename="sim_config.json")
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
         logger.info("Config written to %s", output_dir)
         return output_dir

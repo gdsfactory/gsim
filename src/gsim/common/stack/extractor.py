@@ -317,7 +317,7 @@ class LayerStack(BaseModel):
         if path:
             path = Path(path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(yaml_str)
+            path.write_text(yaml_str, encoding="utf-8")
             logger.info("Stack written to: %s", path)
 
         return yaml_str

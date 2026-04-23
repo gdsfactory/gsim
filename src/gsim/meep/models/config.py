@@ -412,5 +412,5 @@ class SimConfig(BaseModel):
         data = self.model_dump(by_alias=True)
         if self._hints:
             data.update(self._hints)
-        path.write_text(json.dumps(data, indent=2))
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return path
