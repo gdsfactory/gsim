@@ -122,17 +122,45 @@ class TestSerializeMeshGroups:
             "layer_volumes": {"core": {"phys_group": 3, "tags": [5], "material": "si"}},
             "outer_boundary": {"phys_group": 4, "tags": [10, 11]},
         }
-        result = _serialize_mesh_groups(groups)
+        result = _serialize_mesh_groups(groups, materials={"SiO2": 1.44, "si": 3.47})
         assert result["volumes"]["SiO2"]["phys_group"] == 1
         assert result["volumes"]["SiO2"]["material"] == "SiO2"
         assert "tags" not in result["volumes"]["SiO2"]
         assert result["layer_volumes"]["core"]["material"] == "si"
         assert result["outer_boundary"]["phys_group"] == 4
+        # Lower mesh_priority wins; highest n gets mesh_priority=1
+        assert result["layer_volumes"]["core"]["mesh_priority"] == 1
+        assert result["volumes"]["SiO2"]["mesh_priority"] == 2
 
     def test_empty_outer_boundary(self):
         groups = {"volumes": {}, "layer_volumes": {}, "outer_boundary": {}}
         result = _serialize_mesh_groups(groups)
         assert "outer_boundary" not in result
+
+    def test_port_surfaces_pass_through_normal(self):
+        """Serializer reads ``normal`` from info verbatim (no recompute)."""
+        groups = {
+            "port_surfaces": {
+                "o1": {
+                    "phys_group": 3,
+                    "tags": [10],
+                    "normal": [-1.0, 0.0, 0.0],
+                    "layer": "core",
+                },
+                "o_tilt": {
+                    "phys_group": 4,
+                    "tags": [11],
+                    "normal": [0.707, 0.0, 0.707],
+                    "layer": "core",
+                },
+            }
+        }
+        result = _serialize_mesh_groups(groups)
+        assert result["port_surfaces"]["o1"]["normal"] == [-1.0, 0.0, 0.0]
+        assert result["port_surfaces"]["o1"]["layer"] == "core"
+        assert result["port_surfaces"]["o_tilt"]["normal"] == [0.707, 0.0, 0.707]
+        # tags must not leak into the serialized config
+        assert "tags" not in result["port_surfaces"]["o1"]
 
 
 class TestSerializeSource:
@@ -150,10 +178,13 @@ class TestSerializeDomain:
     """Test domain serialization."""
 
     def test_default_domain(self):
-        domain = Domain()
-        result = _serialize_domain(domain)
-        assert result["pml"] == 1.0
-        assert result["margin_xy"] == 0.5
+        domain = Domain()  # pml=1.0 um
+        solver = FDTD(resolution=32)  # 32 cells / um
+        result = _serialize_domain(domain, solver)
+        assert result["pml_cells"] == 32
+        assert "margin_xy" not in result
+        assert "margin_z_above" not in result
+        assert "margin_z_below" not in result
 
 
 class TestSerializeSolver:
@@ -206,13 +237,16 @@ class TestWriteMeshConfig:
         assert data["materials"]["si"]["refractive_index"] == 3.47
         assert data["source"]["port"] == "o1"
         assert data["monitors"] == ["o1", "o2"]
-        assert data["domain"]["pml"] == 1.0
+        assert data["domain"]["pml_cells"] == 32
         assert data["solver"]["resolution"] == 32
         assert data["mesh_stats"]["nodes"] == 1000
         assert data["mesh_stats"]["tetrahedra"] == 5000
         assert data["mesh_groups"]["volumes"]["SiO2"]["phys_group"] == 1
         assert data["mesh_groups"]["volumes"]["SiO2"]["material"] == "SiO2"
         assert data["mesh_groups"]["layer_volumes"]["core"]["material"] == "si"
+        # si (n=3.47) wins over SiO2 (n=1.44): lower mesh_priority = higher priority
+        assert data["mesh_groups"]["layer_volumes"]["core"]["mesh_priority"] == 1
+        assert data["mesh_groups"]["volumes"]["SiO2"]["mesh_priority"] == 2
 
 
 # ---------------------------------------------------------------------------

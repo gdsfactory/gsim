@@ -5,6 +5,14 @@ source, monitors, domain, solver settings) to a ``mesh_config.json`` file
 alongside the ``.msh`` mesh file.
 
 All spatial values are written in nanometers (length_scale = 1e-9).
+
+Port surfaces carry a unit 3D ``normal`` vector in mesh coordinates
+(outward-facing). Combined with the port surface triangles in the ``.msh``
+file and the ``layer`` tag, this is sufficient for a mode solver at any port
+orientation — in-plane rotation, out-of-plane tilt, or both. Width/height/
+center are derivable from the mesh triangles; the local (u, v) basis in the
+port plane can be chosen freely by the solver since the mode eigenproblem is
+basis-invariant.
 """
 
 from __future__ import annotations
@@ -39,8 +47,50 @@ def _serialize_materials(materials: dict[str, float | Material]) -> dict[str, An
     return out
 
 
-def _serialize_mesh_groups(groups: dict) -> dict[str, Any]:
-    """Extract serializable mesh group info (drop internal gmsh tags)."""
+def _get_refractive_index(mat: Any) -> float:
+    """Extract refractive index from a material spec (float, Material, or dict)."""
+    if isinstance(mat, (int, float)):
+        return float(mat)
+    n = getattr(mat, "n", None)
+    if n is not None:
+        return float(n)
+    if isinstance(mat, dict):
+        return float(mat.get("refractive_index", 0.0))
+    return 0.0
+
+
+def _compute_mesh_priorities(groups: dict, materials: dict[str, Any]) -> dict[str, int]:
+    """Rank materials by refractive index → integer ``mesh_priority``.
+
+    Convention matches gplugins / femwell / meshwell: **lower ``mesh_priority``
+    wins when regions overlap**. Highest-n material gets ``mesh_priority=1``,
+    next gets ``2``, etc. (e.g. silicon core=1, SiO2 cladding=2).
+    Only materials actually used in ``volumes`` or ``layer_volumes`` are ranked.
+    """
+    used: set[str] = set()
+    for name in groups.get("volumes", {}):
+        used.add(name)
+    for info in groups.get("layer_volumes", {}).values():
+        mat = info.get("material")
+        if mat:
+            used.add(mat)
+    # Sort by refractive index descending: highest n → mesh_priority 1
+    ranked = sorted(
+        used, key=lambda m: _get_refractive_index(materials.get(m)), reverse=True
+    )
+    return {name: i + 1 for i, name in enumerate(ranked)}
+
+
+def _serialize_mesh_groups(
+    groups: dict, materials: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Extract serializable mesh group info (drop internal gmsh tags).
+
+    Adds a ``mesh_priority`` field to each volume / layer_volume (lower = wins
+    on overlap; default ranks by refractive index, highest n = 1).
+    """
+    materials = materials or {}
+    mesh_priorities = _compute_mesh_priorities(groups, materials)
     out: dict[str, Any] = {}
 
     if "volumes" in groups:
@@ -48,18 +98,20 @@ def _serialize_mesh_groups(groups: dict) -> dict[str, Any]:
             name: {
                 "phys_group": info["phys_group"],
                 "material": name,
+                "mesh_priority": mesh_priorities.get(name, 0),
             }
             for name, info in groups["volumes"].items()
         }
 
     if "layer_volumes" in groups:
-        out["layer_volumes"] = {
-            name: {
+        out["layer_volumes"] = {}
+        for name, info in groups["layer_volumes"].items():
+            material_name = info.get("material", name)
+            out["layer_volumes"][name] = {
                 "phys_group": info["phys_group"],
-                "material": info.get("material", name),
+                "material": material_name,
+                "mesh_priority": mesh_priorities.get(material_name, 0),
             }
-            for name, info in groups["layer_volumes"].items()
-        }
 
     if groups.get("outer_boundary"):
         out["outer_boundary"] = {"phys_group": groups["outer_boundary"]["phys_group"]}
@@ -69,11 +121,8 @@ def _serialize_mesh_groups(groups: dict) -> dict[str, Any]:
         for name, info in groups["port_surfaces"].items():
             out["port_surfaces"][name] = {
                 "phys_group": info["phys_group"],
-                "center": [c * _UM_TO_NM for c in info["center"]],
-                "width": info["width"] * _UM_TO_NM,
-                "orientation": info["orientation"],
+                "normal": [float(n) for n in info["normal"]],
                 "layer": info["layer"],
-                "z_range": [z * _UM_TO_NM for z in info["z_range"]],
             }
 
     return out
@@ -89,13 +138,10 @@ def _serialize_source(source: ModeSource) -> dict[str, Any]:
     }
 
 
-def _serialize_domain(domain: Domain) -> dict[str, Any]:
-    """Serialize domain settings."""
+def _serialize_domain(domain: Domain, solver: FDTD) -> dict[str, Any]:
+    """Serialize domain settings (pml expressed as integer number of cells)."""
     return {
-        "pml": domain.pml * _UM_TO_NM,
-        "margin_xy": domain.margin * _UM_TO_NM,
-        "margin_z_above": domain.margin_z_above * _UM_TO_NM,
-        "margin_z_below": domain.margin_z_below * _UM_TO_NM,
+        "pml_cells": round(domain.pml * solver.resolution),
     }
 
 
@@ -148,10 +194,10 @@ def write_mesh_config(
         "length_scale": 1e-9,  # mesh coordinates in nm; hardcoded for now
         "mesh_filename": mesh_result.mesh_path.name,
         "materials": _serialize_materials(materials),
-        "mesh_groups": _serialize_mesh_groups(mesh_result.groups),
+        "mesh_groups": _serialize_mesh_groups(mesh_result.groups, materials),
         "source": _serialize_source(source),
         "monitors": list(monitors),
-        "domain": _serialize_domain(domain),
+        "domain": _serialize_domain(domain, solver),
         "solver": _serialize_solver(solver),
         "mesh_stats": _serialize_mesh_stats(mesh_result.mesh_stats),
     }

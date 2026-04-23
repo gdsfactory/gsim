@@ -9,6 +9,7 @@ or standalone mesh inspection.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -331,12 +332,22 @@ def _assign_port_groups(
             phys_group = gmsh_utils.assign_physical_group(
                 2, matching_tags, f"port_{port.name}"
             )
+            # Outward-facing 3D unit normal. gdsfactory ports are planar, so
+            # z=0 here; downstream serializers read this vector as-is, so when
+            # upstream ports gain out-of-plane tilt, only this line changes.
+            theta = math.radians(angle)
+            normal = [
+                round(math.cos(theta), 12) + 0.0,
+                round(math.sin(theta), 12) + 0.0,
+                0.0,
+            ]
             groups["port_surfaces"][port.name] = {
                 "phys_group": phys_group,
                 "tags": matching_tags,
                 "center": [cx, cy],
                 "width": float(port.width),
                 "orientation": angle,
+                "normal": normal,
                 "layer": layer_name,
                 "z_range": [zmin, zmax],
             }
