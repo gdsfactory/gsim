@@ -801,7 +801,7 @@ def set_periodic_mesh(
         if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
             continue
         tags = gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
-        if not tags:
+        if len(tags) == 0:
             logger.debug("Physical group %s has no surface entities", pg_name)
             continue
         surface_tags.update(tags)
