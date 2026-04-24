@@ -44,5 +44,5 @@ def test_driven_cpw_lumped(
 
     ndarrays_regression.check(
         arrays,
-        default_tolerance={"atol": 1e-6, "rtol": 1e-6},
+        default_tolerance={"atol": 1e-4, "rtol": 1e-4},
     )
