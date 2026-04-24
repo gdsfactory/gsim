@@ -174,7 +174,7 @@ def generate_mesh(
     planar_conductors: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
     absorbing_boundary: bool = True,
-    periodic_direction: str | None = None,
+    periodic_axis: str | None = None,
     merge_via_distance: float = 2.0,
     verbosity: int = 3,
 ) -> MeshResult:
@@ -200,8 +200,7 @@ def generate_mesh(
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
-        periodic_direction: Optional periodic axis ("x" or "y") for periodic
-            meshing constraints on opposite side boundaries
+        periodic_axis: ("x" or "y") for meshing constraints on opposite domain sides
         merge_via_distance: Max gap between vias to merge (um)
         verbosity: Sets gmsh verbosity level
 
@@ -271,8 +270,8 @@ def generate_mesh(
         )
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
-        if periodic_direction in {"x", "y"}:
-            gmsh_utils.set_periodic_mesh(pg_map, periodic_direction)
+        if periodic_axis in {"x", "y"}:
+            gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
 
         # Assign physical groups
         logger.info("Assigning physical groups...")

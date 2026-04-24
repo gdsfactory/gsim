@@ -850,6 +850,7 @@ class PalaceSimMixin:
         model_name: str,
         verbose: bool,
         write_config: bool = True,
+        periodic_axis: str | None = None,
     ) -> SimulationResult:
         """Internal mesh generation."""
         from gsim.palace.mesh.generator import generate_mesh
@@ -887,6 +888,7 @@ class PalaceSimMixin:
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
+            periodic_axis=periodic_axis,
             merge_via_distance=mesh_config.merge_via_distance,
             verbosity=3,
         )
@@ -1029,6 +1031,7 @@ class PalaceSimMixin:
         verbose: bool = True,
         auto_size: bool = False,
         cells_per_feature: int = 2,
+        periodic_axis: str | None = None,
     ) -> SimulationResult:
         """Generate the mesh for Palace simulation.
 
@@ -1055,6 +1058,8 @@ class PalaceSimMixin:
                 use their literal refined_mesh_size.
             cells_per_feature: Target cells across the smallest conductor
                 feature when auto_size=True. Default 2.
+            periodic_axis: Optional periodic axis ("x" or "y") for periodic
+                meshing constraints on opposite domain sides.
 
         Returns:
             SimulationResult with mesh path
@@ -1113,6 +1118,7 @@ class PalaceSimMixin:
             model_name=model_name,
             verbose=verbose,
             write_config=False,
+            periodic_axis=periodic_axis,
         )
 
         # Post-mesh summary: nodes, tets, refined / max sizes (in um).
