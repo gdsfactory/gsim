@@ -22,4 +22,4 @@ jobs:
       - name: Run cloud tests
         run: uv run pytest -m cloud
         env:
-          GFP_API__KEY: ${{ secrets.GFP_API_KEY }}
+          GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
