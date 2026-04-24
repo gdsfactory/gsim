@@ -767,32 +767,90 @@ def finalize_mesh_fields(field_ids: list[int]) -> None:
 
 
 def set_periodic_mesh(
-    master_entity: Entity,
-    slave_entity: Entity,
-    translation: tuple[float, float, float],
+    pg_map: dict[str, int],
+    direction: str,
     tol: float = 1.0,
 ) -> int:
-    """Pair fragmented periodic surfaces and enforce a periodic mesh constraint.
+    """Pair opposite boundary fragments and enforce periodic mesh constraints.
 
-    After :func:`run_boolean_pipeline`, a 2-D entity may be split into several
-    sub-surfaces.  This function matches each master fragment to its slave
-    counterpart via translated bounding boxes and calls
-    ``gmsh.model.mesh.setPeriodic`` on every matched pair so that the slave
-    mesh is an exact copy of the master mesh.
+    This function discovers periodic boundary surfaces from physical groups in
+    ``pg_map`` (output of :func:`run_boolean_pipeline`).
+
+    - ``direction='x'``: match the min-x side to the max-x side (YZ boundaries)
+    - ``direction='y'``: match the min-y side to the max-y side (XZ boundaries)
 
     Must be called **after** the boolean pipeline and **before** mesh
     generation.
 
     Args:
-        master_entity: The :class:`Entity` on the "donor" side (e.g. x = 0).
-        slave_entity:  The :class:`Entity` on the "receiver" side (e.g. x = L).
-        translation:   ``(dx, dy, dz)`` vector from master to slave.
-        tol:           Bounding-box matching tolerance (model units).
+        pg_map: Mapping from physical-group name to physical-group tag.
+        direction: Periodic axis, either ``"x"`` or ``"y"``.
+        tol: Bounding-box matching tolerance (model units).
 
     Returns:
         Number of matched surface pairs.
     """
-    dx, dy, dz = translation
+    direction = direction.lower()
+    if direction not in {"x", "y"}:
+        msg = f"direction must be 'x' or 'y', got {direction!r}"
+        raise ValueError(msg)
+
+    # Only use dim=2 physical groups from pg_map as candidates.
+    surface_tags: set[int] = set()
+    for pg_name, pg_tag in pg_map.items():
+        if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
+            continue
+        tags = gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
+        if not tags:
+            logger.debug("Physical group %s has no surface entities", pg_name)
+            continue
+        surface_tags.update(tags)
+
+    if not surface_tags:
+        logger.warning("No dim=2 entities found in pg_map; periodic mesh not set")
+        return 0
+
+    bboxes = {tag: gmsh.model.getBoundingBox(2, tag) for tag in surface_tags}
+
+    global_xmin = min(bb[0] for bb in bboxes.values())
+    global_ymin = min(bb[1] for bb in bboxes.values())
+    global_xmax = max(bb[3] for bb in bboxes.values())
+    global_ymax = max(bb[4] for bb in bboxes.values())
+
+    if direction == "x":
+        master_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[0] - global_xmin) < tol and abs(bb[3] - global_xmin) < tol
+        ]
+        slave_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[0] - global_xmax) < tol and abs(bb[3] - global_xmax) < tol
+        ]
+        dx, dy, dz = global_xmax - global_xmin, 0.0, 0.0
+    else:
+        master_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[1] - global_ymin) < tol and abs(bb[4] - global_ymin) < tol
+        ]
+        slave_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[1] - global_ymax) < tol and abs(bb[4] - global_ymax) < tol
+        ]
+        dx, dy, dz = 0.0, global_ymax - global_ymin, 0.0
+
+    if not master_surfs or not slave_surfs:
+        logger.warning(
+            "No periodic side surfaces found for direction %s (masters=%d, slaves=%d)",
+            direction,
+            len(master_surfs),
+            len(slave_surfs),
+        )
+        return 0
+
     affine = [
         1,
         0,
@@ -812,17 +870,14 @@ def set_periodic_mesh(
         1,
     ]
 
-    master_surfs = [t for d, t in master_entity.dimtags if d == 2]
-    slave_surfs = [t for d, t in slave_entity.dimtags if d == 2]
-
     matched = 0
     used_slaves: set[int] = set()
     for ms in master_surfs:
-        xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(2, ms)
+        xmin, ymin, zmin, xmax, ymax, zmax = bboxes[ms]
         for ss in slave_surfs:
             if ss in used_slaves:
                 continue
-            x2min, y2min, z2min, x2max, y2max, z2max = gmsh.model.getBoundingBox(2, ss)
+            x2min, y2min, z2min, x2max, y2max, z2max = bboxes[ss]
             if (
                 abs(x2min - dx - xmin) < tol
                 and abs(x2max - dx - xmax) < tol
@@ -837,5 +892,5 @@ def set_periodic_mesh(
                 matched += 1
                 break
 
-    logger.info("Matched %s periodic surface pairs", matched)
+    logger.info("Matched %s periodic surface pairs (direction=%s)", matched, direction)
     return matched
