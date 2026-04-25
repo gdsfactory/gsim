@@ -12,77 +12,77 @@ theme:
     light: github-light
     dark: github-dark
 extra_css:
-  - assets/custom.css
+- assets/custom.css
 nav:
-  - home: index.md
-  - FDTD for Photonics:
-      - Y-Branch: nbs/meep_ybranch.md
-      - Ring Coupler: nbs/meep_ring_coupler.md
-      - Directional Coupler: nbs/meep_dc.md
-      - Crossing: nbs/meep_crossing.md
-      - 2D FDTD: nbs/meep_2d.md
-      - 2D Grating Coupler: nbs/meep_2d_xz_gc.md
-  - FEM for RF:
-      - CPW (Lumped Ports): nbs/palace_cpw_lumped.md
-      - CPW (Wave Ports): nbs/palace_cpw_waveport.md
-      - Microstrip: nbs/palace_microstrip.md
-      - Branch Line Coupler: nbs/palace_branch_line_coupler.md
-      - "Parallel Simulations: Width Sweep": nbs/palace_width_sweep.md
-      - QPDK Resonator: nbs/palace_qpdk_resonator.md
-      - CPW Via Transition: nbs/palace_cpw_via.md
-      - Field Visualization: nbs/palace_cpw_fields.md
-  - API Reference:
-      - Palace: api/palace.md
-      - Meep: api/meep.md
-      - Common: api/common.md
-      - Cloud: api/cloud.md
+- home: index.md
+- FDTD for Photonics:
+  - Y-Branch: nbs/meep_ybranch.md
+  - Ring Coupler: nbs/meep_ring_coupler.md
+  - Directional Coupler: nbs/meep_dc.md
+  - Crossing: nbs/meep_crossing.md
+  - 2D FDTD: nbs/meep_2d.md
+  - 2D Grating Coupler: nbs/meep_2d_xz_gc.md
+- FEM for RF:
+  - CPW (Lumped Ports): nbs/palace_cpw_lumped.md
+  - CPW (Wave Ports): nbs/palace_cpw_waveport.md
+  - Microstrip: nbs/palace_microstrip.md
+  - Branch Line Coupler: nbs/palace_branch_line_coupler.md
+  - "Parallel Simulations: Width Sweep": nbs/palace_width_sweep.md
+  - QPDK Resonator: nbs/palace_qpdk_resonator.md
+  - CPW Via Transition: nbs/palace_cpw_via.md
+  - Field Visualization: nbs/palace_cpw_fields.md
+- API Reference:
+  - Palace: api/palace.md
+  - Meep: api/meep.md
+  - Common: api/common.md
+  - Cloud: api/cloud.md
 plugins:
-  - search
-  - autorefs
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [src]
-          inventories:
-            - https://docs.python.org/3/objects.inv
-            - https://pandas.pydata.org/docs/objects.inv
-          options:
-            docstring_options:
-              ignore_init_summary: true
-            docstring_section_style: list
-            docstring_style: google
-            filters: ["!^_"]
-            heading_level: 1
-            inherited_members: true
-            line_length: 88
-            merge_init_into_class: true
-            separate_signature: true
-            show_root_full_path: false
-            show_root_heading: true
-            show_signature_annotations: true
-            show_source: true
-            show_symbol_type_heading: true
-            show_symbol_type_toc: true
-            signature_crossrefs: true
-            summary: true
+- search
+- autorefs
+- mkdocstrings:
+    handlers:
+      python:
+        paths: [src]
+        inventories:
+        - https://docs.python.org/3/objects.inv
+        - https://pandas.pydata.org/docs/objects.inv
+        options:
+          docstring_options:
+            ignore_init_summary: true
+          docstring_section_style: list
+          docstring_style: google
+          filters: ["!^_"]
+          heading_level: 1
+          inherited_members: true
+          line_length: 88
+          merge_init_into_class: true
+          separate_signature: true
+          show_root_full_path: false
+          show_root_heading: true
+          show_signature_annotations: true
+          show_source: true
+          show_symbol_type_heading: true
+          show_symbol_type_toc: true
+          signature_crossrefs: true
+          summary: true
 markdown_extensions:
-  - attr_list
-  - codehilite
-  - footnotes
-  - toc:
-      permalink: true
-  - pymdownx.highlight:
-      anchor_linenums: true
-      line_spans: __span
-      pygments_lang_class: true
-      css_class: codehilite
-  - pymdownx.inlinehilite
-  - pymdownx.snippets
-  - pymdownx.magiclink
-  - pymdownx.tabbed:
-      alternate_style: true
-  - admonition
-  - pymdownx.details
-  - pymdownx.superfences
+- attr_list
+- codehilite
+- footnotes
+- toc:
+    permalink: true
+- pymdownx.highlight:
+    anchor_linenums: true
+    line_spans: __span
+    pygments_lang_class: true
+    css_class: codehilite
+- pymdownx.inlinehilite
+- pymdownx.snippets
+- pymdownx.magiclink
+- pymdownx.tabbed:
+    alternate_style: true
+- admonition
+- pymdownx.details
+- pymdownx.superfences
 hooks:
-  - docs/hooks.py
+- docs/hooks.py

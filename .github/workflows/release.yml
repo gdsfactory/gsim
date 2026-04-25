@@ -2,71 +2,71 @@ name: Release
 on:
   push:
     tags:
-      - "[0-9]*.[0-9]*.[0-9]*"
+    - "[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
 jobs:
   build:
     name: Build wheel and sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - name: Install build
-        run: pip install build
-      - name: Build wheel and sdist
-        run: python -m build
-      - name: Show artifacts
-        run: ls dist
-      - uses: actions/upload-artifact@v6
-        with:
-          name: dist
-          path: dist/*
+    - uses: actions/checkout@v6
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.x"
+    - name: Install build
+      run: pip install build
+    - name: Build wheel and sdist
+      run: python -m build
+    - name: Show artifacts
+      run: ls dist
+    - uses: actions/upload-artifact@v6
+      with:
+        name: dist
+        path: dist/*
   release:
     name: Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     needs:
-      - build
+    - build
     permissions:
       id-token: write
       contents: write
     steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.x"
-      - name: Download artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: dist
-          path: dist
-      - name: Show dist contents
-        run: ls dist
-      - name: Release PYPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-      - name: Find draft release notes
-        id: draft
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          draft_json=$(gh api repos/${{ github.repository }}/releases \
-            --jq '[.[] | select(.draft == true)] | first // empty')
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.x"
+    - name: Download artifacts
+      uses: actions/download-artifact@v7
+      with:
+        name: dist
+        path: dist
+    - name: Show dist contents
+      run: ls dist
+    - name: Release PYPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+    - name: Find draft release notes
+      id: draft
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        draft_json=$(gh api repos/${{ github.repository }}/releases \
+          --jq '[.[] | select(.draft == true)] | first // empty')
 
-          if [ -n "$draft_json" ]; then
-            body=$(echo "$draft_json" | jq -r '.body // ""')
-            draft_id=$(echo "$draft_json" | jq -r '.id')
-            {
-              echo "body<<EOFBODY"
-              echo "$body"
-              echo "EOFBODY"
-            } >> "$GITHUB_OUTPUT"
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$draft_id"
-          else
-            echo "body=" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Release GH
-        uses: softprops/action-gh-release@v2
-        with:
-          body: ${{ steps.draft.outputs.body }}
-          files: dist/*
+        if [ -n "$draft_json" ]; then
+          body=$(echo "$draft_json" | jq -r '.body // ""')
+          draft_id=$(echo "$draft_json" | jq -r '.id')
+          {
+            echo "body<<EOFBODY"
+            echo "$body"
+            echo "EOFBODY"
+          } >> "$GITHUB_OUTPUT"
+          gh api -X DELETE "repos/${{ github.repository }}/releases/$draft_id"
+        else
+          echo "body=" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Release GH
+      uses: softprops/action-gh-release@v2
+      with:
+        body: ${{ steps.draft.outputs.body }}
+        files: dist/*

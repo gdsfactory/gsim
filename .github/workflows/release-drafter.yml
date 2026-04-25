@@ -2,7 +2,7 @@ name: Release Drafter and Labels
 on:
   push:
     branches:
-      - main
+    - main
   pull_request:
     types: [edited, opened, reopened, synchronize, unlabeled, labeled]
 permissions:
@@ -14,6 +14,6 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - uses: release-drafter/release-drafter@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: release-drafter/release-drafter@v6
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

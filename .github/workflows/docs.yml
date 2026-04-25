@@ -10,29 +10,29 @@ jobs:
     name: Build Docs
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-      - name: Install UV
-        uses: astral-sh/setup-uv@v5
-      - name: Install Just
-        uses: taiki-e/install-action@just
-      - name: Install svgbob
-        run: cargo install svgbob_cli
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
-      - name: Create environment
-        run: just dev
-      - name: Convert notebooks and build docs
-        run: |
-          for nb in nbs/*.ipynb; do
-            uv run --no-sync jupyter nbconvert --to markdown --embed-images "$nb" --output-dir docs/nbs
-          done
-          just docs
-      - name: Upload artifact
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
+    - name: Checkout repo
+      uses: actions/checkout@v4
+    - name: Install UV
+      uses: astral-sh/setup-uv@v5
+    - name: Install Just
+      uses: taiki-e/install-action@just
+    - name: Install svgbob
+      run: cargo install svgbob_cli
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
+    - name: Create environment
+      run: just dev
+    - name: Convert notebooks and build docs
+      run: |
+        for nb in nbs/*.ipynb; do
+          uv run --no-sync jupyter nbconvert --to markdown --embed-images "$nb" --output-dir docs/nbs
+        done
+        just docs
+    - name: Upload artifact
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: site
   pages:
     name: Deploy to GitHub Pages
     if: github.ref == 'refs/heads/main'
@@ -45,6 +45,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

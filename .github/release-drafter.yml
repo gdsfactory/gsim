@@ -8,73 +8,73 @@ template: |
 
   **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...$RESOLVED_VERSION
 categories:
-  - title: "Breaking"
-    label: "breaking"
-  - title: "New Features"
-    labels:
-      - "enhancement"
-      - "feature"
-  - title: "Bug Fixes"
-    label: "bug"
-  - title: "Refactoring"
-    label: "refactor"
-  - title: "Maintenance"
-    labels:
-      - "maintenance"
-      - "github_actions"
-  - title: "Documentation"
-    label: "documentation"
-  - title: "Other changes"
-  - title: "Dependency Updates"
-    label: "dependencies"
-    collapse-after: 5
+- title: "Breaking"
+  label: "breaking"
+- title: "New Features"
+  labels:
+  - "enhancement"
+  - "feature"
+- title: "Bug Fixes"
+  label: "bug"
+- title: "Refactoring"
+  label: "refactor"
+- title: "Maintenance"
+  labels:
+  - "maintenance"
+  - "github_actions"
+- title: "Documentation"
+  label: "documentation"
+- title: "Other changes"
+- title: "Dependency Updates"
+  label: "dependencies"
+  collapse-after: 5
 version-resolver:
   major:
     labels:
-      - "breaking"
+    - "breaking"
   minor:
     labels:
-      - "enhancement"
-      - "feature"
+    - "enhancement"
+    - "feature"
   patch:
     labels:
-      - "bug"
-      - "refactor"
-      - "maintenance"
-      - "documentation"
-      - "dependencies"
-      - "security"
+    - "bug"
+    - "refactor"
+    - "maintenance"
+    - "documentation"
+    - "dependencies"
+    - "security"
   default: patch
 exclude-labels:
-  - "skip-changelog"
+- "skip-changelog"
 autolabeler:
-  - label: "documentation"
-    files:
-      - "*.md"
-    branch:
-      - "/docs-.+/"
-      - "/docs/.+/"
-  - label: "bug"
-    branch:
-      - "/^fix-.+/"
-      - "/^fix/.+/"
-    title:
-      - "/^fix/i"
-  - label: "enhancement"
-    branch:
-      - "/^feat-.+/"
-      - "/^feat/.+/"
-      - "/^feature-.+/"
-      - "/^add-.+/"
-    title:
-      - "/^feat/i"
-      - "/^add\\s/i"
-  - label: "refactor"
-    branch:
-      - "/^refactor-.+/"
-      - "/^refactor/.+/"
-    title:
-      - "/^refactor/i"
-  - label: "github_actions"
-    files:
-      - ".github/**/*.yml"
+- label: "documentation"
+  files:
+  - "*.md"
+  branch:
+  - "/docs-.+/"
+  - "/docs/.+/"
+- label: "bug"
+  branch:
+  - "/^fix-.+/"
+  - "/^fix/.+/"
+  title:
+  - "/^fix/i"
+- label: "enhancement"
+  branch:
+  - "/^feat-.+/"
+  - "/^feat/.+/"
+  - "/^feature-.+/"
+  - "/^add-.+/"
+  title:
+  - "/^feat/i"
+  - "/^add\\s/i"
+- label: "refactor"
+  branch:
+  - "/^refactor-.+/"
+  - "/^refactor/.+/"
+  title:
+  - "/^refactor/i"
+- label: "github_actions"
+  files:
+  - ".github/**/*.yml"

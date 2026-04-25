@@ -11,15 +11,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v6
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
-      - name: Install UV
-        uses: astral-sh/setup-uv@v6
-      - name: Create environment
-        run: uv sync --dev --all-extras
-      - name: Run cloud tests
-        run: uv run pytest -m cloud
-        env:
-          GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
+    - name: Checkout repo
+      uses: actions/checkout@v6
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+    - name: Install UV
+      uses: astral-sh/setup-uv@v6
+    - name: Create environment
+      run: uv sync --dev --all-extras
+    - name: Run cloud tests
+      run: uv run pytest -m cloud
+      env:
+        GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
