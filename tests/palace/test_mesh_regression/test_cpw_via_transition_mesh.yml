@@ -1,23 +1,23 @@
 groups:
   boundary_surfaces:
-    - absorbing
+  - absorbing
   conductor_surfaces:
-    - metal5_xy
-    - metal5_z
-    - topmetal1_xy
-    - topmetal1_z
-    - topmetal2_xy
-    - topmetal2_z
+  - metal5_xy
+  - metal5_z
+  - topmetal1_xy
+  - topmetal1_z
+  - topmetal2_xy
+  - topmetal2_z
   pec_surfaces: []
   port_surfaces:
-    - P1
-    - P2
+  - P1
+  - P2
   volumes:
-    - SiO2
-    - air
-    - passive
-    - topvia1
-    - topvia2
+  - SiO2
+  - air
+  - passive
+  - topvia1
+  - topvia2
 mesh:
   elements: 14572
   invalid_elements: 0
