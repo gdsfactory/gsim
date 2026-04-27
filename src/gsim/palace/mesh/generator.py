@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,7 @@ class MeshResult:
     output_dir: Path | None = None
     model_name: str = "palace"
     fmax: float = 100e9
+    periodic_axis: str | None = None
 
 
 def _setup_mesh_fields(
@@ -232,6 +234,8 @@ def generate_mesh(
     port_info: list = []
 
     try:
+        periodic_info: dict[str, object] | None = None
+
         # Add geometry
         logger.info("Adding metals...")
         metal_tags = add_metals(
@@ -271,7 +275,7 @@ def generate_mesh(
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
         if periodic_axis in {"x", "y"}:
-            gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
+            periodic_info = gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
 
         # Assign physical groups
         logger.info("Assigning physical groups...")
@@ -286,6 +290,40 @@ def generate_mesh(
             stack,
             pec_block_tags=pec_block_tags or None,
         )
+
+        if periodic_info:
+            donor_surfaces = periodic_info.get("master_surfaces")
+            receiver_surfaces = periodic_info.get("slave_surfaces")
+            if isinstance(donor_surfaces, list) and isinstance(receiver_surfaces, list):
+                donor_tags = [int(t) for t in donor_surfaces if isinstance(t, Integral)]
+                receiver_tags = [
+                    int(t) for t in receiver_surfaces if isinstance(t, Integral)
+                ]
+                if not donor_tags or not receiver_tags:
+                    logger.warning(
+                        "Periodic side surfaces were not discovered for axis %s",
+                        periodic_axis,
+                    )
+                else:
+                    donor_pg = gmsh_utils.assign_physical_group(
+                        2,
+                        donor_tags,
+                        f"periodic_{periodic_axis}_donor",
+                    )
+                    receiver_pg = gmsh_utils.assign_physical_group(
+                        2,
+                        receiver_tags,
+                        f"periodic_{periodic_axis}_receiver",
+                    )
+                    if donor_pg > 0 and receiver_pg > 0:
+                        groups["boundary_surfaces"]["periodic_donor"] = {
+                            "phys_group": donor_pg,
+                            "tags": donor_tags,
+                        }
+                        groups["boundary_surfaces"]["periodic_receiver"] = {
+                            "phys_group": receiver_pg,
+                            "tags": receiver_tags,
+                        }
 
         # Setup mesh fields
         logger.info("Setting up mesh refinement...")
@@ -332,6 +370,7 @@ def generate_mesh(
                 driven_config,
                 eigenmode_config,
                 absorbing_boundary,
+                periodic_axis,
             )
 
     finally:
@@ -348,6 +387,7 @@ def generate_mesh(
         output_dir=output_dir,
         model_name=model_name,
         fmax=fmax,
+        periodic_axis=periodic_axis,
     )
 
     return result

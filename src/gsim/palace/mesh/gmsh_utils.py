@@ -770,7 +770,7 @@ def set_periodic_mesh(
     pg_map: dict[str, int],
     direction: str,
     tol: float = 1.0,
-) -> int:
+) -> dict[str, object]:
     """Pair opposite boundary fragments and enforce periodic mesh constraints.
 
     This function discovers periodic boundary surfaces from physical groups in
@@ -788,27 +788,41 @@ def set_periodic_mesh(
         tol: Bounding-box matching tolerance (model units).
 
     Returns:
-        Number of matched surface pairs.
+        Dict with discovered periodic-side surfaces and pairing summary:
+        - matched: Number of matched periodic surface pairs
+        - master_surfaces: Surface tags on the minimum side (donor side)
+        - slave_surfaces: Surface tags on the maximum side (receiver side)
+        - direction: Normalized periodic axis ('x' or 'y')
     """
     direction = direction.lower()
     if direction not in {"x", "y"}:
         msg = f"direction must be 'x' or 'y', got {direction!r}"
         raise ValueError(msg)
 
-    # Only use dim=2 physical groups from pg_map as candidates.
+    # Only use outer boundary dim=2 groups as periodic candidates.
+    # In the boolean pipeline these are labeled with the "__None" suffix.
+    # Including all dim=2 groups can accidentally pair interior interfaces,
+    # which can produce invalid non-manifold topology in downstream solvers.
     surface_tags: set[int] = set()
     for pg_name, pg_tag in pg_map.items():
+        if not pg_name.endswith("__None"):
+            continue
         if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
             continue
         tags = gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
         if len(tags) == 0:
             logger.debug("Physical group %s has no surface entities", pg_name)
             continue
-        surface_tags.update(tags)
+        surface_tags.update(int(tag) for tag in tags)
 
     if not surface_tags:
         logger.warning("No dim=2 entities found in pg_map; periodic mesh not set")
-        return 0
+        return {
+            "matched": 0,
+            "master_surfaces": [],
+            "slave_surfaces": [],
+            "direction": direction,
+        }
 
     bboxes = {tag: gmsh.model.getBoundingBox(2, tag) for tag in surface_tags}
 
@@ -849,7 +863,12 @@ def set_periodic_mesh(
             len(master_surfs),
             len(slave_surfs),
         )
-        return 0
+        return {
+            "matched": 0,
+            "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
+            "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+            "direction": direction,
+        }
 
     affine = [
         1,
@@ -893,4 +912,9 @@ def set_periodic_mesh(
                 break
 
     logger.info("Matched %s periodic surface pairs (direction=%s)", matched, direction)
-    return matched
+    return {
+        "matched": matched,
+        "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
+        "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+        "direction": direction,
+    }
