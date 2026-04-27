@@ -82,6 +82,20 @@ class TestEigenSimValidation:
         with pytest.raises(ValueError):
             sim.add_port("o1", geometry="inplane")  # No layer
 
+    def test_floquet_requires_target_frequency(self):
+        """Floquet setup must include eigenmode target frequency."""
+        sim = EigenmodeSim()
+        with pytest.raises(ValueError, match="Floquet requires target frequency"):
+            sim.set_eigenmode(floquet=True)
+
+    def test_floquet_options_are_stored(self):
+        """Floquet options should propagate into eigenmode config."""
+        sim = EigenmodeSim()
+        sim.set_eigenmode(target=40e9, floquet=True, phi_target=1.2, n_eff_guess=2.4)
+        assert sim.eigenmode.floquet is True
+        assert sim.eigenmode.phi_target == pytest.approx(1.2)
+        assert sim.eigenmode.n_eff_guess == pytest.approx(2.4)
+
 
 class TestElectrostaticSimValidation:
     """Test ElectrostaticSim validation logic."""

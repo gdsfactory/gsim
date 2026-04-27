@@ -7,6 +7,7 @@ frequencies and mode shapes.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any, Literal
 
@@ -100,6 +101,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         target: float | None = None,
         tolerance: float = 1e-6,
         save: int = 0,
+        floquet: bool = False,
+        phi_target: float = math.pi / 2,
+        n_eff_guess: float = 2.0,
     ) -> None:
         """Configure eigenmode simulation.
 
@@ -108,6 +112,10 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             target: Target frequency in Hz for mode search
             tolerance: Eigenvalue solver tolerance
             save: Number of eigenmodes to save as ParaView fields (0 = disabled)
+            floquet: Enable Floquet periodic boundary setup in config generation
+                (requires mesh(periodic_axis=...)).
+            phi_target: Bloch phase advance per cell in radians (Floquet only).
+            n_eff_guess: Initial effective-index guess for Floquet k-vector setup.
 
         Example:
             >>> sim.set_eigenmode(num_modes=10, target=50e9)
@@ -117,6 +125,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             target=target,
             tolerance=tolerance,
             save=save,
+            floquet=floquet,
+            phi_target=phi_target,
+            n_eff_guess=n_eff_guess,
         )
 
 

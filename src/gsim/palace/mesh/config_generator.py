@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import gmsh
 
@@ -31,6 +31,7 @@ def generate_palace_config(
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
     absorbing_boundary: bool = True,
+    periodic_axis: str | None = None,
     hints: dict[str, Any] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
@@ -299,6 +300,53 @@ def generate_palace_config(
             "Order": 2,
         }
 
+    if (
+        simulation_type == "eigenmode"
+        and eigenmode_config is not None
+        and eigenmode_config.floquet
+    ):
+        axis = (periodic_axis or "").lower()
+        if axis not in {"x", "y"}:
+            raise ValueError(
+                "Floquet eigenmode requires a periodic axis set in mesh(). "
+                "Use mesh(periodic_axis='x') or mesh(periodic_axis='y')."
+            )
+
+        donor_info = groups["boundary_surfaces"].get("periodic_donor")
+        receiver_info = groups["boundary_surfaces"].get("periodic_receiver")
+        if donor_info is None or receiver_info is None:
+            raise ValueError(
+                "Floquet enabled but periodic donor/receiver boundaries were not "
+                "found in the generated mesh."
+            )
+
+        donor_pg = donor_info.get("phys_group")
+        receiver_pg = receiver_info.get("phys_group")
+        periodic_donor_attrs = donor_pg if isinstance(donor_pg, list) else [donor_pg]
+        periodic_receiver_attrs = (
+            receiver_pg if isinstance(receiver_pg, list) else [receiver_pg]
+        )
+
+        if not periodic_donor_attrs or not periodic_receiver_attrs:
+            raise ValueError("Floquet periodic boundary attributes are empty.")
+
+        axis_lit: Literal["x", "y"] = "x" if axis == "x" else "y"
+
+        floquet_vector = eigenmode_config.compute_floquet_wave_vector(
+            periodic_axis=axis_lit,
+            l0=float(config["Model"]["L0"]),
+        )
+
+        boundaries["Periodic"] = {
+            "FloquetWaveVector": floquet_vector,
+            "BoundaryPairs": [
+                {
+                    "DonorAttributes": sorted(periodic_donor_attrs),
+                    "ReceiverAttributes": sorted(periodic_receiver_attrs),
+                }
+            ],
+        }
+
     config["Boundaries"] = boundaries
 
     # Merge any extra hints into the config
@@ -477,6 +525,7 @@ def write_config(
         driven_config=driven_config,
         eigenmode_config=eigenmode_config,
         absorbing_boundary=absorbing_boundary,
+        periodic_axis=mesh_result.periodic_axis,
         hints=hints,
     )
 
