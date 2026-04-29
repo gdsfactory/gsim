@@ -63,6 +63,7 @@ class PalaceSimMixin:
     _pec_blocks: list
     _hints: dict[str, Any]
     absorbing_boundary: bool
+    _airbox_config: dict[str, float]
 
     # -------------------------------------------------------------------------
     # Output directory
@@ -172,6 +173,51 @@ class PalaceSimMixin:
         }
         # Stack will be resolved lazily during mesh() or simulate()
         self.stack = None
+
+    def set_airbox(
+        self,
+        *,
+        margin_x: float,
+        margin_y: float | None = None,
+        z_above: float,
+        z_below: float,
+    ) -> None:
+        """Configure an explicit weak-priority airbox for meshing.
+
+        This helper centralizes airbox controls that were previously split
+        across mesh margin arguments and stack air thickness parameters.
+        The resulting airbox is created as a dedicated dielectric volume
+        with the weakest boolean-priority in mesh construction.
+
+        Args:
+            margin_x: Airbox x-margin around the design (um).
+            margin_y: Airbox y-margin around the design (um).
+                Defaults to ``margin_x`` when omitted.
+            z_above: Airbox extension above the stack top (um).
+            z_below: Airbox extension below the stack bottom (um).
+        """
+        if margin_x < 0:
+            raise ValueError("margin_x must be >= 0")
+        if margin_y is not None and margin_y < 0:
+            raise ValueError("margin_y must be >= 0")
+        if z_above < 0 or z_below < 0:
+            raise ValueError("z_above and z_below must be >= 0")
+
+        y = margin_x if margin_y is None else margin_y
+
+        # Keep mesh margin controls in sync for domain/port extents.
+        mesh_config = getattr(self, "mesh_config", None)
+        if mesh_config is not None:
+            mesh_config.margin_x = margin_x
+            mesh_config.margin_y = y
+
+        # Store explicit airbox expansion for generator plumbing.
+        self._airbox_config = {
+            "margin_x": margin_x,
+            "margin_y": y,
+            "z_above": z_above,
+            "z_below": z_below,
+        }
 
     # -------------------------------------------------------------------------
     # Material methods
@@ -868,6 +914,10 @@ class PalaceSimMixin:
         if verbose:
             logger.info("Generating mesh in %s", output_dir)
 
+        airbox_cfg = getattr(self, "_airbox_config", {})
+        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
+        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
+
         mesh_result = generate_mesh(
             component=component,
             stack=stack,
@@ -876,9 +926,13 @@ class PalaceSimMixin:
             model_name=model_name,
             refined_mesh_size=mesh_config.refined_mesh_size,
             max_mesh_size=mesh_config.max_mesh_size,
-            margin_x=mesh_config.effective_margin_x,
-            margin_y=mesh_config.effective_margin_y,
+            margin_x=domain_margin_x,
+            margin_y=domain_margin_y,
             air_margin=mesh_config.airbox_margin,
+            airbox_margin_x=airbox_cfg.get("margin_x"),
+            airbox_margin_y=airbox_cfg.get("margin_y"),
+            airbox_z_above=airbox_cfg.get("z_above"),
+            airbox_z_below=airbox_cfg.get("z_below"),
             fmax=effective_fmax,
             show_gui=mesh_config.show_gui,
             simulation_type=self.simulation_type,
@@ -988,6 +1042,9 @@ class PalaceSimMixin:
         ports = self._get_ports_for_preview(stack)
 
         # Generate mesh in temp directory
+        airbox_cfg = getattr(self, "_airbox_config", {})
+        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
+        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
         with tempfile.TemporaryDirectory() as tmpdir:
             generate_mesh(
                 component=component,
@@ -996,9 +1053,13 @@ class PalaceSimMixin:
                 output_dir=tmpdir,
                 refined_mesh_size=mesh_config.refined_mesh_size,
                 max_mesh_size=mesh_config.max_mesh_size,
-                margin_x=mesh_config.effective_margin_x,
-                margin_y=mesh_config.effective_margin_y,
+                margin_x=domain_margin_x,
+                margin_y=domain_margin_y,
                 air_margin=mesh_config.airbox_margin,
+                airbox_margin_x=airbox_cfg.get("margin_x"),
+                airbox_margin_y=airbox_cfg.get("margin_y"),
+                airbox_z_above=airbox_cfg.get("z_above"),
+                airbox_z_below=airbox_cfg.get("z_below"),
                 fmax=mesh_config.fmax,
                 show_gui=True,
                 simulation_type=self.simulation_type,
@@ -1354,7 +1415,7 @@ class PalaceSimMixin:
         palace_sif_path: str | Path | None = None,
         palace_executable: str | Path | None = None,
         use_apptainer: bool = True,
-        num_processes: int = 1,
+        num_processes: int | None = None,
         num_threads: int | None = None,
         verbose: bool = True,
     ) -> SParams | dict[str, Path]:
@@ -1372,7 +1433,8 @@ class PalaceSimMixin:
                 If None, uses PALACE_EXECUTABLE environment variable or "palace".
             use_apptainer: If True (default), run via Apptainer using SIF file.
                 If False, run Palace executable directly.
-            num_processes: Number of MPI processes (default: 1)
+            num_processes: Number of MPI processes. If None (default),
+                uses all available CPUs.
             num_threads: Number of OpenMP threads to use for OpenMP builds, default is 1
                 or the value of OMP_NUM_THREADS in the environment
             verbose: Print progress messages
@@ -1417,6 +1479,10 @@ class PalaceSimMixin:
         output_dir = Path(self._output_dir)
         config_path = output_dir / "config.json"
         mesh_path = output_dir / "palace.msh"
+
+        # Default to all available CPUs when caller does not specify -np.
+        if num_processes is None:
+            num_processes = os.cpu_count() or 1
 
         # Check required files exist
         if not config_path.exists():

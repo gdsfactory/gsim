@@ -160,7 +160,7 @@ def generate_palace_config(
 
         mat_entry: dict[str, object] = {"Attributes": [info["phys_group"]]}
 
-        if material_name == "airbox":
+        if material_name in {"airbox", "air"}:
             mat_entry["Permittivity"] = 1.0
             mat_entry["LossTan"] = 0.0
         elif is_via:

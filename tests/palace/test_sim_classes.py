@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim
+from gsim.palace.models import MeshConfig
 
 
 class TestDrivenSimValidation:
@@ -145,6 +148,72 @@ class TestMixinMethods:
             sim.set_stack(air_above=500.0, air_below=25.0)
             assert sim._stack_kwargs["air_above"] == 500.0
             assert sim._stack_kwargs["air_below"] == 25.0
+
+    def test_set_airbox(self):
+        """Test set_airbox stores explicit airbox margins and z extents."""
+        for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim]:
+            sim = cls()
+            sim.set_airbox(margin_x=50.0, margin_y=30.0, z_above=100.0, z_below=80.0)
+            assert sim._airbox_config == {
+                "margin_x": 50.0,
+                "margin_y": 30.0,
+                "z_above": 100.0,
+                "z_below": 80.0,
+            }
+
+    def test_set_airbox_invalid(self):
+        """set_airbox should reject negative margins/extents."""
+        sim = DrivenSim()
+        with pytest.raises(ValueError):
+            sim.set_airbox(margin_x=-1.0, z_above=100.0, z_below=100.0)
+
+    def test_set_airbox_margin_y_zero_reaches_generate_mesh(
+        self, monkeypatch, tmp_path
+    ):
+        """set_airbox(margin_y=0) must propagate to meshing domain extents."""
+        captured: dict[str, float] = {}
+
+        def _fake_generate_mesh(**kwargs):
+            captured["margin_x"] = kwargs["margin_x"]
+            captured["margin_y"] = kwargs["margin_y"]
+            return SimpleNamespace(
+                mesh_path=tmp_path / "palace.msh",
+                config_path=None,
+                port_info=[],
+                mesh_stats={},
+                groups={},
+            )
+
+        monkeypatch.setattr(
+            "gsim.palace.mesh.generator.generate_mesh", _fake_generate_mesh
+        )
+        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: object())
+        monkeypatch.setattr(
+            DrivenSim,
+            "_configure_ports_on_component",
+            lambda _self, _stack: None,
+        )
+        monkeypatch.setattr(
+            "gsim.palace.ports.extract_ports",
+            lambda _component, _stack: [],
+        )
+
+        sim = DrivenSim()
+        sim.set_output_dir(tmp_path / "sim")
+        sim.set_airbox(margin_x=50.0, margin_y=0.0, z_above=100.0, z_below=100.0)
+
+        sim._generate_mesh_internal(
+            output_dir=tmp_path / "sim",
+            mesh_config=MeshConfig.default(),
+            ports=[],
+            driven_config=sim.driven,
+            model_name="palace",
+            verbose=False,
+            write_config=False,
+        )
+
+        assert captured["margin_x"] == 50.0
+        assert captured["margin_y"] == 0.0
 
     def test_set_material(self):
         """Test set_material works on all sim classes."""
