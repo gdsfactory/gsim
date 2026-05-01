@@ -126,6 +126,7 @@ def _plot_wireframe(
 # ---------------------------------------------------------------------------
 
 _TRANSPARENT_DEFAULTS = ("air_boundary", "air_none", "air_plastic_enclosure")
+_TRANSPARENT_OPACITY = 0.05
 
 
 def _plot_solid(
@@ -213,6 +214,7 @@ def _plot_solid(
         )
 
     # Transparent surfaces ------------------------------------------------
+    transparent_legend_entries: list[tuple[str, str]] = []
     for group_name in transparent_groups:
         group_mask = plain_names == group_name
         if not np.any(group_mask):
@@ -223,11 +225,17 @@ def _plot_solid(
             group_grid,
             color=color,
             show_edges=True,
-            opacity=0.2,
+            opacity=_TRANSPARENT_OPACITY,
             edge_color=color,
             line_width=0.5,
         )
+        transparent_legend_entries.append(
+            (f"{group_name} (alpha={_TRANSPARENT_OPACITY:.2f})", color)
+        )
         logger.info("Transparent group '%s' (colour %s)", group_name, color)
+
+    if transparent_legend_entries:
+        plotter.add_legend(transparent_legend_entries, bcolor="white", border=True)
 
     _finish(plotter, msh_path, output=output, interactive=interactive)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,7 @@ class MeshResult:
     output_dir: Path | None = None
     model_name: str = "palace"
     fmax: float = 100e9
+    periodic_axis: str | None = None
 
 
 def _setup_mesh_fields(
@@ -165,6 +167,10 @@ def generate_mesh(
     margin_x: float = 50.0,
     margin_y: float = 50.0,
     air_margin: float = 50.0,
+    airbox_margin_x: float | None = None,
+    airbox_margin_y: float | None = None,
+    airbox_z_above: float | None = None,
+    airbox_z_below: float | None = None,
     fmax: float = 100e9,
     show_gui: bool = False,
     simulation_type: str = "driven",
@@ -174,6 +180,7 @@ def generate_mesh(
     planar_conductors: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
     absorbing_boundary: bool = True,
+    periodic_axis: str | None = None,
     merge_via_distance: float = 2.0,
     verbosity: int = 3,
 ) -> MeshResult:
@@ -189,7 +196,11 @@ def generate_mesh(
         max_mesh_size: Max mesh size in air/dielectric (um)
         margin_x: X-axis margin around design (um)
         margin_y: Y-axis margin around design (um)
-        air_margin: Air box margin (um)
+        air_margin: Legacy isotropic airbox margin (um)
+        airbox_margin_x: Extra x-margin for explicit airbox (um)
+        airbox_margin_y: Extra y-margin for explicit airbox (um)
+        airbox_z_above: Extra +z margin for explicit airbox (um)
+        airbox_z_below: Extra -z margin for explicit airbox (um)
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
         simulation_type: Type of simulation (driven, eigenmode or electrostatics)
@@ -199,6 +210,7 @@ def generate_mesh(
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
+        periodic_axis: ("x" or "y") for meshing constraints on opposite domain sides
         merge_via_distance: Max gap between vias to merge (um)
         verbosity: Sets gmsh verbosity level
 
@@ -230,6 +242,8 @@ def generate_mesh(
     port_info: list = []
 
     try:
+        periodic_info: dict[str, object] | None = None
+
         # Add geometry
         logger.info("Adding metals...")
         metal_tags = add_metals(
@@ -253,7 +267,16 @@ def generate_mesh(
 
         logger.info("Adding dielectrics...")
         dielectric_tags = add_dielectrics(
-            kernel, geometry, stack, margin_x, margin_y, air_margin
+            kernel,
+            geometry,
+            stack,
+            margin_x,
+            margin_y,
+            air_margin,
+            airbox_margin_x=airbox_margin_x,
+            airbox_margin_y=airbox_margin_y,
+            airbox_z_above=airbox_z_above,
+            airbox_z_below=airbox_z_below,
         )
 
         # Build entities and run boolean pipeline
@@ -268,6 +291,9 @@ def generate_mesh(
         )
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
 
+        if periodic_axis in {"x", "y"}:
+            periodic_info = gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
+
         # Assign physical groups
         logger.info("Assigning physical groups...")
         groups = assign_physical_groups(
@@ -281,6 +307,50 @@ def generate_mesh(
             stack,
             pec_block_tags=pec_block_tags or None,
         )
+
+        if periodic_info:
+            donor_surfaces = periodic_info.get("master_surfaces")
+            receiver_surfaces = periodic_info.get("slave_surfaces")
+            donor_phys_groups = periodic_info.get("donor_phys_groups")
+            receiver_phys_groups = periodic_info.get("receiver_phys_groups")
+
+            if isinstance(donor_surfaces, list) and isinstance(receiver_surfaces, list):
+                donor_tags = [int(t) for t in donor_surfaces if isinstance(t, Integral)]
+                receiver_tags = [
+                    int(t) for t in receiver_surfaces if isinstance(t, Integral)
+                ]
+                donor_pgs = (
+                    [int(t) for t in donor_phys_groups if isinstance(t, Integral)]
+                    if isinstance(donor_phys_groups, list)
+                    else []
+                )
+                receiver_pgs = (
+                    [int(t) for t in receiver_phys_groups if isinstance(t, Integral)]
+                    if isinstance(receiver_phys_groups, list)
+                    else []
+                )
+
+                if not donor_tags or not receiver_tags:
+                    logger.warning(
+                        "Periodic side surfaces were not discovered for axis %s",
+                        periodic_axis,
+                    )
+                else:
+                    if donor_pgs and receiver_pgs:
+                        groups["boundary_surfaces"]["periodic_donor"] = {
+                            "phys_group": donor_pgs,
+                            "tags": donor_tags,
+                        }
+                        groups["boundary_surfaces"]["periodic_receiver"] = {
+                            "phys_group": receiver_pgs,
+                            "tags": receiver_tags,
+                        }
+                    else:
+                        logger.warning(
+                            "Periodic donor/receiver physical groups "
+                            "were not created for axis %s",
+                            periodic_axis,
+                        )
 
         # Setup mesh fields
         logger.info("Setting up mesh refinement...")
@@ -327,6 +397,7 @@ def generate_mesh(
                 driven_config,
                 eigenmode_config,
                 absorbing_boundary,
+                periodic_axis,
             )
 
     finally:
@@ -343,6 +414,7 @@ def generate_mesh(
         output_dir=output_dir,
         model_name=model_name,
         fmax=fmax,
+        periodic_axis=periodic_axis,
     )
 
     return result

@@ -764,3 +764,222 @@ def finalize_mesh_fields(field_ids: list[int]) -> None:
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
     gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay algorithm
+
+
+def set_periodic_mesh(
+    pg_map: dict[str, int],
+    direction: str,
+    tol: float = 1.0,
+) -> dict[str, object]:
+    """Pair opposite boundary fragments and enforce periodic mesh constraints.
+
+    This function discovers periodic boundary surfaces from physical groups in
+    ``pg_map`` (output of :func:`run_boolean_pipeline`).
+
+    - ``direction='x'``: match the min-x side to the max-x side (YZ boundaries)
+    - ``direction='y'``: match the min-y side to the max-y side (XZ boundaries)
+
+    Must be called **after** the boolean pipeline and **before** mesh
+    generation.
+
+    Args:
+        pg_map: Mapping from physical-group name to physical-group tag.
+        direction: Periodic axis, either ``"x"`` or ``"y"``.
+        tol: Bounding-box matching tolerance (model units).
+
+    Notes:
+        This function updates physical groups to avoid overlapping boundary
+        assignments on periodic faces:
+
+        1. periodic donor/receiver groups are created from matched side surfaces
+        2. those surfaces are removed from existing ``*__None`` groups
+
+        This preserves MFEM's one-boundary-element-per-face requirement.
+
+    Returns:
+        Dict with discovered periodic-side surfaces and pairing summary:
+        - matched: Number of matched periodic surface pairs
+        - master_surfaces: Surface tags on the minimum side (donor side)
+        - slave_surfaces: Surface tags on the maximum side (receiver side)
+        - donor_phys_groups: Physical-group tag(s) for donor surfaces
+        - receiver_phys_groups: Physical-group tag(s) for receiver surfaces
+        - direction: Normalized periodic axis ('x' or 'y')
+    """
+    direction = direction.lower()
+    if direction not in {"x", "y"}:
+        msg = f"direction must be 'x' or 'y', got {direction!r}"
+        raise ValueError(msg)
+
+    # Only use outer boundary dim=2 groups as periodic candidates.
+    # In the boolean pipeline these are labeled with the "__None" suffix.
+    # Including all dim=2 groups can accidentally pair interior interfaces,
+    # which can produce invalid non-manifold topology in downstream solvers.
+    surface_tags: set[int] = set()
+    for pg_name, pg_tag in pg_map.items():
+        if not pg_name.endswith("__None"):
+            continue
+        if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
+            continue
+        tags = gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
+        if len(tags) == 0:
+            logger.debug("Physical group %s has no surface entities", pg_name)
+            continue
+        surface_tags.update(int(tag) for tag in tags)
+
+    if not surface_tags:
+        logger.warning("No dim=2 entities found in pg_map; periodic mesh not set")
+        return {
+            "matched": 0,
+            "master_surfaces": [],
+            "slave_surfaces": [],
+            "donor_phys_groups": [],
+            "receiver_phys_groups": [],
+            "direction": direction,
+        }
+
+    bboxes = {tag: gmsh.model.getBoundingBox(2, tag) for tag in surface_tags}
+
+    global_xmin = min(bb[0] for bb in bboxes.values())
+    global_ymin = min(bb[1] for bb in bboxes.values())
+    global_xmax = max(bb[3] for bb in bboxes.values())
+    global_ymax = max(bb[4] for bb in bboxes.values())
+
+    if direction == "x":
+        master_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[0] - global_xmin) < tol and abs(bb[3] - global_xmin) < tol
+        ]
+        slave_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[0] - global_xmax) < tol and abs(bb[3] - global_xmax) < tol
+        ]
+        dx, dy, dz = global_xmax - global_xmin, 0.0, 0.0
+    else:
+        master_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[1] - global_ymin) < tol and abs(bb[4] - global_ymin) < tol
+        ]
+        slave_surfs = [
+            tag
+            for tag, bb in bboxes.items()
+            if abs(bb[1] - global_ymax) < tol and abs(bb[4] - global_ymax) < tol
+        ]
+        dx, dy, dz = 0.0, global_ymax - global_ymin, 0.0
+
+    if not master_surfs or not slave_surfs:
+        logger.warning(
+            "No periodic side surfaces found for direction %s (masters=%d, slaves=%d)",
+            direction,
+            len(master_surfs),
+            len(slave_surfs),
+        )
+        return {
+            "matched": 0,
+            "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
+            "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+            "donor_phys_groups": [],
+            "receiver_phys_groups": [],
+            "direction": direction,
+        }
+
+    affine = [
+        1,
+        0,
+        0,
+        dx,
+        0,
+        1,
+        0,
+        dy,
+        0,
+        0,
+        1,
+        dz,
+        0,
+        0,
+        0,
+        1,
+    ]
+
+    matched = 0
+    used_slaves: set[int] = set()
+    for ms in master_surfs:
+        xmin, ymin, zmin, xmax, ymax, zmax = bboxes[ms]
+        for ss in slave_surfs:
+            if ss in used_slaves:
+                continue
+            x2min, y2min, z2min, x2max, y2max, z2max = bboxes[ss]
+            if (
+                abs(x2min - dx - xmin) < tol
+                and abs(x2max - dx - xmax) < tol
+                and abs(y2min - dy - ymin) < tol
+                and abs(y2max - dy - ymax) < tol
+                and abs(z2min - dz - zmin) < tol
+                and abs(z2max - dz - zmax) < tol
+            ):
+                gmsh.model.mesh.setPeriodic(2, [ss], [ms], affine)
+                logger.info("Periodic mesh: surface %s -> %s", ms, ss)
+                used_slaves.add(ss)
+                matched += 1
+                break
+
+    logger.info("Matched %s periodic surface pairs (direction=%s)", matched, direction)
+
+    # Rebuild physical groups to avoid overlapping boundary assignments:
+    # remove periodic-side surfaces from existing *__None groups, then create
+    # dedicated periodic donor/receiver groups for Palace config generation.
+    master_set = {int(tag) for tag in master_surfs}
+    slave_set = {int(tag) for tag in slave_surfs}
+    periodic_side_surfaces = master_set | slave_set
+
+    if periodic_side_surfaces:
+        updated_pg_map = dict(pg_map)
+        for pg_name, pg_tag in list(pg_map.items()):
+            if not pg_name.endswith("__None"):
+                continue
+            if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
+                continue
+
+            current_tags = {
+                int(tag) for tag in gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
+            }
+            if not current_tags:
+                continue
+
+            keep_tags = sorted(current_tags - periodic_side_surfaces)
+            if len(keep_tags) == len(current_tags):
+                continue
+
+            gmsh.model.removePhysicalGroups([(2, pg_tag)])
+            updated_pg_map.pop(pg_name, None)
+            if keep_tags:
+                updated_pg_map[pg_name] = assign_physical_group(2, keep_tags, pg_name)
+
+        donor_name = f"periodic_{direction}_donor"
+        receiver_name = f"periodic_{direction}_receiver"
+        donor_pg = assign_physical_group(2, sorted(master_set), donor_name)
+        receiver_pg = assign_physical_group(2, sorted(slave_set), receiver_name)
+
+        if donor_pg > 0:
+            updated_pg_map[donor_name] = donor_pg
+        if receiver_pg > 0:
+            updated_pg_map[receiver_name] = receiver_pg
+
+        # Keep caller's map authoritative for downstream grouping/config.
+        pg_map.clear()
+        pg_map.update(updated_pg_map)
+    else:
+        donor_pg = -1
+        receiver_pg = -1
+
+    return {
+        "matched": matched,
+        "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
+        "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+        "donor_phys_groups": [donor_pg] if donor_pg > 0 else [],
+        "receiver_phys_groups": [receiver_pg] if receiver_pg > 0 else [],
+        "direction": direction,
+    }

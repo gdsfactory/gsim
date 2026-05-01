@@ -452,6 +452,10 @@ def add_dielectrics(
     margin_x: float,
     margin_y: float | None = None,
     air_margin: float = 0.0,
+    airbox_margin_x: float | None = None,
+    airbox_margin_y: float | None = None,
+    airbox_z_above: float | None = None,
+    airbox_z_below: float | None = None,
 ) -> dict:
     """Add dielectric volumes to gmsh.
 
@@ -467,10 +471,16 @@ def add_dielectrics(
         margin_x: X margin around design (um). Also used as Y margin
             when *margin_y* is not provided (backward compat).
         margin_y: Y margin around design (um). Defaults to margin_x.
-        air_margin: Extra margin for the surrounding airbox (um).
-            When > 0, an enclosing airbox is created.  The boolean
-            pipeline will carve the dielectrics out of it
-            automatically.
+        air_margin: Legacy isotropic extra margin for the surrounding
+            airbox (um). Used as a fallback for all airbox directions.
+        airbox_margin_x: Extra x-margin for the enclosing airbox (um).
+            Falls back to *air_margin* when None.
+        airbox_margin_y: Extra y-margin for the enclosing airbox (um).
+            Falls back to *air_margin* when None.
+        airbox_z_above: Extra +z margin for the enclosing airbox (um).
+            Falls back to *air_margin* when None.
+        airbox_z_below: Extra -z margin for the enclosing airbox (um).
+            Falls back to *air_margin* when None.
 
     Returns:
         Dict with material_name -> list of volume_tags
@@ -478,22 +488,63 @@ def add_dielectrics(
     if margin_y is None:
         margin_y = margin_x
 
+    if airbox_margin_x is None:
+        airbox_margin_x = air_margin
+    if airbox_margin_y is None:
+        airbox_margin_y = air_margin
+    if airbox_z_above is None:
+        airbox_z_above = air_margin
+    if airbox_z_below is None:
+        airbox_z_below = air_margin
+
     dielectric_tags: dict[str, list[int]] = {}
 
-    xmin, ymin, xmax, ymax = geometry.bbox
-    xmin -= margin_x
-    ymin -= margin_y
-    xmax += margin_x
-    ymax += margin_y
+    xmin0, ymin0, xmax0, ymax0 = geometry.bbox
+    xmin_air = xmin0 - margin_x
+    ymin_air = ymin0 - margin_y
+    xmax_air = xmax0 + margin_x
+    ymax_air = ymax0 + margin_y
+
+    def _is_air_or_vacuum(material_name: str) -> bool:
+        """Return True when *material_name* represents air/vacuum.
+
+        Uses stack material metadata first (type + permittivity), then
+        falls back to name matching for robustness with custom stacks.
+        """
+        mat = stack.materials.get(material_name)
+        if isinstance(mat, dict):
+            mat_type = str(mat.get("type", "")).strip().lower()
+            if mat_type == "dielectric":
+                eps = mat.get("permittivity")
+                try:
+                    if eps is not None and abs(float(eps) - 1.0) <= 1e-9:
+                        return True
+                except (TypeError, ValueError):
+                    pass
+
+        name = material_name.strip().lower()
+        return name in {"air", "vacuum"}
 
     z_min_all = math.inf
     z_max_all = -math.inf
 
+    use_airbox = any(
+        m > 0.0
+        for m in (
+            airbox_margin_x,
+            airbox_margin_y,
+            airbox_z_above,
+            airbox_z_below,
+        )
+    )
+
     for dielectric in stack.dielectrics:
         material = dielectric["material"]
 
-        # When building an explicit airbox, skip the dielectric air layer
-        if material == "air" and air_margin > 0:
+        is_air_like = _is_air_or_vacuum(material)
+
+        # When building an explicit airbox, skip explicit air/vacuum layers.
+        if is_air_like and use_airbox:
             continue
 
         d_zmin = dielectric["zmin"]
@@ -503,6 +554,11 @@ def add_dielectrics(
         z_max_all = max(z_max_all, d_zmax)
 
         dielectric_tags.setdefault(material, [])
+
+        xmin = xmin_air if is_air_like else xmin0
+        ymin = ymin_air if is_air_like else ymin0
+        xmax = xmax_air if is_air_like else xmax0
+        ymax = ymax_air if is_air_like else ymax0
 
         box_tag = gmsh_utils.create_box(
             kernel,
@@ -516,15 +572,15 @@ def add_dielectrics(
         dielectric_tags[material].append(box_tag)
 
     # Surrounding airbox (boolean pipeline handles the overlap)
-    if air_margin > 0:
+    if use_airbox:
         airbox_tag = gmsh_utils.create_box(
             kernel,
-            xmin - air_margin,
-            ymin - air_margin,
-            z_min_all - air_margin,
-            xmax + air_margin,
-            ymax + air_margin,
-            z_max_all + air_margin,
+            xmin_air - airbox_margin_x,
+            ymin_air - airbox_margin_y,
+            z_min_all - airbox_z_below,
+            xmax_air + airbox_margin_x,
+            ymax_air + airbox_margin_y,
+            z_max_all + airbox_z_above,
         )
         dielectric_tags["airbox"] = [airbox_tag]
 
@@ -829,9 +885,10 @@ def build_entities(
     # --- Dielectric volumes (dim=3) ---
     for material, vol_tags in dielectric_tags.items():
         order = 3 if material == "airbox" else 2
+        entity_name = "air" if material == "airbox" else material
         entities.append(
             Entity(
-                name=material,
+                name=entity_name,
                 dim=3,
                 mesh_order=order,
                 tags=vol_tags,

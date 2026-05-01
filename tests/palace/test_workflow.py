@@ -218,6 +218,36 @@ class TestEigenmodeSimWorkflow:
         result = eigenmode_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
 
+    def test_config_has_floquet_periodic_boundary(self, tmp_path, cpw_component):
+        """Floquet in eigenmode emits Palace Periodic boundary section."""
+        sim = EigenmodeSim()
+        sim.set_output_dir(str(tmp_path / "palace-sim-floquet"))
+        sim.set_geometry(cpw_component)
+        sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+        sim.set_eigenmode(
+            num_modes=5,
+            target=50e9,
+            floquet=True,
+            phi_target=1.57,
+            n_eff_guess=2.2,
+        )
+        sim.mesh(preset="coarse", periodic_axis="x")
+        sim.write_config()
+
+        assert sim._output_dir is not None
+        config_path = Path(sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+        periodic = config["Boundaries"]["Periodic"]
+
+        assert len(periodic["FloquetWaveVector"]) == 3
+        assert periodic["FloquetWaveVector"][0] > 0
+        assert periodic["FloquetWaveVector"][1] == pytest.approx(0.0)
+        assert periodic["FloquetWaveVector"][2] == pytest.approx(0.0)
+        assert len(periodic["BoundaryPairs"]) == 1
+        pair = periodic["BoundaryPairs"][0]
+        assert len(pair["DonorAttributes"]) > 0
+        assert len(pair["ReceiverAttributes"]) > 0
+
 
 # ---------------------------------------------------------------------------
 # ElectrostaticSim workflow
