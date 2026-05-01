@@ -311,36 +311,46 @@ def generate_mesh(
         if periodic_info:
             donor_surfaces = periodic_info.get("master_surfaces")
             receiver_surfaces = periodic_info.get("slave_surfaces")
+            donor_phys_groups = periodic_info.get("donor_phys_groups")
+            receiver_phys_groups = periodic_info.get("receiver_phys_groups")
+
             if isinstance(donor_surfaces, list) and isinstance(receiver_surfaces, list):
                 donor_tags = [int(t) for t in donor_surfaces if isinstance(t, Integral)]
                 receiver_tags = [
                     int(t) for t in receiver_surfaces if isinstance(t, Integral)
                 ]
+                donor_pgs = (
+                    [int(t) for t in donor_phys_groups if isinstance(t, Integral)]
+                    if isinstance(donor_phys_groups, list)
+                    else []
+                )
+                receiver_pgs = (
+                    [int(t) for t in receiver_phys_groups if isinstance(t, Integral)]
+                    if isinstance(receiver_phys_groups, list)
+                    else []
+                )
+
                 if not donor_tags or not receiver_tags:
                     logger.warning(
                         "Periodic side surfaces were not discovered for axis %s",
                         periodic_axis,
                     )
                 else:
-                    donor_pg = gmsh_utils.assign_physical_group(
-                        2,
-                        donor_tags,
-                        f"periodic_{periodic_axis}_donor",
-                    )
-                    receiver_pg = gmsh_utils.assign_physical_group(
-                        2,
-                        receiver_tags,
-                        f"periodic_{periodic_axis}_receiver",
-                    )
-                    if donor_pg > 0 and receiver_pg > 0:
+                    if donor_pgs and receiver_pgs:
                         groups["boundary_surfaces"]["periodic_donor"] = {
-                            "phys_group": donor_pg,
+                            "phys_group": donor_pgs,
                             "tags": donor_tags,
                         }
                         groups["boundary_surfaces"]["periodic_receiver"] = {
-                            "phys_group": receiver_pg,
+                            "phys_group": receiver_pgs,
                             "tags": receiver_tags,
                         }
+                    else:
+                        logger.warning(
+                            "Periodic donor/receiver physical groups "
+                            "were not created for axis %s",
+                            periodic_axis,
+                        )
 
         # Setup mesh fields
         logger.info("Setting up mesh refinement...")

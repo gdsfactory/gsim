@@ -787,11 +787,22 @@ def set_periodic_mesh(
         direction: Periodic axis, either ``"x"`` or ``"y"``.
         tol: Bounding-box matching tolerance (model units).
 
+    Notes:
+        This function updates physical groups to avoid overlapping boundary
+        assignments on periodic faces:
+
+        1. periodic donor/receiver groups are created from matched side surfaces
+        2. those surfaces are removed from existing ``*__None`` groups
+
+        This preserves MFEM's one-boundary-element-per-face requirement.
+
     Returns:
         Dict with discovered periodic-side surfaces and pairing summary:
         - matched: Number of matched periodic surface pairs
         - master_surfaces: Surface tags on the minimum side (donor side)
         - slave_surfaces: Surface tags on the maximum side (receiver side)
+        - donor_phys_groups: Physical-group tag(s) for donor surfaces
+        - receiver_phys_groups: Physical-group tag(s) for receiver surfaces
         - direction: Normalized periodic axis ('x' or 'y')
     """
     direction = direction.lower()
@@ -821,6 +832,8 @@ def set_periodic_mesh(
             "matched": 0,
             "master_surfaces": [],
             "slave_surfaces": [],
+            "donor_phys_groups": [],
+            "receiver_phys_groups": [],
             "direction": direction,
         }
 
@@ -867,6 +880,8 @@ def set_periodic_mesh(
             "matched": 0,
             "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
             "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+            "donor_phys_groups": [],
+            "receiver_phys_groups": [],
             "direction": direction,
         }
 
@@ -912,9 +927,59 @@ def set_periodic_mesh(
                 break
 
     logger.info("Matched %s periodic surface pairs (direction=%s)", matched, direction)
+
+    # Rebuild physical groups to avoid overlapping boundary assignments:
+    # remove periodic-side surfaces from existing *__None groups, then create
+    # dedicated periodic donor/receiver groups for Palace config generation.
+    master_set = {int(tag) for tag in master_surfs}
+    slave_set = {int(tag) for tag in slave_surfs}
+    periodic_side_surfaces = master_set | slave_set
+
+    if periodic_side_surfaces:
+        updated_pg_map = dict(pg_map)
+        for pg_name, pg_tag in list(pg_map.items()):
+            if not pg_name.endswith("__None"):
+                continue
+            if (2, pg_tag) not in gmsh.model.getPhysicalGroups(2):
+                continue
+
+            current_tags = {
+                int(tag) for tag in gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)
+            }
+            if not current_tags:
+                continue
+
+            keep_tags = sorted(current_tags - periodic_side_surfaces)
+            if len(keep_tags) == len(current_tags):
+                continue
+
+            gmsh.model.removePhysicalGroups([(2, pg_tag)])
+            updated_pg_map.pop(pg_name, None)
+            if keep_tags:
+                updated_pg_map[pg_name] = assign_physical_group(2, keep_tags, pg_name)
+
+        donor_name = f"periodic_{direction}_donor"
+        receiver_name = f"periodic_{direction}_receiver"
+        donor_pg = assign_physical_group(2, sorted(master_set), donor_name)
+        receiver_pg = assign_physical_group(2, sorted(slave_set), receiver_name)
+
+        if donor_pg > 0:
+            updated_pg_map[donor_name] = donor_pg
+        if receiver_pg > 0:
+            updated_pg_map[receiver_name] = receiver_pg
+
+        # Keep caller's map authoritative for downstream grouping/config.
+        pg_map.clear()
+        pg_map.update(updated_pg_map)
+    else:
+        donor_pg = -1
+        receiver_pg = -1
+
     return {
         "matched": matched,
         "master_surfaces": [int(tag) for tag in sorted(master_surfs)],
         "slave_surfaces": [int(tag) for tag in sorted(slave_surfs)],
+        "donor_phys_groups": [donor_pg] if donor_pg > 0 else [],
+        "receiver_phys_groups": [receiver_pg] if receiver_pg > 0 else [],
         "direction": direction,
     }
