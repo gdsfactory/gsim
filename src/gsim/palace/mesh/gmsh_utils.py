@@ -302,15 +302,46 @@ def _create_wire_loop(
     pts_y: list[float],
     z: float,
     meshseed: float = 0,
+    loop_mode: str = "line",
+    point_merge_tol: float = 0.0,
 ) -> int | None:
     """Create a closed curve loop from polygon vertices.
 
     Returns:
         Curve loop tag, or None if fewer than 3 valid edges.
     """
-    verts = [
-        kernel.addPoint(pts_x[v], pts_y[v], z, meshseed, -1) for v in range(len(pts_x))
-    ]
+    tol = max(float(point_merge_tol), 1e-9)
+
+    # Remove consecutive near-duplicate points and trailing closure duplicate.
+    cleaned: list[tuple[float, float]] = []
+    for x, y in zip(pts_x, pts_y, strict=False):
+        if not cleaned:
+            cleaned.append((x, y))
+            continue
+        px, py = cleaned[-1]
+        if math.hypot(x - px, y - py) > tol:
+            cleaned.append((x, y))
+
+    if len(cleaned) >= 2:
+        if math.hypot(cleaned[0][0] - cleaned[-1][0], cleaned[0][1] - cleaned[-1][1]) <= tol:
+            cleaned.pop()
+
+    if len(cleaned) < 3:
+        return None
+
+    verts = [kernel.addPoint(x, y, z, meshseed, -1) for x, y in cleaned]
+
+    if loop_mode in {"spline", "bspline"} and len(verts) >= 4:
+        try:
+            curve_pts = verts + [verts[0]]
+            if loop_mode == "bspline":
+                curve = kernel.addBSpline(curve_pts, -1)
+            else:
+                curve = kernel.addSpline(curve_pts, -1)
+            return kernel.addCurveLoop([curve], tag=-1)
+        except Exception:
+            logger.debug("Failed to create %s loop, falling back to line loop", loop_mode)
+
     lines = []
     for v in range(len(verts)):
         try:
@@ -330,6 +361,9 @@ def create_polygon_surface(
     z: float,
     meshseed: float = 0,
     holes: list[tuple[list[float], list[float]]] | None = None,
+    loop_mode: str = "line",
+    fit_tolerance_um: float = 0.0,
+    min_points_for_curve_fit: int = 8,
 ) -> int | None:
     """Create a planar surface from polygon vertices at z height.
 
@@ -344,6 +378,10 @@ def create_polygon_surface(
         z: z coordinate of the surface
         meshseed: mesh seed size at vertices (0 = auto)
         holes: list of (hole_pts_x, hole_pts_y) tuples for interior holes
+        loop_mode: Boundary loop type: "line", "spline", or "bspline"
+        fit_tolerance_um: Point merge tolerance before loop creation
+        min_points_for_curve_fit: Minimum contour points required to attempt
+            spline/bspline loop creation
 
     Returns:
         Surface tag, or None if polygon is invalid
@@ -351,7 +389,29 @@ def create_polygon_surface(
     if len(pts_x) < 3:
         return None
 
-    exterior_loop = _create_wire_loop(kernel, pts_x, pts_y, z, meshseed)
+    effective_mode = loop_mode
+    if loop_mode in {"spline", "bspline"} and len(pts_x) < min_points_for_curve_fit:
+        effective_mode = "line"
+
+    exterior_loop = _create_wire_loop(
+        kernel,
+        pts_x,
+        pts_y,
+        z,
+        meshseed,
+        loop_mode=effective_mode,
+        point_merge_tol=fit_tolerance_um,
+    )
+    if exterior_loop is None and effective_mode != "line":
+        exterior_loop = _create_wire_loop(
+            kernel,
+            pts_x,
+            pts_y,
+            z,
+            meshseed,
+            loop_mode="line",
+            point_merge_tol=fit_tolerance_um,
+        )
     if exterior_loop is None:
         return None
 
@@ -363,7 +423,16 @@ def create_polygon_surface(
     # Build hole surfaces and subtract them via boolean cut
     hole_dimtags: list[tuple[int, int]] = []
     for hx, hy in holes:
-        hloop = _create_wire_loop(kernel, list(hx), list(hy), z, meshseed)
+        # Keep holes on line loops for robustness during boolean cut.
+        hloop = _create_wire_loop(
+            kernel,
+            list(hx),
+            list(hy),
+            z,
+            meshseed,
+            loop_mode="line",
+            point_merge_tol=fit_tolerance_um,
+        )
         if hloop is not None:
             hsurf = kernel.addPlaneSurface([hloop], tag=-1)
             hole_dimtags.append((2, hsurf))

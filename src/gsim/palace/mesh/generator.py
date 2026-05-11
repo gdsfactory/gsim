@@ -220,6 +220,13 @@ def generate_mesh(
     pec_blocks: list[PECBlockConfig] | None = None,
     absorbing_boundary: bool = True,
     merge_via_distance: float = 2.0,
+    curve_fit_mode: str = "line",
+    curve_fit_layers: list[str] | None = None,
+    curve_fit_tolerance_um: float = 0.0,
+    curve_fit_min_points: int = 8,
+    high_order_elements: bool = False,
+    high_order_order: int = 2,
+    high_order_optimize: bool = True,
     verbosity: int = 3,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
@@ -245,6 +252,13 @@ def generate_mesh(
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
         merge_via_distance: Max gap between vias to merge (um)
+        curve_fit_mode: Patterned dielectric boundary mode: line/spline/bspline
+        curve_fit_layers: Layer names where curve fitting is applied
+        curve_fit_tolerance_um: Point merge tolerance before curve fitting
+        curve_fit_min_points: Min contour points required for curve fitting
+        high_order_elements: Enable high-order geometric mesh elements
+        high_order_order: Polynomial order for high-order elements
+        high_order_optimize: Run gmsh high-order optimization after meshing
         verbosity: Sets gmsh verbosity level
 
     Returns:
@@ -302,7 +316,15 @@ def generate_mesh(
         )
 
         logger.info("Adding patterned dielectric layers...")
-        patterned_dielectric_tags = add_patterned_dielectrics(kernel, geometry, stack)
+        patterned_dielectric_tags = add_patterned_dielectrics(
+            kernel,
+            geometry,
+            stack,
+            curve_fit_mode=curve_fit_mode,
+            curve_fit_layers=curve_fit_layers,
+            curve_fit_tolerance_um=curve_fit_tolerance_um,
+            curve_fit_min_points=curve_fit_min_points,
+        )
 
         all_dielectric_tags = {
             name: list(tags) for name, tags in dielectric_tags.items()
@@ -352,8 +374,32 @@ def generate_mesh(
         if show_gui:
             gmsh.fltk.run()
 
+        if high_order_elements:
+            logger.info(
+                "Enabling high-order elements (order=%d, optimize=%s)",
+                high_order_order,
+                high_order_optimize,
+            )
+            gmsh.option.setNumber("Mesh.ElementOrder", high_order_order)
+            gmsh.option.setNumber("Mesh.SecondOrderLinear", 0)
+            gmsh.option.setNumber(
+                "Mesh.HighOrderOptimize", 1 if high_order_optimize else 0
+            )
+
         logger.info("Generating mesh...")
         gmsh.model.mesh.generate(3)
+
+        if high_order_elements:
+            gmsh.model.mesh.setOrder(high_order_order)
+            if high_order_optimize:
+                try:
+                    gmsh.model.mesh.optimize("HighOrder")
+                except Exception as exc:
+                    logger.warning(
+                        "High-order optimization failed, using unoptimized high-order "
+                        "elements: %s",
+                        exc,
+                    )
 
         # Collect mesh statistics
         mesh_stats = collect_mesh_stats()

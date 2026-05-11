@@ -127,6 +127,77 @@ def _plot_wireframe(
 
 _TRANSPARENT_DEFAULTS = ("air_boundary", "air_none", "air_plastic_enclosure")
 
+# meshio cell block type -> (PyVista/VTK cell type, nodes per cell, topological dim)
+_SOLID_CELLTYPE_MAP: dict[str, tuple[pv.CellType, int, int]] = {
+    "triangle": (pv.CellType.TRIANGLE, 3, 2),
+    "triangle6": (pv.CellType.QUADRATIC_TRIANGLE, 6, 2),
+    "quad": (pv.CellType.QUAD, 4, 2),
+    "quad8": (pv.CellType.QUADRATIC_QUAD, 8, 2),
+    "quad9": (pv.CellType.BIQUADRATIC_QUAD, 9, 2),
+    "tetra": (pv.CellType.TETRA, 4, 3),
+    "tetra10": (pv.CellType.QUADRATIC_TETRA, 10, 3),
+    "hexahedron": (pv.CellType.HEXAHEDRON, 8, 3),
+    "hexahedron20": (pv.CellType.QUADRATIC_HEXAHEDRON, 20, 3),
+    "hexahedron27": (pv.CellType.TRIQUADRATIC_HEXAHEDRON, 27, 3),
+}
+
+
+def _normalize_solid_cell_block(
+    cell_type: str,
+    block_cells: np.ndarray,
+) -> tuple[np.ndarray, pv.CellType, int] | None:
+    """Normalize a meshio cell block for solid plotting.
+
+    Returns a tuple: (connectivity, pyvista_cell_type, topological_dim).
+    """
+    if block_cells.ndim != 2 or block_cells.shape[0] == 0:
+        return None
+
+    if cell_type in _SOLID_CELLTYPE_MAP:
+        pv_type, n_nodes, topo_dim = _SOLID_CELLTYPE_MAP[cell_type]
+        if block_cells.shape[1] != n_nodes:
+            logger.warning(
+                "Skipping '%s': expected %d nodes/cell, got %d",
+                cell_type,
+                n_nodes,
+                block_cells.shape[1],
+            )
+            return None
+        return block_cells.astype(np.int64, copy=False), pv_type, topo_dim
+
+    # Fallback path for unknown high-order surface elements.
+    if "triangle" in cell_type and block_cells.shape[1] >= 3:
+        logger.info(
+            "Linearizing unsupported triangle type '%s' (%d nodes -> 3)",
+            cell_type,
+            block_cells.shape[1],
+        )
+        return block_cells[:, :3].astype(np.int64, copy=False), pv.CellType.TRIANGLE, 2
+
+    if "quad" in cell_type and block_cells.shape[1] >= 4:
+        logger.info(
+            "Linearizing unsupported quad type '%s' (%d nodes -> 4)",
+            cell_type,
+            block_cells.shape[1],
+        )
+        return block_cells[:, :4].astype(np.int64, copy=False), pv.CellType.QUAD, 2
+
+    return None
+
+
+def _aligned_block_tags(phys: list[np.ndarray], idx: int, n_cells: int) -> np.ndarray:
+    """Return physical tags resized to match a cell block length."""
+    if idx >= len(phys):
+        return np.full(n_cells, -1, dtype=int)
+
+    tags = np.asarray(phys[idx], dtype=int)
+    if tags.size < n_cells:
+        pad = np.full(n_cells - tags.size, -1, dtype=int)
+        return np.concatenate([tags, pad])
+    if tags.size > n_cells:
+        return tags[:n_cells]
+    return tags
+
 
 def _plot_solid(
     msh_path: Path,
@@ -141,34 +212,57 @@ def _plot_solid(
         tag: name for name, (tag, _) in mio.field_data.items()
     }
 
-    # Collect triangle cells and their physical tags ----------------------
-    tri_cells: list[np.ndarray] = []
-    tri_tags: list[np.ndarray] = []
+    # Collect supported cells and physical tags ---------------------------
+    # Prefer explicit 2D surface cells when available. If absent, fall
+    # back to volume cells so solid mode still provides a useful view.
+    cell_blocks_2d: list[tuple[np.ndarray, pv.CellType, np.ndarray]] = []
+    cell_blocks_3d: list[tuple[np.ndarray, pv.CellType, np.ndarray]] = []
 
     phys = mio.cell_data.get("gmsh:physical", [])
     for idx, cb in enumerate(mio.cells):
-        if "triangle" not in cb.type:
+        normalized = _normalize_solid_cell_block(cb.type, cb.data)
+        if normalized is None:
             continue
-        tri_cells.append(cb.data)
-        if idx < len(phys):
-            tri_tags.append(phys[idx])
-        else:
-            tri_tags.append(np.full(len(cb.data), -1, dtype=int))
 
-    if not tri_cells:
-        logger.warning("No triangle cells — falling back to wireframe.")
+        block_cells, pv_type, topo_dim = normalized
+        tags = _aligned_block_tags(phys, idx, len(block_cells))
+        if topo_dim == 2:
+            cell_blocks_2d.append((block_cells, pv_type, tags))
+        else:
+            cell_blocks_3d.append((block_cells, pv_type, tags))
+
+    active_blocks = cell_blocks_2d if cell_blocks_2d else cell_blocks_3d
+
+    if not active_blocks:
+        logger.warning("No supported solid cell blocks — falling back to wireframe.")
         _plot_wireframe(
             msh_path, output=output, show_groups=None, interactive=interactive
         )
         return
 
-    all_cells = np.vstack(tri_cells)
-    all_tags = np.concatenate(tri_tags)
+    if cell_blocks_2d:
+        logger.info("Solid plot: using %d surface cell blocks", len(cell_blocks_2d))
+    else:
+        logger.info("Solid plot: using %d volume cell blocks", len(cell_blocks_3d))
 
     # Build an UnstructuredGrid -------------------------------------------
-    n = all_cells.shape[0]
-    pv_cells = np.hstack([np.full((n, 1), 3), all_cells]).astype(np.int64).ravel()
-    celltypes = np.full(n, pv.CellType.TRIANGLE, dtype=np.uint8)
+    cell_chunks: list[np.ndarray] = []
+    type_chunks: list[np.ndarray] = []
+    tag_chunks: list[np.ndarray] = []
+
+    for block_cells, pv_type, tags in active_blocks:
+        n = block_cells.shape[0]
+        n_nodes = block_cells.shape[1]
+        prefixed = np.hstack(
+            [np.full((n, 1), n_nodes, dtype=np.int64), block_cells]
+        ).ravel()
+        cell_chunks.append(prefixed)
+        type_chunks.append(np.full(n, int(pv_type), dtype=np.uint8))
+        tag_chunks.append(tags)
+
+    pv_cells = np.concatenate(cell_chunks)
+    celltypes = np.concatenate(type_chunks)
+    all_tags = np.concatenate(tag_chunks)
     grid = pv.UnstructuredGrid(pv_cells, celltypes, mio.points)
 
     # Annotate each cell with "<name> (<tag>)"

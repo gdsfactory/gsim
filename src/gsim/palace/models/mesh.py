@@ -5,7 +5,7 @@ This module contains Pydantic models for mesh generation configuration.
 
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -49,6 +49,13 @@ class MeshConfig(BaseModel):
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False
     merge_via_distance: float = Field(default=2.0, ge=0)
+    curve_fit_mode: Literal["line", "spline", "bspline"] = "line"
+    curve_fit_layers: list[str] = Field(default_factory=lambda: ["core", "core2"])
+    curve_fit_tolerance_um: float = Field(default=0.0, ge=0)
+    curve_fit_min_points: int = Field(default=8, ge=3)
+    high_order_elements: bool = False
+    high_order_order: int = Field(default=2, ge=2, le=6)
+    high_order_optimize: bool = True
     show_gui: bool = False
     preview_only: bool = False
 

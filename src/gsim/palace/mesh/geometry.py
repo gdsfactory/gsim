@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from shapely import Polygon as ShapelyPolygon
 from shapely import buffer
@@ -538,6 +538,10 @@ def add_patterned_dielectrics(
     geometry: GeometryData,
     stack: LayerStack,
     min_volume_thickness: float = 0.05,
+    curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
+    curve_fit_layers: list[str] | None = None,
+    curve_fit_tolerance_um: float = 0.0,
+    curve_fit_min_points: int = 8,
 ) -> dict[str, list[int]]:
     """Add patterned dielectric volumes from stack dielectric layers.
 
@@ -551,11 +555,16 @@ def add_patterned_dielectrics(
         stack: LayerStack with layer definitions
         min_volume_thickness: Skip very thin dielectric layers that cannot
             be robustly meshed as 3D volumes.
+        curve_fit_mode: Boundary curve mode for selected layers.
+        curve_fit_layers: Layer names where spline/bspline fitting is allowed.
+        curve_fit_tolerance_um: Point merge tolerance before curve fitting.
+        curve_fit_min_points: Minimum contour points to attempt curve fitting.
 
     Returns:
         Dict mapping dielectric layer name -> list of volume tags.
     """
     patterned_tags: dict[str, list[int]] = {}
+    curve_layers = set(curve_fit_layers or [])
 
     polygons_by_layer: dict[int, list[tuple[list[float], list[float], list]]] = {}
     for layernum, pts_x, pts_y, holes in geometry.polygons:
@@ -579,9 +588,21 @@ def add_patterned_dielectrics(
             continue
 
         surfaces = []
+        surface_loop_mode = (
+            curve_fit_mode
+            if curve_fit_mode != "line" and layer_name in curve_layers
+            else "line"
+        )
         for pts_x, pts_y, holes in polys:
             surfacetag = gmsh_utils.create_polygon_surface(
-                kernel, pts_x, pts_y, zmin, holes=holes
+                kernel,
+                pts_x,
+                pts_y,
+                zmin,
+                holes=holes,
+                loop_mode=surface_loop_mode,
+                fit_tolerance_um=curve_fit_tolerance_um,
+                min_points_for_curve_fit=curve_fit_min_points,
             )
             if surfacetag is not None:
                 surfaces.append(surfacetag)

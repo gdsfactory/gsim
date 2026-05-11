@@ -341,6 +341,13 @@ class PalaceSimMixin:
         margin_y: float | None = None,
         auto_size: bool = False,
         cells_per_feature: int = 2,
+        curve_fit_mode: Literal["line", "spline", "bspline"] | None = None,
+        curve_fit_layers: list[str] | None = None,
+        curve_fit_tolerance_um: float | None = None,
+        curve_fit_min_points: int | None = None,
+        high_order_elements: bool | None = None,
+        high_order_order: int | None = None,
+        high_order_optimize: bool | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides.
 
@@ -412,10 +419,21 @@ class PalaceSimMixin:
                         mesh_config.refined_mesh_size,
                     )
 
+        existing_config = getattr(self, "mesh_config", None)
+
+        # Preserve curve-fit settings from sim.mesh_config unless overridden.
+        if existing_config is not None:
+            mesh_config.curve_fit_mode = existing_config.curve_fit_mode
+            mesh_config.curve_fit_layers = list(existing_config.curve_fit_layers)
+            mesh_config.curve_fit_tolerance_um = existing_config.curve_fit_tolerance_um
+            mesh_config.curve_fit_min_points = existing_config.curve_fit_min_points
+            mesh_config.high_order_elements = existing_config.high_order_elements
+            mesh_config.high_order_order = existing_config.high_order_order
+            mesh_config.high_order_optimize = existing_config.high_order_optimize
+
         # Preserve planar_conductors from sim.mesh_config if not
         # explicitly provided via sim.mesh(planar_conductors=...)
         if planar_conductors is None:
-            existing_config = getattr(self, "mesh_config", None)
             if existing_config is not None:
                 mesh_config.planar_conductors = existing_config.planar_conductors
         else:
@@ -436,6 +454,20 @@ class PalaceSimMixin:
             mesh_config.airbox_margin = airbox_margin
         if fmax is not None:
             mesh_config.fmax = fmax
+        if curve_fit_mode is not None:
+            mesh_config.curve_fit_mode = curve_fit_mode
+        if curve_fit_layers is not None:
+            mesh_config.curve_fit_layers = curve_fit_layers
+        if curve_fit_tolerance_um is not None:
+            mesh_config.curve_fit_tolerance_um = curve_fit_tolerance_um
+        if curve_fit_min_points is not None:
+            mesh_config.curve_fit_min_points = curve_fit_min_points
+        if high_order_elements is not None:
+            mesh_config.high_order_elements = high_order_elements
+        if high_order_order is not None:
+            mesh_config.high_order_order = high_order_order
+        if high_order_optimize is not None:
+            mesh_config.high_order_optimize = high_order_optimize
         mesh_config.show_gui = show_gui
 
         return mesh_config
@@ -894,6 +926,13 @@ class PalaceSimMixin:
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
             merge_via_distance=mesh_config.merge_via_distance,
+            curve_fit_mode=mesh_config.curve_fit_mode,
+            curve_fit_layers=mesh_config.curve_fit_layers,
+            curve_fit_tolerance_um=mesh_config.curve_fit_tolerance_um,
+            curve_fit_min_points=mesh_config.curve_fit_min_points,
+            high_order_elements=mesh_config.high_order_elements,
+            high_order_order=mesh_config.high_order_order,
+            high_order_optimize=mesh_config.high_order_optimize,
             verbosity=3,
         )
 
@@ -936,6 +975,13 @@ class PalaceSimMixin:
         show_gui: bool = True,
         auto_size: bool = False,
         cells_per_feature: int = 2,
+        curve_fit_mode: Literal["line", "spline", "bspline"] | None = None,
+        curve_fit_layers: list[str] | None = None,
+        curve_fit_tolerance_um: float | None = None,
+        curve_fit_min_points: int | None = None,
+        high_order_elements: bool | None = None,
+        high_order_order: int | None = None,
+        high_order_optimize: bool | None = None,
     ) -> None:
         """Preview the mesh without running simulation.
 
@@ -956,6 +1002,13 @@ class PalaceSimMixin:
                 conductor feature / cells_per_feature. Off by default.
             cells_per_feature: Target cells across the smallest conductor
                 feature when auto_size=True. Default 2.
+            curve_fit_mode: Patterned dielectric boundary mode (line/spline/bspline).
+            curve_fit_layers: Layer names where spline fitting is applied.
+            curve_fit_tolerance_um: Point merge tolerance before fitting.
+            curve_fit_min_points: Min contour points required to fit curves.
+            high_order_elements: Enable high-order geometric mesh elements.
+            high_order_order: Polynomial order for high-order elements.
+            high_order_optimize: Run gmsh high-order optimization after meshing.
 
         Example:
             >>> sim.preview(preset="fine", planar_conductors=True, show_gui=True)
@@ -983,6 +1036,13 @@ class PalaceSimMixin:
             show_gui=show_gui,
             auto_size=auto_size,
             cells_per_feature=cells_per_feature,
+            curve_fit_mode=curve_fit_mode,
+            curve_fit_layers=curve_fit_layers,
+            curve_fit_tolerance_um=curve_fit_tolerance_um,
+            curve_fit_min_points=curve_fit_min_points,
+            high_order_elements=high_order_elements,
+            high_order_order=high_order_order,
+            high_order_optimize=high_order_optimize,
         )
 
         # Resolve stack
@@ -1012,6 +1072,13 @@ class PalaceSimMixin:
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
                 merge_via_distance=mesh_config.merge_via_distance,
+                curve_fit_mode=mesh_config.curve_fit_mode,
+                curve_fit_layers=mesh_config.curve_fit_layers,
+                curve_fit_tolerance_um=mesh_config.curve_fit_tolerance_um,
+                curve_fit_min_points=mesh_config.curve_fit_min_points,
+                high_order_elements=mesh_config.high_order_elements,
+                high_order_order=mesh_config.high_order_order,
+                high_order_optimize=mesh_config.high_order_optimize,
             )
 
     # -------------------------------------------------------------------------
@@ -1035,6 +1102,13 @@ class PalaceSimMixin:
         verbose: bool = True,
         auto_size: bool = False,
         cells_per_feature: int = 2,
+        curve_fit_mode: Literal["line", "spline", "bspline"] | None = None,
+        curve_fit_layers: list[str] | None = None,
+        curve_fit_tolerance_um: float | None = None,
+        curve_fit_min_points: int | None = None,
+        high_order_elements: bool | None = None,
+        high_order_order: int | None = None,
+        high_order_optimize: bool | None = None,
     ) -> SimulationResult:
         """Generate the mesh for Palace simulation.
 
@@ -1061,6 +1135,13 @@ class PalaceSimMixin:
                 use their literal refined_mesh_size.
             cells_per_feature: Target cells across the smallest conductor
                 feature when auto_size=True. Default 2.
+            curve_fit_mode: Patterned dielectric boundary mode (line/spline/bspline).
+            curve_fit_layers: Layer names where spline fitting is applied.
+            curve_fit_tolerance_um: Point merge tolerance before fitting.
+            curve_fit_min_points: Min contour points required to fit curves.
+            high_order_elements: Enable high-order geometric mesh elements.
+            high_order_order: Polynomial order for high-order elements.
+            high_order_optimize: Run gmsh high-order optimization after meshing.
 
         Returns:
             SimulationResult with mesh path
@@ -1094,6 +1175,13 @@ class PalaceSimMixin:
             show_gui=show_gui,
             auto_size=auto_size,
             cells_per_feature=cells_per_feature,
+            curve_fit_mode=curve_fit_mode,
+            curve_fit_layers=curve_fit_layers,
+            curve_fit_tolerance_um=curve_fit_tolerance_um,
+            curve_fit_min_points=curve_fit_min_points,
+            high_order_elements=high_order_elements,
+            high_order_order=high_order_order,
+            high_order_optimize=high_order_optimize,
         )
 
         # Validate configuration
