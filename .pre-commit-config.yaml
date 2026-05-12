@@ -56,6 +56,13 @@ repos:
     entry: python scripts/check_cp1252.py
     language: system
     types: [python]
+- repo: https://github.com/mwouts/jupytext
+  rev: v1.16.7
+  hooks:
+  - id: jupytext
+    args: [--sync]
+    additional_dependencies:
+    - jupytext>=1.16.0
 - repo: local
   hooks:
   - id: ty
