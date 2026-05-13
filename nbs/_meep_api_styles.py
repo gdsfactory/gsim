@@ -36,7 +36,8 @@ sim = meep.Simulation()
 
 sim.geometry(component=c, z_crop="auto")
 sim.materials = {"si": 3.47, "SiO2": 1.44}
-sim.source(port="o1", wavelength=1.55, wavelength_span=0.01, num_freqs=11)
+sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
+sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]
 sim.domain(pml=1.0, margin=0.5)
 sim.solver(resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0)
@@ -59,7 +60,7 @@ sim.materials = {"si": 3.47, "SiO2": 1.44}
 sim.source.port = "o1"
 sim.source.wavelength = 1.55
 sim.source.wavelength_span = 0.01
-sim.source.num_freqs = 11
+sim.num_freqs = 11
 
 sim.monitors = ["o1", "o2", "o3"]
 
@@ -84,7 +85,8 @@ sim = meep.Simulation()
 
 sim.geometry = Geometry(component=c, z_crop="auto")
 sim.materials = {"si": 3.47, "SiO2": 1.44}
-sim.source = ModeSource(port="o1", wavelength=1.55, wavelength_span=0.01, num_freqs=11)
+sim.source = ModeSource(port="o1", wavelength=1.55, wavelength_span=0.01)
+sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]
 sim.domain = Domain(pml=1.0, margin=0.5)
 sim.solver = FDTD(
@@ -103,7 +105,8 @@ sim = meep.Simulation()
 
 sim.geometry(component=c, z_crop="auto")
 sim.materials = {"si": 3.47, "SiO2": 1.44}
-sim.source(port="o1", wavelength=1.55, wavelength_span=0.01, num_freqs=11)
+sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
+sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]
 sim.domain(pml=1.0, margin=0.5)
 sim.solver(resolution=20, simplify_tol=0.01)

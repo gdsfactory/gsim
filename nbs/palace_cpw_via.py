@@ -26,13 +26,15 @@
 # ### Load a pcell from IHP PDK
 
 # %% papermill={"duration": 1.646886, "end_time": "2026-04-18T15:52:01.100338", "exception": false, "start_time": "2026-04-18T15:51:59.453452", "status": "completed"}
+from typing import Any
+
 import gdsfactory as gf
 from ihp import LAYER, PDK
 
 PDK.activate()
 
 # IHP SG13G2 via design rules
-_VIA_RULES = {
+_VIA_RULES: dict[str, dict[str, Any]] = {
     "TopVia2": {
         "size": 0.9,
         "spacing": 1.06,

@@ -109,7 +109,7 @@ import pyvista as pv
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from gsim.palace import load_fields
-from gsim.viz import plot_cross_section, plot_topview, sample_topview_field
+from gsim.viz import plot_cross_section, plot_topview
 
 pv.OFF_SCREEN = True
 

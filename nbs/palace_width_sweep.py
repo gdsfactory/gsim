@@ -62,6 +62,7 @@ for w in widths:
     sim.set_stack(substrate_thickness=2.0, air_above=300.0)
 
     for port in c.ports:
+        assert port.name is not None
         sim.add_port(
             port.name, from_layer="metal1", to_layer="topmetal2", geometry="via"
         )
@@ -92,7 +93,7 @@ print(f"Started {len(job_ids)} jobs: {job_ids}")
 import gsim
 
 # Poll all jobs concurrently, download and parse results
-results = gsim.wait_for_results(job_ids)
+results = gsim.wait_for_results(*job_ids)
 
 # %% [markdown] papermill={"duration": 0.001049, "end_time": "2026-04-03T18:08:08.800379", "exception": false, "start_time": "2026-04-03T18:08:08.799330", "status": "completed"}
 # ### Plot S11 and S21 comparison

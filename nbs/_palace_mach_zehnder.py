@@ -425,7 +425,7 @@ sim.set_output_dir("./palace-sim-mzm")
 sim.set_geometry(mzm_cpw_comp)
 
 # Configure layer stack from active PDK
-sim.set_stack(yaml_path=Path(stack_filename))
+sim.set_stack(yaml_path=Path(stack_filename), air_above=50)
 
 # Configure via ports (Metal1 ground plane to TopMetal2 signal)
 # Configure left CPW port (o1)
@@ -446,7 +446,7 @@ print(sim.validate_config())
 
 # %%
 # Generate mesh (presets: "coarse", "default", "fine")
-sim.mesh(preset="coarse", margin=15, air_above=50)
+sim.mesh(preset="coarse", margin=15)
 
 # %%
 sim.plot_mesh()

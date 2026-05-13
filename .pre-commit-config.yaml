@@ -57,12 +57,13 @@ repos:
     language: system
     types: [python]
 - repo: https://github.com/mwouts/jupytext
-  rev: v1.16.7
+  rev: v1.19.2
   hooks:
   - id: jupytext
     args: [--sync]
+    files: ^nbs/.*\.(ipynb|py)$
     additional_dependencies:
-    - jupytext>=1.16.0
+    - jupytext>=1.19.0
 - repo: local
   hooks:
   - id: ty
@@ -115,3 +116,4 @@ repos:
   - id: interrogate
     args: [--config=pyproject.toml]
     pass_filenames: true
+    exclude: ^(nbs|docs|tests)/

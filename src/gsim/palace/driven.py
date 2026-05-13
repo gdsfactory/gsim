@@ -7,7 +7,7 @@ simulations to extract S-parameters.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -105,7 +105,23 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Cloud run (narrowed return type)
     # -------------------------------------------------------------------------
 
+    @overload
     def run(
+        self,
+        parent_dir: str | Path | None = ...,
+        *,
+        verbose: Literal["quiet", "status", "full"] = ...,
+        wait: Literal[True] = ...,
+    ) -> SParams: ...
+    @overload
+    def run(
+        self,
+        parent_dir: str | Path | None = ...,
+        *,
+        verbose: Literal["quiet", "status", "full"] = ...,
+        wait: Literal[False],
+    ) -> str: ...
+    def run(  # ty: ignore[invalid-method-override]
         self,
         parent_dir: str | Path | None = None,
         *,

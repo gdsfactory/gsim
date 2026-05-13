@@ -27,12 +27,170 @@
 
 # %% papermill={"duration": 1.713285, "end_time": "2026-04-04T06:14:36.888672", "exception": false, "start_time": "2026-04-04T06:14:35.175387", "status": "completed"}
 import gdsfactory as gf
-from ihp import LAYER, PDK, cells
+from gdsfactory.typings import CrossSectionSpec
+from ihp import LAYER, PDK
 
 PDK.activate()
 
+
+# `branch_line_coupler` used to live in `ihp.cells` but was removed when the
+# IHP PDK migrated its schematic metadata. The PCell is inlined here so this
+# notebook is self-contained.
+@gf.cell
+def tline1(
+    length: float = 100,
+    width: float = 14,
+    signal_cross_section: CrossSectionSpec = "topmetal2_routing",
+    ground_cross_section: CrossSectionSpec = "metal3_routing",
+    npoints: int = 2,
+) -> gf.Component:
+    """Coplanar transmission line: signal straight with a wider ground straight around it."""
+    c = gf.Component()
+    signal = c.add_ref(
+        gf.c.straight(
+            length=length,
+            cross_section=signal_cross_section,
+            width=width,
+            npoints=npoints,
+        )
+    )
+    c.add_ports(signal.ports)
+    ground = c.add_ref(
+        gf.c.straight(
+            length=length + 6 * width,
+            cross_section=ground_cross_section,
+            width=7 * width,
+            npoints=npoints,
+        )
+    )
+    ground.move((-3 * width, 0))
+    return c
+
+
+@gf.cell
+def branch_line_coupler(
+    width: float = 10,
+    width_coupled: float = 14,
+    quarter_wave_length: float = 500,
+    connection_length: float = 100,
+    signal_cross_section: CrossSectionSpec = "topmetal2_routing",
+    ground_cross_section: CrossSectionSpec = "metal3_routing",
+) -> gf.Component:
+    """Four-port branch-line coupler made of coplanar quarter-wave sections."""
+    c = gf.Component()
+    signal_layer = gf.get_cross_section(signal_cross_section).layer
+
+    corner = gf.Component()
+    corner.add_polygon(
+        points=[
+            (0, 0),
+            (0, width),
+            (width - (width_coupled - width), width),
+            (width, width_coupled),
+            (width, 0),
+        ],
+        layer=signal_layer,
+    )
+    corner.add_port(
+        name="e1",
+        center=(width / 2, 0),
+        width=width,
+        orientation=270,
+        port_type="electrical",
+        layer=signal_layer,
+    )
+    corner.add_port(
+        name="e2",
+        center=(width, width_coupled / 2),
+        width=width_coupled,
+        orientation=0,
+        port_type="electrical",
+        layer=signal_layer,
+    )
+    corner.add_port(
+        name="e3",
+        center=(0, width / 2),
+        width=width,
+        orientation=180,
+        port_type="electrical",
+        layer=signal_layer,
+    )
+
+    corner_nw = c.add_ref(corner)
+    tline_top = c.add_ref(
+        tline1(
+            length=quarter_wave_length - width,
+            signal_cross_section=signal_cross_section,
+            ground_cross_section=ground_cross_section,
+            width=width_coupled,
+        )
+    )
+    tline_top.connect("e1", corner_nw.ports["e2"])
+
+    corner_ne = c.add_ref(corner).mirror(p1=(0, 0), p2=(0, 1))
+    corner_ne.connect("e2", tline_top.ports["e2"])
+
+    tline_left = c.add_ref(
+        tline1(
+            length=quarter_wave_length - width_coupled,
+            signal_cross_section=signal_cross_section,
+            ground_cross_section=ground_cross_section,
+            width=width,
+        )
+    )
+    tline_left.connect("e1", corner_nw.ports["e1"])
+
+    corner_sw = c.add_ref(corner).mirror(p1=(0, 0), p2=(1, 0))
+    corner_sw.connect("e1", tline_left.ports["e2"])
+
+    tline_bottom = c.add_ref(
+        tline1(
+            length=quarter_wave_length - width,
+            signal_cross_section=signal_cross_section,
+            ground_cross_section=ground_cross_section,
+            width=width_coupled,
+        )
+    )
+    tline_bottom.connect("e1", corner_sw.ports["e2"])
+
+    corner_se = (
+        c.add_ref(corner).mirror(p1=(0, 0), p2=(1, 0)).mirror(p1=(0, 0), p2=(0, 1))
+    )
+    corner_se.connect("e2", tline_bottom.ports["e2"])
+
+    tline_right = c.add_ref(
+        tline1(
+            length=quarter_wave_length - width_coupled,
+            signal_cross_section=signal_cross_section,
+            ground_cross_section=ground_cross_section,
+            width=width,
+        )
+    )
+    tline_right.connect("e1", corner_ne.ports["e1"])
+
+    for port, name in [
+        (corner_nw.ports["e3"], "e1"),
+        (corner_ne.ports["e3"], "e2"),
+        (corner_se.ports["e3"], "e3"),
+        (corner_sw.ports["e3"], "e4"),
+    ]:
+        feed = c.add_ref(
+            tline1(
+                length=connection_length,
+                signal_cross_section=signal_cross_section,
+                ground_cross_section=ground_cross_section,
+                width=width,
+            )
+        )
+        feed.connect("e1", port)
+        c.add_port(name=name, port=feed.ports["e2"])
+
+    c.move((0, -width))
+    return c
+
+
 c = gf.Component()
-r1 = c << cells.branch_line_coupler(
+r1 = c << branch_line_coupler(
     width=8.85, width_coupled=14.96, quarter_wave_length=769.235, connection_length=50
 )
 c.add_ports(r1.ports)
@@ -78,6 +236,7 @@ sim.set_stack(substrate_thickness=2.0, air_above=300.0)
 
 # Configure via ports (Metal3 ground plane to TopMetal2 signal)
 for port in c.ports:
+    assert port.name is not None
     sim.add_port(port.name, from_layer="metal3", to_layer="topmetal2", geometry="via")
 
 # Configure driven simulation (frequency sweep for S-parameters)

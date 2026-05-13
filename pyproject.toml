@@ -90,11 +90,12 @@ ignore-words-list = "doubleclick,euclidian,te"
 
 [tool.interrogate]
 docstring-style = "google"
-exclude = ["docs/**/*", "tests/**/*"]
+exclude = ["docs/**/*", "tests/**/*", "nbs/**/*"]
 ext = []
 fail-under = 100
 ignore-nested-classes = true
 ignore-nested-functions = true
+ignore-overloaded-functions = true
 ignore-regex = ["^test_.*"]
 omit-covered-files = true
 verbose = 2
@@ -249,8 +250,23 @@ select = ["ALL"]
   "PERF401",  # use-list-extend (keeping for readability)
 ]
 "nbs/*.py" = [
+  "ANN",  # flake8-annotations
+  "ARG001",  # unused-function-argument
+  "B018",  # useless-expression (cell display)
+  "B905",  # zip-without-explicit-strict
+  "D",  # pydocstyle
+  "E402",  # module-import-not-at-top-of-file
+  "E501",  # line-too-long
   "EXE001",  # shebang-present-but-not-executable
+  "F821",  # undefined-name
+  "FBT003",  # boolean-positional-value-in-call
   "INP001",  # implicit-namespace-package
+  "N816",  # mixed-case-variable-in-global-scope
+  "NPY",  # numpy (allow legacy RNG calls in notebooks)
+  "PLC2401",  # non-ascii-name
+  "RUF003",  # ambiguous-unicode-character-comment
+  "S101",  # assert
+  "SLF001",  # private-member-access
   "T201",  # print (natural in scripts)
 ]
 "scripts/*.py" = [
