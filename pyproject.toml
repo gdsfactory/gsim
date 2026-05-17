@@ -1,7 +1,3 @@
-[build-system]
-requires = ["build", "setuptools>=61", "uv", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "gsim"
 version = "0.0.16"
@@ -73,6 +69,10 @@ test = [
   "pytest-xdist>=3.6.0",
 ]
 
+[build-system]
+requires = ["build", "setuptools>=61", "uv", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [[tool.bver.file]]
 src = "README.md"
 
@@ -99,6 +99,9 @@ ignore-overloaded-functions = true
 ignore-regex = ["^test_.*"]
 omit-covered-files = true
 verbose = 2
+
+[tool.jupytext]
+formats = "nbs///ipynb,nbs///py:percent"
 
 [tool.mypy]
 mypy_path = ["src"]
@@ -297,9 +300,6 @@ select = ["ALL"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.jupytext]
-formats = "nbs///ipynb,nbs///py:percent"
 
 [tool.setuptools.packages.find]
 where = ["src"]
