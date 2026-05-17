@@ -85,10 +85,9 @@ sim.set_driven(
     adaptive_tol=0,
     save_step=1,
 )
-
+sim.set_airbox(margin_x=50, margin_y=0, z_above=100, z_below=100)
 sim.mesh(
     preset="default",
-    airbox_margin=50.0,
     refined_mesh_size=2.0,
     max_mesh_size=25.0,
 )
@@ -100,11 +99,11 @@ sim.mesh(
 sim.plot_mesh(
     show_groups=["metal", "P", "via"],
     style="solid",
-    transparent_groups=["airbox__None", "airbox__passive", "SiO2__passive"],
+    transparent_groups=["air__None", "air__passive", "SiO2__passive"],
 )
 
 # %% papermill={"duration": 158.472414, "end_time": "2026-04-17T19:21:17.523438", "exception": false, "start_time": "2026-04-17T19:18:39.051024", "status": "completed"}
-results = sim.run()
+results = sim.run_local()
 
 # %% papermill={"duration": 1.170331, "end_time": "2026-04-17T19:21:18.697731", "exception": false, "start_time": "2026-04-17T19:21:17.527400", "status": "completed"}
 from pathlib import Path
