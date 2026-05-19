@@ -1,4 +1,5 @@
-"""Tests for dispersion models, validity ranges, and frequency-aware material resolution."""
+"""Tests for dispersion models, validity ranges, and frequency-aware
+material resolution."""
 
 from __future__ import annotations
 
@@ -92,7 +93,7 @@ class TestLorentzianTerm:
         assert pole.sigma_diagonal == [1.0, 1.0, 0.5]
 
     def test_rejects_zero_frequency(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LorentzianTerm(frequency=0, gamma=0.01, sigma=1.0)
 
 
@@ -251,7 +252,7 @@ class TestMaterialPropertiesEvaluation:
         )
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            resolved = mat.evaluate_at_wavelength(1.55)
+            mat.evaluate_at_wavelength(1.55)
             assert len(w) == 1
             assert "unspecified" in str(w[0].message).lower()
 
@@ -273,7 +274,7 @@ class TestMaterialPropertiesEvaluation:
         )
         d = mat.to_dict()
         assert "dispersion_models" in d
-        assert len(d["dispersion_models"]) == 1
+        assert len(d["dispersion_models"]) == 1  # ty: ignore[invalid-argument-type]
 
     def test_to_dict_includes_conductivity_diagonal(self):
         mat = MaterialProperties(

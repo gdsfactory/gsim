@@ -2,7 +2,7 @@
 
 PDK overlays are small YAML/JSON files that add foundry-specific measurements
 to the built-in MATERIALS_DB. For example, ``gsim/pdk_overlays/ihp.yaml``
-would contain IHP's measured ε=4.1 for SiO2 at RF, tagged with the process name.
+would contain IHP's measured eps=4.1 for SiO2 at RF, tagged with the process name.
 
 When a PDK overlay is active, its values are merged into MATERIALS_DB at
 resolution time, taking priority over the built-in values (but lower
@@ -19,7 +19,6 @@ from gsim.common.stack.materials import (
     DispersionModel,
     MaterialProperties,
     ValidityRange,
-    get_material_properties,
 )
 
 
@@ -150,7 +149,9 @@ def merge_overlay(
     return merged
 
 
-def _merge_material(base: MaterialProperties, overlay: MaterialProperties) -> MaterialProperties:
+def _merge_material(
+    base: MaterialProperties, overlay: MaterialProperties
+) -> MaterialProperties:
     """Merge overlay properties into base, keeping unset fields from base."""
     kwargs: dict = {"type": overlay.type or base.type}
 

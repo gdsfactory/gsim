@@ -5,9 +5,9 @@ This database provides the EM properties needed for Palace and MEEP simulation.
 
 Dispersion models:
     Each material can store one or more dispersion models (Sellmeier, Lorentzian,
-    or constant-ε), each annotated with a domain of validity and citation.
+    or constant-epsilon), each annotated with a domain of validity and citation.
     A material can have multiple models covering different frequency regimes
-    (e.g. SiO2: Sellmeier for optical, constant ε for RF).
+    (e.g. SiO2: Sellmeier for optical, constant epsilon for RF).
 """
 
 from __future__ import annotations
@@ -39,9 +39,11 @@ class ValidityRange(BaseModel):
 
     @property
     def is_unspecified(self) -> bool:
+        """Check if neither frequency nor wavelength range is specified."""
         return self.valid_frequency is None and self.valid_wavelength is None
 
     def covers_frequency(self, freq_hz: float) -> bool:
+        """Check if a frequency in Hz falls within this validity range."""
         if self.valid_frequency is not None:
             return self.valid_frequency[0] <= freq_hz <= self.valid_frequency[1]
         if self.valid_wavelength is not None:
@@ -50,6 +52,7 @@ class ValidityRange(BaseModel):
         return False
 
     def covers_wavelength(self, wl_um: float) -> bool:
+        """Check if a wavelength in um falls within this validity range."""
         if self.valid_wavelength is not None:
             return self.valid_wavelength[0] <= wl_um <= self.valid_wavelength[1]
         if self.valid_frequency is not None:
@@ -59,9 +62,9 @@ class ValidityRange(BaseModel):
 
 
 class SellmeierTerm(BaseModel):
-    """One term of the Sellmeier equation: n²-1 = B·λ²/(λ²-C).
+    """One term of the Sellmeier equation: n^2-1 = B*lam^2/(lam^2-C).
 
-    C is stored as C (in um²), i.e. already squared.
+    C is stored as C (in um^2), i.e. already squared.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -75,6 +78,7 @@ class SellmeierTerm(BaseModel):
     )
 
     def n_squared_contribution(self, wavelength_um: float) -> float:
+        """Compute the Sellmeier term's contribution to n^2 at a given wavelength."""
         lam_sq = wavelength_um**2
         return self.B * lam_sq / (lam_sq - self.C)
 
@@ -82,16 +86,16 @@ class SellmeierTerm(BaseModel):
 class LorentzianTerm(BaseModel):
     """One Lorentzian susceptibility pole.
 
-    ε(ω) = ε∞ + σ / (ω₀² - ω² - i·γ·ω)
+    eps(w) = eps_inf + sigma / (w0^2 - w^2 - i*gamma*w)
 
     All frequencies in MEEP normalized units (1/um).
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
-    frequency: float = Field(gt=0, description="Resonance frequency ω₀ (1/um)")
-    gamma: float = Field(ge=0, description="Damping rate γ (1/um)")
-    sigma: float = Field(gt=0, description="Oscillator strength σ")
+    frequency: float = Field(gt=0, description="Resonance frequency w0 (1/um)")
+    gamma: float = Field(ge=0, description="Damping rate gamma (1/um)")
+    sigma: float = Field(gt=0, description="Oscillator strength sigma")
 
     sigma_diagonal: list[float] | None = Field(
         default=None,
@@ -134,7 +138,7 @@ class DispersionModel(BaseModel):
     epsilon_inf: float = Field(
         default=1.0,
         ge=1.0,
-        description="High-frequency permittivity ε∞ for Lorentzian/Sellmeier.",
+        description="High-frequency permittivity eps_inf for Lorentzian/Sellmeier.",
     )
 
     validity: ValidityRange = Field(
@@ -147,6 +151,7 @@ class DispersionModel(BaseModel):
     )
 
     def evaluate_n(self, wavelength_um: float) -> float:
+        """Evaluate the refractive index at a given wavelength in um."""
         if self.type == "sellmeier":
             if not self.sellmeier_terms:
                 raise ValueError("Sellmeier model has no terms")
@@ -155,7 +160,7 @@ class DispersionModel(BaseModel):
                 n_sq += term.n_squared_contribution(wavelength_um)
             if n_sq < 0:
                 raise ValueError(
-                    f"Sellmeier model gives n²<0 at λ={wavelength_um} um "
+                    f"Sellmeier model gives n^2<0 at wavelength={wavelength_um} um "
                     f"(likely outside validity range)"
                 )
             return math.sqrt(n_sq)
@@ -165,7 +170,9 @@ class DispersionModel(BaseModel):
                 return self.refractive_index
             if self.permittivity is not None:
                 return math.sqrt(self.permittivity)
-            raise ValueError("Constant model has neither refractive_index nor permittivity")
+            raise ValueError(
+                "Constant model has neither refractive_index nor permittivity"
+            )
 
         if self.type == "lorentzian":
             if self.lorentzian_terms is None:
@@ -182,13 +189,14 @@ class DispersionModel(BaseModel):
                 eps_real += pole.sigma * denom_real / denom_mag_sq
             if eps_real < 1.0:
                 raise ValueError(
-                    f"Lorentzian model gives ε<1 at λ={wavelength_um} um"
+                    f"Lorentzian model gives eps<1 at lambda={wavelength_um} um"
                 )
             return math.sqrt(eps_real)
 
         raise ValueError(f"Unknown dispersion model type: {self.type}")
 
     def evaluate_permittivity(self, wavelength_um: float) -> float:
+        """Evaluate the relative permittivity at a given wavelength in um."""
         if self.type == "constant" and self.permittivity is not None:
             return self.permittivity
         n = self.evaluate_n(wavelength_um)
@@ -221,7 +229,9 @@ class ResolvedMaterial(BaseModel):
     model_source: str = Field(default="", description="Citation of the model used")
     within_validity: bool = Field(
         default=True,
-        description="Whether the evaluation frequency is within the model's validity range",
+        description=(
+            "Whether the evaluation frequency is within the model's validity range"
+        ),
     )
     validity_note: str = Field(
         default="",
@@ -258,6 +268,7 @@ class MaterialProperties(BaseModel):
     )
 
     def to_dict(self) -> dict[str, object]:
+        """Convert to dictionary for YAML/JSON output."""
         d: dict[str, object] = {"type": self.type}
         if self.conductivity is not None:
             d["conductivity"] = self.conductivity
@@ -314,7 +325,7 @@ class MaterialProperties(BaseModel):
                 f"validity range unspecified (source: {selected.source or 'unknown'})"
             )
             warnings.warn(
-                f"Material model for evaluation at λ={wavelength_um} um "
+                f"Material model for evaluation at wavelength={wavelength_um} um "
                 f"has unspecified validity range. {validity_note}",
                 stacklevel=3,
             )
@@ -387,7 +398,7 @@ class MaterialProperties(BaseModel):
         return self.evaluate_at_wavelength(wavelength_um)
 
     def index_variation(self, wavelength_um: float, bandwidth_um: float) -> float:
-        """Compute fractional index variation Δn/n across a bandwidth.
+        """Compute fractional index variation dn/n across a bandwidth.
 
         Returns 0.0 if the material has no dispersive model or scalar n.
         """
@@ -415,12 +426,14 @@ class MaterialProperties(BaseModel):
 
     @classmethod
     def conductor(cls, conductivity: float = 5.8e7) -> MaterialProperties:
+        """Create a conductor material with the given conductivity in S/m."""
         return cls(type="conductor", conductivity=conductivity)
 
     @classmethod
     def dielectric(
         cls, permittivity: float, loss_tangent: float = 0.0
     ) -> MaterialProperties:
+        """Create a dielectric material with permittivity and loss tangent."""
         return cls(
             type="dielectric", permittivity=permittivity, loss_tangent=loss_tangent
         )
@@ -431,6 +444,10 @@ class MaterialProperties(BaseModel):
         refractive_index: float,
         extinction_coeff: float = 0.0,
     ) -> MaterialProperties:
+        """Create a dielectric material with optical properties.
+
+        For photonic simulation.
+        """
         return cls(
             type="dielectric",
             refractive_index=refractive_index,
@@ -789,7 +806,7 @@ def resolve_material_at_wavelength(
         resolved = props.evaluate_at_wavelength(wavelength_um)
         if not resolved.within_validity and resolved.validity_note:
             warnings.warn(
-                f"Material '{material_name}' at λ={wavelength_um} um: "
+                f"Material '{material_name}' at wavelength={wavelength_um} um: "
                 f"{resolved.validity_note}",
                 stacklevel=2,
             )
@@ -812,8 +829,9 @@ def should_enable_dispersion(
 ) -> bool:
     """Determine if dispersion should be enabled for a material.
 
-    Compares Δn/n across the bandwidth against a threshold.
-    Returns True if dispersion is significant (Δn/n > threshold).
+    Compares dn/n across the bandwidth against a threshold.
+
+    Returns True if dispersion is significant (dn/n > threshold).
 
     Args:
         material_name: Material name
@@ -828,7 +846,10 @@ def should_enable_dispersion(
     overrides = overrides or {}
 
     if material_name in overrides:
-        return overrides[material_name].index_variation(wavelength_um, bandwidth_um) > threshold
+        return (
+            overrides[material_name].index_variation(wavelength_um, bandwidth_um)
+            > threshold
+        )
 
     props = get_material_properties(material_name)
     if props is not None:
@@ -838,10 +859,12 @@ def should_enable_dispersion(
 
 
 def material_is_conductor(material_name: str) -> bool:
+    """Check if a material is a conductor."""
     props = get_material_properties(material_name)
     return props is not None and props.type == "conductor"
 
 
 def material_is_dielectric(material_name: str) -> bool:
+    """Check if a material is a dielectric."""
     props = get_material_properties(material_name)
     return props is not None and props.type == "dielectric"

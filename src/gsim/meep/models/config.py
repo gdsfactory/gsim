@@ -317,13 +317,13 @@ class MaterialData(BaseModel):
     extinction_coeff: float = Field(default=0.0, ge=0)
 
     epsilon_diag: list[float] | None = Field(
-        default=None, description="Anisotropic ε diagonal [ex, ey, ez]"
+        default=None, description="Anisotropic epsilon diagonal [ex, ey, ez]"
     )
     epsilon_offdiag: list[float] | None = Field(
-        default=None, description="Anisotropic ε off-diagonal [eu, ev, ew]"
+        default=None, description="Anisotropic epsilon off-diagonal [eu, ev, ew]"
     )
     mu_diag: list[float] | None = Field(
-        default=None, description="Anisotropic μ diagonal [mx, my, mz]"
+        default=None, description="Anisotropic mu diagonal [mx, my, mz]"
     )
     D_conductivity: float | None = Field(
         default=None, ge=0, description="Isotropic conductivity for MEEP"

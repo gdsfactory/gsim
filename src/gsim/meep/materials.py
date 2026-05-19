@@ -111,8 +111,8 @@ def resolve_materials_with_dispersion(
     used_material_names: set[str],
     overrides: dict[str, MaterialProperties] | None = None,
     wavelength_um: float = 1.55,
-    bandwidth_um: float = 0.1,
-    dispersion: str = "auto",
+    bandwidth_um: float = 0.1,  # noqa: ARG001
+    dispersion: str = "auto",  # noqa: ARG001
 ) -> dict[str, MaterialData]:
     """Resolve materials with dispersion-aware evaluation.
 

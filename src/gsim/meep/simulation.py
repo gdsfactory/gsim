@@ -710,7 +710,9 @@ class Simulation(BaseModel):
             )
 
         # Resolve materials
-        active_source = self.fiber_source if self.fiber_source is not None else self.source
+        active_source = (
+            self.fiber_source if self.fiber_source is not None else self.source
+        )
         material_data = resolve_materials(
             used_materials,
             overrides=self._material_overrides(),
