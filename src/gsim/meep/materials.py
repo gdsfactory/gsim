@@ -47,6 +47,8 @@ def resolve_materials(
     for name in sorted(used_material_names):
         if name in overrides:
             props = overrides[name]
+            if props.type == "conductor":
+                continue
             if wavelength_um is not None:
                 resolved = props.evaluate_at_wavelength(wavelength_um)
                 if resolved.refractive_index is not None:
@@ -68,6 +70,10 @@ def resolve_materials(
             )
             continue
 
+        db_props = get_material_properties(name)
+        if db_props is not None and db_props.type == "conductor":
+            continue
+
         if wavelength_um is not None:
             resolved = resolve_material_at_wavelength(name, wavelength_um)
             if resolved is not None and resolved.refractive_index is not None:
@@ -77,7 +83,6 @@ def resolve_materials(
                 )
                 continue
         else:
-            db_props = get_material_properties(name)
             if db_props is not None and db_props.refractive_index is not None:
                 materials[name] = MaterialData(
                     refractive_index=db_props.refractive_index,
@@ -85,12 +90,19 @@ def resolve_materials(
                 )
                 continue
 
-        warnings.warn(
-            f"Material '{name}' has no optical properties (refractive_index) "
-            f"— layer will be omitted from simulation. "
-            f"Use sim.set_material('{name}', refractive_index=...) to include it.",
-            stacklevel=2,
-        )
+        if db_props is None:
+            warnings.warn(
+                f"Material '{name}' not found in database. "
+                f"Use sim.set_material('{name}', refractive_index=...) to add it.",
+                stacklevel=2,
+            )
+        else:
+            warnings.warn(
+                f"Material '{name}' has no optical properties (refractive_index) "
+                f"— layer will be omitted from simulation. "
+                f"Use sim.set_material('{name}', refractive_index=...) to include it.",
+                stacklevel=2,
+            )
 
     return materials
 

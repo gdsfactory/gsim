@@ -680,6 +680,38 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
             ),
         ],
     ),
+    "germanium": MaterialProperties(
+        type="semiconductor",
+        permittivity=16.0,
+        refractive_index=4.18,
+        dispersion_models=[
+            DispersionModel(
+                type="sellmeier",
+                sellmeier_terms=[
+                    SellmeierTerm(B=8.288, C=0.4682**2),
+                    SellmeierTerm(B=1.784, C=5.768**2),
+                ],
+                validity=ValidityRange(valid_wavelength=(2.5, 12)),
+                source="Barnes & Piltch 1979",
+            ),
+        ],
+    ),
+    "ge": MaterialProperties(
+        type="semiconductor",
+        permittivity=16.0,
+        refractive_index=4.18,
+        dispersion_models=[
+            DispersionModel(
+                type="sellmeier",
+                sellmeier_terms=[
+                    SellmeierTerm(B=8.288, C=0.4682**2),
+                    SellmeierTerm(B=1.784, C=5.768**2),
+                ],
+                validity=ValidityRange(valid_wavelength=(2.5, 12)),
+                source="Barnes & Piltch 1979",
+            ),
+        ],
+    ),
     "tfln": MaterialProperties(
         type="dielectric",
         permittivity=44.0,
@@ -706,6 +738,7 @@ MATERIAL_ALIASES: dict[str, str] = {
     "nitride": "Si3N4",
     "sin": "Si3N4",
     "si3n4": "Si3N4",
+    "ge": "germanium",
 }
 
 
