@@ -776,22 +776,53 @@ def get_material_properties(material_name: str) -> MaterialProperties | None:
     return None
 
 
+def _resolve_with_overlay(
+    material_name: str,
+    overlay: dict[str, MaterialProperties] | None = None,
+) -> MaterialProperties | None:
+    """Look up material properties with optional PDK overlay.
+
+    Priority: overlay entry > built-in database.
+
+    Args:
+        material_name: Material name from PDK
+        overlay: PDK overlay dict (merged into MATERIALS_DB for lookup)
+
+    Returns:
+        MaterialProperties if found, else None
+    """
+    if overlay and material_name in overlay:
+        return overlay[material_name]
+
+    if overlay:
+        from gsim.common.stack.overlays import merge_overlay
+
+        merged = merge_overlay(overlay)
+        if material_name in merged:
+            return merged[material_name]
+
+    return get_material_properties(material_name)
+
+
 def resolve_material_at_wavelength(
     material_name: str,
     wavelength_um: float,
     overrides: dict[str, MaterialProperties] | None = None,
+    overlay: dict[str, MaterialProperties] | None = None,
 ) -> ResolvedMaterial | None:
     """Resolve a material's properties at a specific wavelength.
 
     Priority:
     1. User override (if provided)
-    2. Built-in database
-    3. None + warning
+    2. PDK overlay (if provided)
+    3. Built-in database
+    4. None + warning
 
     Args:
         material_name: Material name from PDK
         wavelength_um: Target wavelength in um
         overrides: User-supplied material property overrides
+        overlay: PDK overlay dict (foundry-specific values)
 
     Returns:
         ResolvedMaterial with evaluated properties, or None if not found
@@ -801,7 +832,7 @@ def resolve_material_at_wavelength(
     if material_name in overrides:
         return overrides[material_name].evaluate_at_wavelength(wavelength_um)
 
-    props = get_material_properties(material_name)
+    props = _resolve_with_overlay(material_name, overlay)
     if props is not None:
         resolved = props.evaluate_at_wavelength(wavelength_um)
         if not resolved.within_validity and resolved.validity_note:
@@ -826,12 +857,11 @@ def should_enable_dispersion(
     bandwidth_um: float,
     threshold: float = 0.005,
     overrides: dict[str, MaterialProperties] | None = None,
+    overlay: dict[str, MaterialProperties] | None = None,
 ) -> bool:
     """Determine if dispersion should be enabled for a material.
 
     Compares dn/n across the bandwidth against a threshold.
-
-    Returns True if dispersion is significant (dn/n > threshold).
 
     Args:
         material_name: Material name
@@ -839,6 +869,7 @@ def should_enable_dispersion(
         bandwidth_um: Source bandwidth in um
         threshold: Fractional index variation threshold (default 0.5%)
         overrides: User-supplied material property overrides
+        overlay: PDK overlay dict (foundry-specific values)
 
     Returns:
         True if dispersion should be enabled
@@ -851,7 +882,7 @@ def should_enable_dispersion(
             > threshold
         )
 
-    props = get_material_properties(material_name)
+    props = _resolve_with_overlay(material_name, overlay)
     if props is not None:
         return props.index_variation(wavelength_um, bandwidth_um) > threshold
 

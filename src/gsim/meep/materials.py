@@ -1,7 +1,8 @@
 """Material resolution for MEEP simulation.
 
 Resolves material names from the common materials database to optical
-properties needed for photonic FDTD simulation. No MEEP imports.
+properties needed for photonic FDTD simulation. Supports three-tier
+resolution: user override > PDK overlay > built-in database.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ def resolve_materials(
     used_material_names: set[str],
     overrides: dict[str, MaterialProperties] | None = None,
     wavelength_um: float | None = None,
+    overlay: dict[str, MaterialProperties] | None = None,
 ) -> dict[str, MaterialData]:
     """Resolve material names to optical properties for MEEP.
 
@@ -37,6 +39,7 @@ def resolve_materials(
         used_material_names: Material names that appear in extracted geometry
         overrides: User-supplied material property overrides (from set_material())
         wavelength_um: Target wavelength in um. None = use legacy scalar lookup.
+        overlay: PDK overlay dict (foundry-specific values).
 
     Returns:
         Dict mapping material name to MaterialData
@@ -59,7 +62,7 @@ def resolve_materials(
                     continue
             if props.refractive_index is None:
                 warnings.warn(
-                    f"Material override '{name}' has no refractive_index — "
+                    f"Material override '{name}' has no refractive_index -- "
                     f"skipping. Use set_material('{name}', refractive_index=...)",
                     stacklevel=2,
                 )
@@ -75,7 +78,9 @@ def resolve_materials(
             continue
 
         if wavelength_um is not None:
-            resolved = resolve_material_at_wavelength(name, wavelength_um)
+            resolved = resolve_material_at_wavelength(
+                name, wavelength_um, overlay=overlay
+            )
             if resolved is not None and resolved.refractive_index is not None:
                 materials[name] = MaterialData(
                     refractive_index=resolved.refractive_index,
@@ -99,7 +104,7 @@ def resolve_materials(
         else:
             warnings.warn(
                 f"Material '{name}' has no optical properties (refractive_index) "
-                f"— layer will be omitted from simulation. "
+                f"-- layer will be omitted from simulation. "
                 f"Use sim.set_material('{name}', refractive_index=...) to include it.",
                 stacklevel=2,
             )
@@ -113,6 +118,7 @@ def resolve_materials_with_dispersion(
     wavelength_um: float = 1.55,
     bandwidth_um: float = 0.1,  # noqa: ARG001
     dispersion: str = "auto",  # noqa: ARG001
+    overlay: dict[str, MaterialProperties] | None = None,
 ) -> dict[str, MaterialData]:
     """Resolve materials with dispersion-aware evaluation.
 
@@ -125,6 +131,7 @@ def resolve_materials_with_dispersion(
         wavelength_um: Center wavelength in um
         bandwidth_um: Source bandwidth in um
         dispersion: "auto", "true"/"yes", or "false"/"no"
+        overlay: PDK overlay dict (foundry-specific values)
 
     Returns:
         Dict mapping material name to MaterialData
@@ -138,11 +145,13 @@ def resolve_materials_with_dispersion(
         if name in overrides:
             resolved = overrides[name].evaluate_at_wavelength(wavelength_um)
         else:
-            resolved = resolve_material_at_wavelength(name, wavelength_um)
+            resolved = resolve_material_at_wavelength(
+                name, wavelength_um, overlay=overlay
+            )
 
         if resolved is None or resolved.refractive_index is None:
             warnings.warn(
-                f"Material '{name}' has no optical properties — "
+                f"Material '{name}' has no optical properties -- "
                 f"layer will be omitted from simulation.",
                 stacklevel=2,
             )
@@ -162,17 +171,27 @@ def check_dispersion_needs(
     wavelength_um: float = 1.55,
     bandwidth_um: float = 0.1,
     threshold: float = 0.005,
+    overlay: dict[str, MaterialProperties] | None = None,
 ) -> dict[str, bool]:
     """Check which materials need dispersion for the given bandwidth.
 
-    Returns a dict mapping material name to whether dispersion is needed.
+    Args:
+        used_material_names: Material names that appear in extracted geometry
+        overrides: User-supplied material property overrides
+        wavelength_um: Center wavelength in um
+        bandwidth_um: Source bandwidth in um
+        threshold: Fractional index variation threshold (default 0.5%)
+        overlay: PDK overlay dict (foundry-specific values)
+
+    Returns:
+        Dict mapping material name to whether dispersion is needed
     """
     overrides = overrides or {}
     result: dict[str, bool] = {}
 
     for name in sorted(used_material_names):
         result[name] = should_enable_dispersion(
-            name, wavelength_um, bandwidth_um, threshold, overrides
+            name, wavelength_um, bandwidth_um, threshold, overrides, overlay
         )
 
     return result

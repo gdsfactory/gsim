@@ -442,3 +442,103 @@ class TestMaterialsDB:
         assert mat.type == "dielectric"
         assert mat.permittivity == 4.1
         assert mat.loss_tangent == 0.001
+
+
+class TestOverlayInResolution:
+    """Tests for three-tier resolution: override > overlay > built-in."""
+
+    def test_overlay_overrides_builtin(self):
+        overlay_si = MaterialProperties(
+            type="dielectric",
+            permittivity=12.5,
+            dispersion_models=[
+                DispersionModel(
+                    type="constant",
+                    permittivity=12.5,
+                    source="test overlay",
+                ),
+            ],
+        )
+        resolved = resolve_material_at_wavelength(
+            "silicon", 1.55, overlay={"silicon": overlay_si}
+        )
+        assert resolved is not None
+        assert resolved.permittivity == pytest.approx(12.5)
+
+    def test_user_override_wins_over_overlay(self):
+        override_si = MaterialProperties(
+            type="dielectric",
+            permittivity=99.0,
+        )
+        overlay_si = MaterialProperties(
+            type="dielectric",
+            permittivity=12.5,
+        )
+        resolved = resolve_material_at_wavelength(
+            "silicon",
+            1.55,
+            overrides={"silicon": override_si},
+            overlay={"silicon": overlay_si},
+        )
+        assert resolved is not None
+        assert resolved.permittivity == 99.0
+
+    def test_overlay_provides_missing_material(self):
+        custom = MaterialProperties(
+            type="dielectric",
+            permittivity=5.0,
+            refractive_index=2.236,
+        )
+        resolved = resolve_material_at_wavelength(
+            "custom_foundry_mat", 1.55, overlay={"custom_foundry_mat": custom}
+        )
+        assert resolved is not None
+        assert resolved.refractive_index == pytest.approx(2.236, abs=0.01)
+
+    def test_overlay_with_sellmeier(self):
+        overlay_sio2 = MaterialProperties(
+            type="dielectric",
+            permittivity=4.0,
+            dispersion_models=[
+                DispersionModel(
+                    type="sellmeier",
+                    sellmeier_terms=[
+                        SellmeierTerm(B=0.696, C=0.0684**2),
+                        SellmeierTerm(B=0.408, C=0.1162**2),
+                        SellmeierTerm(B=0.897, C=9.896**2),
+                    ],
+                    validity=ValidityRange(valid_wavelength=(0.21, 3.71)),
+                    source="test overlay",
+                ),
+            ],
+        )
+        resolved = resolve_material_at_wavelength(
+            "SiO2", 1.55, overlay={"SiO2": overlay_sio2}
+        )
+        assert resolved is not None
+        assert resolved.model_source == "test overlay"
+
+    def test_should_enable_dispersion_with_overlay(self):
+        overlay_si = MaterialProperties(
+            type="semiconductor",
+            dispersion_models=[
+                DispersionModel(
+                    type="sellmeier",
+                    sellmeier_terms=[
+                        SellmeierTerm(B=10.357, C=0.8832**2),
+                        SellmeierTerm(B=0.860, C=6.004**2),
+                    ],
+                    validity=ValidityRange(valid_wavelength=(1.36, 11)),
+                    source="test overlay",
+                ),
+            ],
+        )
+        result = should_enable_dispersion(
+            "silicon", 1.55, 0.5, overlay={"silicon": overlay_si}
+        )
+        assert result is True
+
+    def test_no_overlay_falls_to_builtin(self):
+        resolved = resolve_material_at_wavelength("SiO2", 1.55, overlay=None)
+        assert resolved is not None
+        assert resolved.refractive_index == pytest.approx(1.44, abs=0.02)

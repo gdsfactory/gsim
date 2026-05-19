@@ -110,9 +110,26 @@ class Simulation(BaseModel):
     _job_id: str | None = PrivateAttr(default=None)
     _config_dir: Path | None = PrivateAttr(default=None)
 
+    # PDK overlay (foundry-specific material values, loaded from YAML)
+    _pdk_overlay: dict[str, Any] | None = PrivateAttr(default=None)
+
     # -------------------------------------------------------------------------
     # Validators
     # -------------------------------------------------------------------------
+
+    def load_pdk_overlay(self, path: str | Path) -> None:
+        """Load a PDK overlay YAML file for foundry-specific material values.
+
+        PDK overlays augment the built-in MATERIALS_DB with foundry measurements.
+        They take priority over the built-in DB but lower priority than
+        user overrides set via ``sim.materials``.
+
+        Args:
+            path: Path to a YAML overlay file (see :func:`load_overlay` for format).
+        """
+        from gsim.common.stack.overlays import load_overlay
+
+        self._pdk_overlay = load_overlay(path)
 
     @field_validator("materials", mode="before")
     @classmethod
@@ -709,7 +726,7 @@ class Simulation(BaseModel):
                 "or call sim.source_fiber(...)."
             )
 
-        # Resolve materials
+        # Resolve materials (three-tier: user override > PDK overlay > built-in DB)
         active_source = (
             self.fiber_source if self.fiber_source is not None else self.source
         )
@@ -717,6 +734,7 @@ class Simulation(BaseModel):
             used_materials,
             overrides=self._material_overrides(),
             wavelength_um=active_source.wavelength,
+            overlay=self._pdk_overlay,
         )
 
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
