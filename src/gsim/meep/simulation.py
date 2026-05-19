@@ -710,8 +710,11 @@ class Simulation(BaseModel):
             )
 
         # Resolve materials
+        active_source = self.fiber_source if self.fiber_source is not None else self.source
         material_data = resolve_materials(
-            used_materials, overrides=self._material_overrides()
+            used_materials,
+            overrides=self._material_overrides(),
+            wavelength_um=active_source.wavelength,
         )
 
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)

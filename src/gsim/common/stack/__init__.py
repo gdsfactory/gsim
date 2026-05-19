@@ -31,10 +31,21 @@ from gsim.common.stack.extractor import (
 )
 from gsim.common.stack.materials import (
     MATERIALS_DB,
+    DispersionModel,
+    LorentzianTerm,
     MaterialProperties,
+    ResolvedMaterial,
+    SellmeierTerm,
+    ValidityRange,
     get_material_properties,
     material_is_conductor,
     material_is_dielectric,
+    resolve_material_at_wavelength,
+    should_enable_dispersion,
+)
+from gsim.common.stack.overlays import (
+    load_overlay,
+    merge_overlay,
 )
 from gsim.common.stack.visualization import (
     StackLayer,
@@ -140,20 +151,29 @@ def load_stack_yaml(yaml_path: str | Path) -> LayerStack:
 
 __all__ = [
     "MATERIALS_DB",
+    "DispersionModel",
     "Layer",
     "LayerStack",
+    "LorentzianTerm",
     "MaterialProperties",
+    "ResolvedMaterial",
+    "SellmeierTerm",
     "StackLayer",
     "ValidationResult",
+    "ValidityRange",
     "extract_from_pdk",
     "extract_layer_stack",
     "get_material_properties",
     "get_stack",
+    "load_overlay",
     "load_stack_yaml",
     "material_is_conductor",
     "material_is_dielectric",
+    "merge_overlay",
     "parse_layer_stack",
     "plot_stack",
     "print_stack",
     "print_stack_table",
+    "resolve_material_at_wavelength",
+    "should_enable_dispersion",
 ]

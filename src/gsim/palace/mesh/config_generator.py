@@ -150,7 +150,6 @@ def generate_palace_config(
         is_via = info.get("is_via", False)
 
         if is_via:
-            # Via volumes: look up material from the layer stack
             layer = stack.layers.get(material_name)
             if layer is None:
                 continue
@@ -169,7 +168,6 @@ def generate_palace_config(
             if sigma > 0:
                 mat_entry["Conductivity"] = sigma
         else:
-            # Use anisotropic tensor values when available
             if "permittivity_diagonal" in mat_props:
                 mat_entry["Permittivity"] = mat_props["permittivity_diagonal"]
             else:
@@ -181,6 +179,8 @@ def generate_palace_config(
             sigma = mat_props.get("conductivity", 0.0)
             if sigma > 0:
                 mat_entry["Conductivity"] = sigma
+            elif "conductivity_diagonal" in mat_props:
+                mat_entry["Conductivity"] = mat_props["conductivity_diagonal"]
             elif "loss_tangent_diagonal" in mat_props:
                 mat_entry["LossTan"] = mat_props["loss_tangent_diagonal"]
             else:

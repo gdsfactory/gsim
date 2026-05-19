@@ -403,6 +403,22 @@ class FDTD(BaseModel):
             setattr(self, k, v)
         return self
 
+    # Dispersion control
+    dispersion: Literal["auto", "true", "false"] = Field(
+        default="auto",
+        description=(
+            "Dispersion mode: 'auto' evaluates Δn/n across the source bandwidth "
+            "and enables dispersion per material when >0.5%; 'true' forces full "
+            "dispersion for all materials; 'false' forces constant-ε for speed."
+        ),
+    )
+    dispersion_threshold: float = Field(
+        default=0.005,
+        gt=0,
+        lt=1,
+        description="Δn/n threshold for auto-dispersion (default 0.5%).",
+    )
+
     # Diagnostics — output control for plots, fields, animations
     save_geometry: bool = Field(default=True)
     save_fields: bool = Field(default=True)

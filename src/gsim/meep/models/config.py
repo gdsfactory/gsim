@@ -291,13 +291,52 @@ class LayerStackEntry(BaseModel):
     sidewall_angle: float = Field(default=0.0, description="Sidewall angle in degrees")
 
 
+class LorentzianPoleConfig(BaseModel):
+    """One Lorentzian susceptibility pole for the config JSON."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    frequency: float = Field(gt=0, description="Resonance frequency (1/um)")
+    gamma: float = Field(ge=0, description="Damping rate (1/um)")
+    sigma: float = Field(gt=0, description="Oscillator strength")
+    sigma_diagonal: list[float] | None = Field(
+        default=None, description="Anisotropic strength [sx, sy, sz]"
+    )
+
+
 class MaterialData(BaseModel):
-    """Optical material data for config JSON."""
+    """Optical material data for config JSON.
+
+    Supports scalar (n, k), anisotropic tensors, and dispersive susceptibility
+    poles for the MEEP runner.
+    """
 
     model_config = ConfigDict(validate_assignment=True)
 
     refractive_index: float = Field(gt=0)
     extinction_coeff: float = Field(default=0.0, ge=0)
+
+    epsilon_diag: list[float] | None = Field(
+        default=None, description="Anisotropic ε diagonal [ex, ey, ez]"
+    )
+    epsilon_offdiag: list[float] | None = Field(
+        default=None, description="Anisotropic ε off-diagonal [eu, ev, ew]"
+    )
+    mu_diag: list[float] | None = Field(
+        default=None, description="Anisotropic μ diagonal [mx, my, mz]"
+    )
+    D_conductivity: float | None = Field(
+        default=None, ge=0, description="Isotropic conductivity for MEEP"
+    )
+    D_conductivity_diag: list[float] | None = Field(
+        default=None, description="Anisotropic conductivity diagonal"
+    )
+    epsilon_susceptibilities: list[LorentzianPoleConfig] | None = Field(
+        default=None, description="Lorentzian susceptibility poles for dispersion"
+    )
+    valid_freq_range: list[float] | None = Field(
+        default=None, description="Validity range [f_min, f_max] in 1/um"
+    )
 
 
 class FiberSourceConfig(BaseModel):
