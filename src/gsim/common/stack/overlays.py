@@ -75,10 +75,6 @@ def load_overlay(path: str | Path) -> dict[str, MaterialProperties]:
             if val is not None:
                 props_kwargs[key] = val
 
-        if "refractive_index" in entry:
-            props_kwargs["refractive_index"] = entry["refractive_index"]
-        if "extinction_coeff" in entry:
-            props_kwargs["extinction_coeff"] = entry["extinction_coeff"]
         if "material_axes" in entry:
             props_kwargs["material_axes"] = entry["material_axes"]
 
@@ -98,7 +94,6 @@ def load_overlay(path: str | Path) -> dict[str, MaterialProperties]:
                 dm = DispersionModel(
                     type=model_data.get("type", "constant"),
                     permittivity=model_data.get("permittivity"),
-                    refractive_index=model_data.get("refractive_index"),
                     validity=validity,
                     source=model_data.get("source", ""),
                 )
@@ -156,8 +151,6 @@ def _merge_material(
         "loss_tangent",
         "permeability",
         "material_axes",
-        "refractive_index",
-        "extinction_coeff",
     ):
         overlay_val = getattr(overlay, field_name)
         base_val = getattr(base, field_name)

@@ -544,8 +544,7 @@ class Simulation(BaseModel):
         for name, val in self._resolved_materials().items():
             overrides[name] = MaterialProperties(
                 type="dielectric",
-                refractive_index=val.n,
-                extinction_coeff=val.k,
+                permittivity=val.n**2,
             )
         return overrides
 

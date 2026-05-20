@@ -7,6 +7,7 @@ serializable format for the MEEP config JSON.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Any, Literal
 
 from gsim.meep.models.config import PortData
@@ -101,19 +102,20 @@ def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
     from gsim.common.stack.materials import get_material_properties
 
     best_layer = None
-    best_n = 0.0
+    best_eps = 0.0
 
     for layer in layer_stack.layers.values():
         props = get_material_properties(layer.material)
         if (
             props is not None
-            and props.refractive_index is not None
-            and props.refractive_index > best_n
+            and props.permittivity is not None
+            and not isinstance(props.permittivity, list)
+            and props.permittivity > best_eps
         ):
-            best_n = props.refractive_index
+            best_eps = props.permittivity
             best_layer = layer
 
-    return best_layer, best_n
+    return best_layer, math.sqrt(best_eps) if best_eps > 0 else 0.0
 
 
 def filter_ports_for_xz(

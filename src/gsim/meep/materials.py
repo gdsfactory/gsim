@@ -15,7 +15,7 @@ module maps them to MEEP-specific MaterialData fields:
     - ``material_axes`` -> ``epsilon_offdiag`` (rotation of the tensor)
 
 Dispersion rendering (RFC: dispersion flag on the Simulation):
-    - ``dispersion="auto"``: evaluate dn/n across source bandwidth; enable
+    - ``dispersion="auto"``: evaluate deps/eps across source bandwidth; enable
       susceptibility poles per material when > threshold (default 0.5%).
     - ``dispersion="true"``: force full dispersion for all materials.
     - ``dispersion="false"``: force constant-epsilon for speed.
@@ -234,13 +234,10 @@ def _resolved_to_material_data(
     Returns:
         MaterialData suitable for the MEEP config JSON
     """
-    if resolved.refractive_index is None:
-        raise ValueError("ResolvedMaterial has no refractive_index")
+    if resolved.permittivity is None:
+        raise ValueError("ResolvedMaterial has no permittivity")
 
-    data = MaterialData(
-        refractive_index=resolved.refractive_index,
-        extinction_coeff=resolved.extinction_coeff,
-    )
+    data = MaterialData()
 
     if dispersive_model is not None:
         poles = dispersion_model_to_meep_poles(dispersive_model)
@@ -251,7 +248,7 @@ def _resolved_to_material_data(
             data.valid_freq_range = freq_range
         eps_inf = dispersive_model.epsilon_inf
         data.epsilon_diag = [eps_inf] * 3
-    elif resolved.permittivity is not None:
+    else:
         data.epsilon_diag = _as_list(resolved.permittivity, 3)
 
     if resolved.permeability is not None:
@@ -270,9 +267,7 @@ def _resolved_to_material_data(
     has_cond = data.D_conductivity is not None or data.D_conductivity_diag is not None
     if lt_scalar is not None and lt_scalar > 0 and not has_cond:
         if _is_tensor(resolved.loss_tangent):
-            eps_diag = (
-                _as_list(resolved.permittivity, 3) or [resolved.refractive_index**2] * 3
-            )
+            eps_diag = _as_list(resolved.permittivity, 3) or [1.0] * 3
             lt_list = _as_list(resolved.loss_tangent, 3)
             data.D_conductivity_diag = [
                 loss_tangent_to_conductivity(lt, eps, freq_hz)
@@ -283,7 +278,7 @@ def _resolved_to_material_data(
                 )
             ]
         else:
-            eps_r = resolved.permittivity_scalar or (resolved.refractive_index**2)
+            eps_r = resolved.permittivity_scalar or 1.0
             data.D_conductivity = loss_tangent_to_conductivity(
                 lt_scalar, eps_r, freq_hz
             )
@@ -362,21 +357,20 @@ def resolve_materials(
                 continue
             if wavelength_um is not None:
                 resolved = props.evaluate_at_wavelength(wavelength_um)
-                if resolved.refractive_index is not None:
+                if resolved.permittivity is not None:
                     materials[name] = _resolved_to_material_data(
                         resolved, wavelength_um
                     )
                     continue
-            if props.refractive_index is None:
+            if props.permittivity is None:
                 warnings.warn(
-                    f"Material override '{name}' has no refractive_index -- "
-                    f"skipping. Use set_material('{name}', refractive_index=...)",
+                    f"Material override '{name}' has no permittivity -- "
+                    f"skipping. Use set_material('{name}', permittivity=...)",
                     stacklevel=2,
                 )
                 continue
             materials[name] = MaterialData(
-                refractive_index=props.refractive_index,
-                extinction_coeff=props.extinction_coeff or 0.0,
+                epsilon_diag=_as_list(props.permittivity, 3),
             )
             continue
 
@@ -388,28 +382,27 @@ def resolve_materials(
             resolved = resolve_material_at_wavelength(
                 name, wavelength_um, overlay=overlay
             )
-            if resolved is not None and resolved.refractive_index is not None:
+            if resolved is not None and resolved.permittivity is not None:
                 materials[name] = _resolved_to_material_data(resolved, wavelength_um)
                 continue
         else:
-            if db_props is not None and db_props.refractive_index is not None:
+            if db_props is not None and db_props.permittivity is not None:
                 materials[name] = MaterialData(
-                    refractive_index=db_props.refractive_index,
-                    extinction_coeff=db_props.extinction_coeff or 0.0,
+                    epsilon_diag=_as_list(db_props.permittivity, 3),
                 )
                 continue
 
         if db_props is None:
             warnings.warn(
                 f"Material '{name}' not found in database. "
-                f"Use sim.set_material('{name}', refractive_index=...) to add it.",
+                f"Use sim.set_material('{name}', permittivity=...) to add it.",
                 stacklevel=2,
             )
         else:
             warnings.warn(
-                f"Material '{name}' has no optical properties (refractive_index) "
+                f"Material '{name}' has no permittivity data "
                 f"-- layer will be omitted from simulation. "
-                f"Use sim.set_material('{name}', refractive_index=...) to include it.",
+                f"Use sim.set_material('{name}', permittivity=...) to include it.",
                 stacklevel=2,
             )
 
@@ -430,8 +423,8 @@ def resolve_materials_with_dispersion(
     Uses the frequency-aware resolver and the ``dispersion`` flag to decide
     whether each material should use constant or dispersive rendering.
 
-    ``dispersion="auto"``: For each material, evaluate dn/n across the source
-    bandwidth. If > threshold, populate epsilon_susceptibilities with
+    ``dispersion="auto"``: For each material, evaluate deps/eps across the
+    source bandwidth. If > threshold, populate epsilon_susceptibilities with
     Lorentzian poles from the Sellmeier/Lorentzian model. Otherwise, use
     constant-epsilon rendering.
 
@@ -447,7 +440,7 @@ def resolve_materials_with_dispersion(
         bandwidth_um: Source bandwidth in um
         dispersion: "auto", "true", or "false"
         overlay: PDK overlay dict (foundry-specific values)
-        threshold: dn/n threshold for auto-dispersion (default 0.5%)
+        threshold: deps/eps threshold for auto-dispersion (default 0.5%)
 
     Returns:
         Dict mapping material name to MaterialData
@@ -472,9 +465,9 @@ def resolve_materials_with_dispersion(
 
             props = _resolve_with_overlay(name, overlay)
 
-        if resolved is None or resolved.refractive_index is None:
+        if resolved is None or resolved.permittivity is None:
             warnings.warn(
-                f"Material '{name}' has no optical properties -- "
+                f"Material '{name}' has no permittivity data -- "
                 f"layer will be omitted from simulation.",
                 stacklevel=2,
             )

@@ -82,7 +82,7 @@ sim.mesh(preset="default")
 # %% papermill={"duration": 0.717334, "end_time": "2026-04-18T15:42:30.553126", "exception": false, "start_time": "2026-04-18T15:42:29.835792", "status": "completed"}
 # Static PNG
 sim.plot_mesh(show_groups=["metal", "P"])
-
+xsx
 # %% [markdown] papermill={"duration": 0.001594, "end_time": "2026-04-18T15:42:30.556259", "exception": false, "start_time": "2026-04-18T15:42:30.554665", "status": "completed"}
 # ### Run simulation on GDSFactory+ Cloud
 

@@ -307,14 +307,12 @@ class LorentzianPoleConfig(BaseModel):
 class MaterialData(BaseModel):
     """Optical material data for config JSON.
 
-    Supports scalar (n, k), anisotropic tensors, and dispersive susceptibility
-    poles for the MEEP runner.
+    Uses epsilon_diag as the primary permittivity representation.
+    Supports anisotropic tensors and dispersive susceptibility poles
+    for the MEEP runner.
     """
 
     model_config = ConfigDict(validate_assignment=True)
-
-    refractive_index: float = Field(gt=0)
-    extinction_coeff: float = Field(default=0.0, ge=0)
 
     epsilon_diag: list[float] | None = Field(
         default=None, description="Anisotropic epsilon diagonal [ex, ey, ez]"

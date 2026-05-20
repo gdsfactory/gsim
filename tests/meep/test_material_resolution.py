@@ -84,66 +84,42 @@ class TestRotateDiagonalTensor:
 
 class TestResolvedToMaterialData:
     def test_scalar_material(self):
-        resolved = ResolvedMaterial(
-            refractive_index=3.47,
-            permittivity=3.47**2,
-        )
+        resolved = ResolvedMaterial(permittivity=3.47**2)
         data = _resolved_to_material_data(resolved, 1.55)
-        assert data.refractive_index == pytest.approx(3.47)
-        assert data.extinction_coeff == 0.0
         assert data.epsilon_diag == pytest.approx([3.47**2] * 3)
 
     def test_anisotropic_permittivity(self):
-        resolved = ResolvedMaterial(
-            refractive_index=1.77,
-            permittivity=[9.3, 9.3, 11.5],
-        )
+        resolved = ResolvedMaterial(permittivity=[9.3, 9.3, 11.5])
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.epsilon_diag == pytest.approx([9.3, 9.3, 11.5])
 
     def test_permeability(self):
         resolved = ResolvedMaterial(
-            refractive_index=1.77,
-            permittivity=1.77**2,
-            permeability=[0.99999975, 0.99999975, 0.99999979],
+            permittivity=1.77**2, permeability=[0.99999975, 0.99999975, 0.99999979]
         )
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.mu_diag is not None
         assert len(data.mu_diag) == 3
 
     def test_loss_tangent_to_conductivity_conversion(self):
-        resolved = ResolvedMaterial(
-            refractive_index=1.77,
-            permittivity=1.77**2,
-            loss_tangent=3e-5,
-        )
+        resolved = ResolvedMaterial(permittivity=1.77**2, loss_tangent=3e-5)
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.D_conductivity is not None
         assert data.D_conductivity > 0
 
     def test_conductivity_direct(self):
-        resolved = ResolvedMaterial(
-            refractive_index=1.0,
-            permittivity=1.0,
-            conductivity=1e5,
-        )
+        resolved = ResolvedMaterial(permittivity=1.0, conductivity=1e5)
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.D_conductivity == 1e5
 
     def test_tensor_conductivity(self):
-        resolved = ResolvedMaterial(
-            refractive_index=1.0,
-            permittivity=1.0,
-            conductivity=[1e4, 1e4, 1e5],
-        )
+        resolved = ResolvedMaterial(permittivity=1.0, conductivity=[1e4, 1e4, 1e5])
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.D_conductivity_diag == pytest.approx([1e4, 1e4, 1e5])
 
     def test_anisotropic_loss_tangent(self):
         resolved = ResolvedMaterial(
-            refractive_index=1.77,
-            permittivity=[9.3, 9.3, 11.5],
-            loss_tangent=[3e-5, 3e-5, 8.6e-5],
+            permittivity=[9.3, 9.3, 11.5], loss_tangent=[3e-5, 3e-5, 8.6e-5]
         )
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.D_conductivity_diag is not None
@@ -153,7 +129,6 @@ class TestResolvedToMaterialData:
 
     def test_material_axes_rotation(self):
         resolved = ResolvedMaterial(
-            refractive_index=1.77,
             permittivity=[9.3, 9.3, 11.5],
             material_axes=[[0.8, 0.6, 0.0], [-0.6, 0.8, 0.0], [0.0, 0.0, 1.0]],
         )
@@ -162,16 +137,15 @@ class TestResolvedToMaterialData:
 
     def test_identity_axes_no_offdiag(self):
         resolved = ResolvedMaterial(
-            refractive_index=1.77,
             permittivity=[9.3, 9.3, 11.5],
             material_axes=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         )
         data = _resolved_to_material_data(resolved, 1.55)
         assert data.epsilon_offdiag is None
 
-    def test_no_refractive_index_raises(self):
-        resolved = ResolvedMaterial(permittivity=4.1)
-        with pytest.raises(ValueError, match="no refractive_index"):
+    def test_no_permittivity_raises(self):
+        resolved = ResolvedMaterial()
+        with pytest.raises(ValueError, match="no permittivity"):
             _resolved_to_material_data(resolved, 1.55)
 
 
@@ -191,7 +165,7 @@ class TestResolveMaterialsWithTensors:
         materials = resolve_materials({"SiO2"}, wavelength_um=1.55)
         assert "SiO2" in materials
         sio2 = materials["SiO2"]
-        assert sio2.refractive_index is not None
+        assert sio2.epsilon_diag is not None
 
 
 class TestSellmeierToLorentzian:
@@ -291,9 +265,7 @@ class TestValidityToFreqRange:
 
     def test_unspecified_validity(self):
         model = DispersionModel(
-            type="constant",
-            permittivity=4.1,
-            validity=ValidityRange(),
+            type="constant", permittivity=4.1, validity=ValidityRange()
         )
         freq_range = _validity_to_freq_range(model)
         assert freq_range is None
@@ -371,24 +343,15 @@ class TestDispersiveMaterialData:
             validity=ValidityRange(valid_wavelength=(0.21, 3.71)),
             epsilon_inf=1.0,
         )
-        resolved = ResolvedMaterial(
-            refractive_index=1.44,
-            permittivity=1.44**2,
-        )
+        resolved = ResolvedMaterial(permittivity=1.44**2)
         data = _resolved_to_material_data(resolved, 1.55, dispersive_model=model)
         assert data.epsilon_susceptibilities is not None
         assert len(data.epsilon_susceptibilities) == 3
         assert data.valid_freq_range is not None
 
     def test_constant_model_no_susceptibilities(self):
-        model = DispersionModel(
-            type="constant",
-            permittivity=4.1,
-        )
-        resolved = ResolvedMaterial(
-            refractive_index=1.44,
-            permittivity=1.44**2,
-        )
+        model = DispersionModel(type="constant", permittivity=4.1)
+        resolved = ResolvedMaterial(permittivity=1.44**2)
         data = _resolved_to_material_data(resolved, 1.55, dispersive_model=model)
         assert data.epsilon_susceptibilities is None
 
@@ -398,10 +361,7 @@ class TestDispersiveMaterialData:
             sellmeier_terms=[SellmeierTerm(B=1.0, C=0.1)],
             epsilon_inf=2.0,
         )
-        resolved = ResolvedMaterial(
-            refractive_index=1.5,
-            permittivity=2.25,
-        )
+        resolved = ResolvedMaterial(permittivity=2.25)
         data = _resolved_to_material_data(resolved, 1.55, dispersive_model=model)
         assert data.epsilon_diag == [2.0, 2.0, 2.0]
 
@@ -409,10 +369,7 @@ class TestDispersiveMaterialData:
 class TestResolveMaterialsWithDispersion:
     def test_auto_silicon_wide_bandwidth_gets_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"silicon"},
-            wavelength_um=1.55,
-            bandwidth_um=0.5,
-            dispersion="auto",
+            {"silicon"}, wavelength_um=1.55, bandwidth_um=0.5, dispersion="auto"
         )
         assert "silicon" in materials
         si = materials["silicon"]
@@ -420,10 +377,7 @@ class TestResolveMaterialsWithDispersion:
 
     def test_auto_sio2_narrow_bandwidth_no_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"SiO2"},
-            wavelength_um=1.55,
-            bandwidth_um=0.1,
-            dispersion="auto",
+            {"SiO2"}, wavelength_um=1.55, bandwidth_um=0.1, dispersion="auto"
         )
         assert "SiO2" in materials
         sio2 = materials["SiO2"]
@@ -431,10 +385,7 @@ class TestResolveMaterialsWithDispersion:
 
     def test_force_true_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"SiO2"},
-            wavelength_um=1.55,
-            bandwidth_um=0.1,
-            dispersion="true",
+            {"SiO2"}, wavelength_um=1.55, bandwidth_um=0.1, dispersion="true"
         )
         assert "SiO2" in materials
         sio2 = materials["SiO2"]
@@ -442,10 +393,7 @@ class TestResolveMaterialsWithDispersion:
 
     def test_force_false_no_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"silicon"},
-            wavelength_um=1.55,
-            bandwidth_um=0.5,
-            dispersion="false",
+            {"silicon"}, wavelength_um=1.55, bandwidth_um=0.5, dispersion="false"
         )
         assert "silicon" in materials
         si = materials["silicon"]
@@ -453,18 +401,13 @@ class TestResolveMaterialsWithDispersion:
 
     def test_conductor_skipped(self):
         materials = resolve_materials_with_dispersion(
-            {"aluminum"},
-            wavelength_um=1.55,
-            dispersion="true",
+            {"aluminum"}, wavelength_um=1.55, dispersion="true"
         )
         assert "aluminum" not in materials
 
     def test_auto_germanium_gets_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"germanium"},
-            wavelength_um=4.0,
-            bandwidth_um=0.5,
-            dispersion="auto",
+            {"germanium"}, wavelength_um=4.0, bandwidth_um=0.5, dispersion="auto"
         )
         assert "germanium" in materials
         ge = materials["germanium"]

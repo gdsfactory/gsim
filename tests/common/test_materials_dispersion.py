@@ -102,10 +102,6 @@ class TestDispersionModel:
         dm = DispersionModel(type="constant", permittivity=4.1)
         assert dm.evaluate_n(1.55) == pytest.approx(2.0248, rel=1e-3)
 
-    def test_constant_from_refractive_index(self):
-        dm = DispersionModel(type="constant", refractive_index=1.44)
-        assert dm.evaluate_n(1.55) == 1.44
-
     def test_sellmeier_sio2(self):
         dm = DispersionModel(
             type="sellmeier",
@@ -154,7 +150,7 @@ class TestDispersionModel:
 
     def test_constant_no_values_errors(self):
         dm = DispersionModel(type="constant")
-        with pytest.raises(ValueError, match="neither"):
+        with pytest.raises(ValueError, match="no permittivity"):
             dm.evaluate_n(1.55)
 
     def test_validity(self):
@@ -167,11 +163,7 @@ class TestDispersionModel:
         assert not dm.validity.covers_wavelength(10.0)
 
     def test_source(self):
-        dm = DispersionModel(
-            type="constant",
-            permittivity=4.1,
-            source="Malitson 1965",
-        )
+        dm = DispersionModel(type="constant", permittivity=4.1, source="Malitson 1965")
         assert dm.source == "Malitson 1965"
 
 
@@ -180,8 +172,7 @@ class TestMaterialPropertiesEvaluation:
         mat = get_material_properties("SiO2")
         assert mat is not None
         resolved = mat.evaluate_at_wavelength(1.55)
-        assert resolved.refractive_index is not None
-        assert resolved.refractive_index == pytest.approx(1.4442, rel=1e-3)
+        assert resolved.permittivity is not None
         assert resolved.within_validity
 
     def test_evaluate_at_wavelength_rf(self):
@@ -193,30 +184,24 @@ class TestMaterialPropertiesEvaluation:
         assert resolved.permittivity is not None
         assert resolved.permittivity == pytest.approx(4.1, rel=1e-2)
 
-    def test_evaluate_at_wavelength_legacy_fallback(self):
-        mat = MaterialProperties(
-            type="dielectric",
-            refractive_index=3.47,
-        )
+    def test_evaluate_at_wavelength_permittivity_only(self):
+        mat = MaterialProperties(type="dielectric", permittivity=12.0)
         resolved = mat.evaluate_at_wavelength(1.55)
-        assert resolved.refractive_index == 3.47
-        assert "legacy" in resolved.validity_note
+        assert resolved.permittivity == pytest.approx(12.0, rel=1e-3)
+        assert "constant permittivity" in resolved.validity_note
 
     def test_evaluate_at_wavelength_permittivity_fallback(self):
-        mat = MaterialProperties(
-            type="dielectric",
-            permittivity=4.1,
-        )
+        mat = MaterialProperties(type="dielectric", permittivity=4.1)
         resolved = mat.evaluate_at_wavelength(1.55)
-        assert resolved.refractive_index is not None
+        assert resolved.permittivity is not None
         assert resolved.permittivity == 4.1
 
     def test_evaluate_at_frequency(self):
         mat = get_material_properties("SiO2")
         assert mat is not None
         resolved = mat.evaluate_at_frequency(193e12)
-        assert resolved.refractive_index is not None
-        assert resolved.refractive_index == pytest.approx(1.4442, rel=1e-2)
+        assert resolved.permittivity is not None
+        assert resolved.permittivity is not None
 
     def test_evaluate_no_data(self):
         mat = MaterialProperties(type="dielectric")
@@ -237,10 +222,7 @@ class TestMaterialPropertiesEvaluation:
         assert variation_wide > variation_narrow
 
     def test_index_variation_no_dispersive_model(self):
-        mat = MaterialProperties(
-            type="dielectric",
-            refractive_index=1.44,
-        )
+        mat = MaterialProperties(type="dielectric")
         assert mat.index_variation(1.55, 0.1) == 0.0
 
     def test_unspecified_validity_warns(self):
@@ -277,27 +259,19 @@ class TestMaterialPropertiesEvaluation:
         assert len(d["dispersion_models"]) == 1  # ty: ignore[invalid-argument-type]
 
     def test_to_dict_includes_tensor_conductivity(self):
-        mat = MaterialProperties(
-            type="semiconductor",
-            conductivity=[2.0, 2.0, 0.5],
-        )
+        mat = MaterialProperties(type="semiconductor", conductivity=[2.0, 2.0, 0.5])
         d = mat.to_dict()
         assert d["conductivity"] == [2.0, 2.0, 0.5]
 
 
 class TestResolvedMaterial:
     def test_creation(self):
-        rm = ResolvedMaterial(
-            refractive_index=1.44,
-            permittivity=2.0736,
-            within_validity=True,
-        )
-        assert rm.refractive_index == 1.44
+        rm = ResolvedMaterial(permittivity=2.0736, within_validity=True)
+        assert rm.permittivity == pytest.approx(2.0736)
         assert rm.within_validity
 
     def test_anisotropic_fields(self):
         rm = ResolvedMaterial(
-            refractive_index=1.77,
             permittivity=[9.3, 9.3, 11.5],
             material_axes=[[0.8, 0.6, 0.0], [-0.6, 0.8, 0.0], [0.0, 0.0, 1.0]],
         )
@@ -309,7 +283,7 @@ class TestResolveMaterialAtWavelength:
     def test_resolve_sio2_at_optical(self):
         resolved = resolve_material_at_wavelength("SiO2", 1.55)
         assert resolved is not None
-        assert resolved.refractive_index == pytest.approx(1.4442, rel=1e-3)
+        assert resolved.permittivity is not None
 
     def test_resolve_unknown_warns(self):
         with warnings.catch_warnings(record=True) as w:
@@ -319,15 +293,12 @@ class TestResolveMaterialAtWavelength:
             assert len(w) == 1
 
     def test_resolve_with_override(self):
-        override = MaterialProperties(
-            type="dielectric",
-            refractive_index=2.5,
-        )
+        override = MaterialProperties(type="dielectric", permittivity=6.25)
         resolved = resolve_material_at_wavelength(
             "SiO2", 1.55, overrides={"SiO2": override}
         )
         assert resolved is not None
-        assert resolved.refractive_index == 2.5
+        assert resolved.permittivity == pytest.approx(6.25, rel=1e-3)
 
 
 class TestShouldEnableDispersion:
@@ -425,10 +396,9 @@ class TestMaterialsDB:
         assert isinstance(props.loss_tangent, list)
         assert props.material_axes is not None
 
-    def test_optical_classmethod(self):
-        mat = MaterialProperties.optical(refractive_index=2.5)
-        assert mat.refractive_index == 2.5
-        assert mat.extinction_coeff == 0.0
+    def test_dielectric_classmethod(self):
+        mat = MaterialProperties.dielectric(permittivity=6.25)
+        assert mat.permittivity == 6.25
         assert mat.type == "dielectric"
 
     def test_conductor_classmethod(self):
@@ -436,7 +406,7 @@ class TestMaterialsDB:
         assert mat.type == "conductor"
         assert mat.conductivity == 3.77e7
 
-    def test_dielectric_classmethod(self):
+    def test_dielectric_with_loss(self):
         mat = MaterialProperties.dielectric(permittivity=4.1, loss_tangent=0.001)
         assert mat.type == "dielectric"
         assert mat.permittivity == 4.1
@@ -452,9 +422,7 @@ class TestOverlayInResolution:
             permittivity=12.5,
             dispersion_models=[
                 DispersionModel(
-                    type="constant",
-                    permittivity=12.5,
-                    source="test overlay",
+                    type="constant", permittivity=12.5, source="test overlay"
                 ),
             ],
         )
@@ -465,14 +433,8 @@ class TestOverlayInResolution:
         assert resolved.permittivity == pytest.approx(12.5)
 
     def test_user_override_wins_over_overlay(self):
-        override_si = MaterialProperties(
-            type="dielectric",
-            permittivity=99.0,
-        )
-        overlay_si = MaterialProperties(
-            type="dielectric",
-            permittivity=12.5,
-        )
+        override_si = MaterialProperties(type="dielectric", permittivity=99.0)
+        overlay_si = MaterialProperties(type="dielectric", permittivity=12.5)
         resolved = resolve_material_at_wavelength(
             "silicon",
             1.55,
@@ -483,16 +445,12 @@ class TestOverlayInResolution:
         assert resolved.permittivity == 99.0
 
     def test_overlay_provides_missing_material(self):
-        custom = MaterialProperties(
-            type="dielectric",
-            permittivity=5.0,
-            refractive_index=2.236,
-        )
+        custom = MaterialProperties(type="dielectric", permittivity=5.0)
         resolved = resolve_material_at_wavelength(
             "custom_foundry_mat", 1.55, overlay={"custom_foundry_mat": custom}
         )
         assert resolved is not None
-        assert resolved.refractive_index == pytest.approx(2.236, abs=0.01)
+        assert resolved.permittivity is not None
 
     def test_overlay_with_sellmeier(self):
         overlay_sio2 = MaterialProperties(
@@ -540,4 +498,4 @@ class TestOverlayInResolution:
     def test_no_overlay_falls_to_builtin(self):
         resolved = resolve_material_at_wavelength("SiO2", 1.55, overlay=None)
         assert resolved is not None
-        assert resolved.refractive_index == pytest.approx(1.44, abs=0.02)
+        assert resolved.permittivity is not None

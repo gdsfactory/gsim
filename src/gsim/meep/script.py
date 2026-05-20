@@ -59,12 +59,14 @@ def build_materials(config):
     """Build MEEP material objects from config."""
     materials = {}
     for name, props in config["materials"].items():
-        n = props["refractive_index"]
-        k = props["extinction_coeff"]
-        if k > 0:
-            materials[name] = mp.Medium(index=n, D_conductivity=2 * cmath.pi * k / n)
+        eps_diag = props.get("epsilon_diag")
+        if eps_diag is not None:
+            if len(set(eps_diag)) == 1:
+                materials[name] = mp.Medium(epsilon=eps_diag[0])
+            else:
+                materials[name] = mp.Medium(epsilon_diag=eps_diag)
         else:
-            materials[name] = mp.Medium(index=n)
+            materials[name] = mp.Medium(epsilon=1.0)
     return materials
 
 

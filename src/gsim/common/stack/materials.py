@@ -15,10 +15,9 @@ Unified tensor fields:
     This replaces the old separate ``permittivity_diagonal`` etc. fields.
 
 Resolution priority:
-    1. dispersion_models evaluated at target frequency
+    1. dispersion_models evaluated at target frequency (-> permittivity)
     2. PDK overlay (constant-eps)
-    3. legacy ``refractive_index`` (converted to eps=n^2)
-    4. legacy ``permittivity`` scalar or tensor
+    3. ``permittivity`` scalar or tensor (directly specified)
 """
 
 from __future__ import annotations
@@ -120,7 +119,7 @@ class DispersionModel(BaseModel):
     Supports three model types:
     - ``sellmeier``: Sellmeier equation with B, C terms (optical)
     - ``lorentzian``: Lorentzian susceptibility poles (general dispersive)
-    - ``constant``: Constant permittivity or refractive index (single-frequency)
+    - ``constant``: Constant permittivity (single-frequency)
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -139,11 +138,6 @@ class DispersionModel(BaseModel):
         default=None,
         ge=1.0,
         description="Constant relative permittivity. For type='constant'.",
-    )
-    refractive_index: float | None = Field(
-        default=None,
-        gt=0,
-        description="Constant refractive index. For type='constant'.",
     )
 
     epsilon_inf: float = Field(
@@ -177,13 +171,9 @@ class DispersionModel(BaseModel):
             return math.sqrt(n_sq)
 
         if self.type == "constant":
-            if self.refractive_index is not None:
-                return self.refractive_index
             if self.permittivity is not None:
                 return math.sqrt(self.permittivity)
-            raise ValueError(
-                "Constant model has neither refractive_index nor permittivity"
-            )
+            raise ValueError("Constant model has no permittivity")
 
         if self.type == "lorentzian":
             if self.lorentzian_terms is None:
@@ -245,8 +235,6 @@ class ResolvedMaterial(BaseModel):
         default=None,
         description="Relative permittivity. Scalar (isotropic) or [ex, ey, ez].",
     )
-    refractive_index: float | None = Field(default=None, gt=0)
-    extinction_coeff: float = Field(default=0.0, ge=0)
     conductivity: float | list[float] | None = Field(
         default=None, description="Conductivity S/m. Scalar or [sx, sy, sz]."
     )
@@ -310,9 +298,8 @@ class MaterialProperties(BaseModel):
     floats (anisotropic).
 
     Resolution priority:
-        1. dispersion_models evaluated at target frequency
-        2. refractive_index (converted to eps = n^2)
-        3. permittivity scalar or tensor
+    1. dispersion_models evaluated at target frequency (-> permittivity)
+        2. permittivity scalar or tensor (directly specified)
     """
 
     model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
@@ -335,9 +322,6 @@ class MaterialProperties(BaseModel):
     )
     material_axes: list[list[float]] | None = None
 
-    refractive_index: float | None = Field(default=None, gt=0)
-    extinction_coeff: float | None = Field(default=None, ge=0)
-
     dispersion_models: list[DispersionModel] = Field(
         default_factory=list,
         description="Frequency-dependent dispersion models with validity ranges.",
@@ -356,10 +340,6 @@ class MaterialProperties(BaseModel):
             d["permeability"] = self.permeability
         if self.material_axes is not None:
             d["material_axes"] = self.material_axes
-        if self.refractive_index is not None:
-            d["refractive_index"] = self.refractive_index
-        if self.extinction_coeff is not None:
-            d["extinction_coeff"] = self.extinction_coeff
         if self.dispersion_models:
             d["dispersion_models"] = [m.model_dump() for m in self.dispersion_models]
         return d
@@ -370,7 +350,7 @@ class MaterialProperties(BaseModel):
         Resolution strategy:
         1. Scan dispersion_models for one whose validity covers the wavelength.
         2. If no model covers it, use a model with unspecified validity (warn).
-        3. If no dispersion models, fall back to legacy scalar fields.
+        3. If no dispersion models, fall back to the permittivity field directly.
         """
         covered_models = []
         unspecified_models = []
@@ -406,14 +386,12 @@ class MaterialProperties(BaseModel):
             loss_tangent=self.loss_tangent,
             permeability=self.permeability,
             material_axes=self.material_axes,
-            extinction_coeff=self.extinction_coeff or 0.0,
         )
 
         if selected is not None:
-            n = selected.evaluate_n(wavelength_um)
-            base.refractive_index = n
+            eps = selected.evaluate_permittivity(wavelength_um)
             base.permittivity = (
-                self.permittivity if _is_tensor(self.permittivity) else n**2
+                self.permittivity if _is_tensor(self.permittivity) else eps
             )
             base.model_type = selected.type
             base.model_source = selected.source
@@ -421,31 +399,13 @@ class MaterialProperties(BaseModel):
             base.validity_note = validity_note
             return base
 
-        if self.refractive_index is not None:
-            base.refractive_index = self.refractive_index
-            base.permittivity = (
-                self.permittivity
-                if _is_tensor(self.permittivity)
-                else self.refractive_index**2
-            )
-            base.within_validity = True
-            base.validity_note = "legacy scalar (no dispersion models)"
-            return base
-
         if self.permittivity is not None:
-            if _is_tensor(self.permittivity) and isinstance(self.permittivity, list):
-                eps_scalar = float(self.permittivity[0])
-            elif isinstance(self.permittivity, (int, float)):
-                eps_scalar = float(self.permittivity)
-            else:
-                eps_scalar = 1.0
-            base.refractive_index = math.sqrt(eps_scalar)
             base.within_validity = True
-            base.validity_note = "legacy scalar (no dispersion models)"
+            base.validity_note = "constant permittivity (no dispersion models)"
             return base
 
         base.within_validity = False
-        base.validity_note = "no optical or RF data available"
+        base.validity_note = "no permittivity data available"
         return base
 
     def evaluate_at_frequency(self, freq_hz: float) -> ResolvedMaterial:
@@ -454,9 +414,9 @@ class MaterialProperties(BaseModel):
         return self.evaluate_at_wavelength(wavelength_um)
 
     def index_variation(self, wavelength_um: float, bandwidth_um: float) -> float:
-        """Compute fractional index variation dn/n across a bandwidth.
+        """Compute fractional permittivity variation deps/eps across a bandwidth.
 
-        Returns 0.0 if the material has no dispersive model or scalar n.
+        Returns 0.0 if the material has no dispersive model or constant eps.
         """
         if not self.dispersion_models:
             return 0.0
@@ -465,20 +425,22 @@ class MaterialProperties(BaseModel):
         wl_max = wavelength_um + bandwidth_um / 2
 
         resolved_center = self.evaluate_at_wavelength(wavelength_um)
-        if resolved_center.refractive_index is None:
-            return 0.0
-        n_center = resolved_center.refractive_index
-        if n_center == 0:
+        eps_center = resolved_center.permittivity_scalar
+        if eps_center is None or eps_center == 0:
             return 0.0
 
         try:
-            n_min = self.evaluate_at_wavelength(wl_min).refractive_index or n_center
-            n_max = self.evaluate_at_wavelength(wl_max).refractive_index or n_center
+            eps_min = (
+                self.evaluate_at_wavelength(wl_min).permittivity_scalar or eps_center
+            )
+            eps_max = (
+                self.evaluate_at_wavelength(wl_max).permittivity_scalar or eps_center
+            )
         except (ValueError, ZeroDivisionError):
             return 0.0
 
-        delta_n = max(abs(n_max - n_center), abs(n_min - n_center))
-        return delta_n / n_center
+        delta_eps = max(abs(eps_max - eps_center), abs(eps_min - eps_center))
+        return delta_eps / eps_center
 
     @classmethod
     def conductor(cls, conductivity: float = 5.8e7) -> MaterialProperties:
@@ -492,22 +454,6 @@ class MaterialProperties(BaseModel):
         """Create a dielectric material with permittivity and loss tangent."""
         return cls(
             type="dielectric", permittivity=permittivity, loss_tangent=loss_tangent
-        )
-
-    @classmethod
-    def optical(
-        cls,
-        refractive_index: float,
-        extinction_coeff: float = 0.0,
-    ) -> MaterialProperties:
-        """Create a dielectric material with optical properties.
-
-        For photonic simulation.
-        """
-        return cls(
-            type="dielectric",
-            refractive_index=refractive_index,
-            extinction_coeff=extinction_coeff,
         )
 
 
@@ -588,7 +534,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=4.1,
         loss_tangent=0.0,
-        refractive_index=1.44,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -625,7 +570,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=7.5,
         loss_tangent=0.001,
-        refractive_index=2.0,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -661,19 +605,16 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=1.0,
         loss_tangent=0.0,
-        refractive_index=1.0,
     ),
     "vacuum": MaterialProperties(
         type="dielectric",
         permittivity=1.0,
         loss_tangent=0.0,
-        refractive_index=1.0,
     ),
     "silicon": MaterialProperties(
         type="semiconductor",
         permittivity=11.9,
         conductivity=2.0,
-        refractive_index=3.47,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -696,7 +637,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="semiconductor",
         permittivity=11.9,
         conductivity=2.0,
-        refractive_index=3.47,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -719,7 +659,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
         type="dielectric",
         permittivity=[9.3, 9.3, 11.5],
         loss_tangent=[3e-5, 3e-5, 8.6e-5],
-        refractive_index=1.77,
         permeability=[0.99999975, 0.99999975, 0.99999979],
         material_axes=[[0.8, 0.6, 0.0], [-0.6, 0.8, 0.0], [0.0, 0.0, 1.0]],
         dispersion_models=[
@@ -754,7 +693,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "germanium": MaterialProperties(
         type="semiconductor",
         permittivity=16.0,
-        refractive_index=4.18,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -770,7 +708,6 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "ge": MaterialProperties(
         type="semiconductor",
         permittivity=16.0,
-        refractive_index=4.18,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -809,7 +746,6 @@ MATERIAL_ALIASES: dict[str, str] = {
     "nitride": "Si3N4",
     "sin": "Si3N4",
     "si3n4": "Si3N4",
-    "ge": "germanium",
 }
 
 
@@ -915,7 +851,7 @@ def should_enable_dispersion(
 ) -> bool:
     """Determine if dispersion should be enabled for a material.
 
-    Compares dn/n across the bandwidth against a threshold.
+    Compares deps/eps across the bandwidth against a threshold.
 
     Args:
         material_name: Material name
