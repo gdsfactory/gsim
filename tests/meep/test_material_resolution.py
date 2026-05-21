@@ -405,7 +405,7 @@ class TestResolveMaterialsWithDispersion:
 
     def test_auto_germanium_gets_dispersion(self):
         materials = resolve_materials_with_dispersion(
-            {"germanium"}, wavelength_um=4.0, bandwidth_um=0.5, dispersion="auto"
+            {"germanium"}, wavelength_um=3.0, bandwidth_um=1.0, dispersion="auto"
         )
         assert "germanium" in materials
         ge = materials["germanium"]

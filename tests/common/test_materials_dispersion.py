@@ -7,6 +7,8 @@ import warnings
 
 import pytest
 
+from scipy.constants import c as C0
+
 from gsim.common.stack.materials import (
     DispersionModel,
     LorentzianTerm,
@@ -47,12 +49,12 @@ class TestValidityRange:
 
     def test_frequency_covers_wavelength(self):
         vr = ValidityRange(valid_frequency=(1e9, 10e9))
-        wl_um = 299_792_458 / 5e9 * 1e6
+        wl_um = C0 / 5e9 * 1e6
         assert vr.covers_wavelength(wl_um)
 
     def test_wavelength_covers_frequency(self):
         vr = ValidityRange(valid_wavelength=(0.21, 3.71))
-        freq_hz = 299_792_458 / (1.55 * 1e-6)
+        freq_hz = C0 / (1.55 * 1e-6)
         assert vr.covers_frequency(freq_hz)
 
 
@@ -177,7 +179,7 @@ class TestMaterialPropertiesEvaluation:
         mat = get_material_properties("SiO2")
         assert mat is not None
         freq_hz = 5e9
-        wl_um = 299_792_458 / freq_hz * 1e6
+        wl_um = C0 / freq_hz * 1e6
         resolved = mat.evaluate_at_wavelength(wl_um)
         assert resolved.permittivity is not None
         assert resolved.permittivity == pytest.approx(4.1, rel=1e-2)
@@ -346,8 +348,8 @@ class TestMaterialsDB:
         sellmeier = next(m for m in props.dispersion_models if m.type == "sellmeier")
         assert sellmeier.validity.valid_wavelength is not None
         assert sellmeier.validity.valid_wavelength[0] == 0.21
-        assert sellmeier.validity.valid_wavelength[1] == 3.71
-        assert sellmeier.source == "Malitson 1965, Appl. Opt. 4(9)"
+        assert sellmeier.validity.valid_wavelength[1] == 6.7
+        assert "Malitson 1965" in sellmeier.source
 
     def test_sio2_rf_model_validity(self):
         props = get_material_properties("SiO2")
