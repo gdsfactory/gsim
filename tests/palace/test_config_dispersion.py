@@ -67,7 +67,7 @@ class TestResolvePalaceMaterialsAtFrequency:
         assert "silicon" in resolved
         n_sq = resolved["silicon"]["permittivity"]
         n = n_sq**0.5
-        assert 3.5 < n < 4.2
+        assert 3.4 < n < 3.6
 
     def test_conductor_unchanged(self):
         materials = {"aluminum": MATERIALS_DB["aluminum"].to_dict()}

@@ -962,6 +962,112 @@ class Simulation(BaseModel):
             return self._job_id
         return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
 
+    def run_local(
+        self,
+        output_dir: str | Path | None = None,
+        *,
+        python_executable: str | Path | None = None,
+        num_processes: int | None = None,
+        verbose: bool = True,
+    ) -> Any:
+        """Run MEEP simulation locally.
+
+        Writes config, GDS, and runner script to ``output_dir``, then
+        executes ``run_meep.py`` via Python (with meep installed).
+
+        Args:
+            output_dir: Directory for config/GDS/script output.
+                If None, a temporary directory is created.
+            python_executable: Path to the Python interpreter that has
+                meep installed. If None, uses the current interpreter
+                (``sys.executable``).
+            num_processes: Number of MPI processes. If None (default),
+                runs as a single process. When >1, uses ``mpirun -np``.
+            verbose: Print progress messages.
+
+        Returns:
+            :class:`SParameterResult` parsed from the output CSV.
+
+        Raises:
+            FileNotFoundError: If meep is not installed.
+            RuntimeError: If simulation fails.
+        """
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+
+        from gsim.meep.models.results import SParameterResult
+
+        # Auto-write config (matches Palace run_local behavior)
+        if output_dir is None:
+            output_dir = Path(tempfile.mkdtemp(prefix="meep_local_"))
+        output_dir = Path(output_dir)
+        self.write_config(output_dir)
+
+        script_path = output_dir / "run_meep.py"
+        if not script_path.exists():
+            raise FileNotFoundError(
+                f"run_meep.py not found in {output_dir}. "
+                "write_config() should have created it."
+            )
+
+        exe = str(python_executable or sys.executable)
+
+        if num_processes is not None and num_processes > 1:
+            mpirun = shutil.which("mpirun")
+            if mpirun is None:
+                raise RuntimeError(
+                    "mpirun not found. Install an MPI runtime to use "
+                    "num_processes > 1, or omit it for single-process mode."
+                )
+            cmd = [mpirun, "-np", str(num_processes), exe, str(script_path)]
+        else:
+            cmd = [exe, str(script_path)]
+
+        if verbose:
+            logger.info("Running MEEP simulation in %s", output_dir)
+            logger.info("Command: %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if verbose and result.stdout:
+                logger.info(result.stdout)
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    if "warning" in line.lower():
+                        logger.warning(line)
+                    elif verbose:
+                        logger.info(line)
+        except subprocess.CalledProcessError as e:
+            error_msg = f"MEEP simulation failed (rc={e.returncode})"
+            if e.stdout:
+                error_msg += f"\n\nStdout:\n{e.stdout[-4000:]}"
+            if e.stderr:
+                error_msg += f"\n\nStderr:\n{e.stderr[-4000:]}"
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Python executable not found: {exe}. "
+                "Install MEEP or provide the correct python path."
+            ) from e
+
+        if verbose:
+            logger.info("Simulation completed successfully")
+
+        csv_path = output_dir / "s_parameters.csv"
+        if csv_path.exists():
+            return SParameterResult.from_csv(csv_path)
+
+        return SParameterResult.from_directory(output_dir)
+
     # -------------------------------------------------------------------------
     # Visualization
     # -------------------------------------------------------------------------
