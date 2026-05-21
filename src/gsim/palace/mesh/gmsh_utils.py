@@ -149,14 +149,53 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
                 tool_dimtags = [dt for prev in processed_in_dim for dt in prev.dimtags]
 
                 if tool_dimtags and entity.dimtags:
-                    cut_result, _ = gmsh.model.occ.cut(
-                        entity.dimtags,
-                        tool_dimtags,
-                        removeObject=True,
-                        removeTool=False,
-                    )
-                    gmsh.model.occ.synchronize()
-                    entity.dimtags = list(set(cut_result))
+                    # occ.cut(object, tool, removeObject=True) destroys all
+                    # object tags — including any that may be shared with
+                    # previously processed entities (from the fragment step).
+                    # Collect object tags so we can prune stale references
+                    # from processed_in_dim afterwards.
+                    object_tag_set = {t for _, t in entity.dimtags}
+                    try:
+                        cut_result, _ = gmsh.model.occ.cut(
+                            entity.dimtags,
+                            tool_dimtags,
+                            removeObject=True,
+                            removeTool=False,
+                        )
+                        gmsh.model.occ.synchronize()
+                        entity.dimtags = list(set(cut_result))
+                    except Exception:
+                        # Stale tags can cause "Unknown entity" errors.
+                        # Filter to only valid dimtags and retry.
+                        valid = []
+                        for dt in entity.dimtags:
+                            try:
+                                gmsh.model.getBoundary([dt], oriented=False)
+                                valid.append(dt)
+                            except Exception:
+                                pass
+                        gmsh.model.occ.synchronize()
+                        if valid:
+                            cut_result, _ = gmsh.model.occ.cut(
+                                valid,
+                                tool_dimtags,
+                                removeObject=True,
+                                removeTool=False,
+                            )
+                            gmsh.model.occ.synchronize()
+                            entity.dimtags = list(set(cut_result))
+                        else:
+                            entity.dimtags = []
+
+                    # Prune stale tags from previously processed entities.
+                    # removeObject=True may have invalidated shared tags.
+                    destroyed = object_tag_set - {t for _, t in entity.dimtags}
+                    if destroyed:
+                        for prev in processed_in_dim:
+                            prev.dimtags = [
+                                dt for dt in prev.dimtags
+                                if dt[1] not in destroyed
+                            ]
 
                 if entity.dimtags:
                     processed_in_dim.append(entity)
