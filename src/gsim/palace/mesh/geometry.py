@@ -186,6 +186,57 @@ def _merge_via_polygons(
     return result
 
 
+def _is_covered_by_dielectric_box(layer, stack: LayerStack) -> bool:
+    """Check if a layer is already represented as a bulk box in stack.dielectrics.
+
+    When a dielectric layer's material and z-range are covered by a
+    ``stack.dielectrics`` entry, the polygon geometry on that layer is
+    just a placeholder for a full-domain bulk region (e.g. vacuum or
+    cladding) and should NOT be polygon-extruded as a shaped volume.
+    """
+    from gsim.common.stack.materials import MATERIAL_ALIASES
+
+    layer_mat = MATERIAL_ALIASES.get(layer.material.lower(), layer.material.lower())
+    for d in stack.dielectrics:
+        d_mat_name = d.get("material", "")
+        d_mat = MATERIAL_ALIASES.get(d_mat_name.lower(), d_mat_name.lower())
+        if d_mat == layer_mat:
+            if d["zmin"] <= layer.zmin + 1e-6 and d["zmax"] >= layer.zmax - 1e-6:
+                return True
+    return False
+
+
+def _detect_shaped_dielectric_layers(
+    geometry: GeometryData, stack: LayerStack
+) -> set[str]:
+    """Detect dielectric layers that should be polygon-extruded (shaped).
+
+    A dielectric layer is shaped when it carries polygon geometry in the
+    component AND is NOT already represented as a bulk box in
+    ``stack.dielectrics``.  Bulk regions (vacuum, cladding) that have
+    both a Layer entry and a dielectric box entry are treated as boxes.
+    Waveguide cores only exist as Layer entries with polygon geometry —
+    they have no corresponding dielectric box, so they must be
+    polygon-extruded as shaped volumes.
+
+    Returns:
+        Set of layer names that should be treated as shaped dielectrics.
+    """
+    gds_layers_with_polys = {layernum for layernum, *_ in geometry.polygons}
+
+    shaped: set[str] = set()
+    for name, layer in stack.layers.items():
+        if layer.layer_type != "dielectric":
+            continue
+        if layer.gds_layer[0] not in gds_layers_with_polys:
+            continue
+        if _is_covered_by_dielectric_box(layer, stack):
+            continue
+        shaped.add(name)
+
+    return shaped
+
+
 def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
     """Get layer info from stack by GDS layer number.
 
@@ -219,8 +270,9 @@ def add_metals(
     """Add metal, via, and shaped-dielectric geometries to gmsh.
 
     Creates extruded volumes for vias and shells (surfaces) for conductors.
-    Shaped dielectrics (auto-detected: ``layer_type="dielectric"`` with
-    thin patterned layers) are extruded as 3D solid volumes, similar to
+    Shaped dielectrics (auto-detected: dielectric layers with polygon
+    geometry that are NOT already represented as bulk boxes in
+    ``stack.dielectrics``) are extruded as 3D solid volumes, similar to
     vias, but are not hollowed out — they retain their full volume and
     carry dielectric permittivity in the Palace config.
 
@@ -243,8 +295,8 @@ def add_metals(
     """
     # layer_name -> {"volumes": [], "surfaces_xy": [], "surfaces_z": []}
     metal_tags = {}
-    # Track shaped-dielectric layer names for downstream classification
-    shaped_dielectric_names: set[str] = set()
+    # Detect shaped-dielectric layers once (replaces thickness heuristic)
+    shaped_dielectric_names = _detect_shaped_dielectric_layers(geometry, stack)
 
     # Group polygons by layer
     polygons_by_layer = {}
@@ -268,17 +320,7 @@ def add_metals(
         layer_type = layer_info["type"]
         zmin = layer_info["zmin"]
         thickness = layer_info["thickness"]
-        # Auto-detect: a dielectric layer whose GDS layer has polygon
-        # geometry in the component is a shaped dielectric — it gets
-        # extruded as a 3D volume following the polygon cross-section
-        # (e.g. waveguide core).  Only thin patterned layers (< 5 µm)
-        # are treated as shaped; thick layers (> 5 µm) like substrate
-        # or vacuum remain full-bbox boxes.
-        _SHAPED_DIELECTRIC_MAX_THICKNESS = 5.0  # um
-        is_shaped_dielectric = (
-            layer_type == "dielectric"
-            and thickness < _SHAPED_DIELECTRIC_MAX_THICKNESS
-        )
+        is_shaped_dielectric = layer_name in shaped_dielectric_names
 
         if layer_type not in ("conductor", "via") and not is_shaped_dielectric:
             continue
@@ -627,14 +669,7 @@ def add_dielectrics(
         # extend to the air margins.  A shaped dielectric (e.g. waveguide
         # core) carves out of the surrounding oxide/substrate boxes, so those
         # boxes need to be large enough to fully surround the shaped volume.
-        # Auto-detect: any dielectric layer whose GDS layer has polygon
-        # geometry in the component will be extruded as a shaped volume.
-        gds_layers_with_polys = {layernum for layernum, *_ in geometry.polygons}
-        has_shaped = any(
-            layer.layer_type == "dielectric" and layer.gds_layer[0] in gds_layers_with_polys
-            for layer in stack.layers.values()
-        )
-        if has_shaped and not is_air_like:
+        if _detect_shaped_dielectric_layers(geometry, stack) and not is_air_like:
             xmin = xmin_air
             ymin = ymin_air
             xmax = xmax_air
