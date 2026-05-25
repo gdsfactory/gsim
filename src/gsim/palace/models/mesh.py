@@ -20,6 +20,7 @@ class MeshConfig(BaseModel):
         margin: XY margin around design (um)
         margin_x: X-axis margin override (um). Falls back to margin.
         margin_y: Y-axis margin override (um). Falls back to margin.
+        airbox_margin: Extra airbox around stack (um); 0 = disabled
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
@@ -43,6 +44,7 @@ class MeshConfig(BaseModel):
         ge=0,
         description="Y margin override (um). Falls back to margin.",
     )
+    airbox_margin: float = Field(default=0.0, ge=0)
     fmax: float = Field(default=100e9, gt=0)
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False

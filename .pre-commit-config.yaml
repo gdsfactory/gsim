@@ -56,6 +56,14 @@ repos:
     entry: python scripts/check_cp1252.py
     language: system
     types: [python]
+- repo: https://github.com/mwouts/jupytext
+  rev: v1.19.2
+  hooks:
+  - id: jupytext
+    args: [--sync]
+    files: ^nbs/.*\.(ipynb|py)$
+    additional_dependencies:
+    - jupytext>=1.19.0
 - repo: local
   hooks:
   - id: ty
@@ -63,6 +71,7 @@ repos:
     entry: uv run --no-sync ty check
     language: system
     files: \.(py)$
+    exclude: ^nbs/
 - repo: https://github.com/tombi-toml/tombi-pre-commit
   rev: v0.7.14
   hooks:
@@ -108,3 +117,4 @@ repos:
   - id: interrogate
     args: [--config=pyproject.toml]
     pass_filenames: true
+    exclude: ^(nbs|docs|tests)/

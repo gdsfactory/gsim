@@ -62,8 +62,8 @@ class PalaceSimMixin:
     _stack_kwargs: dict[str, Any]
     _pec_blocks: list
     _hints: dict[str, Any]
-    _airbox_config: dict[str, float] | None
     absorbing_boundary: bool
+    _airbox_config: dict[str, float]
 
     # -------------------------------------------------------------------------
     # Output directory
@@ -190,33 +190,44 @@ class PalaceSimMixin:
         *,
         margin_x: float,
         margin_y: float | None = None,
-        margin_above: float,
-        margin_below: float,
+        z_above: float,
+        z_below: float,
     ) -> None:
-        """Set explicit airbox margins for Palace meshing.
+        """Configure an explicit weak-priority airbox for meshing.
 
-        This is the single source of truth for airbox creation.
+        This helper centralizes airbox controls that were previously split
+        across mesh margin arguments and stack air thickness parameters.
+        The resulting airbox is created as a dedicated dielectric volume
+        with the weakest boolean-priority in mesh construction.
 
         Args:
-            margin_x: Lateral x margin around component bbox (um).
-            margin_y: Lateral y margin around component bbox (um).
-                Uses margin_x when omitted.
-            margin_above: Airbox z extension above the stack envelope (um).
-            margin_below: Airbox z extension below the stack envelope (um).
+            margin_x: Airbox x-margin around the design (um).
+            margin_y: Airbox y-margin around the design (um).
+                Defaults to ``margin_x`` when omitted.
+            z_above: Airbox extension above the stack top (um).
+            z_below: Airbox extension below the stack bottom (um).
         """
         if margin_x < 0:
             raise ValueError("margin_x must be >= 0")
         if margin_y is not None and margin_y < 0:
             raise ValueError("margin_y must be >= 0")
-        if margin_above < 0 or margin_below < 0:
-            raise ValueError("margin_above and margin_below must be >= 0")
+        if z_above < 0 or z_below < 0:
+            raise ValueError("z_above and z_below must be >= 0")
 
-        resolved_margin_y = margin_x if margin_y is None else margin_y
+        y = margin_x if margin_y is None else margin_y
+
+        # Keep mesh margin controls in sync for domain/port extents.
+        mesh_config = getattr(self, "mesh_config", None)
+        if mesh_config is not None:
+            mesh_config.margin_x = margin_x
+            mesh_config.margin_y = y
+
+        # Store explicit airbox expansion for generator plumbing.
         self._airbox_config = {
             "margin_x": margin_x,
-            "margin_y": resolved_margin_y,
-            "margin_above": margin_above,
-            "margin_below": margin_below,
+            "margin_y": y,
+            "z_above": z_above,
+            "z_below": z_below,
         }
 
     # -------------------------------------------------------------------------
@@ -544,100 +555,22 @@ class PalaceSimMixin:
         Call after mesh() and before run().
 
         Returns:
-            ValidationResult with validation status and messages
+            ValidationResult with validation status and messages when valid.
+
+        Raises:
+            RuntimeError: If mesh/config validation fails.
 
         Example:
             >>> sim.mesh(preset="coarse")
             >>> result = sim.validate_mesh()
             >>> print(result)
         """
-        errors = []
-        warnings_list = []
+        from gsim.palace.mesh.validation import validate_mesh as _validate_mesh
 
-        mesh_result = getattr(self, "_mesh_result", None) or getattr(
-            self, "_last_mesh_result", None
-        )
-        if mesh_result is None:
-            errors.append("No mesh generated. Call mesh() first.")
-            return ValidationResult(valid=False, errors=errors, warnings=warnings_list)
-
-        groups = mesh_result.groups
-
-        # Check dielectric volumes
-        if not groups.get("volumes"):
-            errors.append("No dielectric volumes in mesh.")
-        else:
-            vol_names = list(groups["volumes"].keys())
-            warnings_list.append(f"Volumes: {vol_names}")
-
-        # Check conductor surfaces (volumetric or PEC)
-        has_conductors = bool(groups.get("conductor_surfaces"))
-        has_pec = bool(groups.get("pec_surfaces"))
-        if not has_conductors and not has_pec:
-            errors.append(
-                "No conductor surfaces in mesh. "
-                "Check that conductor layers have polygons and correct layer_type."
-            )
-        else:
-            if has_conductors:
-                warnings_list.append(
-                    f"Conductor surfaces: {list(groups['conductor_surfaces'].keys())}"
-                )
-            if has_pec:
-                warnings_list.append(
-                    f"PEC surfaces: {list(groups['pec_surfaces'].keys())}"
-                )
-
-        # Check ports
-        port_surfaces = groups.get("port_surfaces", {})
-        if not port_surfaces and self.simulation_type == "driven":
-            errors.append("No port surfaces in mesh.")
-        else:
-            for port_name, port_info in port_surfaces.items():
-                if port_info.get("type") == "cpw":
-                    n_elems = len(port_info.get("elements", []))
-                    if n_elems < 2:
-                        errors.append(
-                            f"CPW port '{port_name}' has {n_elems} elements "
-                            f"(expected >= 2)."
-                        )
-
-        # Check absorbing boundary
-        if not groups.get("boundary_surfaces", {}).get("absorbing"):
-            warnings_list.append(
-                "No absorbing boundary found. "
-                "Configure set_airbox(...) for open boundaries."
-            )
-
-        # Validate config.json if it exists
-        output_dir = getattr(self, "_output_dir", None)
-        if output_dir is not None:
-            import json
-
-            config_path = output_dir / "config.json"
-            if config_path.exists():
-                try:
-                    config = json.loads(config_path.read_text())
-                    boundaries = config.get("Boundaries", {})
-                    if not boundaries.get("Conductivity") and not boundaries.get("PEC"):
-                        errors.append(
-                            "config.json has no Conductivity or PEC boundaries."
-                        )
-                    if (
-                        not boundaries.get("LumpedPort")
-                        and not boundaries.get("WavePort")
-                    ) and (
-                        self.simulation_type == "driven"
-                        or self.simulation_type == "waveport"
-                    ):
-                        errors.append(
-                            "config.json has no LumpedPort nor Waveport entries."
-                        )
-                except json.JSONDecodeError as e:
-                    errors.append(f"config.json is invalid JSON: {e}")
-
-        valid = len(errors) == 0
-        return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
+        result = _validate_mesh(self)
+        if not result.valid:
+            raise RuntimeError(f"Mesh validation failed:\n{result}")
+        return result
 
     # -------------------------------------------------------------------------
     # Convenience methods
@@ -887,7 +820,13 @@ class PalaceSimMixin:
                     offset=port_config.offset,
                 )
 
-            # Attach RLC values to port info for downstream consumers
+            # Clear any stale reactive metadata from previous simulations.
+            # kfactory Info is mapping-like (get/setitem) but has no pop/delitem.
+            gf_port.info["resistance"] = None
+            gf_port.info["inductance"] = None
+            gf_port.info["capacitance"] = None
+
+            # Attach RLC values to port info for downstream consumers.
             if port_config.resistance is not None:
                 gf_port.info["resistance"] = port_config.resistance
             if port_config.inductance is not None:
@@ -947,6 +886,7 @@ class PalaceSimMixin:
         model_name: str,
         verbose: bool,
         write_config: bool = True,
+        periodic_axis: str | None = None,
     ) -> SimulationResult:
         """Internal mesh generation."""
         from gsim.palace.mesh.generator import generate_mesh
@@ -967,6 +907,10 @@ class PalaceSimMixin:
         if verbose:
             logger.info("Generating mesh in %s", output_dir)
 
+        airbox_cfg = getattr(self, "_airbox_config", {})
+        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
+        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
+
         mesh_result = generate_mesh(
             component=component,
             stack=stack,
@@ -977,10 +921,11 @@ class PalaceSimMixin:
             max_mesh_size=mesh_config.max_mesh_size,
             margin_x=domain_margin_x,
             margin_y=domain_margin_y,
+            air_margin=mesh_config.airbox_margin,
             airbox_margin_x=airbox_cfg.get("margin_x"),
             airbox_margin_y=airbox_cfg.get("margin_y"),
-            airbox_margin_above=airbox_cfg.get("margin_above"),
-            airbox_margin_below=airbox_cfg.get("margin_below"),
+            airbox_z_above=airbox_cfg.get("z_above"),
+            airbox_z_below=airbox_cfg.get("z_below"),
             fmax=effective_fmax,
             show_gui=mesh_config.show_gui,
             simulation_type=self.simulation_type,
@@ -991,6 +936,7 @@ class PalaceSimMixin:
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
+            periodic_axis=periodic_axis,
             merge_via_distance=mesh_config.merge_via_distance,
             curve_fit_mode=mesh_config.curve_fit_mode,
             curve_fit_layers=mesh_config.curve_fit_layers,
@@ -1127,6 +1073,9 @@ class PalaceSimMixin:
         domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
 
         # Generate mesh in temp directory
+        airbox_cfg = getattr(self, "_airbox_config", {})
+        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
+        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
         with tempfile.TemporaryDirectory() as tmpdir:
             generate_mesh(
                 component=component,
@@ -1137,10 +1086,11 @@ class PalaceSimMixin:
                 max_mesh_size=mesh_config.max_mesh_size,
                 margin_x=domain_margin_x,
                 margin_y=domain_margin_y,
+                air_margin=mesh_config.airbox_margin,
                 airbox_margin_x=airbox_cfg.get("margin_x"),
                 airbox_margin_y=airbox_cfg.get("margin_y"),
-                airbox_margin_above=airbox_cfg.get("margin_above"),
-                airbox_margin_below=airbox_cfg.get("margin_below"),
+                airbox_z_above=airbox_cfg.get("z_above"),
+                airbox_z_below=airbox_cfg.get("z_below"),
                 fmax=mesh_config.fmax,
                 show_gui=True,
                 simulation_type=self.simulation_type,
@@ -1182,6 +1132,7 @@ class PalaceSimMixin:
         verbose: bool = True,
         auto_size: bool = False,
         cells_per_feature: int = 2,
+        periodic_axis: str | None = None,
         curve_fit_mode: Literal["line", "spline", "bspline"] | None = None,
         curve_fit_layers: list[str] | None = None,
         curve_fit_tolerance_um: float | None = None,
@@ -1216,6 +1167,8 @@ class PalaceSimMixin:
                 use their literal refined_mesh_size.
             cells_per_feature: Target cells across the smallest conductor
                 feature when auto_size=True. Default 2.
+            periodic_axis: Optional periodic axis ("x" or "y") for periodic
+                meshing constraints on opposite domain sides.
             curve_fit_mode: Patterned dielectric boundary mode (line/spline/bspline).
             curve_fit_layers: Layer names where spline fitting is applied.
             curve_fit_tolerance_um: Point merge tolerance before fitting.
@@ -1291,6 +1244,7 @@ class PalaceSimMixin:
             model_name=model_name,
             verbose=verbose,
             write_config=False,
+            periodic_axis=periodic_axis,
         )
 
         # Post-mesh summary: nodes, tets, refined / max sizes (in um).
@@ -1317,6 +1271,7 @@ class PalaceSimMixin:
     def write_config(
         self,
         *,
+        validate_mesh: bool = True,
         photonic: bool = False,
         photononic: bool | None = None,
     ) -> Path:
@@ -1373,7 +1328,7 @@ class PalaceSimMixin:
         )
 
         # Validate mesh and config unless this is a photonic workflow.
-        if not photonic:
+        if not photonic and validate_mesh:
             validation = self.validate_mesh()
             if not validation.valid:
                 raise ValueError(f"Mesh validation failed:\n{validation}")
@@ -1549,7 +1504,7 @@ class PalaceSimMixin:
         palace_sif_path: str | Path | None = None,
         palace_executable: str | Path | None = None,
         use_apptainer: bool = True,
-        num_processes: int = 1,
+        num_processes: int | None = None,
         num_threads: int | None = None,
         verbose: bool = True,
     ) -> SParams | dict[str, Path]:
@@ -1567,7 +1522,8 @@ class PalaceSimMixin:
                 If None, uses PALACE_EXECUTABLE environment variable or "palace".
             use_apptainer: If True (default), run via Apptainer using SIF file.
                 If False, run Palace executable directly.
-            num_processes: Number of MPI processes (default: 1)
+            num_processes: Number of MPI processes. If None (default),
+                uses all available CPUs.
             num_threads: Number of OpenMP threads to use for OpenMP builds, default is 1
                 or the value of OMP_NUM_THREADS in the environment
             verbose: Print progress messages and stream Palace output in real time
@@ -1612,6 +1568,10 @@ class PalaceSimMixin:
         output_dir = Path(self._output_dir)
         config_path = output_dir / "config.json"
         mesh_path = output_dir / "palace.msh"
+
+        # Default to all available CPUs when caller does not specify -np.
+        if num_processes is None:
+            num_processes = os.cpu_count() or 1
 
         # Check required files exist
         if not config_path.exists():

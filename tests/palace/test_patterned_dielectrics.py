@@ -85,7 +85,7 @@ def test_build_entities_prioritizes_patterned_dielectrics_over_background_boxes(
 
     orders = {entity.name: entity.mesh_order for entity in entities}
     assert orders["via1"] == 1
-    assert orders["P1"] == 1
+    assert orders["P1"] == -1
     assert orders["core"] == 2
     assert orders["SiO2"] == 3
-    assert orders["airbox"] == 4
+    assert orders["air"] == 4

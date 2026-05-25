@@ -11,6 +11,7 @@ This module contains Pydantic models for different simulation types:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -192,6 +193,64 @@ class EigenmodeConfig(BaseModel):
         ge=0,
         description="Number of eigenmodes to save as ParaView fields. 0 = disabled.",
     )
+    floquet: bool = Field(
+        default=False,
+        description=(
+            "Enable Floquet-periodic boundary setup for eigenmode simulations. "
+            "Requires a periodic axis to be set in mesh()."
+        ),
+    )
+    phi_target: float = Field(
+        default=math.pi / 2,
+        gt=0,
+        description="Target Bloch phase advance per cell (radians).",
+    )
+    n_eff_guess: float = Field(
+        default=2.0,
+        gt=0,
+        description="Initial effective-index estimate used for Floquet k-vector setup.",
+    )
+
+    @model_validator(mode="after")
+    def validate_floquet(self) -> Self:
+        """Validate Floquet dependencies for eigenmode setup."""
+        if self.floquet and self.target is None:
+            raise ValueError(
+                "Eigenmode Floquet requires target frequency. "
+                "Set target when floquet=True."
+            )
+        return self
+
+    def compute_floquet_wave_vector(
+        self,
+        *,
+        periodic_axis: Literal["x", "y"],
+        l0: float = 1e-6,
+    ) -> list[float]:
+        """Compute Palace Floquet wave vector [kx, ky, kz] in rad / mesh-unit.
+
+        Uses a practical initialization:
+            d_mesh = round(phi * c0 / (2*pi*f_target*n_eff*L0))
+            k = phi / d_mesh
+        where L0 is Palace's mesh-unit scale (default 1e-6 m).
+        """
+        if self.target is None:
+            raise ValueError(
+                "Cannot compute Floquet wave vector without eigenmode target frequency."
+            )
+
+        c0 = 299_792_458.0
+        d_mesh = (
+            self.phi_target * c0 / (2 * math.pi * self.target * self.n_eff_guess * l0)
+        )
+        d_mesh_rounded = max(1, round(d_mesh))
+        k_component = self.phi_target / d_mesh_rounded
+
+        if periodic_axis == "x":
+            return [k_component, 0.0, 0.0]
+        if periodic_axis == "y":
+            return [0.0, k_component, 0.0]
+        raise ValueError(f"periodic_axis must be 'x' or 'y', got {periodic_axis!r}")
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""

@@ -1,7 +1,3 @@
-[build-system]
-requires = ["build", "setuptools>=61", "uv", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "gsim"
 version = "0.0.16"
@@ -56,6 +52,7 @@ docs = [
   "vega-datasets>=0.9.0"
 ]
 lint = [
+  "jupytext>=1.16.0",
   "mkinit>=1.1.0",
   "mypy>=1.15.0",
   "pre-commit>=4.1.0",
@@ -71,6 +68,10 @@ test = [
   "pytest-regressions>=2.5.0",
   "pytest-xdist>=3.6.0",
 ]
+
+[build-system]
+requires = ["build", "setuptools>=61", "uv", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [[tool.bver.file]]
 src = "README.md"
@@ -89,14 +90,18 @@ ignore-words-list = "doubleclick,euclidian,te"
 
 [tool.interrogate]
 docstring-style = "google"
-exclude = ["docs/**/*", "tests/**/*"]
+exclude = ["docs/**/*", "tests/**/*", "nbs/**/*"]
 ext = []
 fail-under = 100
 ignore-nested-classes = true
 ignore-nested-functions = true
+ignore-overloaded-functions = true
 ignore-regex = ["^test_.*"]
 omit-covered-files = true
 verbose = 2
+
+[tool.jupytext]
+formats = "nbs///ipynb,nbs///py:percent"
 
 [tool.mypy]
 mypy_path = ["src"]
@@ -248,8 +253,23 @@ select = ["ALL"]
   "PERF401",  # use-list-extend (keeping for readability)
 ]
 "nbs/*.py" = [
+  "ANN",  # flake8-annotations
+  "ARG001",  # unused-function-argument
+  "B018",  # useless-expression (cell display)
+  "B905",  # zip-without-explicit-strict
+  "D",  # pydocstyle
+  "E402",  # module-import-not-at-top-of-file
+  "E501",  # line-too-long
   "EXE001",  # shebang-present-but-not-executable
+  "F821",  # undefined-name
+  "FBT003",  # boolean-positional-value-in-call
   "INP001",  # implicit-namespace-package
+  "N816",  # mixed-case-variable-in-global-scope
+  "NPY",  # numpy (allow legacy RNG calls in notebooks)
+  "PLC2401",  # non-ascii-name
+  "RUF003",  # ambiguous-unicode-character-comment
+  "S101",  # assert
+  "SLF001",  # private-member-access
   "T201",  # print (natural in scripts)
 ]
 "scripts/*.py" = [

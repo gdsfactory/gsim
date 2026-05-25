@@ -89,5 +89,3 @@ venv.bak/
 venv/
 wheelhouse/
 wheels/
-
-nbs/*.py

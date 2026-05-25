@@ -97,7 +97,8 @@ def _make_cpw_waveport_sim(tmp_path):
     sim = DrivenSim()
     sim.set_output_dir(str(tmp_path / "palace-sim"))
     sim.set_geometry(c)
-    sim.set_stack(substrate_thickness=2.0, air_above=100.0, air_below=100.0)
+    sim.set_stack(substrate_thickness=2.0)
+    sim.set_airbox(margin_x=0, margin_y=0, z_above=100.0, z_below=100.0)
     sim.add_wave_port("o1", layer="topmetal2", max_size=True, mode=1, excited=True)
     sim.add_wave_port("o2", layer="topmetal2", max_size=True, mode=1, excited=False)
     sim.set_driven(fmin=1e9, fmax=100e9, num_points=10)
@@ -260,7 +261,8 @@ def _make_cpw_via_transition_sim(tmp_path):
     sim = DrivenSim()
     sim.set_output_dir(str(tmp_path / "palace-sim"))
     sim.set_geometry(comp)
-    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.set_stack(substrate_thickness=2.0)
+    sim.set_airbox(margin_x=0, margin_y=0, z_above=300.0, z_below=300.0)
     sim.add_cpw_port("o1", layer="topmetal2", s_width=20, gap_width=15)
     sim.add_cpw_port("o2", layer="topmetal2", s_width=20, gap_width=15)
     sim.set_driven(fmin=1e9, fmax=100e9, num_points=10)
@@ -273,7 +275,7 @@ def cpw_via_transition_sim(tmp_path_factory):
     pytest.importorskip("ihp")
     tmp_path = tmp_path_factory.mktemp("via_transition")
     sim = _make_cpw_via_transition_sim(tmp_path)
-    sim.mesh(preset="coarse", planar_conductors=False)
+    sim.mesh(preset="coarse", margin_x=0, margin_y=0, planar_conductors=False)
     return sim
 
 
@@ -306,7 +308,8 @@ def _make_microstrip_sim(tmp_path):
     sim = DrivenSim()
     sim.set_output_dir(str(tmp_path / "palace-sim"))
     sim.set_geometry(c)
-    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.set_stack(substrate_thickness=2.0)
+    sim.set_airbox(margin_x=0, margin_y=0, z_above=300.0, z_below=300.0)
     for port in c.ports:
         assert port.name is not None
         sim.add_port(
@@ -473,7 +476,8 @@ def _make_branch_line_coupler_sim(tmp_path):
     sim = DrivenSim()
     sim.set_output_dir(str(tmp_path / "palace-sim"))
     sim.set_geometry(comp)
-    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.set_stack(substrate_thickness=2.0)
+    sim.set_airbox(margin_x=0, margin_y=0, z_above=300.0, z_below=300.0)
     for port in comp.ports:
         assert port.name is not None
         sim.add_port(

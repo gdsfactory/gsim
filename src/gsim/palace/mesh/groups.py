@@ -71,12 +71,14 @@ def assign_physical_groups(
 
     # --- Volumes (dielectrics + airbox) ---
     for material in dielectric_tags:
-        entity = entity_by_name.get(material)
-        pg = pg_map.get(material)
+        entity_name = "air" if material == "airbox" else material
+        group_name = "air" if material == "airbox" else material
+        entity = entity_by_name.get(entity_name)
+        pg = pg_map.get(entity_name)
         if entity and pg is not None:
             vol_tags = [t for d, t in entity.dimtags if d == 3]
             if vol_tags:
-                groups["volumes"][material] = {
+                groups["volumes"][group_name] = {
                     "phys_group": pg,
                     "tags": vol_tags,
                 }

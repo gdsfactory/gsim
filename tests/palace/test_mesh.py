@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+
+from gsim.common.stack import LayerStack
 from gsim.palace.mesh import MeshConfig
+from gsim.palace.mesh import validation as mesh_validation
+from gsim.palace.mesh.geometry import GeometryData, add_dielectrics
 
 
 class TestMeshConfig:
@@ -91,3 +97,121 @@ class TestMeshConfig:
         assert config.high_order_elements is True
         assert config.high_order_order == 3
         assert config.high_order_optimize is False
+
+
+def test_add_dielectrics_margin_applies_only_to_airlike(monkeypatch) -> None:
+    calls: list[tuple[float, float, float, float, float, float]] = []
+
+    def _fake_create_box(_kernel, xmin, ymin, zmin, xmax, ymax, zmax):
+        calls.append((xmin, ymin, zmin, xmax, ymax, zmax))
+        return len(calls)
+
+    monkeypatch.setattr(
+        "gsim.palace.mesh.geometry.gmsh_utils.create_box", _fake_create_box
+    )
+
+    class _Kernel:
+        def synchronize(self) -> None:
+            return
+
+    geometry = GeometryData(polygons=[], bbox=(0.0, 0.0, 10.0, 20.0), layer_bboxes={})
+    stack = LayerStack(
+        dielectrics=[
+            {"name": "oxide", "zmin": -2.0, "zmax": 0.5, "material": "SiO2"},
+            {"name": "air", "zmin": 0.5, "zmax": 8.0, "material": "air"},
+            {"name": "passivation", "zmin": 8.0, "zmax": 9.0, "material": "passive"},
+        ],
+        materials={
+            "SiO2": {"type": "dielectric", "permittivity": 4.1},
+            "air": {"type": "dielectric", "permittivity": 1.0},
+            "passive": {"type": "dielectric", "permittivity": 6.6},
+        },
+    )
+
+    add_dielectrics(
+        _Kernel(), geometry, stack, margin_x=5.0, margin_y=7.0, air_margin=0.0
+    )
+
+    # SiO2 and passive keep original bbox; only air expands by margins.
+    assert calls[0] == (0.0, 0.0, -2.0, 10.0, 20.0, 0.5)
+    assert calls[1] == (-5.0, -7.0, 0.5, 15.0, 27.0, 8.0)
+    assert calls[2] == (0.0, 0.0, 8.0, 10.0, 20.0, 9.0)
+
+
+def test_add_dielectrics_explicit_airbox_z_extents(monkeypatch) -> None:
+    calls: list[tuple[float, float, float, float, float, float]] = []
+
+    def _fake_create_box(_kernel, xmin, ymin, zmin, xmax, ymax, zmax):
+        calls.append((xmin, ymin, zmin, xmax, ymax, zmax))
+        return len(calls)
+
+    monkeypatch.setattr(
+        "gsim.palace.mesh.geometry.gmsh_utils.create_box", _fake_create_box
+    )
+
+    class _Kernel:
+        def synchronize(self) -> None:
+            return
+
+    geometry = GeometryData(polygons=[], bbox=(0.0, 0.0, 10.0, 20.0), layer_bboxes={})
+    stack = LayerStack(
+        dielectrics=[
+            {"name": "oxide", "zmin": -2.0, "zmax": 0.5, "material": "SiO2"},
+            {"name": "air", "zmin": 0.5, "zmax": 8.0, "material": "air"},
+        ],
+        materials={
+            "SiO2": {"type": "dielectric", "permittivity": 4.1},
+            "air": {"type": "dielectric", "permittivity": 1.0},
+        },
+    )
+
+    tags = add_dielectrics(
+        _Kernel(),
+        geometry,
+        stack,
+        margin_x=5.0,
+        margin_y=7.0,
+        air_margin=0.0,
+        airbox_z_above=100.0,
+        airbox_z_below=100.0,
+    )
+
+    assert "airbox" in tags
+    # Air layer is skipped when explicit airbox is built.
+    assert list(tags.keys()) == ["SiO2", "airbox"]
+
+
+class TestValidationHelpers:
+    """Test helper routines used by mesh validation."""
+
+    def test_parse_direction(self):
+        """Direction parser returns normalized vectors and rejects unknown keys."""
+        vec = mesh_validation._parse_direction("+X")
+        assert np.allclose(vec, np.array([1.0, 0.0, 0.0]))
+
+        with pytest.raises(ValueError, match="Unknown port direction"):
+            mesh_validation._parse_direction("north")
+
+    def test_perp_dist(self):
+        """Perpendicular distance to an axis-aligned line is computed correctly."""
+        v = np.array([0.0, 3.0, 4.0])
+        origin = np.zeros(3)
+        normals = [np.array([1.0, 0.0, 0.0])]
+        dist = mesh_validation._perp_dist(v, normals, origin)
+        assert dist == pytest.approx(5.0)
+
+    def test_palace_obb_planar_rectangle(self):
+        """OBB helper handles a simple planar rectangle point cloud."""
+        pts = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [2.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
+        _center, axes, planar = mesh_validation._palace_obb(pts)
+        lengths = [2.0 * float(np.linalg.norm(ax)) for ax in axes]
+        assert planar is True
+        assert max(lengths) == pytest.approx(2.0)
+        assert min(lengths) == pytest.approx(0.0)

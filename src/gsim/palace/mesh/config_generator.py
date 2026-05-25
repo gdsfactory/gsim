@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import gmsh
 
@@ -32,6 +32,7 @@ def generate_palace_config(
     eigenmode_config: EigenmodeConfig | None = None,
     numerical_config: NumericalConfig | None = None,
     absorbing_boundary: bool = True,
+    periodic_axis: str | None = None,
     hints: dict[str, Any] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
@@ -149,7 +150,7 @@ def generate_palace_config(
 
         mat_entry: dict[str, object] = {"Attributes": [info["phys_group"]]}
 
-        if volume_name == "airbox":
+        if volume_name in {"airbox", "air"}:
             mat_entry["Permittivity"] = 1.0
             mat_entry["LossTan"] = 0.0
         elif is_via:
@@ -210,6 +211,10 @@ def generate_palace_config(
     lumped_ports: list[dict[str, object]] = []
     wave_ports: list[dict[str, object]] = []
     port_idx = 1
+    # Passive reactive ports are appended after all primary ports are assigned
+    # indices so that their synthetic indices never clash.  We collect them here
+    # and append them to lumped_ports once the primary loop finishes.
+    passive_reactive_ports: list[dict[str, object]] = []
 
     for port in ports:
         if simulation_type != "driven":
@@ -244,21 +249,63 @@ def generate_palace_config(
                         if port.geometry == PortGeometry.VIA
                         else port.direction.upper()
                     )
-                    port_entry: dict[str, object] = {
-                        "Index": port_idx,
-                        "R": port.impedance,
-                        "Direction": direction,
-                        "Excitation": port_idx if port.excited else False,
-                        "Attributes": [port_group["phys_group"]],
-                    }
-                    if port.resistance is not None:
-                        port_entry["Rs"] = port.resistance
-                    if port.inductance is not None:
-                        port_entry["L"] = port.inductance
-                    if port.capacitance is not None:
-                        port_entry["C"] = port.capacitance
-                    lumped_ports.append(port_entry)
-                else:
+
+                    has_reactive = (
+                        port.resistance is not None
+                        or (port.inductance is not None and port.inductance > 0)
+                        or (port.capacitance is not None and port.capacitance > 0)
+                    )
+
+                    if simulation_type == "driven" and has_reactive:
+                        # Driven simulations forbid L/C on excited ports.
+                        # Emit the excited port with only R=impedance, then a
+                        # separate passive (Active: false) lumped port carrying
+                        # the reactive parameters on the same boundary surface.
+                        # Palace allows shared attributes when Active is false.
+                        port_entry: dict[str, object] = {
+                            "Index": port_idx,
+                            "R": port.impedance,
+                            "Direction": direction,
+                            "Excitation": port_idx if port.excited else False,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                        lumped_ports.append(port_entry)
+
+                        reactive_entry: dict[str, object] = {
+                            # Placeholder index - will be replaced after the
+                            # primary loop assigns all port_idx values.
+                            "Index": None,
+                            "Direction": direction,
+                            "Attributes": [port_group["phys_group"]],
+                            "Active": False,
+                        }
+                        if port.resistance is not None:
+                            reactive_entry["R"] = port.resistance
+                        if port.inductance is not None and port.inductance > 0:
+                            reactive_entry["L"] = port.inductance
+                        if port.capacitance is not None and port.capacitance > 0:
+                            reactive_entry["C"] = port.capacitance
+                        passive_reactive_ports.append(reactive_entry)
+                    else:
+                        # Eigenmode (or non-excited driven port): R/L/C on the
+                        # same port entry is supported.
+                        eigenmode_entry: dict[str, object] = {
+                            "Index": port_idx,
+                            "Direction": direction,
+                            "Excitation": port_idx if port.excited else False,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                        if port.impedance:
+                            eigenmode_entry["R"] = port.impedance
+                        if port.resistance is not None:
+                            eigenmode_entry["R"] = port.resistance
+                        if port.inductance is not None and port.inductance > 0:
+                            eigenmode_entry["L"] = port.inductance
+                        if port.capacitance is not None and port.capacitance > 0:
+                            eigenmode_entry["C"] = port.capacitance
+                        lumped_ports.append(eigenmode_entry)
+
+                elif port.port_type == PortType.WAVEPORT:
                     wave_ports.append(
                         {
                             "Index": port_idx,
@@ -269,6 +316,14 @@ def generate_palace_config(
                         }
                     )
         port_idx += 1
+
+    # Assign unique indices to passive reactive ports now that all primary
+    # indices are consumed (port_idx is one past the last primary index).
+    synthetic_idx = port_idx
+    for entry in passive_reactive_ports:
+        entry["Index"] = synthetic_idx
+        synthetic_idx += 1
+    lumped_ports.extend(passive_reactive_ports)
 
     boundaries: dict[str, object] = {
         "Conductivity": conductors,
@@ -287,6 +342,53 @@ def generate_palace_config(
         boundaries["Absorbing"] = {
             "Attributes": attrs,
             "Order": 2,
+        }
+
+    if (
+        simulation_type == "eigenmode"
+        and eigenmode_config is not None
+        and eigenmode_config.floquet
+    ):
+        axis = (periodic_axis or "").lower()
+        if axis not in {"x", "y"}:
+            raise ValueError(
+                "Floquet eigenmode requires a periodic axis set in mesh(). "
+                "Use mesh(periodic_axis='x') or mesh(periodic_axis='y')."
+            )
+
+        donor_info = groups["boundary_surfaces"].get("periodic_donor")
+        receiver_info = groups["boundary_surfaces"].get("periodic_receiver")
+        if donor_info is None or receiver_info is None:
+            raise ValueError(
+                "Floquet enabled but periodic donor/receiver boundaries were not "
+                "found in the generated mesh."
+            )
+
+        donor_pg = donor_info.get("phys_group")
+        receiver_pg = receiver_info.get("phys_group")
+        periodic_donor_attrs = donor_pg if isinstance(donor_pg, list) else [donor_pg]
+        periodic_receiver_attrs = (
+            receiver_pg if isinstance(receiver_pg, list) else [receiver_pg]
+        )
+
+        if not periodic_donor_attrs or not periodic_receiver_attrs:
+            raise ValueError("Floquet periodic boundary attributes are empty.")
+
+        axis_lit: Literal["x", "y"] = "x" if axis == "x" else "y"
+
+        floquet_vector = eigenmode_config.compute_floquet_wave_vector(
+            periodic_axis=axis_lit,
+            l0=float(config["Model"]["L0"]),
+        )
+
+        boundaries["Periodic"] = {
+            "FloquetWaveVector": floquet_vector,
+            "BoundaryPairs": [
+                {
+                    "DonorAttributes": sorted(periodic_donor_attrs),
+                    "ReceiverAttributes": sorted(periodic_receiver_attrs),
+                }
+            ],
         }
 
     config["Boundaries"] = boundaries
@@ -469,6 +571,7 @@ def write_config(
         eigenmode_config=eigenmode_config,
         numerical_config=numerical_config,
         absorbing_boundary=absorbing_boundary,
+        periodic_axis=mesh_result.periodic_axis,
         hints=hints,
     )
 
