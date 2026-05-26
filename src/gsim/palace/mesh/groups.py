@@ -179,6 +179,40 @@ def assign_physical_groups(
                         "tags": surf_tags,
                     }
 
+    # --- Via boundary surfaces (via volume faces exposed to dielectric) ---
+    #
+    # Palace's electrostatic solver treats Conductivity-bearing material domains
+    # as plain dielectrics; current does NOT flow through such regions to drag
+    # terminal potential into them. To make a via behave as a true conductive
+    # extension of the terminal it connects to, we need its dielectric-facing
+    # boundary surfaces (bottom + sides — the top has already been merged with
+    # the touching conductor shell) to be Dirichlet boundaries on that terminal.
+    #
+    # The boolean pipeline labels these surfaces "<material>__<via>" (parts are
+    # sorted, joined with "__"). Collect them here by via layer so the config
+    # generator can attach them to the right terminal.
+    if _stack:
+        cond_via_names = {
+            n
+            for n, layer in _stack.layers.items()
+            if layer.layer_type in ("conductor", "via")
+        }
+        via_boundary: dict[str, list[int]] = {}
+        for pg_name, pg_tag in pg_map.items():
+            parts = pg_name.split("__")
+            via_parts = [p for p in parts if p in via_layers]
+            if len(via_parts) != 1:
+                continue
+            others = [p for p in parts if p != via_parts[0]]
+            # Skip outer-boundary side ("__None") and via<->conductor interfaces
+            if not others or "None" in others:
+                continue
+            if any(o in cond_via_names for o in others):
+                continue
+            via_boundary.setdefault(via_parts[0], []).append(pg_tag)
+        if via_boundary:
+            groups["via_boundary_surfaces"] = via_boundary
+
     # --- Boundary surfaces (outer faces labelled *__None by the pipeline) ---
     boundary_pgs: list[int] = [
         pg for name, pg in pg_map.items() if name.endswith("__None")

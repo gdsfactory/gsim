@@ -145,6 +145,47 @@ def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
     return None
 
 
+def _snap_via_z_range(
+    stack: LayerStack,
+    via_name: str,
+    zmin: float,
+    zmax: float,
+    tol: float = 0.05,
+) -> tuple[float, float]:
+    """Snap a via's z-range so it doesn't sliver into adjacent conductor layers.
+
+    PDK stacks routinely model vias with z-ranges that overlap the metal layers
+    they connect to (e.g. IHP `vmim` z=[5.58, 6.24] vs `topmetal1` z=[6.23, 8.23]
+    — a 10 nm overlap to model fab interdiffusion). After mesh fragmentation,
+    that overlap becomes a sliver volume too thin for gmsh to mesh, producing
+    "No elements in volume N" warnings.
+
+    If the via's zmax exceeds an adjacent conductor's zmin by less than *tol*,
+    snap zmax down to that conductor's zmin (and symmetrically for zmin).
+    """
+    new_zmin, new_zmax = zmin, zmax
+    for other_name, other in stack.layers.items():
+        if other_name == via_name or other.layer_type != "conductor":
+            continue
+        # Via top extends slightly into the conductor above
+        if zmin < other.zmin < zmax and (zmax - other.zmin) < tol:
+            new_zmax = min(new_zmax, other.zmin)
+        # Via bottom extends slightly into the conductor below
+        if zmin < other.zmax < zmax and (other.zmax - zmin) < tol:
+            new_zmin = max(new_zmin, other.zmax)
+    if (new_zmin, new_zmax) != (zmin, zmax):
+        logger.info(
+            "Snapped via '%s' z-range [%.3f, %.3f] -> [%.3f, %.3f] "
+            "to avoid sliver against adjacent conductor",
+            via_name,
+            zmin,
+            zmax,
+            new_zmin,
+            new_zmax,
+        )
+    return new_zmin, new_zmax
+
+
 def _merge_via_polygons(
     polys: list[tuple[list[float], list[float], list]],
     merge_distance: float,
@@ -263,6 +304,11 @@ def add_metals(
 
         if layer_type not in ("conductor", "via"):
             continue
+
+        # Snap via z-range so it does not sliver into an adjacent conductor
+        if layer_type == "via":
+            zmin, zmax = _snap_via_z_range(stack, layer_name, zmin, zmin + thickness)
+            thickness = zmax - zmin
 
         if layer_name not in metal_tags:
             metal_tags[layer_name] = {

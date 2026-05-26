@@ -397,7 +397,13 @@ def validate_mesh(sim) -> ValidationResult:
             try:
                 config = json.loads(config_path.read_text())
                 boundaries = config.get("Boundaries", {})
-                if not boundaries.get("Conductivity") and not boundaries.get("PEC"):
+                has_conductor_bounds = (
+                    boundaries.get("Conductivity")
+                    or boundaries.get("PEC")
+                    or boundaries.get("Terminal")
+                    or boundaries.get("Ground")
+                )
+                if not has_conductor_bounds:
                     errors.append("config.json has no Conductivity or PEC boundaries.")
                 if (
                     not boundaries.get("LumpedPort")
