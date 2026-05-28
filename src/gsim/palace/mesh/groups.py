@@ -62,12 +62,18 @@ def assign_physical_groups(
     # Helper: entity name -> (phys_group, surface_tags)
     entity_by_name: dict[str, gmsh_utils.Entity] = {e.name: e for e in entities}
 
-    # Build set of via layer names
+    # Build set of via and shaped-dielectric layer names
     via_layers: set[str] = set()
+    shaped_dielectric_layers: set[str] = set()
     if _stack:
         via_layers = {
             n for n, layer in _stack.layers.items() if layer.layer_type == "via"
         }
+
+    # Auto-detected shaped dielectrics from add_metals() metadata
+    _shaped_meta = metal_tags.get("__shaped_dielectrics__")
+    if isinstance(_shaped_meta, set):
+        shaped_dielectric_layers |= _shaped_meta
 
     # --- Volumes (dielectrics + airbox) ---
     for material in dielectric_tags:
@@ -96,8 +102,23 @@ def assign_physical_groups(
                     "is_via": True,
                 }
 
+    # --- Shaped dielectric volumes (3D polygon-extruded dielectrics) ---
+    for layer_name in shaped_dielectric_layers:
+        entity = entity_by_name.get(layer_name)
+        pg = pg_map.get(layer_name)
+        if entity and pg is not None:
+            vol_tags = [t for d, t in entity.dimtags if d == 3]
+            if vol_tags:
+                groups["volumes"][layer_name] = {
+                    "phys_group": pg,
+                    "tags": vol_tags,
+                    "is_shaped_dielectric": True,
+                }
+
     # --- PEC surfaces (planar conductors) ---
     for layer_name, tag_info in metal_tags.items():
+        if layer_name == "__shaped_dielectrics__":
+            continue
         if tag_info["surfaces_xy"]:
             pec_name = f"{layer_name}_pec"
             entity = entity_by_name.get(pec_name)
@@ -127,6 +148,8 @@ def assign_physical_groups(
 
     # --- Volumetric conductor surfaces (finite thickness) ---
     for layer_name, tag_info in metal_tags.items():
+        if layer_name == "__shaped_dielectrics__":
+            continue
         if tag_info["volumes"]:
             for suffix in ("_xy", "_z"):
                 name = f"{layer_name}{suffix}"

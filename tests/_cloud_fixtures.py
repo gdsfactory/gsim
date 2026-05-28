@@ -29,7 +29,7 @@ def make_sbend_sim():
 
     sim = Simulation()
     sim.geometry.component = component
-    sim.materials = {"si": 3.47, "SiO2": 1.44}
+    sim.materials = {"si": 12.0, "SiO2": 2.1}
     sim.source.port = "o1"
     sim.source.wavelength = 1.55
     sim.source.wavelength_span = 0.05
@@ -61,7 +61,7 @@ def make_2d_xz_gc_sim():
 
     sim = Simulation()
     sim.geometry.component = c
-    sim.materials = {"si": 3.47, "SiO2": 1.44}
+    sim.materials = {"si": 12.0, "SiO2": 2.1}
 
     sim.solver.is_3d = False
     sim.solver.plane = "xz"

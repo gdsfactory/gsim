@@ -17,6 +17,7 @@ from gsim.meep import (
     WavelengthConfig,
 )
 from gsim.meep.models.config import (
+    MaterialData,
     StoppingConfig,
     SymmetryEntry,
 )
@@ -125,7 +126,7 @@ class TestSimConfig:
                     "is_source": True,
                 }
             ],
-            materials={"si": {"refractive_index": 3.47, "extinction_coeff": 0.0}},  # ty: ignore[invalid-argument-type]
+            materials={"si": MaterialData(epsilon_diag=[11.9, 11.9, 11.9])},
             wavelength=wl_cfg,
             source=source_cfg,
             stopping=stopping_cfg,
@@ -167,7 +168,7 @@ class TestSimConfig:
         assert "ports" in data
         assert "materials" in data
         assert data["gds_filename"] == "layout.gds"
-        assert data["materials"]["si"]["refractive_index"] == 3.47
+        assert data["materials"]["si"]["epsilon_diag"] == [11.9, 11.9, 11.9]
         assert data["layer_stack"][0]["layer_name"] == "core"
         # JSON keys use serialization aliases (fdtd, run_after_sources, decay_by)
         assert "source" in data
@@ -278,22 +279,22 @@ class TestMaterialsResolution:
 
         props = get_material_properties("silicon")
         assert props is not None
-        assert props.refractive_index == 3.47
+        assert props.permittivity == 11.9
 
     def test_resolve_sio2(self):
         from gsim.common.stack.materials import get_material_properties
 
         props = get_material_properties("SiO2")
         assert props is not None
-        assert props.refractive_index == 1.44
+        assert props.permittivity == 4.1
 
-    def test_optical_classmethod(self):
+    def test_dielectric_classmethod(self):
         from gsim.common.stack.materials import MaterialProperties
 
-        mat = MaterialProperties.optical(refractive_index=2.5)
-        assert mat.refractive_index == 2.5
-        assert mat.extinction_coeff == 0.0
-        assert mat.type == "dielectric"
+        mat = MaterialProperties.dielectric(permittivity=6.25)
+        assert mat.permittivity == 6.25
+        resolved = mat.evaluate_at_wavelength(1.55)
+        assert resolved.behavior == "dielectric"
 
 
 # ---------------------------------------------------------------------------

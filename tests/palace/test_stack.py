@@ -8,8 +8,7 @@ from gsim.common.stack import (
     LayerStack,
     ValidationResult,
     get_material_properties,
-    material_is_conductor,
-    material_is_dielectric,
+    resolve_material_at_wavelength,
 )
 
 
@@ -20,54 +19,48 @@ class TestMaterials:
         """Test getting aluminum properties."""
         props = get_material_properties("aluminum")
         assert props is not None
-        assert props.type == "conductor"
         assert props.conductivity == 3.77e7
 
     def test_get_copper(self):
         """Test getting copper properties."""
         props = get_material_properties("copper")
         assert props is not None
-        assert props.type == "conductor"
         assert props.conductivity == 5.8e7
 
     def test_get_sio2(self):
         """Test getting SiO2 properties."""
         props = get_material_properties("SiO2")
         assert props is not None
-        assert props.type == "dielectric"
         assert props.permittivity == 4.1
 
     def test_get_by_alias(self):
         """Test getting material by alias."""
         props = get_material_properties("al")
         assert props is not None
-        assert props.type == "conductor"
         assert props.conductivity == 3.77e7
 
     def test_case_insensitive(self):
         """Test case-insensitive lookup."""
         props = get_material_properties("ALUMINUM")
         assert props is not None
-        assert props.type == "conductor"
+        assert props.conductivity is not None
 
     def test_unknown_material(self):
         """Test unknown material returns None."""
         props = get_material_properties("unknown_material_xyz")
         assert props is None
 
-    def test_material_is_conductor(self):
-        """Test material_is_conductor function."""
-        assert material_is_conductor("aluminum")
-        assert material_is_conductor("copper")
-        assert not material_is_conductor("SiO2")
-        assert not material_is_conductor("air")
+    def test_material_behavior_conductor_at_rf(self):
+        """Test conductive behavior at RF."""
+        resolved = resolve_material_at_wavelength("aluminum", 60000)
+        assert resolved is not None
+        assert resolved.behavior == "conductive"
 
-    def test_material_is_dielectric(self):
-        """Test material_is_dielectric function."""
-        assert material_is_dielectric("SiO2")
-        assert material_is_dielectric("air")
-        assert not material_is_dielectric("aluminum")
-        assert not material_is_dielectric("copper")
+    def test_material_behavior_dielectric(self):
+        """Test dielectric behavior at optical."""
+        resolved = resolve_material_at_wavelength("SiO2", 1.55)
+        assert resolved is not None
+        assert resolved.behavior == "dielectric"
 
 
 class TestLayer:

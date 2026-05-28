@@ -8,10 +8,10 @@ from pydantic import ValidationError
 from gsim.meep import (
     FDTD,
     Domain,
-    Material,
     ModeSource,
     Simulation,
 )
+from gsim.meep.models.api import Material
 
 # ---------------------------------------------------------------------------
 # Model construction & defaults
@@ -21,13 +21,13 @@ from gsim.meep import (
 class TestMaterial:
     """Tests for the Material model."""
 
-    def test_n_must_be_positive(self):
+    def test_permittivity_must_be_positive(self):
         with pytest.raises(ValidationError):
-            Material(n=0)
+            Material(permittivity=0)
 
-    def test_k_must_be_non_negative(self):
+    def test_loss_tangent_must_be_non_negative(self):
         with pytest.raises(ValidationError):
-            Material(n=1.5, k=-0.1)
+            Material(permittivity=1.5, loss_tangent=-0.1)
 
 
 class TestStoppingFields:
@@ -84,27 +84,32 @@ class TestMaterialNormalization:
     """Tests for material shorthand and normalization."""
 
     def test_float_shorthand(self):
-        sim = Simulation(materials={"si": 3.47, "sio2": 1.44})
+        sim = Simulation(materials={"si": 12.0, "sio2": 2.1})
         assert isinstance(sim.materials["si"], Material)
-        assert sim.materials["si"].n == 3.47
+        assert sim.materials["si"].permittivity == 12.0
+        assert sim.materials["si"].loss_tangent == 0.0
         assert isinstance(sim.materials["sio2"], Material)
-        assert sim.materials["sio2"].n == 1.44
+        assert sim.materials["sio2"].permittivity == 2.1
 
     def test_material_object(self):
-        sim = Simulation(materials={"si": Material(n=3.47, k=0.01)})
-        assert sim.materials["si"].n == 3.47  # ty: ignore[unresolved-attribute]
-        assert sim.materials["si"].k == 0.01  # ty: ignore[unresolved-attribute]
+        sim = Simulation(
+            materials={"si": {"permittivity": 12.0, "loss_tangent": 0.001}}  # ty: ignore[invalid-argument-type]
+        )
+        assert sim.materials["si"].permittivity == 12.0  # ty: ignore[unresolved-attribute]
+        assert sim.materials["si"].loss_tangent == 0.001  # ty: ignore[unresolved-attribute]
 
     def test_dict_shorthand(self):
-        sim = Simulation(materials={"si": {"n": 3.47, "k": 0.01}})  # ty: ignore[invalid-argument-type]
+        sim = Simulation(
+            materials={"si": {"permittivity": 12.0, "loss_tangent": 0.001}}  # ty: ignore[invalid-argument-type]
+        )
         assert isinstance(sim.materials["si"], Material)
-        assert sim.materials["si"].n == 3.47
+        assert sim.materials["si"].permittivity == 12.0
 
     def test_assignment_normalization(self):
         sim = Simulation()
-        sim.materials = {"si": 3.47}
+        sim.materials = {"si": 12.0}
         assert isinstance(sim.materials["si"], Material)
-        assert sim.materials["si"].n == 3.47
+        assert sim.materials["si"].permittivity == 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +499,10 @@ class Test2DMode:
 
         sim = Simulation()
         sim.geometry.component = c
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
         sim.solver.is_3d = False
@@ -511,7 +519,10 @@ class Test2DMode:
 
         sim = Simulation()
         sim.geometry.component = c
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
         sim.solver.is_3d = False
@@ -527,7 +538,10 @@ class Test2DMode:
 
         sim = Simulation()
         sim.geometry.component = c
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
 
@@ -544,7 +558,10 @@ class Test2DMode:
 
         sim = Simulation()
         sim.geometry.component = c
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
         sim.solver.is_3d = False
@@ -617,7 +634,10 @@ class TestXZBuildConfig:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
@@ -634,7 +654,10 @@ class TestXZBuildConfig:
         sim.geometry.component = _xz_straight_component()
         sim.geometry.y_cut = 0.1
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
@@ -648,7 +671,10 @@ class TestXZBuildConfig:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
@@ -665,7 +691,10 @@ class TestXZBuildConfig:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         sim.source_fiber(x=0.0, z=1.22, angle_deg=14.5, waist=5.4)
@@ -715,7 +744,7 @@ class TestXZValidation:
             dielectrics=[],
             simulation={},
         )
-        sim.materials = {"si": 3.47}
+        sim.materials = {"si": 12.0}
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
 
@@ -732,7 +761,10 @@ class TestXZAutoCrop:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
@@ -754,7 +786,10 @@ class TestXZAutoCrop:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         # Clad zmax is 1.0 (see _xz_trivial_stack), so absolute z=1.42 is
@@ -780,7 +815,10 @@ class TestXZAutoCrop:
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
         sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.solver.is_3d = False
         sim.solver.plane = "xz"
         # Default margin_z_below=0.5 would previously crop the 2 µm BOX

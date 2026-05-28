@@ -106,12 +106,13 @@ def classify_layer_type(
 
         props = get_material_properties(material)
         if props:
-            if props.type == "conductor":
+            cond = props.conductivity
+            if isinstance(cond, list):
+                cond = cond[0]
+            if cond is not None and cond >= 1e4:
                 return "conductor"
-            if props.type == "semiconductor" and "substrate" in name_lower:
+            if cond is not None and cond > 0 and "substrate" in name_lower:
                 return "substrate"
-            if props.type == "dielectric":
-                return "dielectric"
 
         material_lower = material.lower()
         if material_lower in [

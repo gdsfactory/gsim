@@ -29,7 +29,10 @@ def configured_sim(straight_component):
     """Fully configured Simulation ready for build_config/write_config."""
     sim = Simulation()
     sim.geometry.component = straight_component
-    sim.materials = {"si": 3.47, "SiO2": 1.44}
+    sim.materials = {
+        "si": 12.0,
+        "SiO2": 2.1,
+    }
     sim.source.port = "o1"
     sim.source.wavelength = 1.55
     sim.source.wavelength_span = 0.1
@@ -223,7 +226,10 @@ class TestStoppingModes:
     def test_dft_decay(self, straight_component, tmp_path):
         sim = Simulation()
         sim.geometry.component = straight_component
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o2"]
         sim.solver.resolution = 16
@@ -237,7 +243,10 @@ class TestStoppingModes:
     def test_field_decay(self, straight_component, tmp_path):
         sim = Simulation()
         sim.geometry.component = straight_component
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o2"]
         sim.solver.resolution = 16
@@ -251,7 +260,10 @@ class TestStoppingModes:
     def test_fixed_time(self, straight_component, tmp_path):
         sim = Simulation()
         sim.geometry.component = straight_component
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o2"]
         sim.solver.resolution = 16
@@ -275,7 +287,10 @@ class TestDifferentComponents:
         component = gf.components.mmi1x2(length_mmi=5.5, width_mmi=2.5)
         sim = Simulation()
         sim.geometry.component = component
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o2", "o3"]
         sim.solver.resolution = 16
@@ -290,7 +305,10 @@ class TestDifferentComponents:
         component = gf.components.bend_euler(radius=10)
         sim = Simulation()
         sim.geometry.component = component
-        sim.materials = {"si": 3.47, "SiO2": 1.44}
+        sim.materials = {
+            "si": 12.0,
+            "SiO2": 2.1,
+        }
         sim.source.port = "o1"
         sim.monitors = ["o2"]
         sim.solver.resolution = 16

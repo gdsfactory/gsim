@@ -75,6 +75,7 @@ def _setup_mesh_fields(
     conductor_line_count = 0
     port_line_count = 0
     pec_line_count = 0
+    shaped_dielectric_count = 0
 
     # Conductor-surface edges are always refined — the refined_cellsize only
     # takes effect where boundary curves drive the Threshold field, and metal
@@ -94,6 +95,23 @@ def _setup_mesh_fields(
             boundary_lines.extend(lines)
             pec_line_count += len(lines)
 
+    # Shaped-dielectric volume boundaries are refined — the permittivity
+    # discontinuity at the core-cladding interface concentrates fields.
+    for vol_info in groups.get("volumes", {}).values():
+        if vol_info.get("is_shaped_dielectric"):
+            for tag in vol_info.get("tags", []):
+                try:
+                    boundary = gmsh.model.getBoundary(
+                        [(3, tag)], combined=False, oriented=False, recursive=False
+                    )
+                    for bdim, btag in boundary:
+                        if bdim == 2:
+                            lines = gmsh_utils.get_boundary_lines(btag, kernel)
+                            boundary_lines.extend(lines)
+                            shaped_dielectric_count += len(lines)
+                except Exception:
+                    pass
+
     # Port boundaries are always refined — drives S-parameter / impedance
     # accuracy regardless of preset.
     for surface_info in groups["port_surfaces"].values():
@@ -112,11 +130,13 @@ def _setup_mesh_fields(
     boundary_lines = sorted(set(boundary_lines))
 
     logger.info(
-        "Mesh refinement: %d boundary lines (conductor=%d, port=%d, pec=%d)",
+        "Mesh refinement: %d boundary lines "
+        "(conductor=%d, port=%d, pec=%d, shaped_dielectric=%d)",
         len(boundary_lines),
         conductor_line_count,
         port_line_count,
         pec_line_count,
+        shaped_dielectric_count,
     )
 
     # Setup main refinement field

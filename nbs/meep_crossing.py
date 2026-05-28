@@ -56,6 +56,8 @@ sim.solver.stop_when_energy_decayed()
 
 print(sim.validate_config())
 
+xsxs
+
 # %% papermill={"duration": 0.837901, "end_time": "2026-04-22T11:27:13.121534", "exception": false, "start_time": "2026-04-22T11:27:12.283633", "status": "completed"}
 sim.plot_2d(slices="xyz")
 

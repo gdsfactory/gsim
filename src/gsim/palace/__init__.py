@@ -44,8 +44,6 @@ from gsim.common.stack import (
     get_material_properties,
     get_stack,
     load_stack_yaml,
-    material_is_conductor,
-    material_is_dielectric,
     parse_layer_stack,
     plot_stack,
     print_stack,
@@ -58,6 +56,9 @@ from gsim.gcloud import run_simulation as _run_simulation
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
+
+# Material resolution with dispersion
+from gsim.palace.materials import resolve_palace_materials_at_frequency
 
 # Mesh utilities
 from gsim.palace.mesh import (
@@ -154,8 +155,6 @@ __all__ = [
     "load_fields",
     "load_sparams",
     "load_stack_yaml",
-    "material_is_conductor",
-    "material_is_dielectric",
     "parse_layer_stack",
     "plot_cross_section",
     "plot_mesh",
@@ -163,6 +162,7 @@ __all__ = [
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "resolve_palace_materials_at_frequency",
     "run_simulation",
 ]
 

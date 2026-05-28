@@ -63,7 +63,7 @@ class Simulation(BaseModel):
         sim = meep.Simulation()
         sim.geometry.component = ybranch
         sim.geometry.stack = stack
-        sim.materials = {"si": 3.47, "sio2": 1.44}
+        sim.materials = {"si": Material(permittivity=12.0)}
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
         sim.solver.stopping = "dft_decay"
@@ -110,25 +110,47 @@ class Simulation(BaseModel):
     _job_id: str | None = PrivateAttr(default=None)
     _config_dir: Path | None = PrivateAttr(default=None)
 
+    # PDK overlay (foundry-specific material values, loaded from YAML)
+    _pdk_overlay: dict[str, Any] | None = PrivateAttr(default=None)
+
     # -------------------------------------------------------------------------
     # Validators
     # -------------------------------------------------------------------------
+
+    def load_pdk_overlay(self, path: str | Path) -> None:
+        """Load a PDK overlay YAML file for foundry-specific material values.
+
+        PDK overlays augment the built-in MATERIALS_DB with foundry measurements.
+        They take priority over the built-in DB but lower priority than
+        user overrides set via ``sim.materials``.
+
+        Args:
+            path: Path to a YAML overlay file (see :func:`load_overlay` for format).
+        """
+        from gsim.common.stack.overlays import load_overlay
+
+        self._pdk_overlay = load_overlay(path)
 
     @field_validator("materials", mode="before")
     @classmethod
     def _normalize_materials(
         cls,
         v: dict[str, float | Material | dict],
-    ) -> dict[str, float | Material]:
-        """Accept float shorthand: ``{"si": 3.47}`` -> ``Material(n=3.47)``."""
-        out: dict[str, float | Material] = {}
+    ) -> dict[str, Material]:
+        """Accept float/int shorthand: ``{"si": 12.0}`` -> ``Material(permittivity=12.0)``."""  # noqa: E501
+        out: dict[str, Material] = {}
         for name, val in v.items():
-            if isinstance(val, (int, float)):
-                out[name] = Material(n=float(val))
+            if isinstance(val, Material):
+                out[name] = val
+            elif isinstance(val, (int, float)):
+                out[name] = Material(permittivity=float(val))
             elif isinstance(val, dict):
                 out[name] = Material(**val)
             else:
-                out[name] = val
+                raise TypeError(
+                    f"Material '{name}' must be a Material, number, or dict, "
+                    f"got {type(val).__name__}."
+                )
         return out
 
     # -------------------------------------------------------------------------
@@ -137,13 +159,7 @@ class Simulation(BaseModel):
 
     def _resolved_materials(self) -> dict[str, Material]:
         """Return materials dict with all values normalized to Material."""
-        out: dict[str, Material] = {}
-        for name, val in self.materials.items():
-            if isinstance(val, (int, float)):
-                out[name] = Material(n=float(val))
-            else:
-                out[name] = val
-        return out
+        return dict(self.materials)  # ty: ignore[invalid-return-type]
 
     # -------------------------------------------------------------------------
     # Fiber source helper
@@ -526,9 +542,8 @@ class Simulation(BaseModel):
         overrides: dict[str, MaterialProperties] = {}
         for name, val in self._resolved_materials().items():
             overrides[name] = MaterialProperties(
-                type="dielectric",
-                refractive_index=val.n,
-                extinction_coeff=val.k,
+                permittivity=val.permittivity,
+                loss_tangent=val.loss_tangent,
             )
         return overrides
 
@@ -709,10 +724,29 @@ class Simulation(BaseModel):
                 "or call sim.source_fiber(...)."
             )
 
-        # Resolve materials
-        material_data = resolve_materials(
-            used_materials, overrides=self._material_overrides()
+        # Resolve materials (three-tier: user override > PDK overlay > built-in DB)
+        active_source = (
+            self.fiber_source if self.fiber_source is not None else self.source
         )
+        if self.solver.dispersion != "false":
+            from gsim.meep.materials import resolve_materials_with_dispersion
+
+            material_data = resolve_materials_with_dispersion(
+                used_materials,
+                overrides=self._material_overrides(),
+                wavelength_um=active_source.wavelength,
+                bandwidth_um=active_source.wavelength_span,
+                dispersion=self.solver.dispersion,
+                overlay=self._pdk_overlay,
+                threshold=self.solver.dispersion_threshold,
+            )
+        else:
+            material_data = resolve_materials(
+                used_materials,
+                overrides=self._material_overrides(),
+                wavelength_um=active_source.wavelength,
+                overlay=self._pdk_overlay,
+            )
 
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
@@ -926,6 +960,111 @@ class Simulation(BaseModel):
         if not wait:
             return self._job_id
         return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+
+    def run_local(
+        self,
+        output_dir: str | Path | None = None,
+        *,
+        python_executable: str | Path | None = None,
+        num_processes: int | None = None,
+        verbose: bool = True,
+    ) -> Any:
+        """Run MEEP simulation locally.
+
+        Writes config, GDS, and runner script to ``output_dir``, then
+        executes ``run_meep.py`` via Python (with meep installed).
+
+        Args:
+            output_dir: Directory for config/GDS/script output.
+                If None, a temporary directory is created.
+            python_executable: Path to the Python interpreter that has
+                meep installed. If None, uses the current interpreter
+                (``sys.executable``).
+            num_processes: Number of MPI processes. If None (default),
+                runs as a single process. When >1, uses ``mpirun -np``.
+            verbose: Print progress messages.
+
+        Returns:
+            :class:`SParameterResult` parsed from the output CSV.
+
+        Raises:
+            FileNotFoundError: If meep is not installed.
+            RuntimeError: If simulation fails.
+        """
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+
+        from gsim.meep.models.results import SParameterResult
+
+        # Auto-write config (matches Palace run_local behavior)
+        if output_dir is None:
+            output_dir = Path(tempfile.mkdtemp(prefix="meep_local_"))
+        output_dir = Path(output_dir)
+        self.write_config(output_dir)
+
+        script_path = output_dir / "run_meep.py"
+        if not script_path.exists():
+            raise FileNotFoundError(
+                f"run_meep.py not found in {output_dir}. "
+                "write_config() should have created it."
+            )
+
+        exe = str(python_executable or sys.executable)
+
+        if num_processes is not None and num_processes > 1:
+            mpirun = shutil.which("mpirun")
+            if mpirun is None:
+                raise RuntimeError(
+                    "mpirun not found. Install an MPI runtime to use "
+                    "num_processes > 1, or omit it for single-process mode."
+                )
+            cmd = [mpirun, "-np", str(num_processes), exe, str(script_path)]
+        else:
+            cmd = [exe, str(script_path)]
+
+        if verbose:
+            logger.info("Running MEEP simulation in %s", output_dir)
+            logger.info("Command: %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                cwd=output_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if verbose and result.stdout:
+                logger.info(result.stdout)
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    if "warning" in line.lower():
+                        logger.warning(line)
+                    elif verbose:
+                        logger.info(line)
+        except subprocess.CalledProcessError as e:
+            error_msg = f"MEEP simulation failed (rc={e.returncode})"
+            if e.stdout:
+                error_msg += f"\n\nStdout:\n{e.stdout[-4000:]}"
+            if e.stderr:
+                error_msg += f"\n\nStderr:\n{e.stderr[-4000:]}"
+            raise RuntimeError(error_msg) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Python executable not found: {exe}. "
+                "Install MEEP or provide the correct python path."
+            ) from e
+
+        if verbose:
+            logger.info("Simulation completed successfully")
+
+        csv_path = output_dir / "s_parameters.csv"
+        if csv_path.exists():
+            return SParameterResult.from_csv(csv_path)
+
+        return SParameterResult.from_directory(output_dir)
 
     # -------------------------------------------------------------------------
     # Visualization

@@ -143,8 +143,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     def set_driven(
         self,
         *,
-        fmin: float = 1e9,
-        fmax: float = 100e9,
+        f: float | None = None,
+        fmin: float | None = None,
+        fmax: float | None = None,
         num_points: int = 40,
         scale: Literal["linear", "log"] = "linear",
         adaptive_tol: float = 0.02,
@@ -159,6 +160,9 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         """Configure driven (frequency sweep) simulation.
 
         Args:
+            f: Single frequency in Hz (convenience). Sets both fmin and fmax
+                to this value with num_points=1. Ignored when both fmin and
+                fmax are explicitly provided.
             fmin: Minimum frequency in Hz
             fmax: Maximum frequency in Hz
             num_points: Number of frequency points
@@ -184,14 +188,26 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 Appended to *save_fields_at* if both are given.
 
         Example:
+            >>> sim.set_driven(f=50e9)
             >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
             >>> sim.set_driven(fmin=1e9, fmax=100e9, save_freq="center")
         """
+        # Resolve f vs fmin/fmax: explicit fmin/fmax take precedence over f
+        if fmin is not None and fmax is not None:
+            eff_fmin = fmin
+            eff_fmax = fmax
+        elif f is not None:
+            eff_fmin = f
+            eff_fmax = f
+            num_points = 1
+        else:
+            eff_fmin = fmin if fmin is not None else 1e9
+            eff_fmax = fmax if fmax is not None else 100e9
         fields_at: list[float] = list(save_fields_at or [])
 
         if save_freq is not None:
             if save_freq == "center":
-                fields_at.append((fmin + fmax) / 2)
+                fields_at.append((eff_fmin + eff_fmax) / 2)
             else:
                 raise ValueError(
                     f"Unknown save_freq value: {save_freq!r}. "
@@ -199,8 +215,8 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                 )
 
         self.driven = DrivenConfig(
-            fmin=fmin,
-            fmax=fmax,
+            fmin=eff_fmin,
+            fmax=eff_fmax,
             num_points=num_points,
             scale=scale,
             adaptive_tol=adaptive_tol,

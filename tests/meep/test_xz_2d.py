@@ -63,7 +63,7 @@ def _build_minimal_gc_sim():
     sim = Simulation()
     sim.geometry.component = c
     sim.geometry.stack = stack
-    sim.materials = {"si": 3.47, "SiO2": 1.44}
+    sim.materials = {"si": 12.0, "SiO2": 2.1}
     sim.solver.is_3d = False
     sim.solver.plane = "xz"
     sim.solver.resolution = 15

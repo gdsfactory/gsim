@@ -347,11 +347,19 @@ def extract_layer_stack(
     Returns:
         LayerStack object for Palace simulation
     """
+    # Auto-detect: if the PDK has dielectric layers on real GDS layers
+    # (not substrate layer 999), it's a photonic stack and the BOX
+    # should be preserved as SiO2 rather than merged into the substrate.
+    has_patterned_dielectrics = False
     stack = LayerStack(pdk_name=pdk_name)
 
     z_min_overall = float("inf")
     z_max_overall = float("-inf")
     materials_used: set[str] = set()
+    # Track dielectric layers on real GDS layers (not placeholder 999).
+    # If any exist, the PDK has patterned dielectric geometry (photonic
+    # stack) and the BOX should be preserved as SiO2.
+    _substrate_gds_layers: set[int] = set()
 
     for layer_name, layer_level in gf_layer_stack.layers.items():
         zmin = layer_level.zmin if layer_level.zmin is not None else 0.0
@@ -365,6 +373,7 @@ def extract_layer_stack(
         sidewall_angle = getattr(layer_level, "sidewall_angle", 0.0) or 0.0
 
         if layer_type == "substrate" and not include_substrate:
+            _substrate_gds_layers.add(gds_layer[0])
             continue
 
         layer = Layer(
@@ -385,6 +394,12 @@ def extract_layer_stack(
             z_min_overall = min(z_min_overall, zmin)
             z_max_overall = max(z_max_overall, zmax)
 
+        # Detect patterned dielectric layers: dielectric layers whose GDS
+        # layer is NOT a substrate placeholder (999) — these carry actual
+        # polygon geometry (e.g. waveguide cores).
+        if layer_type == "dielectric" and gds_layer[0] not in _substrate_gds_layers:
+            has_patterned_dielectrics = True
+
     for material in materials_used:
         props = get_material_properties(material)
         if props:
@@ -402,19 +417,91 @@ def extract_layer_stack(
         stack.materials["SiO2"] = MATERIALS_DB["SiO2"].to_dict()
 
     if include_substrate:
-        stack.dielectrics.append(
-            {
-                "name": "substrate",
-                "zmin": -substrate_thickness,
-                "zmax": 0.0,
-                "material": "silicon",
-            }
-        )
+        if has_patterned_dielectrics:
+            # With shaped dielectrics (photonic mode): respect the PDK's
+            # actual layer z-ranges so the BOX stays as SiO2 rather than
+            # being merged into the substrate. Build dielectrics from the
+            # PDK's substrate + box layer z-ranges.
+            substrate_zmin = None
+            substrate_zmax = None
+            box_zmin = None
+            box_zmax = None
+            for layer in stack.layers.values():
+                if layer.layer_type == "substrate":
+                    substrate_zmin = min(
+                        layer.zmin,
+                        substrate_zmin if substrate_zmin is not None else layer.zmin,
+                    )
+                    substrate_zmax = max(
+                        layer.zmax,
+                        substrate_zmax if substrate_zmax is not None else layer.zmax,
+                    )
+                # BOX detection: dielectric layers below z=0 on the WAFER GDS
+                # layer that are SiO2-like (covers the buried oxide in SOI)
+                if (
+                    layer.layer_type == "dielectric"
+                    and layer.zmax <= 0.0 + 1e-6
+                    and _is_oxide_like(layer.material)
+                ):
+                    box_zmin = min(
+                        layer.zmin, box_zmin if box_zmin is not None else layer.zmin
+                    )
+                    box_zmax = max(
+                        layer.zmax, box_zmax if box_zmax is not None else layer.zmax
+                    )
+
+            # Extend substrate below the PDK's substrate z-range
+            if substrate_zmin is not None:
+                sub_zmin = min(substrate_zmin, -substrate_thickness)
+            else:
+                sub_zmin = -substrate_thickness
+
+            # Substrate silicon: from extended bottom to BOX bottom (or 0)
+            if box_zmin is not None:
+                stack.dielectrics.append(
+                    {
+                        "name": "substrate",
+                        "zmin": sub_zmin,
+                        "zmax": box_zmin,
+                        "material": "silicon",
+                    }
+                )
+                # BOX (buried oxide): from BOX bottom to BOX top (or 0)
+                stack.dielectrics.append(
+                    {
+                        "name": "box",
+                        "zmin": box_zmin,
+                        "zmax": box_zmax,
+                        "material": "SiO2",
+                    }
+                )
+                oxide_zmin = box_zmax
+            else:
+                # No BOX layer detected: use legacy behavior
+                stack.dielectrics.append(
+                    {
+                        "name": "substrate",
+                        "zmin": sub_zmin,
+                        "zmax": 0.0,
+                        "material": "silicon",
+                    }
+                )
+                oxide_zmin = 0.0
+        else:
+            # RF mode: single silicon substrate box (legacy)
+            stack.dielectrics.append(
+                {
+                    "name": "substrate",
+                    "zmin": -substrate_thickness,
+                    "zmax": 0.0,
+                    "material": "silicon",
+                }
+            )
+            oxide_zmin = 0.0
         if "silicon" not in stack.materials:
             stack.materials["silicon"] = MATERIALS_DB["silicon"].to_dict()
-        oxide_zmin = 0.0
     else:
-        oxide_zmin = -substrate_thickness
+        oxide_zmin = 0.0
 
     stack.dielectrics.append(
         {
@@ -465,6 +552,21 @@ def extract_layer_stack(
     }
 
     return stack
+
+
+_OXIDE_NAMES = {"sio2", "oxide", "box", "buried_oxide", "si3n4", "nitride"}
+
+
+def _is_oxide_like(material: str) -> bool:
+    """Return True if *material* looks like an oxide/nitride dielectric."""
+    m = material.strip().lower()
+    if m in _OXIDE_NAMES:
+        return True
+    # Also check via MATERIAL_ALIASES resolution
+    from gsim.common.stack.materials import MATERIAL_ALIASES
+
+    canonical = MATERIAL_ALIASES.get(m, m)
+    return canonical.lower() in {"sio2", "si3n4"}
 
 
 def extract_from_pdk(

@@ -93,9 +93,9 @@ def test_add_dielectrics_margin_applies_only_to_airlike(monkeypatch) -> None:
             {"name": "passivation", "zmin": 8.0, "zmax": 9.0, "material": "passive"},
         ],
         materials={
-            "SiO2": {"type": "dielectric", "permittivity": 4.1},
-            "air": {"type": "dielectric", "permittivity": 1.0},
-            "passive": {"type": "dielectric", "permittivity": 6.6},
+            "SiO2": {"permittivity": 4.1},
+            "air": {"permittivity": 1.0},
+            "passive": {"permittivity": 6.6},
         },
     )
 
@@ -131,8 +131,8 @@ def test_add_dielectrics_explicit_airbox_z_extents(monkeypatch) -> None:
             {"name": "air", "zmin": 0.5, "zmax": 8.0, "material": "air"},
         ],
         materials={
-            "SiO2": {"type": "dielectric", "permittivity": 4.1},
-            "air": {"type": "dielectric", "permittivity": 1.0},
+            "SiO2": {"permittivity": 4.1},
+            "air": {"permittivity": 1.0},
         },
     )
 

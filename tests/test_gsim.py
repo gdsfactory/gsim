@@ -21,27 +21,27 @@ def test_mesh_config_presets():
 
 
 def test_material_properties():
-    """Test material property lookups."""
+    """Test material property lookups and frequency-aware behavior."""
     from gsim.common.stack import (
         get_material_properties,
-        material_is_conductor,
-        material_is_dielectric,
+        resolve_material_at_wavelength,
     )
 
-    # Test conductor
     aluminum = get_material_properties("aluminum")
     assert aluminum is not None
-    assert aluminum.type == "conductor"
-    assert material_is_conductor("aluminum")
-    assert not material_is_dielectric("aluminum")
+    assert aluminum.conductivity is not None
 
-    # Test dielectric
+    resolved_al_rf = resolve_material_at_wavelength("aluminum", 60000)
+    assert resolved_al_rf is not None
+    assert resolved_al_rf.behavior == "conductive"
+
     sio2 = get_material_properties("SiO2")
     assert sio2 is not None
-    assert sio2.type == "dielectric"
-    assert material_is_dielectric("SiO2")
-    assert not material_is_conductor("SiO2")
+    assert sio2.permittivity == 4.1
 
-    # Test unknown material
+    resolved_sio2 = resolve_material_at_wavelength("SiO2", 1.55)
+    assert resolved_sio2 is not None
+    assert resolved_sio2.behavior == "dielectric"
+
     unknown = get_material_properties("nonexistent_material_xyz")
     assert unknown is None

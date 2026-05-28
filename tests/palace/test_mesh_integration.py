@@ -216,7 +216,7 @@ def _make_qpdk_stack():
         zmax=substrate_thickness,
         thickness=substrate_thickness,
         material="sapphire",
-        layer_type="dielectric",
+        layer_type="substrate",
         mesh_resolution="coarse",
     )
     stack.layers["superconductor"] = Layer(
@@ -249,12 +249,11 @@ def _make_qpdk_stack():
     ]
     stack.materials = {
         "sapphire": {
-            "type": "dielectric",
             "permittivity": 9.3,
             "loss_tangent": 0.0,
         },
-        "vacuum": {"type": "dielectric", "permittivity": 1.0, "loss_tangent": 0.0},
-        "niobium": {"type": "conductor", "conductivity": 0.0},
+        "vacuum": {"permittivity": 1.0, "loss_tangent": 0.0},
+        "niobium": {"conductivity": 0.0},
     }
     return stack
 
@@ -437,4 +436,116 @@ class TestPECBlockMesh:
     def test_validate_mesh_passes(self, pec_block_sim):
         """validate_mesh() must pass with PEC blocks."""
         result = pec_block_sim.validate_mesh()
+        assert result.valid, f"Validation failed:\n{result}"
+
+
+class TestShapedDielectric:
+    """Test mesh generation with shaped dielectric volumes."""
+
+    @pytest.fixture(scope="class")
+    def shaped_dielectric_sim(self, tmp_path_factory):
+        """Create and mesh a component with a shaped dielectric core."""
+        from gsim.common.stack.materials import MATERIALS_DB
+
+        tmp_path = tmp_path_factory.mktemp("shaped_dielectric")
+        gf.gpdk.PDK.activate()
+
+        c = gf.Component("shaped_wg")
+        c.add_polygon([(-11, -1), (11, -1), (11, 1), (-11, 1)], layer=(1, 0))
+        c.add_port(name="o1", center=(-11, 0), width=2, orientation=180, layer=(1, 0))
+        c.add_port(name="o2", center=(11, 0), width=2, orientation=0, layer=(1, 0))
+
+        si_thickness = 0.22
+        box_thickness = 2.0
+
+        stack = LayerStack(pdk_name="test_shaped")
+        stack.layers["CORE"] = Layer(
+            name="CORE",
+            gds_layer=(1, 0),
+            zmin=box_thickness,
+            zmax=box_thickness + si_thickness,
+            thickness=si_thickness,
+            material="silicon",
+            layer_type="dielectric",
+        )
+        stack.dielectrics = [
+            {
+                "name": "box",
+                "zmin": 0,
+                "zmax": box_thickness,
+                "material": "SiO2",
+            },
+            {
+                "name": "clad",
+                "zmin": box_thickness + si_thickness,
+                "zmax": box_thickness + si_thickness + 2.0,
+                "material": "SiO2",
+            },
+            {
+                "name": "air",
+                "zmin": box_thickness + si_thickness + 2.0,
+                "zmax": box_thickness + si_thickness + 2.0 + 5.0,
+                "material": "air",
+            },
+        ]
+        stack.materials = {
+            "SiO2": MATERIALS_DB["SiO2"].to_dict(),
+            "silicon": MATERIALS_DB["silicon"].to_dict(),
+            "air": MATERIALS_DB["air"].to_dict(),
+        }
+
+        sim = DrivenSim()
+        sim.set_output_dir(str(tmp_path / "sim"))
+        sim.set_geometry(c)
+        sim.set_stack(stack)
+        for i, port in enumerate(c.ports):
+            sim.add_wave_port(port.name or f"P{i}", layer="CORE")
+        sim.set_driven(fmin=190e12, fmax=200e12, num_points=2)
+        sim.mesh(preset="coarse", auto_size=True)
+        return sim
+
+    def test_shaped_dielectric_volume_exists(self, shaped_dielectric_sim):
+        """CORE must appear as a volume group with is_shaped_dielectric=True."""
+        groups = shaped_dielectric_sim._last_mesh_result.groups
+        assert "CORE" in groups["volumes"], (
+            f"CORE not found in volumes. Got: {list(groups['volumes'].keys())}"
+        )
+        assert groups["volumes"]["CORE"].get("is_shaped_dielectric") is True, (
+            "CORE volume should have is_shaped_dielectric=True"
+        )
+
+    def test_shaped_dielectric_not_via(self, shaped_dielectric_sim):
+        """CORE must NOT be marked as a via."""
+        groups = shaped_dielectric_sim._last_mesh_result.groups
+        assert groups["volumes"]["CORE"].get("is_via") is not True, (
+            "CORE volume should not be marked as via"
+        )
+
+    def test_config_has_dielectric_permittivity(self, shaped_dielectric_sim):
+        """Config must assign silicon permittivity (not 1.0) to CORE volume."""
+        shaped_dielectric_sim.write_config()
+        config_path = Path(shaped_dielectric_sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+
+        groups = shaped_dielectric_sim._last_mesh_result.groups
+        core_pg = groups["volumes"]["CORE"]["phys_group"]
+
+        materials = config["Domains"]["Materials"]
+        core_mat = None
+        for mat in materials:
+            if core_pg in mat.get("Attributes", []):
+                core_mat = mat
+                break
+
+        assert core_mat is not None, "CORE volume not found in config materials"
+        perm = core_mat.get("Permittivity")
+        assert perm is not None, f"CORE should have Permittivity, got {core_mat}"
+        assert perm != 1.0, f"CORE should have non-1.0 permittivity, got {perm}"
+        assert "Conductivity" not in core_mat, (
+            f"CORE should not have Conductivity, got {core_mat.get('Conductivity')}"
+        )
+
+    def test_validate_mesh_passes(self, shaped_dielectric_sim):
+        """validate_mesh() must pass for shaped dielectric simulations."""
+        result = shaped_dielectric_sim.validate_mesh()
         assert result.valid, f"Validation failed:\n{result}"
