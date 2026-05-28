@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from scipy.constants import c as C0  # noqa: N812
 
 from gsim.common.stack.materials import MATERIALS_DB
 from gsim.palace.materials import resolve_palace_materials_at_frequency
@@ -48,7 +49,7 @@ class TestSetDrivenSingleFreq:
 class TestResolvePalaceMaterialsAtFrequency:
     def test_sio2_at_optical_frequency(self):
         materials = {"SiO2": MATERIALS_DB["SiO2"].to_dict()}
-        freq_hz = 299_792_458 / (1.55e-6)
+        freq_hz = C0 / (1.55e-6)
         resolved = resolve_palace_materials_at_frequency(materials, freq_hz)
         assert "SiO2" in resolved
         assert resolved["SiO2"]["permittivity"] == pytest.approx(2.085, abs=0.01)
@@ -62,7 +63,7 @@ class TestResolvePalaceMaterialsAtFrequency:
 
     def test_silicon_at_optical_frequency(self):
         materials = {"silicon": MATERIALS_DB["silicon"].to_dict()}
-        freq_hz = 299_792_458 / (1.55e-6)
+        freq_hz = C0 / (1.55e-6)
         resolved = resolve_palace_materials_at_frequency(materials, freq_hz)
         assert "silicon" in resolved
         n_sq = resolved["silicon"]["permittivity"]
@@ -87,7 +88,7 @@ class TestResolvePalaceMaterialsAtFrequency:
 
     def test_preserves_nonoptical_fields(self):
         materials = {"SiO2": MATERIALS_DB["SiO2"].to_dict()}
-        freq_hz = 299_792_458 / (1.55e-6)
+        freq_hz = C0 / (1.55e-6)
         resolved = resolve_palace_materials_at_frequency(materials, freq_hz)
         assert resolved["SiO2"]["permittivity"] is not None
 
@@ -99,7 +100,7 @@ class TestResolvePalaceMaterialsAtFrequency:
 
     def test_sapphire_anisotropic_resolved(self):
         materials = {"sapphire": MATERIALS_DB["sapphire"].to_dict()}
-        freq_hz = 299_792_458 / (1.55e-6)
+        freq_hz = C0 / (1.55e-6)
         resolved = resolve_palace_materials_at_frequency(materials, freq_hz)
         assert "sapphire" in resolved
         assert isinstance(resolved["sapphire"]["permittivity"], list)

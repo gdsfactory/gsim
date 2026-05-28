@@ -27,6 +27,7 @@ import warnings
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from scipy.constants import c as C0  # noqa: N812
 
 
 class ValidityRange(BaseModel):
@@ -57,7 +58,7 @@ class ValidityRange(BaseModel):
         if self.valid_frequency is not None:
             return self.valid_frequency[0] <= freq_hz <= self.valid_frequency[1]
         if self.valid_wavelength is not None:
-            wl_um = 299_792_458 / freq_hz * 1e6
+            wl_um = C0 / freq_hz * 1e6
             return self.valid_wavelength[0] <= wl_um <= self.valid_wavelength[1]
         return False
 
@@ -66,7 +67,7 @@ class ValidityRange(BaseModel):
         if self.valid_wavelength is not None:
             return self.valid_wavelength[0] <= wl_um <= self.valid_wavelength[1]
         if self.valid_frequency is not None:
-            freq_hz = 299_792_458 / (wl_um * 1e-6)
+            freq_hz = C0 / (wl_um * 1e-6)
             return self.valid_frequency[0] <= freq_hz <= self.valid_frequency[1]
         return False
 
@@ -450,7 +451,7 @@ class MaterialProperties(BaseModel):
 
     def evaluate_at_frequency(self, freq_hz: float) -> ResolvedMaterial:
         """Evaluate material properties at a specific frequency in Hz."""
-        wavelength_um = 299_792_458 / freq_hz * 1e6
+        wavelength_um = C0 / freq_hz * 1e6
         return self.evaluate_at_wavelength(wavelength_um)
 
     def index_variation(self, wavelength_um: float, bandwidth_um: float) -> float:
