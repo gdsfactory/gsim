@@ -1354,13 +1354,19 @@ class PalaceSimMixin:
 
         Args:
             palace_sif_path: Path to Palace Apptainer SIF file.
-                Only used when ``use_apptainer=True``.
-                If None, uses PALACE_SIF environment variable.
+                Only used when ``use_apptainer=True`` and no executable is
+                selected.
+                If None, tries PALACE_SIF, then local defaults:
+                ``./Palace.sif``, ``./palace.sif``,
+                ``./bin/Palace.sif``, ``./bin/palace.sif``.
             palace_executable: Path to Palace executable.
-                Only used when ``use_apptainer=False``.
-                If None, uses PALACE_EXECUTABLE environment variable or "palace".
+                If provided, runs Palace directly and overrides
+                ``use_apptainer``.
+                If None, tries PALACE_EXECUTABLE, then ``./bin/palace``,
+                then ``palace`` on PATH.
             use_apptainer: If True (default), run via Apptainer using SIF file.
                 If False, run Palace executable directly.
+                Ignored when ``palace_executable`` is explicitly provided.
             num_processes: Number of MPI processes. If None (default),
                 uses all available CPUs.
             num_threads: Number of OpenMP threads to use for OpenMP builds, default is 1
@@ -1387,13 +1393,14 @@ class PalaceSimMixin:
             >>> # Using Apptainer with explicit path
             >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
             >>>
-            >>> # Using direct Palace installation
-            >>> results = sim.run_local(use_apptainer=False)
+            >>> # Auto-discovery with no options:
+            >>> # tries local SIF first, then executable defaults
+            >>> results = sim.run_local()
             >>>
             >>> # Using direct Palace with custom executable path
-            >>> results = sim.run_local(
-            ...     use_apptainer=False, palace_executable="/usr/local/bin/palace"
-            ... )
+            >>> results = sim.run_local(palace_executable="/usr/local/bin/palace")
+            >>> # Using a locally built Palace binary
+            >>> results = sim.run_local(palace_executable="./bin/palace")
             >>> # For DrivenSim: `results` is SParams -> results.s21.db
             >>> # For eigen / electrostatic: `results` is dict[str, Path]
         """
@@ -1423,20 +1430,70 @@ class PalaceSimMixin:
                 f"Mesh file not found: {mesh_path}. Call mesh() first."
             )
 
-        # Determine Palace command based on use_apptainer flag
-        if use_apptainer:
+        # Auto-discovery when arguments are omitted.
+        search_roots = [Path.cwd(), output_dir, output_dir.parent]
+        dedup_roots: list[Path] = []
+        for root in search_roots:
+            resolved = root.expanduser().resolve()
+            if resolved not in dedup_roots:
+                dedup_roots.append(resolved)
+
+        if palace_sif_path is None:
+            palace_sif_path = os.environ.get("PALACE_SIF")
+            if palace_sif_path is None:
+                sif_rel_candidates = [
+                    Path("Palace.sif"),
+                    Path("palace.sif"),
+                    Path("bin/Palace.sif"),
+                    Path("bin/palace.sif"),
+                ]
+                for root in dedup_roots:
+                    for rel in sif_rel_candidates:
+                        candidate = (root / rel).resolve()
+                        if candidate.exists():
+                            palace_sif_path = str(candidate)
+                            if verbose:
+                                logger.info(
+                                    "Auto-discovered Palace SIF: %s", palace_sif_path
+                                )
+                            break
+                    if palace_sif_path is not None:
+                        break
+
+        if palace_executable is None:
+            palace_executable = os.environ.get("PALACE_EXECUTABLE")
+
+        if palace_executable is None and palace_sif_path is None:
+            for root in dedup_roots:
+                candidate = (root / "bin" / "palace").resolve()
+                if candidate.exists() and os.access(candidate, os.X_OK):
+                    palace_executable = str(candidate)
+                    if verbose:
+                        logger.info(
+                            "Auto-discovered Palace executable: %s", palace_executable
+                        )
+                    break
+
+        if palace_executable is None and palace_sif_path is None:
+            palace_executable = "palace"
+
+        # palace_executable takes precedence for a simpler API.
+        run_with_apptainer = use_apptainer and palace_executable is None
+
+        if palace_executable is not None and use_apptainer and verbose:
+            logger.info(
+                "palace_executable was provided; running directly and ignoring "
+                "use_apptainer=True."
+            )
+
+        # Determine Palace command based on effective execution mode.
+        if run_with_apptainer:
             # Determine Palace SIF path from environment variable or parameter
             if palace_sif_path is None:
-                palace_sif_path = os.environ.get("PALACE_SIF")
-                if palace_sif_path is None:
-                    raise ValueError(
-                        "Palace SIF path not specified. Either set PALACE_SIF "
-                        "environment variable or pass palace_sif_path parameter."
-                    )
-                if verbose:
-                    logger.info(
-                        "Using PALACE_SIF from environment: %s", palace_sif_path
-                    )
+                raise ValueError(
+                    "Palace SIF path not specified. Either set PALACE_SIF, pass "
+                    "palace_sif_path, or provide a Palace executable."
+                )
 
             sif_path = Path(palace_sif_path).expanduser().resolve()
 
@@ -1472,19 +1529,39 @@ class PalaceSimMixin:
                         palace_executable,
                     )
 
-            exe_path = Path(palace_executable).expanduser()
+            exe_candidate = Path(palace_executable).expanduser()
+            is_path_like = (
+                exe_candidate.is_absolute()
+                or exe_candidate.parent != Path()
+                or str(palace_executable).startswith("~")
+            )
 
-            # Check if executable exists
-            if not exe_path.exists():
-                # Try resolving to see if it's in PATH
-                resolved = shutil.which(str(exe_path))
-                if resolved is None:
+            if is_path_like:
+                # Normalize local paths to absolute paths because subprocess
+                # runs with cwd=output_dir.
+                exe_path = exe_candidate.resolve()
+                if not exe_path.exists():
                     raise FileNotFoundError(
                         f"Palace executable not found: {exe_path}. "
                         "Install Palace directly or provide correct path via "
                         "palace_executable parameter."
                     )
+            else:
+                # Resolve command names (e.g. "palace") via PATH.
+                resolved = shutil.which(str(exe_candidate))
+                if resolved is None:
+                    raise FileNotFoundError(
+                        f"Palace executable not found: {exe_candidate}. "
+                        "Install Palace directly or provide correct path via "
+                        "palace_executable parameter."
+                    )
                 exe_path = Path(resolved)
+
+            if not os.access(exe_path, os.X_OK):
+                raise FileNotFoundError(
+                    f"Palace executable is not executable: {exe_path}. "
+                    "Update file permissions or provide a valid executable path."
+                )
 
             cmd = [
                 str(exe_path),
@@ -1497,7 +1574,7 @@ class PalaceSimMixin:
         cmd.extend(["config.json"])
 
         if verbose:
-            if use_apptainer:
+            if run_with_apptainer:
                 logger.info("Running Palace simulation in %s via Apptainer", output_dir)
             else:
                 logger.info("Running Palace simulation in %s directly", output_dir)
@@ -1528,7 +1605,7 @@ class PalaceSimMixin:
                 error_msg += f"\n\nStderr:\n{e.stderr}"
             raise RuntimeError(error_msg) from e
         except FileNotFoundError as e:
-            if use_apptainer:
+            if run_with_apptainer:
                 raise RuntimeError(
                     "Apptainer not found. Install Apptainer to run local simulations "
                     "with use_apptainer=True."
