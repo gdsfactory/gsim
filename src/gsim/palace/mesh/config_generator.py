@@ -15,7 +15,8 @@ from gsim.palace.ports.config import PortType
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig, EigenmodeConfig
+    from gsim.palace.models import DrivenConfig, EigenmodeConfig, ElectrostaticConfig
+    from gsim.palace.models.ports import TerminalConfig
     from gsim.palace.ports.config import PalacePort
 
 
@@ -33,6 +34,8 @@ def generate_palace_config(
     absorbing_boundary: bool = True,
     periodic_axis: str | None = None,
     hints: dict[str, Any] | None = None,
+    electrostatic_config: ElectrostaticConfig | None = None,
+    terminals: list[TerminalConfig] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -127,9 +130,11 @@ def generate_palace_config(
         solver_conf["Driven"] = solver_driven
     elif simulation_type == "eigenmode":
         solver_conf["Eigenmode"] = solver_eigenmode
-    else:
-        raise NotImplementedError
-        # solver_conf["Electrostatics"] = solver_driven
+    elif simulation_type in ("electrostatic", "electrostatics"):
+        if electrostatic_config is not None:
+            solver_conf["Electrostatic"] = electrostatic_config.to_palace_config()
+        else:
+            solver_conf["Electrostatic"] = {"Save": 0}
 
     config: dict[str, object] = {
         "Problem": {
@@ -247,132 +252,212 @@ def generate_palace_config(
         info["phys_group"] for info in groups.get("pec_surfaces", {}).values()
     ]
 
-    lumped_ports: list[dict[str, object]] = []
-    wave_ports: list[dict[str, object]] = []
-    port_idx = 1
-    # Passive reactive ports are appended after all primary ports are assigned
-    # indices so that their synthetic indices never clash.  We collect them here
-    # and append them to lumped_ports once the primary loop finishes.
-    passive_reactive_ports: list[dict[str, object]] = []
+    is_electrostatic = simulation_type in ("electrostatic", "electrostatics")
 
-    for port in ports:
-        if simulation_type != "driven":
-            port.excited = False
-        port_key = f"P{port_idx}"
-        if port_key in groups["port_surfaces"]:
-            port_group = groups["port_surfaces"][port_key]
+    if is_electrostatic and terminals:
+        terminal_layer_names: set[str] = {t.layer for t in terminals}
+        via_boundary = groups.get("via_boundary_surfaces", {})
 
-            if port.multi_element:
-                # Multi-element port (CPW)
-                if port_group.get("type") == "cpw":
-                    elements = [
-                        {
-                            "Attributes": [elem["phys_group"]],
-                            "Direction": elem["direction"],
-                        }
-                        for elem in port_group["elements"]
-                    ]
-                    lumped_ports.append(
-                        {
-                            "Index": port_idx,
-                            "R": port.impedance,
-                            "Excitation": port_idx if port.excited else False,
-                            "Elements": elements,
-                        }
-                    )
-            else:
-                # Single-element port
-                if port.port_type == PortType.LUMPED:
-                    direction = (
-                        "Z"
-                        if port.geometry == PortGeometry.VIA
-                        else port.direction.upper()
-                    )
+        def _via_touches(via_name: str, conductor_layer_name: str) -> bool:
+            """Z-range overlap (or touching) between a via and a conductor."""
+            via = stack.layers.get(via_name)
+            cond = stack.layers.get(conductor_layer_name)
+            if via is None or cond is None:
+                return False
+            return via.zmin <= cond.zmax and via.zmax >= cond.zmin
 
-                    has_reactive = (
-                        port.resistance is not None
-                        or (port.inductance is not None and port.inductance > 0)
-                        or (port.capacitance is not None and port.capacitance > 0)
-                    )
+        terminal_entries: list[dict[str, object]] = []
+        assigned_pgs: set[int] = set()
 
-                    if simulation_type == "driven" and has_reactive:
-                        # Driven simulations forbid L/C on excited ports.
-                        # Emit the excited port with only R=impedance, then a
-                        # separate passive (Active: false) lumped port carrying
-                        # the reactive parameters on the same boundary surface.
-                        # Palace allows shared attributes when Active is false.
-                        port_entry: dict[str, object] = {
-                            "Index": port_idx,
-                            "R": port.impedance,
-                            "Direction": direction,
-                            "Excitation": port_idx if port.excited else False,
-                            "Attributes": [port_group["phys_group"]],
-                        }
-                        lumped_ports.append(port_entry)
+        # Track which vias were attached to a terminal so we don't also
+        # send their surfaces to ground.
+        vias_on_terminal: set[str] = set()
 
-                        reactive_entry: dict[str, object] = {
-                            # Placeholder index - will be replaced after the
-                            # primary loop assigns all port_idx values.
-                            "Index": None,
-                            "Direction": direction,
-                            "Attributes": [port_group["phys_group"]],
-                            "Active": False,
-                        }
-                        if port.resistance is not None:
-                            reactive_entry["R"] = port.resistance
-                        if port.inductance is not None and port.inductance > 0:
-                            reactive_entry["L"] = port.inductance
-                        if port.capacitance is not None and port.capacitance > 0:
-                            reactive_entry["C"] = port.capacitance
-                        passive_reactive_ports.append(reactive_entry)
-                    else:
-                        # Eigenmode (or non-excited driven port): R/L/C on the
-                        # same port entry is supported.
-                        eigenmode_entry: dict[str, object] = {
-                            "Index": port_idx,
-                            "Direction": direction,
-                            "Excitation": port_idx if port.excited else False,
-                            "Attributes": [port_group["phys_group"]],
-                        }
-                        if port.impedance:
-                            eigenmode_entry["R"] = port.impedance
-                        if port.resistance is not None:
-                            eigenmode_entry["R"] = port.resistance
-                        if port.inductance is not None and port.inductance > 0:
-                            eigenmode_entry["L"] = port.inductance
-                        if port.capacitance is not None and port.capacitance > 0:
-                            eigenmode_entry["C"] = port.capacitance
-                        lumped_ports.append(eigenmode_entry)
+        pec_surfaces = groups.get("pec_surfaces", {})
 
-                elif port.port_type == PortType.WAVEPORT:
-                    wave_ports.append(
-                        {
-                            "Index": port_idx,
-                            "Mode": port.mode,
-                            "Offset": port.offset,
-                            "Excitation": port_idx if port.excited else False,
-                            "Attributes": [port_group["phys_group"]],
-                        }
-                    )
-        port_idx += 1
+        for idx, terminal in enumerate(terminals, start=1):
+            attrs: list[int] = []
+            # Thick conductor shells (named "<layer>_xy" / "<layer>_z")
+            for surf_name, surf_info in groups["conductor_surfaces"].items():
+                surf_layer = surf_name.rsplit("_", 1)[0]
+                if surf_layer == terminal.layer:
+                    attrs.append(surf_info["phys_group"])
+            # Planar (thin) conductor surfaces (keyed by layer name)
+            if terminal.layer in pec_surfaces:
+                attrs.append(pec_surfaces[terminal.layer]["phys_group"])
+            # Vias touching this terminal's layer
+            for via_name, via_pgs in via_boundary.items():
+                if _via_touches(via_name, terminal.layer):
+                    attrs.extend(via_pgs)
+                    vias_on_terminal.add(via_name)
 
-    # Assign unique indices to passive reactive ports now that all primary
-    # indices are consumed (port_idx is one past the last primary index).
-    synthetic_idx = port_idx
-    for entry in passive_reactive_ports:
-        entry["Index"] = synthetic_idx
-        synthetic_idx += 1
-    lumped_ports.extend(passive_reactive_ports)
+            assigned_pgs.update(attrs)
+            terminal_entries.append(
+                {
+                    "Index": idx,
+                    "Attributes": sorted(attrs),
+                }
+            )
 
-    boundaries: dict[str, object] = {
-        "Conductivity": conductors,
-        "LumpedPort": lumped_ports,
-        "WavePort": wave_ports,
-    }
+        # Anything that wasn't assigned to a terminal becomes Ground.
+        ground_attrs: list[int] = []
+        for surf_info in groups["conductor_surfaces"].values():
+            pg = surf_info["phys_group"]
+            if pg not in assigned_pgs:
+                ground_attrs.append(pg)
+        for surf_info in pec_surfaces.values():
+            pg = surf_info["phys_group"]
+            if pg not in assigned_pgs:
+                ground_attrs.append(pg)
 
-    # Add PEC boundaries if any exist
-    if pec_attrs:
-        boundaries["PEC"] = {"Attributes": pec_attrs}
+        # Vias that touch a non-terminal conductor -> tie to ground so they
+        # don't float (Palace's solver has no current-flow through volumes).
+        for via_name, via_pgs in via_boundary.items():
+            if via_name in vias_on_terminal:
+                continue
+            for cond_name in stack.layers or {}:
+                if cond_name in terminal_layer_names:
+                    continue
+                cond = stack.layers.get(cond_name)
+                if cond is None or cond.layer_type != "conductor":
+                    continue
+                if _via_touches(via_name, cond_name):
+                    ground_attrs.extend(via_pgs)
+                    break
+
+        boundaries: dict[str, object] = {
+            "Terminal": terminal_entries,
+        }
+        if ground_attrs:
+            boundaries["Ground"] = {"Attributes": sorted(set(ground_attrs))}
+
+    else:
+        lumped_ports: list[dict[str, object]] = []
+        wave_ports: list[dict[str, object]] = []
+        port_idx = 1
+        # Passive reactive ports are appended after all primary ports are assigned
+        # indices so that their synthetic indices never clash.  We collect them here
+        # and append them to lumped_ports once the primary loop finishes.
+        passive_reactive_ports: list[dict[str, object]] = []
+
+        for port in ports:
+            if simulation_type != "driven":
+                port.excited = False
+            port_key = f"P{port_idx}"
+            if port_key in groups["port_surfaces"]:
+                port_group = groups["port_surfaces"][port_key]
+
+                if port.multi_element:
+                    # Multi-element port (CPW)
+                    if port_group.get("type") == "cpw":
+                        elements = [
+                            {
+                                "Attributes": [elem["phys_group"]],
+                                "Direction": elem["direction"],
+                            }
+                            for elem in port_group["elements"]
+                        ]
+                        lumped_ports.append(
+                            {
+                                "Index": port_idx,
+                                "R": port.impedance,
+                                "Excitation": port_idx if port.excited else False,
+                                "Elements": elements,
+                            }
+                        )
+                else:
+                    # Single-element port
+                    if port.port_type == PortType.LUMPED:
+                        direction = (
+                            "Z"
+                            if port.geometry == PortGeometry.VIA
+                            else port.direction.upper()
+                        )
+
+                        has_reactive = (
+                            port.resistance is not None
+                            or (port.inductance is not None and port.inductance > 0)
+                            or (port.capacitance is not None and port.capacitance > 0)
+                        )
+
+                        if simulation_type == "driven" and has_reactive:
+                            # Driven simulations forbid L/C on excited ports.
+                            # Emit the excited port with only R=impedance, then a
+                            # separate passive (Active: false) lumped port carrying
+                            # the reactive parameters on the same boundary surface.
+                            # Palace allows shared attributes when Active is false.
+                            port_entry: dict[str, object] = {
+                                "Index": port_idx,
+                                "R": port.impedance,
+                                "Direction": direction,
+                                "Excitation": port_idx if port.excited else False,
+                                "Attributes": [port_group["phys_group"]],
+                            }
+                            lumped_ports.append(port_entry)
+
+                            reactive_entry: dict[str, object] = {
+                                # Placeholder index - will be replaced after the
+                                # primary loop assigns all port_idx values.
+                                "Index": None,
+                                "Direction": direction,
+                                "Attributes": [port_group["phys_group"]],
+                                "Active": False,
+                            }
+                            if port.resistance is not None:
+                                reactive_entry["R"] = port.resistance
+                            if port.inductance is not None and port.inductance > 0:
+                                reactive_entry["L"] = port.inductance
+                            if port.capacitance is not None and port.capacitance > 0:
+                                reactive_entry["C"] = port.capacitance
+                            passive_reactive_ports.append(reactive_entry)
+                        else:
+                            # Eigenmode (or non-excited driven port): R/L/C on the
+                            # same port entry is supported.
+                            eigenmode_entry: dict[str, object] = {
+                                "Index": port_idx,
+                                "Direction": direction,
+                                "Excitation": port_idx if port.excited else False,
+                                "Attributes": [port_group["phys_group"]],
+                            }
+                            if port.impedance:
+                                eigenmode_entry["R"] = port.impedance
+                            if port.resistance is not None:
+                                eigenmode_entry["R"] = port.resistance
+                            if port.inductance is not None and port.inductance > 0:
+                                eigenmode_entry["L"] = port.inductance
+                            if port.capacitance is not None and port.capacitance > 0:
+                                eigenmode_entry["C"] = port.capacitance
+                            lumped_ports.append(eigenmode_entry)
+
+                    elif port.port_type == PortType.WAVEPORT:
+                        wave_ports.append(
+                            {
+                                "Index": port_idx,
+                                "Mode": port.mode,
+                                "Offset": port.offset,
+                                "Excitation": port_idx if port.excited else False,
+                                "Attributes": [port_group["phys_group"]],
+                            }
+                        )
+            port_idx += 1
+
+        # Assign unique indices to passive reactive ports now that all primary
+        # indices are consumed (port_idx is one past the last primary index).
+        synthetic_idx = port_idx
+        for entry in passive_reactive_ports:
+            entry["Index"] = synthetic_idx
+            synthetic_idx += 1
+        lumped_ports.extend(passive_reactive_ports)
+
+        boundaries: dict[str, object] = {
+            "Conductivity": conductors,
+            "LumpedPort": lumped_ports,
+            "WavePort": wave_ports,
+        }
+
+        # Add PEC boundaries if any exist
+        if pec_attrs:
+            boundaries["PEC"] = {"Attributes": pec_attrs}
 
     if "absorbing" in groups["boundary_surfaces"] and absorbing_boundary:
         absorbing_pg = groups["boundary_surfaces"]["absorbing"]["phys_group"]
@@ -570,6 +655,8 @@ def write_config(
     eigenmode_config: EigenmodeConfig | None = None,
     absorbing_boundary: bool = True,
     hints: dict[str, Any] | None = None,
+    electrostatic_config: ElectrostaticConfig | None = None,
+    terminals: list[TerminalConfig] | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -615,6 +702,8 @@ def write_config(
         absorbing_boundary=absorbing_boundary,
         periodic_axis=mesh_result.periodic_axis,
         hints=hints,
+        electrostatic_config=electrostatic_config,
+        terminals=terminals,
     )
 
     # Update the mesh_result with the config path
