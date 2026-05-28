@@ -400,9 +400,13 @@ def validate_mesh(sim) -> ValidationResult:
             try:
                 config = json.loads(config_path.read_text())
                 boundaries = config.get("Boundaries", {})
-                has_conductivity = bool(boundaries.get("Conductivity"))
-                has_pec = bool(boundaries.get("PEC"))
-                if not has_conductivity and not has_pec and not has_shaped_dielectrics:
+                has_conductor_bounds = (
+                    boundaries.get("Conductivity")
+                    or boundaries.get("PEC")
+                    or boundaries.get("Terminal")
+                    or boundaries.get("Ground")
+                )
+                if not has_conductor_bounds and not has_shaped_dielectrics:
                     errors.append("config.json has no Conductivity or PEC boundaries.")
                 if (
                     not boundaries.get("LumpedPort")
