@@ -54,6 +54,7 @@ from gsim.gcloud import RunResult, print_job_summary, register_result_parser
 from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
+from gsim.palace.boundarymode import BoundaryModeSim
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
@@ -70,7 +71,9 @@ from gsim.palace.mesh import (
 
 # Models (new submodule)
 from gsim.palace.models import (
+    BoundaryModeConfig,
     CPWPortConfig,
+    CrossSectionPlaneConfig,
     DrivenConfig,
     EigenmodeConfig,
     ElectrostaticConfig,
@@ -112,7 +115,10 @@ from gsim.viz import plot_cross_section, plot_mesh
 
 __all__ = [
     "MATERIALS_DB",
+    "BoundaryModeConfig",
+    "BoundaryModeSim",
     "CPWPortConfig",
+    "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSim",
     "EigenmodeConfig",
