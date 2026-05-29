@@ -1637,7 +1637,8 @@ class PalaceSimMixin:
             >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
             >>>
             >>> # Auto-discovery with no options:
-            >>> # tries local SIF first, then executable defaults
+            >>> # prefers local ./bin/palace if present,
+            >>> # otherwise falls back to local SIF or PATH executable
             >>> results = sim.run_local()
             >>>
             >>> # Using direct Palace with custom executable path
@@ -1706,7 +1707,10 @@ class PalaceSimMixin:
         if palace_executable is None:
             palace_executable = os.environ.get("PALACE_EXECUTABLE")
 
-        if palace_executable is None and palace_sif_path is None:
+        # Prefer a local Palace executable when available, even when a SIF is
+        # configured via PALACE_SIF. This keeps local developer workflows on
+        # native binaries by default.
+        if palace_executable is None:
             for root in dedup_roots:
                 candidate = (root / "bin" / "palace").resolve()
                 if candidate.exists() and os.access(candidate, os.X_OK):
@@ -1725,8 +1729,8 @@ class PalaceSimMixin:
 
         if palace_executable is not None and use_apptainer and verbose:
             logger.info(
-                "palace_executable was provided; running directly and ignoring "
-                "use_apptainer=True."
+                "Using Palace executable (%s); ignoring use_apptainer=True.",
+                palace_executable,
             )
 
         # Determine Palace command based on effective execution mode.

@@ -330,7 +330,9 @@ def _layer_shapely_polys(component, gds_layer_tuple, dbu):
     """Return a list of shapely Polygons for one GDS layer of ``component``."""
     from shapely.geometry import Polygon
 
-    raw = component.get_polygons(layers=(gds_layer_tuple,), merge=True)
+    # ``merge=True`` mutates the component and fails for locked @cell instances.
+    # We perform geometric union downstream, so request raw polygons here.
+    raw = component.get_polygons(layers=(gds_layer_tuple,), merge=False)
     if not isinstance(raw, dict) or not raw:
         return []
 

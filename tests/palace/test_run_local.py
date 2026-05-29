@@ -31,12 +31,12 @@ def test_run_local_accepts_relative_local_executable(monkeypatch, tmp_path):
 
     captured: dict[str, object] = {}
 
-    def _fake_run(cmd, cwd, _check, _capture_output, _text):
+    def _fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
-        captured["cwd"] = cwd
-        assert _check is True
-        assert _capture_output is True
-        assert _text is True
+        captured["cwd"] = kwargs["cwd"]
+        assert kwargs["check"] is True
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
         return SimpleNamespace(stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
@@ -79,9 +79,9 @@ def test_run_local_no_args_discovers_bin_palace(monkeypatch, tmp_path):
 
     captured: dict[str, object] = {}
 
-    def _fake_run(cmd, cwd, _check, _capture_output, _text):
+    def _fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
-        captured["cwd"] = cwd
+        captured["cwd"] = kwargs["cwd"]
         return SimpleNamespace(stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
@@ -97,8 +97,51 @@ def test_run_local_no_args_discovers_bin_palace(monkeypatch, tmp_path):
     assert captured["cwd"] == output_dir
 
 
-def test_run_local_no_args_prefers_local_sif(monkeypatch, tmp_path):
-    """run_local() should use Apptainer when a local SIF is auto-discovered."""
+def test_run_local_no_args_prefers_local_bin_over_sif(monkeypatch, tmp_path):
+    """run_local() should prefer local ./bin/palace over local SIF."""
+    output_dir = tmp_path / "sim"
+    postpro_dir = output_dir / "output" / "palace"
+    output_dir.mkdir(parents=True)
+    postpro_dir.mkdir(parents=True)
+    (output_dir / "config.json").write_text("{}")
+    (output_dir / "palace.msh").write_text("mesh")
+
+    local_sif = tmp_path / "Palace.sif"
+    local_sif.write_text("fake")
+
+    local_bin_dir = tmp_path / "bin"
+    local_bin_dir.mkdir()
+    local_palace = local_bin_dir / "palace"
+    local_palace.write_text("#!/bin/sh\nexit 0\n")
+    local_palace.chmod(0o755)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PALACE_SIF", raising=False)
+    monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs["cwd"]
+        return SimpleNamespace(stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    sim = DrivenSim()
+    sim.set_output_dir(output_dir)
+    result = sim.run_local(num_processes=1, verbose=False)
+
+    assert isinstance(result, dict)
+    cmd = cast(list[str], captured["cmd"])
+    assert isinstance(cmd, list)
+    assert Path(cmd[0]) == local_palace.resolve()
+    assert Path(cmd[0]).is_absolute()
+    assert captured["cwd"] == output_dir
+
+
+def test_run_local_no_args_uses_local_sif_when_no_executable(monkeypatch, tmp_path):
+    """run_local() should use Apptainer if only a local SIF is available."""
     output_dir = tmp_path / "sim"
     postpro_dir = output_dir / "output" / "palace"
     output_dir.mkdir(parents=True)
@@ -116,9 +159,9 @@ def test_run_local_no_args_prefers_local_sif(monkeypatch, tmp_path):
 
     captured: dict[str, object] = {}
 
-    def _fake_run(cmd, cwd, _check, _capture_output, _text):
+    def _fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
-        captured["cwd"] = cwd
+        captured["cwd"] = kwargs["cwd"]
         return SimpleNamespace(stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
