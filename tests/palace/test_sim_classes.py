@@ -6,8 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from gsim.common import Geometry
-from gsim.common.stack import Layer, LayerStack
 from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -156,88 +154,6 @@ class TestMixinMethods:
         sim = DrivenSim()
         sim.set_stack()
         assert sim._stack_kwargs["air_above"] == 0.0
-
-    def test_resolve_stack_does_not_auto_cap_from_geometry(self, monkeypatch):
-        """_resolve_stack should not infer an implicit top-layer cap from geometry."""
-        calls: list[dict] = []
-
-        def _mk_stack() -> LayerStack:
-            return LayerStack(
-                pdk_name="test",
-                layers={
-                    "metal1": Layer(
-                        name="metal1",
-                        gds_layer=(10, 0),
-                        zmin=0.0,
-                        zmax=1.0,
-                        thickness=1.0,
-                        material="aluminum",
-                        layer_type="conductor",
-                    ),
-                    "topmetal2": Layer(
-                        name="topmetal2",
-                        gds_layer=(20, 0),
-                        zmin=2.0,
-                        zmax=3.0,
-                        thickness=1.0,
-                        material="aluminum",
-                        layer_type="conductor",
-                    ),
-                },
-            )
-
-        def _fake_get_stack(*, yaml_path=None, **kwargs):
-            calls.append({"yaml_path": yaml_path, **kwargs})
-            return _mk_stack()
-
-        monkeypatch.setattr("gsim.common.stack.get_stack", _fake_get_stack)
-
-        class _Layout:
-            def layers(self):
-                return 2
-
-            def is_valid_layer(self, idx):
-                return idx in (0, 1)
-
-            def get_info(self, idx):
-                mapping = {
-                    0: SimpleNamespace(layer=10, datatype=0),
-                    1: SimpleNamespace(layer=99, datatype=0),
-                }
-                return mapping[idx]
-
-        class _Component:
-            def __init__(self):
-                self.kcl = SimpleNamespace(layout=_Layout())
-
-            def get_polygons(self):
-                return {0: [object()], 1: [object()]}
-
-        sim = DrivenSim()
-        sim.set_stack(substrate_thickness=2.0)
-        sim.geometry = Geometry(component=_Component())
-
-        sim._resolve_stack()
-
-        assert len(calls) == 1
-        assert calls[0].get("top_layer") is None
-
-    def test_resolve_stack_keeps_explicit_cap(self, monkeypatch):
-        """Explicit top_layer/max_z should bypass auto top-layer inference."""
-        calls: list[dict] = []
-
-        def _fake_get_stack(*, yaml_path=None, **kwargs):
-            calls.append({"yaml_path": yaml_path, **kwargs})
-            return LayerStack()
-
-        monkeypatch.setattr("gsim.common.stack.get_stack", _fake_get_stack)
-
-        sim = DrivenSim()
-        sim.set_stack(top_layer="topmetal1")
-        sim._resolve_stack()
-
-        assert len(calls) == 1
-        assert calls[0].get("top_layer") == "topmetal1"
 
     def test_set_airbox(self):
         """Test set_airbox stores explicit airbox margins and z extents."""

@@ -63,10 +63,6 @@ def get_stack(
               Palace RF sims typically override to 200+ for far-field radiation.
                         - air_below: Air box height below substrate/oxide in um
                             (default: 0)
-                        - top_layer: Optional stack layer name to cap dielectric/air
-                            construction at that layer's zmax.
-                        - max_z: Optional explicit z-cap (um) for dielectric/air
-                            construction.
             - include_substrate: Include lossy silicon substrate (default: False).
               When False, omits substrate for RF simulation.
 

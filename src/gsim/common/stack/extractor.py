@@ -331,8 +331,6 @@ def extract_layer_stack(
     air_below: float = 0.0,
     boundary_margin: float = 30.0,
     include_substrate: bool = False,
-    max_z: float | None = None,
-    top_layer: str | None = None,
 ) -> LayerStack:
     """Extract layer stack from a gdsfactory LayerStack.
 
@@ -345,11 +343,6 @@ def extract_layer_stack(
         air_below: Height of air box below substrate/oxide in um (default: 0)
         boundary_margin: Lateral margin from GDS bbox in um (default: 30)
         include_substrate: Whether to include lossy substrate (default: False)
-        max_z: Optional z-cap (um) for dielectric/air stack construction.
-            Useful to trim unused upper process levels.
-        top_layer: Optional layer name whose ``zmax`` is used as z-cap.
-            If both ``max_z`` and ``top_layer`` are provided, the smaller
-            of the two caps is applied.
 
     Returns:
         LayerStack object for Palace simulation
@@ -359,7 +352,6 @@ def extract_layer_stack(
     z_min_overall = float("inf")
     z_max_overall = float("-inf")
     z_max_conductor = float("-inf")
-    conductor_tops: list[float] = []
     passivation_ranges: list[tuple[float, float, str]] = []
     dielectric_layers: list[tuple[float, float, str, str]] = []
     materials_used: set[str] = set()
@@ -410,35 +402,13 @@ def extract_layer_stack(
 
         if layer_type in {"conductor", "via"}:
             z_max_conductor = max(z_max_conductor, zmax)
-            conductor_tops.append(zmax)
         elif layer_type == "dielectric":
             dielectric_layers.append((zmin, zmax, material, layer_name))
             if _looks_like_passivation(layer_name, material):
                 passivation_ranges.append((zmin, zmax, material))
 
-    z_cap = max_z
-    if top_layer is not None:
-        top = stack.layers.get(top_layer)
-        if top is None:
-            raise ValueError(f"top_layer '{top_layer}' not found in layer stack")
-        z_cap = top.zmax if z_cap is None else min(z_cap, top.zmax)
-
-    if z_cap is not None:
-        if z_cap <= z_min_overall:
-            raise ValueError(
-                "z-cap "
-                f"({z_cap}) must be greater than the stack bottom "
-                f"({z_min_overall})"
-            )
-        z_max_active = min(z_max_overall, z_cap)
-        active_tops = [z for z in conductor_tops if z <= z_max_active + 1e-9]
-        if active_tops:
-            z_max_conductor_active = max(active_tops)
-        else:
-            z_max_conductor_active = min(z_max_conductor, z_max_active)
-    else:
-        z_max_active = z_max_overall
-        z_max_conductor_active = z_max_conductor
+    z_max_active = z_max_overall
+    z_max_conductor_active = z_max_conductor
 
     for material in materials_used:
         props = get_material_properties(material)
@@ -590,8 +560,6 @@ def extract_layer_stack(
         "air_below": air_below,
         "substrate_thickness": substrate_thickness,
         "include_substrate": include_substrate,
-        "max_z": max_z,
-        "top_layer": top_layer,
     }
 
     return stack

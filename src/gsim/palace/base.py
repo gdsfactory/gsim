@@ -153,9 +153,6 @@ class PalaceSimMixin:
             substrate_thickness: Thickness below z=0 in um.
             include_substrate: Include lossy silicon substrate.
             **kwargs: Additional args passed to extract_layer_stack.
-                Common options include ``top_layer`` and ``max_z`` to cap
-                dielectric/air stack height for structures that use only a
-                subset of process levels.
 
         Example:
             >>> sim.set_stack(air_above=300.0, substrate_thickness=2.0)
