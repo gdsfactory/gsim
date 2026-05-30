@@ -11,6 +11,8 @@ to the Palace config JSON.
 
 from __future__ import annotations
 
+from scipy.constants import c as C0  # noqa: N812
+
 from gsim.common.stack.materials import (
     get_material_properties,
     resolve_material_at_wavelength,
@@ -38,7 +40,7 @@ def resolve_palace_materials_at_frequency(
     Returns:
         New materials dict with evaluated scalar properties
     """
-    wavelength_um = 299_792_458 / frequency_hz * 1e6
+    wavelength_um = C0 / frequency_hz * 1e6
     resolved: dict[str, dict] = {}
 
     for name, props in materials.items():

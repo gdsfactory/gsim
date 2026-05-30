@@ -429,9 +429,11 @@ class TestOverlayInResolution:
                 ),
             ],
         )
-        resolved = resolve_material_at_wavelength(
-            "silicon", 1.55, overlay={"silicon": overlay_si}
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            resolved = resolve_material_at_wavelength(
+                "silicon", 1.55, overlay={"silicon": overlay_si}
+            )
         assert resolved is not None
         assert resolved.permittivity == pytest.approx(12.5)
 

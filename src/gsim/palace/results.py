@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -190,7 +191,9 @@ class SParams:
         ax2.grid(True)
 
         fig.tight_layout()
-        plt.show()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            plt.show()
 
     def plot_plotly(self, *, full: bool = False):
         """Plot S-parameters with Plotly (interactive).

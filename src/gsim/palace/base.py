@@ -1031,6 +1031,7 @@ class PalaceSimMixin:
         cells_per_feature: int = 2,
         periodic_axis: str | None = None,
         decimate_tolerance: float | None = None,
+        merge_via_distance: float | None = None,
     ) -> SimulationResult:
         """Generate the mesh for Palace simulation.
 
@@ -1063,6 +1064,10 @@ class PalaceSimMixin:
             decimate_tolerance: Relative tolerance for polygon decimation
                 (None = no decimation; typical 0.001-0.01). Reduces vertex
                 count on curved geometry before meshing.
+            merge_via_distance: Max gap (um) between nearby via polygons to
+                merge before extrusion. Pass 0 to disable merging (keep
+                each via as a separate volume). Defaults to the preset's
+                value (typically 2.0 um).
 
         Returns:
             SimulationResult with mesh path
@@ -1097,6 +1102,9 @@ class PalaceSimMixin:
             auto_size=auto_size,
             cells_per_feature=cells_per_feature,
         )
+
+        if merge_via_distance is not None:
+            mesh_config.merge_via_distance = merge_via_distance
 
         # Validate configuration
         validation = self.validate_config()
@@ -1172,6 +1180,8 @@ class PalaceSimMixin:
             )
 
         stack = self._resolve_stack()
+        electrostatic_config = getattr(self, "electrostatic", None)
+        terminals = getattr(self, "terminals", None)
         config_path = gen_write_config(
             mesh_result=self._last_mesh_result,
             stack=stack,
@@ -1181,6 +1191,8 @@ class PalaceSimMixin:
             driven_config=self.driven,
             absorbing_boundary=self.absorbing_boundary,
             hints=self._hints,
+            electrostatic_config=electrostatic_config,
+            terminals=terminals or [],
         )
 
         # Validate mesh and config unless explicitly skipped.

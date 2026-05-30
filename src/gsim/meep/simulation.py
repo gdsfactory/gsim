@@ -998,7 +998,7 @@ class Simulation(BaseModel):
 
         from gsim.meep.models.results import SParameterResult
 
-        # Auto-write config (matches Palace run_local behavior)
+        # Always regenerate config to reflect current settings
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="meep_local_"))
         output_dir = Path(output_dir)

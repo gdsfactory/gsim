@@ -61,7 +61,7 @@ sim.plot_2d(slices="xyz")
 
 # %%
 # Run on GDSFactory+ cloud
-result = sim.run()
+result = sim.run_local()
 
 # %%
 result.plot(db=True)

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pytest
 
 from gsim.common.stack import LayerStack
+from gsim.common.stack.extractor import Layer
 from gsim.palace.mesh import MeshConfig
 from gsim.palace.mesh import validation as mesh_validation
-from gsim.palace.mesh.geometry import GeometryData, add_dielectrics
+from gsim.palace.mesh.geometry import GeometryData, _snap_via_z_range, add_dielectrics
 
 
 class TestMeshConfig:
@@ -147,6 +150,72 @@ def test_add_dielectrics_explicit_airbox_z_extents(monkeypatch) -> None:
     assert "airbox" in tags
     # Air layer is skipped when explicit airbox is built.
     assert list(tags.keys()) == ["SiO2", "airbox"]
+
+
+def _mk_layer(
+    name: str,
+    zmin: float,
+    zmax: float,
+    ltype: Literal["conductor", "via", "dielectric", "substrate"] = "conductor",
+) -> Layer:
+    return Layer(
+        name=name,
+        gds_layer=(0, 0),
+        zmin=zmin,
+        zmax=zmax,
+        thickness=zmax - zmin,
+        material="aluminum",
+        layer_type=ltype,
+    )
+
+
+class TestSnapViaZRange:
+    """Snap via z-range to avoid sliver volumes against adjacent conductors."""
+
+    def test_snaps_top_overlap_with_conductor(self):
+        # Mimics IHP vmim z=[5.58, 6.24] vs topmetal1 z=[6.23, 8.23]
+        stack = LayerStack(
+            layers={
+                "vmim": _mk_layer("vmim", 5.58, 6.24, "via"),
+                "topmetal1": _mk_layer("topmetal1", 6.23, 8.23, "conductor"),
+            }
+        )
+        new_zmin, new_zmax = _snap_via_z_range(stack, "vmim", 5.58, 6.24)
+        assert new_zmin == pytest.approx(5.58)
+        assert new_zmax == pytest.approx(6.23)
+
+    def test_does_not_snap_large_overlap(self):
+        # Overlap > tol must be left alone (likely a real geometric intersection).
+        stack = LayerStack(
+            layers={
+                "via": _mk_layer("via", 0.0, 1.0, "via"),
+                "metal": _mk_layer("metal", 0.5, 2.0, "conductor"),
+            }
+        )
+        new_zmin, new_zmax = _snap_via_z_range(stack, "via", 0.0, 1.0, tol=0.05)
+        assert (new_zmin, new_zmax) == (0.0, 1.0)
+
+    def test_no_overlap_unchanged(self):
+        stack = LayerStack(
+            layers={
+                "via": _mk_layer("via", 1.0, 2.0, "via"),
+                # touches, no overlap
+                "metal": _mk_layer("metal", 2.0, 3.0, "conductor"),
+            }
+        )
+        new_zmin, new_zmax = _snap_via_z_range(stack, "via", 1.0, 2.0)
+        assert (new_zmin, new_zmax) == (1.0, 2.0)
+
+    def test_snaps_bottom_overlap_with_conductor(self):
+        stack = LayerStack(
+            layers={
+                "via": _mk_layer("via", 1.99, 3.0, "via"),
+                "metal": _mk_layer("metal", 1.0, 2.0, "conductor"),
+            }
+        )
+        new_zmin, new_zmax = _snap_via_z_range(stack, "via", 1.99, 3.0)
+        assert new_zmin == pytest.approx(2.0)
+        assert new_zmax == pytest.approx(3.0)
 
 
 class TestValidationHelpers:

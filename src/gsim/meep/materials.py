@@ -26,6 +26,8 @@ from __future__ import annotations
 import math
 import warnings
 
+from scipy.constants import c as C0  # noqa: N812
+
 from gsim.common.stack.materials import (
     DispersionModel,
     MaterialProperties,
@@ -170,8 +172,8 @@ def _validity_to_freq_range(
             return [1.0 / wl_max, 1.0 / wl_min]
     if v.valid_frequency is not None:
         f_min_hz, f_max_hz = v.valid_frequency
-        f_min = f_min_hz * 1e-6 / 299_792_458
-        f_max = f_max_hz * 1e-6 / 299_792_458
+        f_min = f_min_hz * 1e-6 / C0
+        f_max = f_max_hz * 1e-6 / C0
         return [f_min, f_max]
     return None
 
@@ -254,7 +256,7 @@ def _resolved_to_material_data(
     if resolved.permeability is not None:
         data.mu_diag = _as_list(resolved.permeability, 3)
 
-    freq_hz = 299_792_458 / (wavelength_um * 1e-6)
+    freq_hz = C0 / (wavelength_um * 1e-6)
 
     cond_scalar = resolved.conductivity_scalar
     if cond_scalar is not None and cond_scalar > 0:
