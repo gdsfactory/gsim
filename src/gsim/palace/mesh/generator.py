@@ -77,6 +77,7 @@ def _setup_mesh_fields(
     port_line_count = 0
     pec_line_count = 0
     shaped_dielectric_count = 0
+    dielectric_line_count = 0
 
     # Conductor-surface edges are always refined — the refined_cellsize only
     # takes effect where boundary curves drive the Threshold field, and metal
@@ -173,12 +174,13 @@ def _setup_mesh_fields(
 
     logger.info(
         "Mesh refinement: %d boundary lines "
-        "(conductor=%d, port=%d, pec=%d, shaped_dielectric=%d)",
+        "(conductor=%d, port=%d, pec=%d, shaped_dielectric=%d, dielectric=%d)",
         len(boundary_lines),
         conductor_line_count,
         port_line_count,
         pec_line_count,
         shaped_dielectric_count,
+        dielectric_line_count,
     )
 
     # Setup main refinement field
@@ -255,7 +257,6 @@ def generate_mesh(
     high_order_optimize: bool = True,
     verbosity: int = 3,
     decimate_tolerance: float | None = None,
-    verbosity: int = 0,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 

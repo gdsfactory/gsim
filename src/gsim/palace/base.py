@@ -948,7 +948,8 @@ class PalaceSimMixin:
             high_order_elements=mesh_config.high_order_elements,
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
-            verbosity=3,
+            verbosity=gmsh_verbosity,
+            decimate_tolerance=decimate_tolerance,
         )
 
         # Store mesh_result for deferred config generation

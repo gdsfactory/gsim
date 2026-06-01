@@ -162,6 +162,7 @@ def generate_palace_config(
 
     materials: list[dict[str, object]] = []
     for volume_name, info in groups["volumes"].items():
+        material_name = volume_name
         is_via = info.get("is_via", False)
         is_shaped_dielectric = info.get("is_shaped_dielectric", False)
 
