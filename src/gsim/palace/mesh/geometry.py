@@ -842,6 +842,13 @@ def add_patterned_dielectrics(
     patterned_tags: dict[str, list[int]] = {}
     curve_layers = set(curve_fit_layers or [])
 
+    # Shaped dielectric layers are already extruded by ``add_metals`` and
+    # tracked via ``metal_tags["__shaped_dielectrics__"]``. Re-extruding them
+    # here would create overlapping volumes with duplicate ``Entity`` names,
+    # which collide in ``build_entities`` / ``assign_physical_groups`` and
+    # cause the layer to drop out of ``groups["volumes"]``.
+    shaped_dielectric_names = _detect_shaped_dielectric_layers(geometry, stack)
+
     polygons_by_layer: dict[int, list[tuple[list[float], list[float], list]]] = {}
     for layernum, pts_x, pts_y, holes in geometry.polygons:
         polygons_by_layer.setdefault(layernum, []).append((pts_x, pts_y, holes))
@@ -852,6 +859,8 @@ def add_patterned_dielectrics(
             continue
 
         layer_name = layer_info["name"]
+        if layer_name in shaped_dielectric_names:
+            continue
         zmin = layer_info["zmin"]
         thickness = layer_info["thickness"]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from types import SimpleNamespace
 
@@ -14,7 +15,7 @@ class _FakeOption:
     def __init__(self) -> None:
         self.calls: list[tuple[str, float]] = []
 
-    def setNumber(self, name: str, value: float) -> None:
+    def setNumber(self, name: str, value: float) -> None:  # noqa: N802 (gmsh API)
         self.calls.append((name, value))
 
 
@@ -25,7 +26,7 @@ class _FakeMeshOps:
     def generate(self, dim: int) -> None:
         self.generated_dim = dim
 
-    def setOrder(self, _order: int) -> None:
+    def setOrder(self, _order: int) -> None:  # noqa: N802 (gmsh API)
         return
 
     def optimize(self, _method: str) -> None:
@@ -38,10 +39,10 @@ class _FakeModel:
         self.mesh = _FakeMeshOps()
         self._models: list[str] = []
 
-    def list(self) -> list[str]:
+    def list(self) -> builtins.list[str]:
         return list(self._models)
 
-    def setCurrent(self, _name: str) -> None:
+    def setCurrent(self, _name: str) -> None:  # noqa: N802 (gmsh API)
         return
 
     def remove(self) -> None:
@@ -181,7 +182,9 @@ def test_generate_mesh_forwards_curve_fit_and_decimation(monkeypatch, tmp_path) 
         "assign_physical_groups",
         _fake_assign_physical_groups,
     )
-    monkeypatch.setattr(mesh_generator, "_setup_mesh_fields", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mesh_generator, "_setup_mesh_fields", lambda *_args, **_kwargs: None
+    )
     monkeypatch.setattr(mesh_generator, "collect_mesh_stats", lambda: {"nodes": 1})
 
     stack = LayerStack()
