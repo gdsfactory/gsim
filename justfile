@@ -43,6 +43,13 @@ docs:
 serve:
   uv run mkdocs serve -a localhost:8080
 
+# Run a notebook normally (interactive plots): just nbrun nbs/foo.ipynb
+nbrun +notebooks: ipykernel
+  for nb in {{notebooks}}; do \
+    uv run papermill "$nb" "$nb" -k gsim; \
+    jupytext --sync "$nb"; \
+  done
+
 # Run a notebook for docs (with Plotly HTML renderer): just nbrun-docs nbs/foo.ipynb
 nbrun-docs +notebooks: ipykernel
   for nb in {{notebooks}}; do \

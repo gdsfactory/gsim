@@ -65,10 +65,15 @@ sim.plot_2d(slices="xyz")
 
 # %%
 # Run on GDSFactory+ cloud
-result = sim.run_local()
+result = sim.run()
 
 # %%
-result.plot(db=True)
+result.plot_interactive()
+
+# %%
+result.plot_interactive(phase=True)
 
 # %%
 result.show_animation()
+
+# %%
