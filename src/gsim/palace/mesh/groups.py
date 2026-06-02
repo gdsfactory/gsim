@@ -130,6 +130,15 @@ def assign_physical_groups(
                         "phys_group": pg,
                         "tags": surf_tags,
                     }
+            # Also track explicit refinement lines for planar conductors.
+            # Embedded planar surfaces lose their boundary curves after boolean
+            # fragmentation, so separate wire loops are added to drive mesh
+            # refinement at conductor edges.
+            refinement_lines = tag_info.get("refinement_lines", [])
+            if refinement_lines:
+                groups.setdefault("refinement_lines", {})[layer_name] = {
+                    "tags": refinement_lines,
+                }
 
     # --- PEC block surfaces ---
     if pec_block_tags:

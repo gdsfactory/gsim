@@ -473,6 +473,23 @@ def add_metals(
         elif layer_type == "conductor" and is_planar:
             # Zero/thin-thickness or explicitly planar -> 2D PEC surface
             metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+            # Also create explicit wire loops for mesh refinement.  Embedded
+            # planar surfaces lose their boundary curves after boolean
+            # fragmentation, so the conductor edges cannot drive refinement.
+            # Adding independent line loops at the conductor z-height gives
+            # gmsh explicit curves to refine around the metal perimeter.
+            for pts_x, pts_y, holes in polys:
+                loop_tag = gmsh_utils._create_wire_loop(
+                    kernel, list(pts_x), list(pts_y), zmin
+                )
+                if loop_tag is not None:
+                    metal_tags[layer_name].setdefault("refinement_lines", []).append(loop_tag)
+                for hx, hy in holes:
+                    hole_loop = gmsh_utils._create_wire_loop(
+                        kernel, list(hx), list(hy), zmin
+                    )
+                    if hole_loop is not None:
+                        metal_tags[layer_name].setdefault("refinement_lines", []).append(hole_loop)
         elif layer_type == "via":
             # Decide between 3D volume (with conductivity) and 2D PEC fallback
             material_name = layer_info["material"]
@@ -748,7 +765,14 @@ def add_dielectrics(
         # extend to the air margins.  A shaped dielectric (e.g. waveguide
         # core) carves out of the surrounding oxide/substrate boxes, so those
         # boxes need to be large enough to fully surround the shaped volume.
-        if _detect_shaped_dielectric_layers(geometry, stack) and not is_air_like:
+        #
+        # Also extend substrates (dielectrics starting at z ≈ 0) to margins.
+        # A bulk substrate like sapphire or silicon should fill the same
+        # transverse extent as the surrounding air so the mesh domain is
+        # consistent and the substrate edge does not artificially truncate
+        # fields.
+        is_bulk_substrate = d_zmin <= 1e-6
+        if (is_bulk_substrate or _detect_shaped_dielectric_layers(geometry, stack)) and not is_air_like:
             xmin = xmin_air
             ymin = ymin_air
             xmax = xmax_air
@@ -861,6 +885,15 @@ def add_patterned_dielectrics(
         layer_name = layer_info["name"]
         if layer_name in shaped_dielectric_names:
             continue
+
+        # Skip dielectric layers already covered by bulk dielectric boxes
+        # from stack.dielectrics. Re-extruding them would create overlapping
+        # volumes that get consumed in the boolean pipeline, causing the
+        # intended bulk material groups to disappear.
+        layer_obj = stack.layers.get(layer_name)
+        if layer_obj is not None and _is_covered_by_dielectric_box(layer_obj, stack):
+            continue
+
         zmin = layer_info["zmin"]
         thickness = layer_info["thickness"]
 
