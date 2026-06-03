@@ -150,10 +150,11 @@ class TestMixinMethods:
             assert "air_below" not in sim._stack_kwargs
 
     def test_set_stack_default_air_above_zero(self):
-        """Default stack setup should not add top air unless explicitly requested."""
+        """Default stack setup should not pass legacy air kwargs at all."""
         sim = DrivenSim()
         sim.set_stack()
-        assert sim._stack_kwargs["air_above"] == 0.0
+        assert "air_above" not in sim._stack_kwargs
+        assert "air_below" not in sim._stack_kwargs
 
     def test_set_airbox(self):
         """Test set_airbox stores explicit airbox margins and z extents."""
@@ -167,11 +168,98 @@ class TestMixinMethods:
                 "z_below": 80.0,
             }
 
+    def test_set_airbox_defaults_to_zero(self):
+        """Unassigned set_airbox arguments should default to 0.0."""
+        for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim]:
+            sim = cls()
+            sim.set_airbox()
+            assert sim._airbox_config == {
+                "margin_x": 0.0,
+                "margin_y": 0.0,
+                "z_above": 0.0,
+                "z_below": 0.0,
+            }
+
+    def test_set_airbox_partial_defaults(self):
+        """Any omitted set_airbox field should still become 0.0."""
+        sim = DrivenSim()
+        sim.set_airbox(margin_x=50.0)
+        assert sim._airbox_config == {
+            "margin_x": 50.0,
+            "margin_y": 0.0,
+            "z_above": 0.0,
+            "z_below": 0.0,
+        }
+
     def test_set_airbox_invalid(self):
         """set_airbox should reject negative margins/extents."""
         sim = DrivenSim()
         with pytest.raises(ValueError):
             sim.set_airbox(margin_x=-1.0, z_above=100.0, z_below=100.0)
+
+    def test_mesh_routes_airbox_kwargs_through_set_airbox(self, monkeypatch, tmp_path):
+        """mesh() air-region kwargs should be applied via set_airbox()."""
+        captured: dict[str, float | None] = {}
+
+        def _fake_set_airbox(
+            _self,
+            *,
+            margin_x=None,
+            margin_y=None,
+            z_above=None,
+            z_below=None,
+        ):
+            captured["margin_x"] = margin_x
+            captured["margin_y"] = margin_y
+            captured["z_above"] = z_above
+            captured["z_below"] = z_below
+
+        def _fake_generate_mesh_internal(_self, **_kwargs):
+            return SimpleNamespace(mesh_stats={}, mesh_path=tmp_path / "palace.msh")
+
+        sim = DrivenSim()
+        sim.set_output_dir(tmp_path / "sim")
+
+        monkeypatch.setattr(DrivenSim, "set_airbox", _fake_set_airbox)
+
+        def _fake_validate_config(_self):
+            return SimpleNamespace(valid=True, errors=[])
+
+        monkeypatch.setattr(
+            DrivenSim,
+            "validate_config",
+            _fake_validate_config,
+        )
+        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: object())
+        monkeypatch.setattr(
+            DrivenSim,
+            "_configure_ports_on_component",
+            lambda _self, _stack: None,
+        )
+        monkeypatch.setattr(
+            "gsim.palace.ports.extract_ports",
+            lambda _component, _stack: [],
+        )
+        monkeypatch.setattr(
+            DrivenSim,
+            "_generate_mesh_internal",
+            _fake_generate_mesh_internal,
+        )
+
+        sim.mesh(
+            margin_x=50.0,
+            margin_y=10.0,
+            z_above=120.0,
+            z_below=80.0,
+            verbose=False,
+        )
+
+        assert captured == {
+            "margin_x": 50.0,
+            "margin_y": 10.0,
+            "z_above": 120.0,
+            "z_below": 80.0,
+        }
 
     def test_set_airbox_margin_y_zero_reaches_generate_mesh(
         self, monkeypatch, tmp_path

@@ -26,6 +26,7 @@ from .geometry import (
     add_ports,
     build_entities,
     extract_geometry,
+    resolve_mesh_domain_bounds,
 )
 from .groups import assign_physical_groups
 
@@ -343,13 +344,30 @@ def generate_mesh(
             pec_block_tags = add_pec_blocks(kernel, component, pec_blocks, stack)
 
         logger.info("Adding ports...")
+        domain_bounds = resolve_mesh_domain_bounds(
+            geometry,
+            stack,
+            margin_x=margin_x,
+            margin_y=margin_y,
+            air_margin=air_margin,
+            airbox_margin_x=airbox_margin_x,
+            airbox_margin_y=airbox_margin_y,
+            airbox_z_above=airbox_z_above,
+            airbox_z_below=airbox_z_below,
+        )
         domain_bbox = (
             geometry.bbox[0] - margin_x,
             geometry.bbox[1] - margin_y,
             geometry.bbox[2] + margin_x,
             geometry.bbox[3] + margin_y,
         )
-        port_tags, port_info = add_ports(kernel, ports, stack, domain_bbox=domain_bbox)
+        port_tags, port_info = add_ports(
+            kernel,
+            ports,
+            stack,
+            domain_bbox=domain_bbox,
+            domain_bounds=domain_bounds,
+        )
 
         logger.info("Adding dielectrics...")
         dielectric_tags = add_dielectrics(
