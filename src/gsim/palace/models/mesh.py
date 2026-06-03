@@ -33,7 +33,7 @@ class MeshConfig(BaseModel):
     refined_mesh_size: float = Field(default=5.0, gt=0)
     max_mesh_size: float = Field(default=300.0, gt=0)
     cells_per_wavelength: int = Field(default=10, ge=1)
-    margin: float = Field(default=50.0, ge=0)
+    margin: float = Field(default=0.0, ge=0)
     margin_x: float | None = Field(
         default=None,
         ge=0,

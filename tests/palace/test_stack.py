@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any, cast
+
 from gsim.common.stack import (
     MATERIALS_DB,
     Layer,
     LayerStack,
     ValidationResult,
+    extract_layer_stack,
     get_material_properties,
     resolve_material_at_wavelength,
 )
@@ -204,6 +208,112 @@ class TestLayerStack:
         vias = stack.get_via_layers()
         assert len(vias) == 1
         assert "via1" in vias
+
+
+class TestExtractor:
+    """Test gdsfactory-to-gsim stack extraction behavior."""
+
+    @staticmethod
+    def _mk_level(
+        layer: tuple[int, int],
+        zmin: float,
+        thickness: float,
+        material: str,
+        *,
+        info: dict | None = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            layer=layer,
+            zmin=zmin,
+            thickness=thickness,
+            material=material,
+            info=info or {},
+            sidewall_angle=0.0,
+        )
+
+    def test_passivation_uses_pdk_zrange_when_available(self):
+        gf_stack = cast(
+            Any,
+            SimpleNamespace(
+                layers={
+                    "metal1": self._mk_level((1, 0), 0.0, 1.0, "aluminum"),
+                    "passive": self._mk_level((2, 0), 1.0, 2.0, "Si3N4"),
+                }
+            ),
+        )
+
+        stack = extract_layer_stack(
+            gf_stack,
+            pdk_name="test",
+            substrate_thickness=2.0,
+            air_above=10.0,
+            include_substrate=False,
+        )
+
+        oxide = next(d for d in stack.dielectrics if d["name"] == "oxide")
+        passive = next(d for d in stack.dielectrics if d["name"] == "passive")
+        air = next(d for d in stack.dielectrics if d["name"] == "air_box")
+
+        assert oxide["zmin"] == -2.0
+        assert oxide["zmax"] == 1.0
+        assert passive["zmin"] == 1.0
+        assert passive["zmax"] == 3.0
+        assert air["zmin"] == 3.0
+        assert air["zmax"] == 13.0
+
+    def test_no_synthetic_passivation_when_pdk_has_none(self):
+        gf_stack = cast(
+            Any,
+            SimpleNamespace(
+                layers={
+                    "metal1": self._mk_level((1, 0), 0.0, 1.0, "aluminum"),
+                }
+            ),
+        )
+
+        stack = extract_layer_stack(
+            gf_stack,
+            pdk_name="test",
+            substrate_thickness=2.0,
+            air_above=10.0,
+            include_substrate=False,
+        )
+
+        assert all(d["name"] != "passive" for d in stack.dielectrics)
+
+        air = next(d for d in stack.dielectrics if d["name"] == "air_box")
+
+        assert air["zmin"] == 1.0
+        assert air["zmax"] == 11.0
+
+    def test_dielectric_materials_follow_pdk_material_names(self):
+        gf_stack = cast(
+            Any,
+            SimpleNamespace(
+                layers={
+                    "metal1": self._mk_level((1, 0), 0.0, 1.0, "aluminum"),
+                    "mim": self._mk_level((3, 0), 0.9, 0.1, "sio2"),
+                    "passive": self._mk_level((2, 0), 1.0, 2.0, "sin"),
+                }
+            ),
+        )
+
+        stack = extract_layer_stack(
+            gf_stack,
+            pdk_name="test",
+            substrate_thickness=2.0,
+            air_above=10.0,
+            include_substrate=False,
+        )
+
+        oxide = next(d for d in stack.dielectrics if d["name"] == "oxide")
+        passive = next(d for d in stack.dielectrics if d["name"] == "passive")
+
+        assert oxide["material"] == "sio2"
+        assert passive["material"] == "sin"
+        assert "sio2" in stack.materials
+        assert "sin" in stack.materials
+        assert "passive" not in stack.materials
 
 
 class TestValidation:

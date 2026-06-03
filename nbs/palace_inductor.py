@@ -108,7 +108,7 @@ sim.set_output_dir("./palace-sim-inductor-guardring")
 sim.set_geometry(cc)
 
 # Configure layer stack from active PDK
-sim.set_stack(substrate_thickness=180.0, air_above=200.0, include_substrate=True)
+sim.set_stack(substrate_thickness=180.0, include_substrate=True)
 
 # Configure ports
 sim.add_port(
@@ -126,10 +126,16 @@ print(sim.validate_config())
 
 # %% papermill={"duration": 1.930523, "end_time": "2026-05-18T13:26:58.885247", "exception": false, "start_time": "2026-05-18T13:26:56.954724", "status": "completed"}
 # Generate mesh (presets: "coarse", "default", "fine")
-sim.mesh(preset="default", margin=50, refined_mesh_size=1.5)
+sim.set_airbox(margin_x=5, margin_y=5, z_above=5, z_below=5)
+sim.mesh(preset="default", refined_mesh_size=1.5)
 
 # %% papermill={"duration": 0.706534, "end_time": "2026-05-18T13:26:59.592690", "exception": false, "start_time": "2026-05-18T13:26:58.886156", "status": "completed"}
-sim.plot_mesh(show_groups=["metal", "P"])
+# sim.plot_mesh(show_groups=["metal", "P"])
+sim.plot_mesh(
+    style="solid",
+    transparent_groups=["air__None", "sio2__None", "air__sio2"],
+    interactive=True,
+)
 
 # %% [markdown] papermill={"duration": 0.001592, "end_time": "2026-05-18T13:26:59.596145", "exception": false, "start_time": "2026-05-18T13:26:59.594553", "status": "completed"}
 # ### Run simulation on cloud
