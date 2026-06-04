@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
 #   kernelspec:
-#     display_name: gsim
+#     display_name: .venv
 #     language: python
 #     name: python3
 # ---
@@ -97,8 +97,9 @@ sim = DrivenSim()
 sim.set_output_dir("./palace-sim-cpw-waveport")
 sim.set_geometry(c)
 
-stack = get_stack(air_above=100.0, air_below=100.0)  # auto-detects active PDK
+stack = get_stack()  # auto-detects active PDK
 sim.set_stack(stack)
+sim.set_airbox(margin_x=0.0, margin_y=50, z_above=100.0, z_below=100.0)
 
 # Wave ports — max_size fills the full domain boundary
 sim.add_wave_port("o1", layer="topmetal2", max_size=True, mode=1, excited=True)
@@ -112,14 +113,7 @@ print(sim.validate_config())
 # ### Generate mesh
 
 # %% papermill={"duration": 4.746906, "end_time": "2026-04-17T08:35:51.907178", "exception": false, "start_time": "2026-04-17T08:35:47.160272", "status": "completed"}
-sim.mesh(
-    preset="default",
-    refined_mesh_size=2.0,
-    max_mesh_size=40.0,
-    fmax=150e9,
-    margin_x=0,
-    margin_y=50.0,
-)
+sim.mesh(preset="default", refined_mesh_size=2.0, max_mesh_size=40.0, fmax=150e9)
 
 # %% papermill={"duration": 0.907891, "end_time": "2026-04-17T08:35:52.816150", "exception": false, "start_time": "2026-04-17T08:35:51.908259", "status": "completed"}
 sim.plot_mesh(
@@ -132,7 +126,8 @@ sim.plot_mesh(
 # ### Run simulation
 
 # %% papermill={"duration": 671.248603, "end_time": "2026-04-17T08:47:04.075888", "exception": false, "start_time": "2026-04-17T08:35:52.827285", "status": "completed"}
-results = sim.run()
+sim.write_config()
+results = sim.run_local()
 
 # %% [markdown] papermill={"duration": 0.002779, "end_time": "2026-04-17T08:47:04.084457", "exception": false, "start_time": "2026-04-17T08:47:04.081678", "status": "completed"}
 # ### Plot S-parameters

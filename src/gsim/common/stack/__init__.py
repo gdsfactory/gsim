@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import gdsfactory as gf
@@ -93,6 +94,18 @@ def get_stack(
     """
     if yaml_path is not None:
         return load_stack_yaml(yaml_path)
+
+    if "air_above" in kwargs or "air_below" in kwargs:
+        # Deprecated: air volumes must be configured through simulation.set_airbox().
+        kwargs.pop("air_above", None)
+        kwargs.pop("air_below", None)
+        warnings.warn(
+            "get_stack(air_above/air_below) is deprecated and ignored. "
+            "Use simulation.set_airbox(margin_x=..., margin_y=..., "
+            "z_above=..., z_below=...).",
+            UserWarning,
+            stacklevel=2,
+        )
 
     pdk = gf.get_active_pdk()
     if pdk is None:

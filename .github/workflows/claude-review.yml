@@ -1,0 +1,27 @@
+name: Claude Review
+on:
+  pull_request:
+    types: [opened, synchronize]
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+    - name: Run Claude Code Review
+      uses: anthropics/claude-code-action@v1
+      with:
+        anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+        prompt: |
+          Review this pull request for correctness bugs, security issues, and
+          adherence to the conventions in CLAUDE.md (keep modules < ~500 lines,
+          conventional commits, simple over clever). Leave inline comments on
+          specific lines where useful and a short summary. Be concise.
+        claude_args: "--max-turns 5"

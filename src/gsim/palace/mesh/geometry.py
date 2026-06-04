@@ -232,7 +232,8 @@ def _merge_via_polygons(
     # Convert back to coordinate lists
     result = []
     # unary_union may return Polygon or MultiPolygon
-    geoms = merged.geoms if hasattr(merged, "geoms") else [merged]
+    geoms_attr = getattr(merged, "geoms", None)
+    geoms = list(geoms_attr) if geoms_attr is not None else [merged]
     for geom in geoms:
         if geom.is_empty:
             continue
@@ -770,7 +771,22 @@ def add_dielectrics(
     xmax_air = xmax0 + margin_x
     ymax_air = ymax0 + margin_y
 
-    def _is_air_or_vacuum(material_name: str) -> bool:
+    def _contains_air_token(name: str | None) -> bool:
+        """Return True when *name* clearly denotes air/vacuum."""
+        if not name:
+            return False
+
+        normalized = name.strip().lower().replace("-", "_")
+        if normalized in {"air", "vacuum"}:
+            return True
+
+        tokens = [tok for tok in normalized.split("_") if tok]
+        return "air" in tokens or "vacuum" in tokens
+
+    def _is_air_or_vacuum(
+        material_name: str,
+        dielectric_name: str | None = None,
+    ) -> bool:
         """Return True when *material_name* represents air/vacuum.
 
         Uses stack material metadata (permittivity ~1) first, then
@@ -778,15 +794,23 @@ def add_dielectrics(
         """
         mat = stack.materials.get(material_name)
         if isinstance(mat, dict):
+            mat_type = str(mat.get("type", "")).strip().lower()
             eps = mat.get("permittivity")
+        else:
+            mat_type = str(getattr(mat, "type", "")).strip().lower()
+            eps = getattr(mat, "permittivity", None)
+
+        if mat_type == "dielectric":
             try:
                 if eps is not None and abs(float(eps) - 1.0) <= 1e-9:
                     return True
             except (TypeError, ValueError):
                 pass
 
-        name = material_name.strip().lower()
-        return name in {"air", "vacuum"}
+        if _contains_air_token(material_name):
+            return True
+
+        return _contains_air_token(dielectric_name)
 
     z_min_all = math.inf
     z_max_all = -math.inf
@@ -802,9 +826,10 @@ def add_dielectrics(
     )
 
     for dielectric in stack.dielectrics:
+        dielectric_name = dielectric.get("name")
         material = dielectric["material"]
 
-        is_air_like = _is_air_or_vacuum(material)
+        is_air_like = _is_air_or_vacuum(material, dielectric_name=dielectric_name)
 
         # When building an explicit airbox, skip explicit air/vacuum layers.
         if is_air_like and use_airbox:
@@ -890,6 +915,81 @@ def add_dielectrics(
     kernel.synchronize()
 
     return dielectric_tags
+
+
+def resolve_mesh_domain_bounds(
+    geometry: GeometryData,
+    stack: LayerStack,
+    *,
+    margin_x: float,
+    margin_y: float | None = None,
+    air_margin: float = 0.0,
+    airbox_margin_x: float | None = None,
+    airbox_margin_y: float | None = None,
+    airbox_z_above: float | None = None,
+    airbox_z_below: float | None = None,
+) -> tuple[float, float, float, float, float, float]:
+    """Resolve outer mesh-domain bounds (including explicit airbox when used)."""
+    if margin_y is None:
+        margin_y = margin_x
+
+    if airbox_margin_x is None:
+        airbox_margin_x = air_margin
+    if airbox_margin_y is None:
+        airbox_margin_y = air_margin
+    if airbox_z_above is None:
+        airbox_z_above = air_margin
+    if airbox_z_below is None:
+        airbox_z_below = air_margin
+
+    xmin0, ymin0, xmax0, ymax0 = geometry.bbox
+    xmin_air = xmin0 - margin_x
+    ymin_air = ymin0 - margin_y
+    xmax_air = xmax0 + margin_x
+    ymax_air = ymax0 + margin_y
+
+    # Robust stack z-envelope: include dielectric and layer extents.
+    z_min_all = math.inf
+    z_max_all = -math.inf
+    for dielectric in stack.dielectrics:
+        z_min_all = min(z_min_all, dielectric["zmin"])
+        z_max_all = max(z_max_all, dielectric["zmax"])
+
+    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+        z_try_min, z_try_max = stack.get_z_range()
+        z_min_all = min(z_min_all, z_try_min)
+        z_max_all = max(z_max_all, z_try_max)
+
+    if stack.layers:
+        z_min_layers = min(layer.zmin for layer in stack.layers.values())
+        z_max_layers = max(layer.zmax for layer in stack.layers.values())
+        z_min_all = min(z_min_all, z_min_layers)
+        z_max_all = max(z_max_all, z_max_layers)
+
+    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+        raise ValueError("Cannot resolve stack z extents for domain bounds")
+
+    use_airbox = any(
+        m > 0.0
+        for m in (
+            airbox_margin_x,
+            airbox_margin_y,
+            airbox_z_above,
+            airbox_z_below,
+        )
+    )
+
+    if use_airbox:
+        return (
+            xmin_air - airbox_margin_x,
+            ymin_air - airbox_margin_y,
+            z_min_all - airbox_z_below,
+            xmax_air + airbox_margin_x,
+            ymax_air + airbox_margin_y,
+            z_max_all + airbox_z_above,
+        )
+
+    return (xmin_air, ymin_air, z_min_all, xmax_air, ymax_air, z_max_all)
 
 
 def add_patterned_dielectrics(
@@ -1371,6 +1471,7 @@ def add_ports(
     ports: list[PalacePort],
     stack: LayerStack,
     domain_bbox: tuple[float, float, float, float] | None = None,
+    domain_bounds: tuple[float, float, float, float, float, float] | None = None,
 ) -> tuple[dict, list]:
     """Add port surfaces to gmsh.
 
@@ -1381,6 +1482,9 @@ def add_ports(
         domain_bbox: (xmin, ymin, xmax, ymax) of the simulation domain
             (geometry bbox with margin applied). Required when any port
             has ``max_size=True``.
+        domain_bounds: (xmin, ymin, zmin, xmax, ymax, zmax) of the outer
+            simulation domain. When provided, ``max_size=True`` waveports
+            are clipped to this exact 3D domain envelope.
 
     Returns:
         (port_tags dict, port_info list)
@@ -1547,8 +1651,11 @@ def add_ports(
                     layer_zmin = min(layer_zmin, zmin_layers)
                     layer_zmax = max(layer_zmax, zmax_layers)
 
-                if port.max_size:
-                    # Fill the full simulation domain
+                if port.max_size and domain_bounds is not None:
+                    # Fill the full 3D simulation domain.
+                    _, _, zmin, _, _, zmax = domain_bounds
+                elif port.max_size:
+                    # Backward-compatible fallback when 3D bounds are unavailable.
                     zmin = layer_zmin
                     zmax = layer_zmax
                 else:
@@ -1568,12 +1675,15 @@ def add_ports(
                 is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
 
                 if port.max_size:
-                    if domain_bbox is None:
+                    if domain_bounds is not None:
+                        dom_xmin, dom_ymin, _, dom_xmax, dom_ymax, _ = domain_bounds
+                    elif domain_bbox is not None:
+                        dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
+                    else:
                         raise ValueError(
                             f"Port '{port.name}' has max_size=True but "
-                            "domain_bbox was not provided to add_ports()"
+                            "domain bounds were not provided to add_ports()"
                         )
-                    dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
                     if is_y_axis:
                         xmin = dom_xmin
                         xmax = dom_xmax

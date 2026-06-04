@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
 #   kernelspec:
-#     display_name: gsim
+#     display_name: .venv
 #     language: python
 #     name: python3
 # ---
@@ -40,7 +40,10 @@ cap_length = 10.0  # um
 #   -> 10x10 Vmim vias (0.42 um, pitch 0.94 um) -> TopMetal1 (top plate, PLUS)
 c = cells.cmim(width=cap_width, length=cap_length).copy()
 print("Ports:", [(p.name, tuple(p.center)) for p in c.ports])
-c.plot()
+
+cc = c.copy()
+cc.draw_ports()
+cc
 
 # %% [markdown]
 # ### Configure ElectrostaticSim
@@ -52,7 +55,8 @@ sim = ElectrostaticSim()
 
 sim.set_output_dir("./palace-sim-electrostatic")
 sim.set_geometry(c)
-sim.set_stack(air_above=100.0, substrate_thickness=2.0)
+sim.set_stack(substrate_thickness=2.0)
+sim.set_airbox(margin_x=5, margin_y=5, z_above=5, z_below=5)
 
 # Metal5 = bottom plate (MINUS), TopMetal1 = top plate (PLUS)
 sim.add_terminal("T1", layer="metal5")
@@ -67,31 +71,86 @@ print(sim.validate_config())
 
 # %%
 # Vmim vias are 0.42 um with 0.52 um gaps; MIM dielectric is 0.19 um thick
-sim.mesh(preset="fine", margin=20, refined_mesh_size=0.1, merge_via_distance=0)
+sim.mesh(preset="fine", refined_mesh_size=0.1, merge_via_distance=0)
 
 # %%
 # sim.plot_mesh(show_groups=["metal", "topmetal", "via", "dielectric", "SiO2__vmim"])
 
-sim.plot_mesh(show_groups=["metal5", "topmetal1", "vmim", "SiO2__vmim"])
+# sim.plot_mesh(show_groups=["metal5", "topmetal1", "vmim", "SiO2__vmim"])
+
+sim.plot_mesh(
+    style="solid",
+    transparent_groups=["air__None", "sio2__None", "air__sio2", "air__passive"],
+    interactive=True,
+)
 
 # %% [markdown]
 # ### Analytical estimate
 #
 # For the MIM capacitor: C = epsilon_0 * epsilon_r * A / d
 #
-# The MIM dielectric (SiO2, eps_r ~ 4.1) is 0.19 um thick between Metal5 top (z=5.38) and the Vmim bottom (z=5.58). The MIM drawing is 10.72 x 10.72 um. The Vmim vias (tungsten, conductive) extend the TopMetal1 terminal down to the MIM dielectric surface.
+# In this estimate, epsilon_r is read from the active PDK-derived stack material table for SiO2, the MIM drawing dimensions are read from the geometry `MIMdrawing` polygon bounding box, and we report two spacings:
+# - d_topmetal1 = topmetal1_bottom - metal5_top
+# - d_vmim = vmim_bottom - metal5_top
 
 # %%
 import scipy.constants as const
 
-# MIM dielectric area (MIM drawing: 10.72 x 10.72 um)
-eps_r = 4.1  # SiO2 permittivity from IHP stack
-A_mim = (10.72e-6) * (10.72e-6)  # m^2
-d_mim = (5.58 - 5.38) * 1e-6  # m (Metal5 top to Vmim bottom = MIM dielectric)
+# Pull SiO2 epsilon_r and plate spacings from the active stack derived from the current PDK.
+stack = sim._resolve_stack()
+sio2_props = stack.materials.get("sio2") or stack.materials.get("SiO2")
+if sio2_props is None or sio2_props.get("permittivity") is None:
+    raise ValueError("Could not find SiO2 permittivity in active stack materials")
+eps_r = float(sio2_props["permittivity"])
 
-C_analytical = const.epsilon_0 * eps_r * A_mim / d_mim
-print(f"Analytical capacitance: {C_analytical * 1e15:.1f} fF")
-print(f"  A_mim = 10.72 x 10.72 um^2, d = {d_mim * 1e6:.2f} um, eps_r = {eps_r}")
+metal5 = stack.layers.get("metal5")
+topmetal1 = stack.layers.get("topmetal1")
+vmim = stack.layers.get("vmim")
+if metal5 is None or topmetal1 is None or vmim is None:
+    raise ValueError("Could not find metal5/topmetal1/vmim in active stack layers")
+
+metal5_top = metal5.zmin + metal5.thickness
+topmetal1_bottom = topmetal1.zmin
+vmim_bottom = vmim.zmin
+
+d_topmetal1_um = topmetal1_bottom - metal5_top
+d_vmim_um = vmim_bottom - metal5_top
+if d_topmetal1_um <= 0:
+    raise ValueError(f"Non-physical topmetal1 spacing: {d_topmetal1_um} um")
+if d_vmim_um <= 0:
+    raise ValueError(f"Non-physical vmim spacing: {d_vmim_um} um")
+
+d_topmetal1 = d_topmetal1_um * 1e-6  # m
+d_vmim = d_vmim_um * 1e-6  # m
+
+# Read MIM drawing dimensions from geometry.
+geom_component = sim.geometry.component
+mim_polys = geom_component.get_polygons(by="name").get("MIMdrawing", [])
+if not mim_polys:
+    raise ValueError("Could not find MIMdrawing polygons in geometry")
+
+dbu = geom_component.kcl.dbu
+left = min(poly.bbox().left for poly in mim_polys)
+right = max(poly.bbox().right for poly in mim_polys)
+bottom = min(poly.bbox().bottom for poly in mim_polys)
+top = max(poly.bbox().top for poly in mim_polys)
+
+mim_width_um = (right - left) * dbu
+mim_length_um = (top - bottom) * dbu
+A_mim = (mim_width_um * 1e-6) * (mim_length_um * 1e-6)  # m^2
+
+C_analytical_topmetal1 = const.epsilon_0 * eps_r * A_mim / d_topmetal1
+C_analytical_vmim = const.epsilon_0 * eps_r * A_mim / d_vmim
+C_analytical = C_analytical_topmetal1
+
+print(f"eps_r(SiO2) = {eps_r}")
+print(f"MIM drawing from geometry: {mim_width_um:.3f} x {mim_length_um:.3f} um")
+print(
+    f"Analytical (d=topmetal1_bottom-metal5_top={d_topmetal1_um:.3f} um): {C_analytical_topmetal1 * 1e15:.1f} fF"
+)
+print(
+    f"Analytical (d=vmim_bottom-metal5_top={d_vmim_um:.3f} um):      {C_analytical_vmim * 1e15:.1f} fF"
+)
 
 # %% [markdown]
 # ### Run on cloud
@@ -148,14 +207,65 @@ import scipy.constants as const
 
 C_palace = abs(C_matrix[0, 1])
 
-eps_r = 4.1
-A_mim = (10.72e-6) * (10.72e-6)
-d_mim = (5.58 - 5.38) * 1e-6
+stack = sim._resolve_stack()
+sio2_props = stack.materials.get("sio2") or stack.materials.get("SiO2")
+if sio2_props is None or sio2_props.get("permittivity") is None:
+    raise ValueError("Could not find SiO2 permittivity in active stack materials")
+eps_r = float(sio2_props["permittivity"])
 
-C_analytical = const.epsilon_0 * eps_r * A_mim / d_mim
+metal5 = stack.layers.get("metal5")
+topmetal1 = stack.layers.get("topmetal1")
+vmim = stack.layers.get("vmim")
+if metal5 is None or topmetal1 is None or vmim is None:
+    raise ValueError("Could not find metal5/topmetal1/vmim in active stack layers")
 
-print(f"Palace result:       {C_palace * 1e15:.3f} fF")
-print(f"Analytical (C=eA/d): {C_analytical * 1e15:.1f} fF")
-print(f"Ratio:               {C_palace / C_analytical:.3f}")
+metal5_top = metal5.zmin + metal5.thickness
+topmetal1_bottom = topmetal1.zmin
+vmim_bottom = vmim.zmin
+
+d_topmetal1_um = topmetal1_bottom - metal5_top
+d_vmim_um = vmim_bottom - metal5_top
+if d_topmetal1_um <= 0:
+    raise ValueError(f"Non-physical topmetal1 spacing: {d_topmetal1_um} um")
+if d_vmim_um <= 0:
+    raise ValueError(f"Non-physical vmim spacing: {d_vmim_um} um")
+
+d_topmetal1 = d_topmetal1_um * 1e-6
+d_vmim = d_vmim_um * 1e-6
+
+geom_component = sim.geometry.component
+mim_polys = geom_component.get_polygons(by="name").get("MIMdrawing", [])
+if not mim_polys:
+    raise ValueError("Could not find MIMdrawing polygons in geometry")
+
+dbu = geom_component.kcl.dbu
+left = min(poly.bbox().left for poly in mim_polys)
+right = max(poly.bbox().right for poly in mim_polys)
+bottom = min(poly.bbox().bottom for poly in mim_polys)
+top = max(poly.bbox().top for poly in mim_polys)
+
+mim_width_um = (right - left) * dbu
+mim_length_um = (top - bottom) * dbu
+A_mim = (mim_width_um * 1e-6) * (mim_length_um * 1e-6)
+
+C_analytical_topmetal1 = const.epsilon_0 * eps_r * A_mim / d_topmetal1
+C_analytical_vmim = const.epsilon_0 * eps_r * A_mim / d_vmim
+C_analytical = C_analytical_topmetal1
+
+print(f"Palace result:                                {C_palace * 1e15:.3f} fF")
+print(
+    f"Analytical (d=topmetal1_bottom-metal5_top):   {C_analytical_topmetal1 * 1e15:.1f} fF"
+)
+print(
+    f"Analytical (d=vmim_bottom-metal5_top):        {C_analytical_vmim * 1e15:.1f} fF"
+)
+print(
+    f"Ratio Palace / topmetal1-based analytical:    {C_palace / C_analytical_topmetal1:.3f}"
+)
+print(
+    f"Ratio Palace / vmim-based analytical:         {C_palace / C_analytical_vmim:.3f}"
+)
+print(f"Using A_mim = {mim_width_um:.3f} x {mim_length_um:.3f} um^2 from MIMdrawing")
+print(f"d_topmetal1 = {d_topmetal1_um:.3f} um, d_vmim = {d_vmim_um:.3f} um")
 
 # %%

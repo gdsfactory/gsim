@@ -171,7 +171,7 @@ class PalaceSimMixin:
             logger.warning(
                 "set_stack(air_above/air_below) is deprecated and ignored. "
                 "Use set_airbox(margin_x=..., margin_y=..., "
-                "margin_above=..., margin_below=...)."
+                "z_above=..., z_below=...)."
             )
 
         self._stack_kwargs = {
@@ -188,10 +188,10 @@ class PalaceSimMixin:
     def set_airbox(
         self,
         *,
-        margin_x: float,
+        margin_x: float | None = None,
         margin_y: float | None = None,
-        z_above: float,
-        z_below: float,
+        z_above: float | None = None,
+        z_below: float | None = None,
     ) -> None:
         """Configure an explicit weak-priority airbox for meshing.
 
@@ -202,33 +202,64 @@ class PalaceSimMixin:
 
         Args:
             margin_x: Airbox x-margin around the design (um).
+                Defaults to ``0.0`` when omitted.
             margin_y: Airbox y-margin around the design (um).
-                Defaults to ``margin_x`` when omitted.
+                Defaults to ``0.0`` when omitted.
             z_above: Airbox extension above the stack top (um).
+                Defaults to ``0.0`` when omitted.
             z_below: Airbox extension below the stack bottom (um).
+                Defaults to ``0.0`` when omitted.
         """
-        if margin_x < 0:
-            raise ValueError("margin_x must be >= 0")
-        if margin_y is not None and margin_y < 0:
-            raise ValueError("margin_y must be >= 0")
-        if z_above < 0 or z_below < 0:
-            raise ValueError("z_above and z_below must be >= 0")
+        mx = 0.0 if margin_x is None else margin_x
+        my = 0.0 if margin_y is None else margin_y
+        za = 0.0 if z_above is None else z_above
+        zb = 0.0 if z_below is None else z_below
 
-        y = margin_x if margin_y is None else margin_y
+        if mx < 0:
+            raise ValueError("margin_x must be >= 0")
+        if my < 0:
+            raise ValueError("margin_y must be >= 0")
+        if za < 0 or zb < 0:
+            raise ValueError("z_above and z_below must be >= 0")
 
         # Keep mesh margin controls in sync for domain/port extents.
         mesh_config = getattr(self, "mesh_config", None)
         if mesh_config is not None:
-            mesh_config.margin_x = margin_x
-            mesh_config.margin_y = y
+            mesh_config.margin_x = mx
+            mesh_config.margin_y = my
 
         # Store explicit airbox expansion for generator plumbing.
         self._airbox_config = {
-            "margin_x": margin_x,
-            "margin_y": y,
-            "z_above": z_above,
-            "z_below": z_below,
+            "margin_x": mx,
+            "margin_y": my,
+            "z_above": za,
+            "z_below": zb,
         }
+
+    def _apply_airbox_overrides(
+        self,
+        *,
+        margin_x: float | None = None,
+        margin_y: float | None = None,
+        z_above: float | None = None,
+        z_below: float | None = None,
+    ) -> None:
+        """Route mesh-time airbox kwargs through set_airbox()."""
+        if (
+            margin_x is None
+            and margin_y is None
+            and z_above is None
+            and z_below is None
+        ):
+            return
+
+        current = self._airbox_config or {}
+        self.set_airbox(
+            margin_x=margin_x if margin_x is not None else current.get("margin_x"),
+            margin_y=margin_y if margin_y is not None else current.get("margin_y"),
+            z_above=z_above if z_above is not None else current.get("z_above"),
+            z_below=z_below if z_below is not None else current.get("z_below"),
+        )
 
     # -------------------------------------------------------------------------
     # Material methods
@@ -517,7 +548,7 @@ class PalaceSimMixin:
             raise ValueError(
                 "airbox_margin has been removed from mesh()/preview(). "
                 "Use set_airbox(margin_x=..., margin_y=..., "
-                "margin_above=..., margin_below=...)."
+                "z_above=..., z_below=...)."
             )
         if fmax is not None:
             mesh_config.fmax = fmax
@@ -985,6 +1016,8 @@ class PalaceSimMixin:
         margin: float | None = None,
         margin_x: float | None = None,
         margin_y: float | None = None,
+        z_above: float | None = None,
+        z_below: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -1012,6 +1045,8 @@ class PalaceSimMixin:
             margin: XY margin around design (um)
             margin_x: X-axis margin (um). Overrides margin for X.
             margin_y: Y-axis margin (um). Overrides margin for Y.
+            z_above: Airbox extension above stack top (um).
+            z_below: Airbox extension below stack bottom (um).
             airbox_margin: Deprecated. Use set_airbox().
             fmax: Max frequency for mesh sizing (Hz)
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -1043,6 +1078,13 @@ class PalaceSimMixin:
         validation = self.validate_config()
         if not validation.valid:
             raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
+
+        self._apply_airbox_overrides(
+            margin_x=margin_x,
+            margin_y=margin_y,
+            z_above=z_above,
+            z_below=z_below,
+        )
 
         # Build mesh config
         mesh_config = self._build_mesh_config(
@@ -1131,6 +1173,8 @@ class PalaceSimMixin:
         margin: float | None = None,
         margin_x: float | None = None,
         margin_y: float | None = None,
+        z_above: float | None = None,
+        z_below: float | None = None,
         airbox_margin: float | None = None,
         fmax: float | None = None,
         planar_conductors: bool | None = None,
@@ -1166,6 +1210,8 @@ class PalaceSimMixin:
             margin: XY margin around design (um), overrides preset
             margin_x: X-axis margin (um). Overrides margin for X.
             margin_y: Y-axis margin (um). Overrides margin for Y.
+            z_above: Airbox extension above stack top (um).
+            z_below: Airbox extension below stack bottom (um).
             airbox_margin: Deprecated. Use set_airbox().
             fmax: Max frequency for mesh sizing (Hz), overrides preset
             planar_conductors: Treat conductors as 2D PEC surfaces
@@ -1214,6 +1260,13 @@ class PalaceSimMixin:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
 
         component = self.geometry.component if self.geometry else None
+
+        self._apply_airbox_overrides(
+            margin_x=margin_x,
+            margin_y=margin_y,
+            z_above=z_above,
+            z_below=z_below,
+        )
 
         # Build mesh config
         mesh_config = self._build_mesh_config(
