@@ -24,4 +24,4 @@ jobs:
           adherence to the conventions in CLAUDE.md (keep modules < ~500 lines,
           conventional commits, simple over clever). Leave inline comments on
           specific lines where useful and a short summary. Be concise.
-        claude_args: "--max-turns 5"
+        claude_args: "--max-turns 30"

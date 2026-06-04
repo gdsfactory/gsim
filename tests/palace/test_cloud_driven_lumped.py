@@ -13,7 +13,7 @@ from pytest_regressions.ndarrays_regression import NDArraysRegressionFixture
 
 from tests._cloud_fixtures import make_driven_cpw_lumped_sim
 
-pytestmark = pytest.mark.cloud
+pytestmark = [pytest.mark.cloud, pytest.mark.sim_smoke_test]
 
 
 def test_driven_cpw_lumped(
