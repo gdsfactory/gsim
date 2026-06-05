@@ -2,8 +2,12 @@ name: Claude Review
 on:
   pull_request:
     types: [opened, synchronize]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}-claude-pr-review
+  cancel-in-progress: true
 jobs:
   claude-review:
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,9 +23,7 @@ jobs:
       uses: anthropics/claude-code-action@v1
       with:
         anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-        prompt: |
-          Review this pull request for correctness bugs, security issues, and
-          adherence to the conventions in CLAUDE.md (keep modules < ~500 lines,
-          conventional commits, simple over clever). Leave inline comments on
-          specific lines where useful and a short summary. Be concise.
+        plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+        plugins: "code-review@claude-code-plugins"
+        prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
         claude_args: "--max-turns 30"
