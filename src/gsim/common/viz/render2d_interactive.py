@@ -47,6 +47,7 @@ def _rgba(hex_color: str, alpha: float) -> str:
 
 
 def _diel_color(material: str) -> str:
+    """Return the RGBA fill colour for a dielectric material name."""
     return _DIELECTRIC_COLORS.get(material.lower(), _DIELECTRIC_DEFAULT)
 
 
@@ -401,6 +402,7 @@ def _add_dielectrics_xy(
     cmin: tuple[float, float, float],
     cmax: tuple[float, float, float],
 ) -> None:
+    """Draw dielectric background rectangles for an XY slice."""
     seen: set[str] = set()
     for diel in dielectrics:
         if not (diel.zmin <= z_slice <= diel.zmax):
@@ -428,6 +430,7 @@ def _add_dielectrics_side(
     h_min: float,
     h_max: float,
 ) -> None:
+    """Draw dielectric background rectangles for a side (YZ/XZ) slice."""
     seen: set[str] = set()
     for diel in dielectrics:
         if diel.zmax <= diel.zmin:
@@ -462,6 +465,7 @@ def _add_pml_rect(
     h: float,
     show_legend: bool,
 ) -> None:
+    """Add a PML region rectangle to the figure."""
     if w <= 0 or h <= 0:
         return
     _add_rect_trace(
@@ -476,6 +480,7 @@ def _add_sim_cell_rect(
     w: float,
     h: float,
 ) -> None:
+    """Add a dashed simulation-cell boundary rectangle."""
     import plotly.graph_objects as go
 
     xs = [x0, x0 + w, x0 + w, x0, x0]
@@ -495,6 +500,7 @@ def _add_sim_cell_rect(
 
 
 def _add_overlay_xy(fig: Any, overlay: Any) -> None:
+    """Draw sim cell, PML, and port overlays for an XY slice."""
     cmin, cmax = overlay.cell_min, overlay.cell_max
     pml = overlay.dpml
     x0, y0 = cmin[0], cmin[1]
@@ -511,6 +517,7 @@ def _add_overlay_xy(fig: Any, overlay: Any) -> None:
 
 
 def _add_overlay_yz(fig: Any, overlay: Any, x_slice: float) -> None:
+    """Draw sim cell, PML, and port overlays for a YZ slice."""
     cmin, cmax = overlay.cell_min, overlay.cell_max
     pml = overlay.dpml
     y0, z0 = cmin[1], cmin[2]
@@ -527,7 +534,7 @@ def _add_overlay_yz(fig: Any, overlay: Any, x_slice: float) -> None:
 
 
 def _add_overlay_xz(fig: Any, overlay: Any, y_slice: float) -> None:
-
+    """Draw sim cell, PML, port, and fiber overlays for an XZ slice."""
     cmin, cmax = overlay.cell_min, overlay.cell_max
     pml = overlay.dpml
     x0, z0 = cmin[0], cmin[2]
@@ -553,6 +560,7 @@ def _add_overlay_xz(fig: Any, overlay: Any, y_slice: float) -> None:
 
 
 def _add_ports_xy(fig: Any, ports: list) -> None:
+    """Draw source/monitor port lines on an XY slice."""
     import plotly.graph_objects as go
 
     labeled: set[str] = set()
@@ -590,6 +598,7 @@ def _add_ports_xy(fig: Any, ports: list) -> None:
 
 
 def _add_ports_yz(fig: Any, ports: list, x_slice: float) -> None:
+    """Draw source/monitor port rectangles on a YZ slice."""
     import plotly.graph_objects as go
 
     labeled: set[str] = set()
@@ -627,6 +636,7 @@ def _add_ports_yz(fig: Any, ports: list, x_slice: float) -> None:
 
 
 def _add_ports_xz(fig: Any, ports: list, y_slice: float) -> None:
+    """Draw source/monitor port lines on an XZ slice."""
     import plotly.graph_objects as go
 
     labeled: set[str] = set()
@@ -661,6 +671,7 @@ def _add_ports_xz(fig: Any, ports: list, y_slice: float) -> None:
 
 
 def _add_fiber_source(fig: Any, fiber: Any) -> None:
+    """Draw a fiber source arrow and waist indicator."""
     import math
 
     import plotly.graph_objects as go
