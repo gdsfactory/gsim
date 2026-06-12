@@ -16,7 +16,7 @@ def generate_layer_colors(
     """
     import matplotlib.pyplot as plt
 
-    cmap = plt.cm.get_cmap("tab10" if len(layer_names) <= 10 else "tab20")
+    cmap = plt.colormaps.get_cmap("tab10" if len(layer_names) <= 10 else "tab20")
     colors: dict[str, tuple[float, float, float]] = {}
     for i, name in enumerate(layer_names):
         rgb = cmap(i / max(len(layer_names) - 1, 1))[:3]
@@ -44,7 +44,7 @@ def generate_layer_colors_with_opacity(
     if layer_opacity is None:
         layer_opacity = {name: 1.0 if name == "core" else 0.2 for name in layer_names}
 
-    cmap = plt.cm.get_cmap("tab10" if len(layer_names) <= 10 else "tab20")
+    cmap = plt.colormaps.get_cmap("tab10" if len(layer_names) <= 10 else "tab20")
     colors: dict[str, list[float]] = {}
     for i, name in enumerate(layer_names):
         rgb = cmap(i / max(len(layer_names) - 1, 1))[:3]
