@@ -15,15 +15,26 @@
 # %% [markdown]
 # # Electrostatic Capacitance Extraction with Palace
 #
-# This notebook demonstrates electrostatic simulation using `gsim.palace.ElectrostaticSim` to extract the capacitance matrix between conductor terminals.
+# We use `gsim.palace.ElectrostaticSim` to extract the **plate-to-plate (mutual)
+# capacitance** of the IHP `cmim` (MIM capacitor) cell and compare it against the IHP
+# PDK compact model. The bottom plate is on Metal5
+# (terminal `T1` = SPICE `MINUS`), the top plate on TopMetal1 (`T2` = `PLUS`), joined
+# by a 10x10 array of Vmim vias through a 0.19 um SiO2 MIM dielectric.
 #
-# We use the IHP `cmim` (MIM capacitor) cell. The bottom plate is on Metal5 and the top plate on TopMetal1, connected by a 10x10 array of Vmim vias through a thin MIM dielectric (0.19 um SiO2).
+# Palace writes two matrices: `terminal-C.csv` (Maxwell — self-cap on the diagonal,
+# negative induced charge off-diagonal) and `terminal-Cm.csv` (mutual/"SPICE" — its
+# off-diagonal `Cm[i,j] = -C[i,j]` is the physical two-terminal capacitor). The MIM cap
+# value is `Cm[1,2]`, which is exactly what the PDK `cap_cmim` model describes.
 #
-# **Limitation:** The current terminal system assigns one terminal per layer. Structures with multiple electrodes on the same layer (e.g., interdigitated capacitors) are not yet supported.
+# The IHP `cap_cmim` is a 2-terminal model with an area + perimeter law (plate-to-plate
+# only; substrate parasitics are left to extraction). See
+# [`capacitors_mod.lib`](https://github.com/IHP-GmbH/IHP-Open-PDK/blob/main/ihp-sg13g2/libs.tech/ngspice/models/capacitors_mod.lib).
 #
-# **Requirements:**
-# - IHP PDK: `uv pip install ihp-gdsfactory`
-# - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
+# **Limitation:** one terminal per layer — multiple electrodes on the same layer (e.g.
+# interdigitated caps) are not yet supported.
+#
+# **Requirements:** IHP PDK (`uv pip install ihp-gdsfactory`) and a
+# [GDSFactory+](https://gdsfactory.com) account for cloud simulation.
 
 # %% [markdown]
 # ### Load IHP MIM capacitor
@@ -76,81 +87,43 @@ sim.mesh(preset="fine", refined_mesh_size=0.1, merge_via_distance=0)
 # %%
 # sim.plot_mesh(show_groups=["metal", "topmetal", "via", "dielectric", "SiO2__vmim"])
 
-# sim.plot_mesh(show_groups=["metal5", "topmetal1", "vmim", "SiO2__vmim"])
+sim.plot_mesh(show_groups=["metal5", "topmetal1", "vmim", "SiO2__vmim"])
 
-sim.plot_mesh(
-    style="solid",
-    transparent_groups=["air__None", "sio2__None", "air__sio2", "air__passive"],
-    interactive=True,
-)
+# sim.plot_mesh(
+#     style="solid",
+#     transparent_groups=["air__None", "sio2__None", "air__sio2", "air__passive"],
+#     interactive=True,
+# )
 
 # %% [markdown]
-# ### Analytical estimate
+# ### IHP PDK compact-model reference
 #
-# For the MIM capacitor: C = epsilon_0 * epsilon_r * A / d
-#
-# In this estimate, epsilon_r is read from the active PDK-derived stack material table for SiO2, the MIM drawing dimensions are read from the geometry `MIMdrawing` polygon bounding box, and we report two spacings:
-# - d_topmetal1 = topmetal1_bottom - metal5_top
-# - d_vmim = vmim_bottom - metal5_top
+# This is the value the IHP `cap_cmim` SPICE device would report for the same
+# geometry. We evaluate the PDK's own area+perimeter law using the process constants
+# from the active techParams (`caspec` [F/m^2], `cpspec` [F/m], `lwd` [m]), so the
+# reference is authoritative rather than hand-tuned. This is the number to compare the
+# Palace mutual capacitance `Cm[1,2]` against.
 
 # %%
-import scipy.constants as const
+from ihp.cells2.ihp_pycell.utility_functions import Numeric
+from ihp.tech import techParams
 
-# Pull SiO2 epsilon_r and plate spacings from the active stack derived from the current PDK.
-stack = sim._resolve_stack()
-sio2_props = stack.materials.get("sio2") or stack.materials.get("SiO2")
-if sio2_props is None or sio2_props.get("permittivity") is None:
-    raise ValueError("Could not find SiO2 permittivity in active stack materials")
-eps_r = float(sio2_props["permittivity"])
+caspec = Numeric(techParams["cmim_caspec"])  # F/m^2  area-specific capacitance
+cpspec = Numeric(techParams["cmim_cpspec"])  # F/m    perimeter-specific capacitance
+lwd = Numeric(techParams["cmim_lwd"])  # m      line-width delta
 
-metal5 = stack.layers.get("metal5")
-topmetal1 = stack.layers.get("topmetal1")
-vmim = stack.layers.get("vmim")
-if metal5 is None or topmetal1 is None or vmim is None:
-    raise ValueError("Could not find metal5/topmetal1/vmim in active stack layers")
+# Use the device w/l (what the SPICE model is parameterized by), in meters.
+leff = cap_width * 1e-6 + lwd
+weff = cap_length * 1e-6 + lwd
 
-metal5_top = metal5.zmin + metal5.thickness
-topmetal1_bottom = topmetal1.zmin
-vmim_bottom = vmim.zmin
+C_pdk_area = caspec * leff * weff
+C_pdk_perim = cpspec * 2.0 * (leff + weff)
+C_pdk = C_pdk_area + C_pdk_perim
 
-d_topmetal1_um = topmetal1_bottom - metal5_top
-d_vmim_um = vmim_bottom - metal5_top
-if d_topmetal1_um <= 0:
-    raise ValueError(f"Non-physical topmetal1 spacing: {d_topmetal1_um} um")
-if d_vmim_um <= 0:
-    raise ValueError(f"Non-physical vmim spacing: {d_vmim_um} um")
-
-d_topmetal1 = d_topmetal1_um * 1e-6  # m
-d_vmim = d_vmim_um * 1e-6  # m
-
-# Read MIM drawing dimensions from geometry.
-geom_component = sim.geometry.component
-mim_polys = geom_component.get_polygons(by="name").get("MIMdrawing", [])
-if not mim_polys:
-    raise ValueError("Could not find MIMdrawing polygons in geometry")
-
-dbu = geom_component.kcl.dbu
-left = min(poly.bbox().left for poly in mim_polys)
-right = max(poly.bbox().right for poly in mim_polys)
-bottom = min(poly.bbox().bottom for poly in mim_polys)
-top = max(poly.bbox().top for poly in mim_polys)
-
-mim_width_um = (right - left) * dbu
-mim_length_um = (top - bottom) * dbu
-A_mim = (mim_width_um * 1e-6) * (mim_length_um * 1e-6)  # m^2
-
-C_analytical_topmetal1 = const.epsilon_0 * eps_r * A_mim / d_topmetal1
-C_analytical_vmim = const.epsilon_0 * eps_r * A_mim / d_vmim
-C_analytical = C_analytical_topmetal1
-
-print(f"eps_r(SiO2) = {eps_r}")
-print(f"MIM drawing from geometry: {mim_width_um:.3f} x {mim_length_um:.3f} um")
-print(
-    f"Analytical (d=topmetal1_bottom-metal5_top={d_topmetal1_um:.3f} um): {C_analytical_topmetal1 * 1e15:.1f} fF"
-)
-print(
-    f"Analytical (d=vmim_bottom-metal5_top={d_vmim_um:.3f} um):      {C_analytical_vmim * 1e15:.1f} fF"
-)
+print(f"IHP model '{techParams['cmim_model']}' for {cap_width} x {cap_length} um cmim:")
+print(f"  area term      = {C_pdk_area * 1e15:7.2f} fF")
+print(f"  perimeter term = {C_pdk_perim * 1e15:7.2f} fF")
+print(f"  C_pdk (total)  = {C_pdk * 1e15:7.2f} fF   <- reference for Palace Cm[1,2]")
 
 # %% [markdown]
 # ### Run on cloud
@@ -181,17 +154,19 @@ def read_palace_csv(path):
     return [h.strip() for h in header], data
 
 
-# Capacitance matrix
+# Maxwell capacitance matrix (terminal-C.csv): diagonal = self-capacitance,
+# off-diagonal = negative induced charge on the grounded neighbor.
 header, C_matrix = read_palace_csv(results_dir / "terminal-C.csv")
-print("Capacitance matrix (F):")
+print("Maxwell capacitance matrix (F):")
 print(f"  C[1,1] = {C_matrix[0, 1]:+.4e} F  ({C_matrix[0, 1] * 1e15:+.3f} fF)")
 print(f"  C[1,2] = {C_matrix[0, 2]:+.4e} F  ({C_matrix[0, 2] * 1e15:+.3f} fF)")
 print(f"  C[2,1] = {C_matrix[1, 1]:+.4e} F  ({C_matrix[1, 1] * 1e15:+.3f} fF)")
 print(f"  C[2,2] = {C_matrix[1, 2]:+.4e} F  ({C_matrix[1, 2] * 1e15:+.3f} fF)")
 
-# Mutual capacitance
+# Mutual (lumped "SPICE") matrix (terminal-Cm.csv): off-diagonal is the physical
+# plate-to-plate capacitor. Cm[1,2] is the device capacitance the PDK models.
 _, Cm = read_palace_csv(results_dir / "terminal-Cm.csv")
-print(f"\nMutual capacitance C_m[1,2] = {Cm[0, 2] * 1e15:.3f} fF")
+print(f"\nMutual (plate-to-plate) capacitance  Cm[1,2] = {Cm[0, 2] * 1e15:.3f} fF")
 
 # Domain energy
 _, E = read_palace_csv(results_dir / "domain-E.csv")
@@ -200,72 +175,16 @@ print(
 )
 
 # %% [markdown]
-# ### Compare with analytical estimate
+# ### Compare: Palace vs IHP PDK model
+#
+# The Palace plate-to-plate capacitance is `Cm[1,2]` (equivalently `|C[1,2]|`),
+# compared against the IHP `cap_cmim` compact-model value `C_pdk`.
 
 # %%
-import scipy.constants as const
+# Palace device (mutual) capacitance — the quantity the PDK models.
+C_palace = abs(Cm[0, 2])
 
-C_palace = abs(C_matrix[0, 1])
-
-stack = sim._resolve_stack()
-sio2_props = stack.materials.get("sio2") or stack.materials.get("SiO2")
-if sio2_props is None or sio2_props.get("permittivity") is None:
-    raise ValueError("Could not find SiO2 permittivity in active stack materials")
-eps_r = float(sio2_props["permittivity"])
-
-metal5 = stack.layers.get("metal5")
-topmetal1 = stack.layers.get("topmetal1")
-vmim = stack.layers.get("vmim")
-if metal5 is None or topmetal1 is None or vmim is None:
-    raise ValueError("Could not find metal5/topmetal1/vmim in active stack layers")
-
-metal5_top = metal5.zmin + metal5.thickness
-topmetal1_bottom = topmetal1.zmin
-vmim_bottom = vmim.zmin
-
-d_topmetal1_um = topmetal1_bottom - metal5_top
-d_vmim_um = vmim_bottom - metal5_top
-if d_topmetal1_um <= 0:
-    raise ValueError(f"Non-physical topmetal1 spacing: {d_topmetal1_um} um")
-if d_vmim_um <= 0:
-    raise ValueError(f"Non-physical vmim spacing: {d_vmim_um} um")
-
-d_topmetal1 = d_topmetal1_um * 1e-6
-d_vmim = d_vmim_um * 1e-6
-
-geom_component = sim.geometry.component
-mim_polys = geom_component.get_polygons(by="name").get("MIMdrawing", [])
-if not mim_polys:
-    raise ValueError("Could not find MIMdrawing polygons in geometry")
-
-dbu = geom_component.kcl.dbu
-left = min(poly.bbox().left for poly in mim_polys)
-right = max(poly.bbox().right for poly in mim_polys)
-bottom = min(poly.bbox().bottom for poly in mim_polys)
-top = max(poly.bbox().top for poly in mim_polys)
-
-mim_width_um = (right - left) * dbu
-mim_length_um = (top - bottom) * dbu
-A_mim = (mim_width_um * 1e-6) * (mim_length_um * 1e-6)
-
-C_analytical_topmetal1 = const.epsilon_0 * eps_r * A_mim / d_topmetal1
-C_analytical_vmim = const.epsilon_0 * eps_r * A_mim / d_vmim
-C_analytical = C_analytical_topmetal1
-
-print(f"Palace result:                                {C_palace * 1e15:.3f} fF")
-print(
-    f"Analytical (d=topmetal1_bottom-metal5_top):   {C_analytical_topmetal1 * 1e15:.1f} fF"
-)
-print(
-    f"Analytical (d=vmim_bottom-metal5_top):        {C_analytical_vmim * 1e15:.1f} fF"
-)
-print(
-    f"Ratio Palace / topmetal1-based analytical:    {C_palace / C_analytical_topmetal1:.3f}"
-)
-print(
-    f"Ratio Palace / vmim-based analytical:         {C_palace / C_analytical_vmim:.3f}"
-)
-print(f"Using A_mim = {mim_width_um:.3f} x {mim_length_um:.3f} um^2 from MIMdrawing")
-print(f"d_topmetal1 = {d_topmetal1_um:.3f} um, d_vmim = {d_vmim_um:.3f} um")
+print(f"Palace mutual Cm[1,2]:      {C_palace * 1e15:.3f} fF")
+print(f"IHP PDK model (cap_cmim):   {C_pdk * 1e15:.3f} fF")
 
 # %%
