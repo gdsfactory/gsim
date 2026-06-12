@@ -215,8 +215,8 @@ def plot_prism_slices_interactive(
         title=title,
         xaxis_title=xlabel,
         yaxis_title=ylabel,
-        xaxis=dict(scaleanchor="y", scaleratio=1),
-        yaxis=dict(constrain="domain"),
+        xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False, zeroline=False),
+        yaxis=dict(constrain="domain", showgrid=False, zeroline=False),
         legend=dict(
             title="Layers / Materials",
             itemclick="toggle",
