@@ -74,6 +74,9 @@ nbclean +filenames:
     jq --indent 1 'del(.metadata.papermill)' "$filename" > "$filename.tmp" && mv "$filename.tmp" "$filename"; \
   done
 
+taper_sc_nc:
+  uv run python samples/meep_taper_sc_nc.py
+
 tree:
   @tree -a -I .git --gitignore
 

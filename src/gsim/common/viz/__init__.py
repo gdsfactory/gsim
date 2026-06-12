@@ -12,6 +12,7 @@ and do **not** depend on any solver (meep, tidy3d, etc.).
 """
 
 from gsim.common.viz.render2d import plot_prism_slices
+from gsim.common.viz.render2d_interactive import plot_prism_slices_interactive
 from gsim.common.viz.render3d import (
     create_web_export,
     export_3d_mesh,
@@ -23,6 +24,7 @@ __all__ = [
     "create_web_export",
     "export_3d_mesh",
     "plot_prism_slices",
+    "plot_prism_slices_interactive",
     "plot_prisms_3d",
     "plot_prisms_3d_open3d",
 ]
