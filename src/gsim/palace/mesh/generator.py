@@ -32,7 +32,12 @@ from .groups import assign_physical_groups
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import BoundaryModeConfig, DrivenConfig, EigenmodeConfig, NumericalConfig
+    from gsim.palace.models import (
+        BoundaryModeConfig,
+        DrivenConfig,
+        EigenmodeConfig,
+        NumericalConfig,
+    )
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 

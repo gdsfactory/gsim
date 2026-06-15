@@ -25,7 +25,7 @@
 # %% [markdown] papermill={"duration": 0.003686, "end_time": "2026-06-12T07:04:20.157977", "exception": false, "start_time": "2026-06-12T07:04:20.154291", "status": "completed"}
 # ### Define GSG electrode
 
-# %% papermill={"duration": 1.318149, "end_time": "2026-04-17T08:35:46.675848", "exception": false, "start_time": "2026-04-17T08:35:45.357699", "status": "completed"}
+# %% papermill={"duration": 2.54829, "end_time": "2026-06-12T07:04:22.708430", "exception": false, "start_time": "2026-06-12T07:04:20.160140", "status": "completed"}
 from pathlib import Path
 
 import gdsfactory as gf
@@ -136,7 +136,7 @@ sim.plot_mesh(
 # %% [markdown] papermill={"duration": 0.003212, "end_time": "2026-06-12T07:04:31.011514", "exception": false, "start_time": "2026-06-12T07:04:31.008302", "status": "completed"}
 # ### Run simulation
 
-# %% papermill={"duration": 671.248603, "end_time": "2026-04-17T08:47:04.075888", "exception": false, "start_time": "2026-04-17T08:35:52.827285", "status": "completed"}
+# %% papermill={"duration": 572.564296, "end_time": "2026-06-12T07:14:03.578757", "exception": false, "start_time": "2026-06-12T07:04:31.014461", "status": "completed"}
 palace_executable = "/home/martin/Desktop/palace/build/bin/palace"
 
 sim.write_config()
