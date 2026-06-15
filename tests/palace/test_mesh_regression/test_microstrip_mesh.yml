@@ -15,7 +15,7 @@ groups:
   - si
   - sin
 mesh:
-  elements: 7606
+  elements: 6095
   invalid_elements: 0
-  nodes: 1109
-  tetrahedra: 4560
+  nodes: 863
+  tetrahedra: 3709

@@ -1,12 +1,41 @@
 name: Cloud Test
 on:
   workflow_dispatch:
+  push:
+    branches:
+    - main
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
 jobs:
+  # Small per-PR smoke check: one MEEP + one Palace sim vs stored S-params.
+  # Runs automatically only in trusted contexts (pushes to main, or PRs from
+  # branches in this repo). Fork PRs are skipped, since running the sim
+  # executes PR code and would expose GFP_API_KEY; a maintainer can run the
+  # full suite by applying the `sims_run_all` label after reviewing the diff.
+  sim_smoke_test:
+    if: >-
+      github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v6
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+    - name: Install UV
+      uses: astral-sh/setup-uv@v6
+    - name: Create environment
+      run: uv sync --dev --all-extras
+    - name: Run sim smoke tests
+      run: uv run pytest -m sim_smoke_test
+      env:
+        GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
+  # Full cloud suite. Manual (workflow_dispatch) or maintainer-gated via the
+  # `sims_run_all` label — the label is the security review for fork PRs.
   cloud_test:
     if: >-
-      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'run-cloud-tests')
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'sims_run_all')
     runs-on: ubuntu-latest
     permissions:
       contents: read

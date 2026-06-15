@@ -7,24 +7,10 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.2
 #   kernelspec:
-#     display_name: gsim
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
-
-# %% [markdown] papermill={"duration": 0.005219, "end_time": "2026-04-04T11:56:42.391968", "exception": false, "start_time": "2026-04-04T11:56:42.386749", "status": "completed"}
-# ### QPDK Coupled Resonator — Driven Simulation
-#
-# This notebook builds a compact coupled resonator from QPDK cells, converts etch
-# layers to conductor geometry, and runs a Palace driven simulation to extract
-# S-parameters and visualize the electric field at resonance (~7.78 GHz).
-#
-# [Palace](https://awslabs.github.io/palace/) is an open-source 3D electromagnetic simulator supporting eigenmode, driven (S-parameter), and electrostatic simulations.
-#
-# **Requirements:**
-#
-# - Quantum PDK: `uv pip install qpdk`
-# - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
 # %% papermill={"duration": 3.114078, "end_time": "2026-04-04T11:56:45.509802", "exception": false, "start_time": "2026-04-04T11:56:42.395724", "status": "completed"}
 import gdsfactory as gf
@@ -72,6 +58,20 @@ component = resonator_compact(coupling_gap=15.0)
 _c = component.copy()
 _c.draw_ports()
 _c
+
+# %% [markdown] papermill={"duration": 0.005219, "end_time": "2026-04-04T11:56:42.391968", "exception": false, "start_time": "2026-04-04T11:56:42.386749", "status": "completed"}
+# ### QPDK Coupled Resonator — Driven Simulation
+#
+# This notebook builds a compact coupled resonator from QPDK cells, converts etch
+# layers to conductor geometry, and runs a Palace driven simulation to extract
+# S-parameters and visualize the electric field at resonance (~7.78 GHz).
+#
+# [Palace](https://awslabs.github.io/palace/) is an open-source 3D electromagnetic simulator supporting eigenmode, driven (S-parameter), and electrostatic simulations.
+#
+# **Requirements:**
+#
+# - Quantum PDK: `uv pip install qpdk`
+# - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
 # %% [markdown] papermill={"duration": 0.001139, "end_time": "2026-04-04T11:56:45.512022", "exception": false, "start_time": "2026-04-04T11:56:45.510883", "status": "completed"}
 # ### Convert QPDK etch layers to conductor geometry
@@ -223,6 +223,57 @@ res_idx = np.argmin(results.s21.db)
 freq_ghz = results.freq[res_idx]
 print(f"Resonance at {freq_ghz:.4f} GHz (S21 = {results.s21.db[res_idx]:.1f} dB)")
 
+# Extract quality factor from the resonance dip
+s21_db = results.s21.db
+s21_mag = 10 ** (s21_db / 20.0)
+
+# Method 1: -3 dB bandwidth (half-power points)
+s21_min_mag = s21_mag[res_idx]
+baseline = np.median(s21_mag)  # transmission away from resonance
+dip_depth = baseline - s21_min_mag
+half_depth = s21_min_mag + dip_depth / 2
+half_power_db = 20 * np.log10(half_depth)
+
+# Find the left and right half-power indices
+left_idx = np.argmin(np.abs(s21_db[:res_idx] - half_power_db))
+right_idx = res_idx + np.argmin(np.abs(s21_db[res_idx:] - half_power_db))
+
+f_left = results.freq[left_idx]
+f_right = results.freq[right_idx]
+bw_ghz = f_right - f_left
+
+Q_bw = freq_ghz / bw_ghz if bw_ghz > 0 else np.inf
+print(f"-3 dB bandwidth: {bw_ghz:.6f} GHz")
+print(f"Loaded quality factor Q ~ {Q_bw:.0f}")
+
+# Method 2: Lorentzian fit to |S21| for refined Q estimate
+from scipy.optimize import curve_fit
+
+
+def lorentzian_dip(f, f0, Q, dip_depth, baseline):
+    """Lorentzian dip: baseline - dip_depth / (1 + (2*Q*(f-f0)/f0)**2)"""
+    return baseline - dip_depth / (1 + (2 * Q * (f - f0) / f0) ** 2)
+
+
+freq = results.freq
+mask = np.abs(freq - freq_ghz) < 0.01  # ±10 MHz fit window
+if mask.sum() > 5:
+    popt, pcov = curve_fit(
+        lorentzian_dip,
+        freq[mask],
+        s21_mag[mask],
+        p0=[freq_ghz, Q_bw, dip_depth, baseline],
+        bounds=(
+            [freq_ghz - 0.01, 100, 0, 0],
+            [freq_ghz + 0.01, 1e6, 2 * baseline, 2 * baseline],
+        ),
+    )
+    f0_fit, Q_fit, dip_fit, base_fit = popt
+    Q_err = np.sqrt(np.diag(pcov))[1]
+    print(f"Lorentzian fit: f0 = {f0_fit:.4f} GHz, Q = {Q_fit:.0f} ± {Q_err:.0f}")
+else:
+    print("Insufficient points for Lorentzian fit.")
+
 # Load volume field data
 vol_dir = results_dir / "paraview/driven/excitation_1"
 vol_path = sorted(vol_dir.rglob("*.pvtu"))[-1]
@@ -269,3 +320,5 @@ plot_topview(
     np.linalg.norm(vol_slice.point_data["E_real"], axis=1),
     f"Electric field |E| at {freq_ghz:.4f} GHz — (V/m)",
 )
+
+# %%

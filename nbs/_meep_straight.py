@@ -39,11 +39,15 @@ c
 
 # %%
 from gsim import meep
+from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
 sim.geometry(component=c, z_crop="auto")
-sim.materials = {"si": 3.47, "SiO2": 1.44}
+sim.materials = {
+    "si": Material(refractive_index=3.47),
+    "SiO2": Material(refractive_index=1.44),
+}
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.num_freqs = 11
 sim.monitors = ["o1", "o2"]
@@ -61,10 +65,15 @@ sim.plot_2d(slices="xyz")
 
 # %%
 # Run on GDSFactory+ cloud
-result = sim.run_local()
+result = sim.run()
 
 # %%
-result.plot(db=True)
+result.plot_interactive()
+
+# %%
+result.plot_interactive(phase=True)
 
 # %%
 result.show_animation()
+
+# %%

@@ -263,6 +263,86 @@ def plot_3d(
     raise ValueError(f"Unsupported backend: {backend}. Use 'open3d' or 'pyvista'")
 
 
+def plot_2d_interactive(
+    component: Component,
+    stack: LayerStack | None,
+    domain_config: DomainConfig,
+    source_port: str | None = None,
+    x: float | str | None = None,
+    y: float | str | None = None,
+    z: float | str | None = None,
+    slices: str = "z",
+    extend_ports_length: float | None = None,
+    port_data: list | None = None,
+    component_bbox: list[float] | tuple[float, ...] | None = None,
+    fiber_source: Any = None,
+    monitor_z_span: float | None = None,
+) -> Any:
+    """Plot an interactive 2D cross-section using Plotly.
+
+    Each layer and overlay element is a separate trace, so users can zoom,
+    pan, and toggle individual layers/materials on and off via the legend.
+
+    Accepts the same geometry arguments as :func:`plot_2d`, except ``ax``
+    and ``legend`` (Plotly manages its own legend).
+
+    Only a single slice direction is supported per call.
+
+    Args:
+        component: gdsfactory Component to visualize.
+        stack: gsim LayerStack (may be None).
+        domain_config: Domain configuration.
+        source_port: Source port name (for overlay).
+        x: X-coordinate or layer name for slice plane.
+        y: Y-coordinate or layer name for slice plane.
+        z: Z-coordinate or layer name for slice plane.
+        slices: Slice direction — "x", "y", or "z".
+        extend_ports_length: Override port extension length (pass 0 if
+            the component is already extended).
+        port_data: Pre-computed port data (skips re-extraction).
+        component_bbox: Original component bbox ``[xmin, ymin, xmax, ymax]``
+            (for correct cell boundary computation with extended ports).
+        fiber_source: Pre-computed fiber source config (for overlay).
+        monitor_z_span: Port monitor z-span override.
+
+    Returns:
+        ``plotly.graph_objects.Figure``.
+    """
+    from gsim.common.viz import plot_prism_slices_interactive
+
+    slices_to_plot = sorted(set(slices.lower()))
+    if len(slices_to_plot) != 1:
+        raise ValueError(
+            f"plot_2d_interactive supports exactly one slice direction. Got: {slices!r}"
+        )
+
+    gm = build_geometry_model(
+        component, stack, domain_config, extend_ports_length=extend_ports_length
+    )
+    overlay = build_overlay(
+        gm,
+        component,
+        stack,
+        domain_config,
+        source_port,
+        port_data=port_data,
+        component_bbox=component_bbox,
+        fiber_source=fiber_source,
+        monitor_z_span=monitor_z_span,
+    )
+
+    slice_dir = slices_to_plot[0]
+    kw: dict[str, Any] = {}
+    if slice_dir == "x":
+        kw["x"] = x if x is not None else "core"
+    elif slice_dir == "y":
+        kw["y"] = y if y is not None else "core"
+    else:
+        kw["z"] = z if z is not None else "core"
+
+    return plot_prism_slices_interactive(gm, overlay=overlay, **kw)
+
+
 def plot_2d(
     component: Component,
     stack: LayerStack | None,

@@ -31,11 +31,15 @@ c = cells.ebeam_y_1550()
 
 # %%
 from gsim import meep
+from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
 sim.geometry(component=c, z_crop="auto")
-sim.materials = {"si": 3.47, "SiO2": 1.44}
+sim.materials = {
+    "si": Material(refractive_index=3.47),
+    "SiO2": Material(refractive_index=1.44),
+}
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]
@@ -49,13 +53,17 @@ sim.solver(resolution=20, simplify_tol=0.01, save_animation=True, verbose_interv
 
 # %%
 from gsim import meep
+from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
 sim.geometry.component = c
 sim.geometry.z_crop = "auto"
 
-sim.materials = {"si": 3.47, "SiO2": 1.44}
+sim.materials = {
+    "si": Material(refractive_index=3.47),
+    "SiO2": Material(refractive_index=1.44),
+}
 
 sim.source.port = "o1"
 sim.source.wavelength = 1.55
@@ -79,12 +87,15 @@ sim.solver.verbose_interval = 5.0
 
 # %%
 from gsim import meep
-from gsim.meep import FDTD, Domain, Geometry, ModeSource
+from gsim.meep import FDTD, Domain, Geometry, Material, ModeSource
 
 sim = meep.Simulation()
 
 sim.geometry = Geometry(component=c, z_crop="auto")
-sim.materials = {"si": 3.47, "SiO2": 1.44}
+sim.materials = {
+    "si": Material(refractive_index=3.47),
+    "SiO2": Material(refractive_index=1.44),
+}
 sim.source = ModeSource(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]
@@ -100,11 +111,15 @@ sim.solver = FDTD(
 
 # %%
 from gsim import meep
+from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
 sim.geometry(component=c, z_crop="auto")
-sim.materials = {"si": 3.47, "SiO2": 1.44}
+sim.materials = {
+    "si": Material(refractive_index=3.47),
+    "SiO2": Material(refractive_index=1.44),
+}
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.num_freqs = 11
 sim.monitors = ["o1", "o2", "o3"]

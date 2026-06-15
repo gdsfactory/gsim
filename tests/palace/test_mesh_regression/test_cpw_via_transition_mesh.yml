@@ -19,7 +19,7 @@ groups:
   - topvia1
   - topvia2
 mesh:
-  elements: 16363
+  elements: 14367
   invalid_elements: 0
-  nodes: 2162
-  tetrahedra: 10351
+  nodes: 1840
+  tetrahedra: 9155

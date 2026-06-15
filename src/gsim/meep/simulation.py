@@ -78,7 +78,9 @@ class Simulation(BaseModel):
     )
 
     geometry: Geometry = Field(default_factory=Geometry)
-    materials: dict[str, float | Material] = Field(default_factory=dict)
+    materials: dict[str, float | Material | dict[str, Any]] = Field(
+        default_factory=dict
+    )
     source: ModeSource = Field(default_factory=ModeSource)
     fiber_source: FiberSource | None = Field(
         default=None,
@@ -1091,6 +1093,47 @@ class Simulation(BaseModel):
                 kwargs.setdefault("y", result.config.y_cut)
 
         return plot_2d(
+            component=result.component,
+            stack=self.geometry.stack,
+            domain_config=result.config.domain,
+            source_port=result.config.source.port,
+            extend_ports_length=0,
+            port_data=result.config.ports,
+            component_bbox=result.config.component_bbox,
+            fiber_source=result.config.fiber_source,
+            monitor_z_span=result.config.monitor_z_span,
+            **kwargs,
+        )
+
+    def plot_2d_interactive(self, **kwargs: Any) -> Any:
+        """Plot an interactive 2D cross-section using Plotly.
+
+        Each layer and overlay element is a separate trace, so users can
+        zoom, pan, and toggle individual layers/materials on and off via
+        the legend.
+
+        Uses :meth:`build_config` so the plot shows exactly what meep
+        processes — including extended ports and PML boundaries.
+
+        In XZ 2D mode (``solver.plane='xz'``), ``slices`` defaults to
+        ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
+
+        Accepts the same keyword arguments as
+        :func:`gsim.meep.viz.plot_2d_interactive`.
+
+        Returns:
+            ``plotly.graph_objects.Figure``.
+        """
+        from gsim.meep.viz import plot_2d_interactive
+
+        result = self.build_config()
+
+        if self.solver.plane == "xz":
+            kwargs.setdefault("slices", "y")
+            if kwargs.get("slices") == "y":
+                kwargs.setdefault("y", result.config.y_cut)
+
+        return plot_2d_interactive(
             component=result.component,
             stack=self.geometry.stack,
             domain_config=result.config.domain,

@@ -1659,3 +1659,108 @@ class TestSimConfigXZ:
         assert isinstance(cfg.fiber_source, FiberSourceConfig)
         assert cfg.fiber_source.angle_deg == 14.5
         assert cfg.fiber_source.k_direction == [0.25, 0.0, -0.97]
+
+
+# ---------------------------------------------------------------------------
+# Material API tests (Issue #147)
+# ---------------------------------------------------------------------------
+
+
+class TestMaterial:
+    """Test the user-facing Material model with refractive_index / permittivity."""
+
+    def test_material_from_refractive_index(self):
+        from gsim.meep.models.api import Material
+
+        m = Material(refractive_index=3.47)
+        perm = m.permittivity
+        loss = m.loss_tangent
+        assert perm is not None
+        assert loss is not None
+        assert abs(perm - 3.47**2) < 1e-10
+        assert loss == 0.0
+
+    def test_material_from_permittivity(self):
+        from gsim.meep.models.api import Material
+
+        m = Material(permittivity=12.04)
+        perm = m.permittivity
+        loss = m.loss_tangent
+        assert perm is not None
+        assert loss is not None
+        assert perm == 12.04
+        assert loss == 0.0
+
+    def test_material_with_extinction_coeff(self):
+        from gsim.meep.models.api import Material
+
+        m = Material(refractive_index=3.47, extinction_coeff=0.01)
+        eps = m.permittivity
+        loss = m.loss_tangent
+        assert eps is not None
+        assert loss is not None
+        expected_eps = 3.47**2 - 0.01**2
+        assert abs(eps - expected_eps) < 1e-10
+        expected_tan = (2 * 3.47 * 0.01) / expected_eps
+        assert abs(loss - expected_tan) < 1e-10
+
+    def test_material_rejects_both_n_and_eps(self):
+        from pydantic import ValidationError
+
+        from gsim.meep.models.api import Material
+
+        with pytest.raises(ValidationError, match="not both"):
+            Material(refractive_index=3.47, permittivity=12.0)
+
+    def test_material_rejects_neither(self):
+        from pydantic import ValidationError
+
+        from gsim.meep.models.api import Material
+
+        with pytest.raises(ValidationError, match="either"):
+            Material()
+
+    def test_material_float_shorthand_still_works(self):
+        from gsim.meep.models.api import Material
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.materials = {"si": 12.04}
+        mat = sim.materials["si"]
+        assert isinstance(mat, Material)
+        assert mat.permittivity == 12.04
+        assert mat.loss_tangent == 0.0
+
+    def test_material_dict_with_refractive_index(self):
+        from gsim.meep.models.api import Material
+        from gsim.meep.simulation import Simulation
+
+        sim = Simulation()
+        sim.materials = {"si": {"refractive_index": 3.47}}
+        mat = sim.materials["si"]
+        assert isinstance(mat, Material)
+        perm = mat.permittivity
+        assert perm is not None
+        assert abs(perm - 3.47**2) < 1e-10
+
+    def test_material_explicit_loss_tangent(self):
+        from gsim.meep.models.api import Material
+
+        m = Material(refractive_index=3.47, loss_tangent=0.1)
+        perm = m.permittivity
+        loss = m.loss_tangent
+        assert perm is not None
+        assert loss is not None
+        assert abs(perm - 3.47**2) < 1e-10
+        assert loss == 0.1
+
+    def test_material_permittivity_with_loss_tangent(self):
+        from gsim.meep.models.api import Material
+
+        m = Material(permittivity=12.04, loss_tangent=0.05)
+        perm = m.permittivity
+        loss = m.loss_tangent
+        assert perm is not None
+        assert loss is not None
+        assert perm == 12.04
+        assert loss == 0.05

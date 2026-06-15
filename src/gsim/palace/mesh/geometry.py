@@ -6,6 +6,7 @@ and creating 3D geometry in gmsh.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass
@@ -474,6 +475,27 @@ def add_metals(
         elif layer_type == "conductor" and is_planar:
             # Zero/thin-thickness or explicitly planar -> 2D PEC surface
             metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+            # Also create explicit wire loops for mesh refinement.  Embedded
+            # planar surfaces lose their boundary curves after boolean
+            # fragmentation, so the conductor edges cannot drive refinement.
+            # Adding independent line loops at the conductor z-height gives
+            # gmsh explicit curves to refine around the metal perimeter.
+            for pts_x, pts_y, holes in polys:
+                loop_tag = gmsh_utils._create_wire_loop(  # noqa: SLF001
+                    kernel, list(pts_x), list(pts_y), zmin
+                )
+                if loop_tag is not None:
+                    metal_tags[layer_name].setdefault("refinement_lines", []).append(
+                        loop_tag
+                    )
+                for hx, hy in holes:
+                    hole_loop = gmsh_utils._create_wire_loop(  # noqa: SLF001
+                        kernel, list(hx), list(hy), zmin
+                    )
+                    if hole_loop is not None:
+                        metal_tags[layer_name].setdefault(
+                            "refinement_lines", []
+                        ).append(hole_loop)
         elif layer_type == "via":
             # Decide between 3D volume (with conductivity) and 2D PEC fallback
             material_name = layer_info["material"]
@@ -544,12 +566,25 @@ def add_metals(
     # afterwards. We re-identify volumes by bbox after the call.
     _via_bboxes: dict[str, list[tuple[float, ...]]] = {}
     _conductor_bboxes: dict[str, list[tuple[float, ...]]] = {}
+    # Also record surface bboxes for planar conductors — these survive as
+    # dielectric boundary faces after boolean and are used to find the
+    # conductor perimeter curves for mesh refinement.
+    _pec_surface_bboxes: dict[str, list[tuple[float, ...]]] = {}
     kernel.synchronize()
     for layer_name, tag_info in metal_tags.items():
         for vtag in tag_info["volumes"]:
             if isinstance(vtag, int):
                 bbox = kernel.getBoundingBox(3, vtag)
                 _via_bboxes.setdefault(layer_name, []).append(bbox)
+
+        for stag in tag_info.get("surfaces_xy", []):
+            try:
+                bbox = kernel.getBoundingBox(2, stag)
+                _pec_surface_bboxes.setdefault(layer_name, []).append(bbox)
+            except Exception:
+                logger.debug(
+                    "Could not get bbox for planar conductor surface %d, skipping", stag
+                )
 
     for layer_name, vol_tags in _conductor_volumes.items():
         for vtag in vol_tags:
@@ -563,6 +598,50 @@ def add_metals(
 
     kernel.removeAllDuplicates()
     kernel.synchronize()
+
+    # After removeAllDuplicates(), some independent curve-loop entities
+    # (created for planar-conductor refinement) may be merged away.
+    # Refresh the refinement line tags so downstream consumers see only
+    # valid curves.
+    for layer_name, tag_info in metal_tags.items():
+        if layer_name == "__shaped_dielectrics__":
+            continue
+        old_line_tags = tag_info.get("refinement_lines", [])
+        if not old_line_tags:
+            continue
+        valid_lines = []
+        for ltag in old_line_tags:
+            try:
+                kernel.getBoundingBox(1, ltag)
+                valid_lines.append(ltag)
+            except Exception:
+                pass  # Curve was merged away
+        # Try to find the merged successor by looking at all remaining curves
+        # that have the same z-coordinate and bounding box.
+        if len(valid_lines) < len(old_line_tags):
+            # Some curves were merged — find replacements by matching bboxes.
+            # getEntities(1) returns curves that survived dedup.
+            all_curves = list(kernel.getEntities(1))
+            all_curve_bboxes: dict[int, tuple] = {}
+            for _, ctag in all_curves:
+                with contextlib.suppress(Exception):
+                    all_curve_bboxes[ctag] = kernel.getBoundingBox(1, ctag)
+            for ltag in old_line_tags:
+                if ltag in valid_lines:
+                    continue
+                try:
+                    old_bbox = kernel.getBoundingBox(1, ltag)
+                except Exception:
+                    continue
+                for ctag, bbox in all_curve_bboxes.items():
+                    if ctag in valid_lines:
+                        continue
+                    if all(
+                        abs(a - b) < 0.01 for a, b in zip(bbox, old_bbox, strict=True)
+                    ):
+                        valid_lines.append(ctag)
+                        break
+        tag_info["refinement_lines"] = sorted(set(valid_lines))
 
     # Build a single bbox lookup for all post-dedup volumes (avoids O(n²) calls).
     all_vols = kernel.getEntities(3)
@@ -628,6 +707,11 @@ def add_metals(
     # type-ignore here. Cleaner to return shaped_dielectric_names separately and
     # update the consumer in classify_* (see metal_tags.get("__shaped_dielectrics__")).
     metal_tags["__shaped_dielectrics__"] = shaped_dielectric_names  # ty: ignore[invalid-assignment]
+
+    # Store pre-dedup PEC surface bboxes so the boolean pipeline can re-identify
+    # merged planar-conductor surfaces by their geometry.
+    if _pec_surface_bboxes:
+        metal_tags["__pec_surface_bboxes__"] = _pec_surface_bboxes  # type: ignore[invalid-assignment]
 
     return metal_tags
 
@@ -773,7 +857,16 @@ def add_dielectrics(
         # extend to the air margins.  A shaped dielectric (e.g. waveguide
         # core) carves out of the surrounding oxide/substrate boxes, so those
         # boxes need to be large enough to fully surround the shaped volume.
-        if _detect_shaped_dielectric_layers(geometry, stack) and not is_air_like:
+        #
+        # Also extend substrates (dielectrics starting at z ~ 0) to margins.
+        # A bulk substrate like sapphire or silicon should fill the same
+        # transverse extent as the surrounding air so the mesh domain is
+        # consistent and the substrate edge does not artificially truncate
+        # fields.
+        is_bulk_substrate = d_zmin <= 1e-6
+        if (
+            is_bulk_substrate or _detect_shaped_dielectric_layers(geometry, stack)
+        ) and not is_air_like:
             xmin = xmin_air
             ymin = ymin_air
             xmax = xmax_air
@@ -961,6 +1054,15 @@ def add_patterned_dielectrics(
         layer_name = layer_info["name"]
         if layer_name in shaped_dielectric_names:
             continue
+
+        # Skip dielectric layers already covered by bulk dielectric boxes
+        # from stack.dielectrics. Re-extruding them would create overlapping
+        # volumes that get consumed in the boolean pipeline, causing the
+        # intended bulk material groups to disappear.
+        layer_obj = stack.layers.get(layer_name)
+        if layer_obj is not None and _is_covered_by_dielectric_box(layer_obj, stack):
+            continue
+
         zmin = layer_info["zmin"]
         thickness = layer_info["thickness"]
 
@@ -1207,14 +1309,14 @@ def build_entities(
 
     # --- Conductors, vias, and shaped dielectrics ---
     for layer_name, tag_info in metal_tags.items():
-        if layer_name == "__shaped_dielectrics__":
+        if layer_name.startswith("__") and layer_name.endswith("__"):
             continue
 
         is_via = layer_name in via_layers
         is_shaped_dielectric = layer_name in shaped_dielectric_layers
 
         # PEC / zero-thickness surfaces
-        if tag_info["surfaces_xy"]:
+        if tag_info.get("surfaces_xy"):
             # Via PEC surfaces get higher priority (lower mesh_order) so they
             # are processed first and survive boolean cuts against conductor
             # shell surfaces that sit at the same z-height.
@@ -1228,7 +1330,7 @@ def build_entities(
                 )
             )
 
-        if tag_info["volumes"]:
+        if tag_info.get("volumes"):
             if is_via:
                 # Via volumes: 3D entities, higher priority than dielectrics
                 via_vol_tags = [

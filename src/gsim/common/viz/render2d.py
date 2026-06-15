@@ -293,7 +293,7 @@ def _plot_single_prism_slice(
             elif y is not None:
                 xmin = min(xmin, bbox[0][0])
                 xmax = max(xmax, bbox[1][0])
-        except Exception:  # noqa: S112
+        except Exception:
             continue
 
     # Second pass: draw patches

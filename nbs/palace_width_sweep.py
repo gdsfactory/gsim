@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# %% [markdown] papermill={"duration": 0.003998, "end_time": "2026-04-03T18:03:01.257043", "exception": false, "start_time": "2026-04-03T18:03:01.253045", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.003599, "end_time": "2026-06-12T07:05:03.195433", "exception": false, "start_time": "2026-06-12T07:05:03.191834", "status": "completed"}
 # # Palace Width Sweep: Parallel Simulation
 #
 # Sweep the microstrip width from 5 to 50 um (5 points), run all simulations
@@ -24,18 +24,18 @@
 # - IHP PDK: `uv pip install ihp-gdsfactory`
 # - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
-# %% [markdown] papermill={"duration": 0.001322, "end_time": "2026-04-03T18:03:01.260961", "exception": false, "start_time": "2026-04-03T18:03:01.259639", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.001912, "end_time": "2026-06-12T07:05:03.199616", "exception": false, "start_time": "2026-06-12T07:05:03.197704", "status": "completed"}
 # ### Define the sweep
 
-# %% papermill={"duration": 0.035809, "end_time": "2026-04-03T18:03:01.298312", "exception": false, "start_time": "2026-04-03T18:03:01.262503", "status": "completed"}
+# %% papermill={"duration": 0.035134, "end_time": "2026-06-12T07:05:03.236721", "exception": false, "start_time": "2026-06-12T07:05:03.201587", "status": "completed"}
 import numpy as np
 
 widths = np.arange(2, 21, 4)
 
-# %% [markdown] papermill={"duration": 0.000672, "end_time": "2026-04-03T18:03:01.299809", "exception": false, "start_time": "2026-04-03T18:03:01.299137", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.000995, "end_time": "2026-06-12T07:05:03.238909", "exception": false, "start_time": "2026-06-12T07:05:03.237914", "status": "completed"}
 # ### Build components and configure simulations
 
-# %% papermill={"duration": 6.720991, "end_time": "2026-04-03T18:03:08.021430", "exception": false, "start_time": "2026-04-03T18:03:01.300439", "status": "completed"}
+# %% papermill={"duration": 8.184669, "end_time": "2026-06-12T07:05:11.424436", "exception": false, "start_time": "2026-06-12T07:05:03.239767", "status": "completed"}
 import gdsfactory as gf
 from ihp import LAYER, PDK, cells
 
@@ -76,10 +76,10 @@ for w in widths:
 
 print(f"Configured {len(sims)} simulations")
 
-# %% [markdown] papermill={"duration": 0.000636, "end_time": "2026-04-03T18:03:08.023074", "exception": false, "start_time": "2026-04-03T18:03:08.022438", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.000907, "end_time": "2026-06-12T07:05:11.426506", "exception": false, "start_time": "2026-06-12T07:05:11.425599", "status": "completed"}
 # ### Upload and start all jobs (non-blocking)
 
-# %% papermill={"duration": 17.189773, "end_time": "2026-04-03T18:03:25.213421", "exception": false, "start_time": "2026-04-03T18:03:08.023648", "status": "completed"}
+# %% papermill={"duration": 18.360425, "end_time": "2026-06-12T07:05:29.787447", "exception": false, "start_time": "2026-06-12T07:05:11.427022", "status": "completed"}
 # Upload and start all jobs without waiting
 job_ids = []
 for sim in sims:
@@ -88,24 +88,24 @@ for sim in sims:
 
 print(f"Started {len(job_ids)} jobs: {job_ids}")
 
-# %% [markdown] papermill={"duration": 0.001071, "end_time": "2026-04-03T18:03:25.216657", "exception": false, "start_time": "2026-04-03T18:03:25.215586", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.001834, "end_time": "2026-06-12T07:05:29.790790", "exception": false, "start_time": "2026-06-12T07:05:29.788956", "status": "completed"}
 # ### Wait for all jobs to complete
 
-# %% papermill={"duration": 283.580034, "end_time": "2026-04-03T18:08:08.797695", "exception": false, "start_time": "2026-04-03T18:03:25.217661", "status": "completed"}
+# %% papermill={"duration": 254.797545, "end_time": "2026-06-12T07:09:44.589247", "exception": false, "start_time": "2026-06-12T07:05:29.791702", "status": "completed"}
 import gsim
 
 # Poll all jobs concurrently, download and parse results
 results = gsim.wait_for_results(job_ids)
 
-# %% [markdown] papermill={"duration": 0.001049, "end_time": "2026-04-03T18:08:08.800379", "exception": false, "start_time": "2026-04-03T18:08:08.799330", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.001753, "end_time": "2026-06-12T07:09:44.593338", "exception": false, "start_time": "2026-06-12T07:09:44.591585", "status": "completed"}
 # ### Plot S11 and S21 comparison
 
-# %% papermill={"duration": 0.109339, "end_time": "2026-04-03T18:08:08.910656", "exception": false, "start_time": "2026-04-03T18:08:08.801317", "status": "completed"}
+# %% papermill={"duration": 0.134018, "end_time": "2026-06-12T07:09:44.729055", "exception": false, "start_time": "2026-06-12T07:09:44.595037", "status": "completed"}
 import matplotlib.pyplot as plt
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6))
 
-for w, sp in zip(widths, results):
+for w, sp in zip(widths, results, strict=True):
     ax1.plot(sp.freq, sp.s11.db, label=f"w={w:.1f} um")
     ax2.plot(sp.freq, sp.s21.db, label=f"w={w:.1f} um")
 

@@ -55,17 +55,71 @@ class Geometry(BaseModel):
 class Material(BaseModel):
     """EM material properties for MEEP simulation overrides.
 
-    Use ``permittivity`` for the relative permittivity (isotropic).
+    Initialize via **exactly one** of:
+
+    - ``refractive_index`` (+ optional ``extinction_coeff``) — converted to
+      permittivity internally.
+    - ``permittivity`` — used directly.
+
     Use ``loss_tangent`` for dielectric loss (converted to conductivity at
     the simulation frequency).
     """
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
-    permittivity: float = Field(gt=0, description="Relative permittivity")
-    loss_tangent: float = Field(
-        default=0.0, ge=0, description="Dielectric loss tangent"
+    permittivity: float | None = Field(
+        default=None, gt=0, description="Relative permittivity"
     )
+    refractive_index: float | None = Field(
+        default=None, gt=0, description="Refractive index (n)"
+    )
+    extinction_coeff: float | None = Field(
+        default=None, ge=0, description="Extinction coefficient (k)"
+    )
+    loss_tangent: float | None = Field(
+        default=None, ge=0, description="Dielectric loss tangent"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_material(cls, data: Any) -> Any:
+        """Derive permittivity from refractive_index / extinction_coeff."""
+        if not isinstance(data, dict):
+            return data
+
+        n = data.get("refractive_index")
+        k = data.get("extinction_coeff")
+        eps = data.get("permittivity")
+        tan_delta = data.get("loss_tangent")
+
+        if n is not None and eps is not None:
+            raise ValueError(
+                "Provide either 'refractive_index' or 'permittivity', not both."
+            )
+
+        if n is not None:
+            k_val = k if k is not None else 0.0
+            derived_eps = n**2 - k_val**2
+            if derived_eps <= 0:
+                raise ValueError(
+                    f"refractive_index={n} and extinction_coeff={k_val} "
+                    f"yield non-positive permittivity ({derived_eps})."
+                )
+            data["permittivity"] = derived_eps
+            if tan_delta is None:
+                data["loss_tangent"] = (2 * n * k_val) / derived_eps
+        elif eps is not None:
+            data["permittivity"] = eps
+            if tan_delta is None:
+                data["loss_tangent"] = 0.0
+        else:
+            raise ValueError("Provide either 'refractive_index' or 'permittivity'.")
+
+        # Ensure loss_tangent is set
+        if data.get("loss_tangent") is None:
+            data["loss_tangent"] = 0.0
+
+        return data
 
 
 # ---------------------------------------------------------------------------

@@ -1169,6 +1169,42 @@ def save_debug_log(config, s_params, debug_data, wall_seconds=0.0,
 # Diagnostics
 # ---------------------------------------------------------------------------
 
+def _core_z_center(config):
+    """Z-center of the highest-permittivity (core) layer.
+
+    Animation and diagnostic XY slices must cut through the waveguide core,
+    not the geometric midpoint of the full stack. For an asymmetric stack
+    (e.g. SOI with thick BOX below and metal/heater layers above) the
+    full-stack midpoint lands in the oxide or cladding, away from the thin
+    core, so the slice shows no waveguide and misses the guided field.
+
+    Mirrors gsim.meep.ports._get_z_center: prefer the layer with the
+    highest permittivity (n > 1.5, i.e. eps > 2.25); otherwise fall back
+    to the full-stack midpoint.
+    """
+    layer_stack = config["layer_stack"]
+    materials = config.get("materials", {})
+
+    best_layer = None
+    best_eps = 0.0
+    for layer in layer_stack:
+        mat = materials.get(layer["material"]) or {}
+        eps_diag = mat.get("epsilon_diag")
+        if not eps_diag:
+            continue
+        eps = max(eps_diag)
+        if eps > best_eps:
+            best_eps = eps
+            best_layer = layer
+
+    if best_layer is not None and best_eps > 2.25:
+        return (best_layer["zmin"] + best_layer["zmax"]) / 2.0
+
+    z_min = min(l["zmin"] for l in layer_stack)
+    z_max = max(l["zmax"] for l in layer_stack)
+    return (z_min + z_max) / 2.0
+
+
 def save_geometry_diagnostics(sim, config, cell_center):
     """Save geometry cross-section plots showing epsilon, sources, monitors, PML."""
     if not HAS_MATPLOTLIB:
@@ -1201,9 +1237,7 @@ def save_geometry_diagnostics(sim, config, cell_center):
         return
 
     if is_3d:
-        z_min = min(l["zmin"] for l in config["layer_stack"])
-        z_max = max(l["zmax"] for l in config["layer_stack"])
-        z_core = (z_min + z_max) / 2
+        z_core = _core_z_center(config)
     else:
         z_core = 0
 
@@ -1298,9 +1332,7 @@ def save_field_snapshot(sim, config, cell_center):
         return
 
     if is_3d:
-        z_min = min(l["zmin"] for l in config["layer_stack"])
-        z_max = max(l["zmax"] for l in config["layer_stack"])
-        z_core = (z_min + z_max) / 2
+        z_core = _core_z_center(config)
     else:
         z_core = 0
 
@@ -1462,9 +1494,7 @@ def save_epsilon_raw(sim, config, cell_center):
     """Save raw epsilon array as .npy for XY slice at core center."""
     is_3d = config.get("is_3d", True)
     if is_3d:
-        z_min = min(l["zmin"] for l in config["layer_stack"])
-        z_max = max(l["zmax"] for l in config["layer_stack"])
-        z_core = (z_min + z_max) / 2
+        z_core = _core_z_center(config)
     else:
         z_core = 0
 
@@ -1711,12 +1741,7 @@ def main():
             )
             _anim_axes = ("x", "z")
         else:
-            if is_3d:
-                z_min_anim = min(l["zmin"] for l in config["layer_stack"])
-                z_max_anim = max(l["zmax"] for l in config["layer_stack"])
-                z_core_anim = (z_min_anim + z_max_anim) / 2
-            else:
-                z_core_anim = 0
+            z_core_anim = _core_z_center(config) if is_3d else 0
             _anim_plane = mp.Volume(
                 center=mp.Vector3(cell_center.x, cell_center.y, z_core_anim),
                 size=mp.Vector3(sim.cell_size.x, sim.cell_size.y, 0),

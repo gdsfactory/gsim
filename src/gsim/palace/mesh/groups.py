@@ -6,8 +6,11 @@ from the ``pg_map`` produced by ``run_boolean_pipeline``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
+
+import gmsh
 
 from . import gmsh_utils
 
@@ -117,9 +120,9 @@ def assign_physical_groups(
 
     # --- PEC surfaces (planar conductors) ---
     for layer_name, tag_info in metal_tags.items():
-        if layer_name == "__shaped_dielectrics__":
+        if layer_name.startswith("__") and layer_name.endswith("__"):
             continue
-        if tag_info["surfaces_xy"]:
+        if tag_info.get("surfaces_xy"):
             pec_name = f"{layer_name}_pec"
             entity = entity_by_name.get(pec_name)
             pg = pg_map.get(pec_name)
@@ -129,6 +132,147 @@ def assign_physical_groups(
                     groups["pec_surfaces"][layer_name] = {
                         "phys_group": pg,
                         "tags": surf_tags,
+                    }
+
+            # Always collect refinement lines for planar conductors — either
+            # from explicit refinement_lines (if they survived boolean) or
+            # from the PEC surface boundary curves (fallback).
+            pec_entity = entity_by_name.get(pec_name)
+            refinement_lines = tag_info.get("refinement_lines", [])
+            if refinement_lines:
+                valid_lines: list[int] = []
+                for ltag in refinement_lines:
+                    try:
+                        kernel.getBoundingBox(1, ltag)
+                        valid_lines.append(ltag)
+                    except Exception:
+                        pass  # Curve was merged / renumbered
+                if len(valid_lines) < len(refinement_lines):
+                    # Some curves were merged — find replacements by bbox.
+                    all_curves = list(kernel.getEntities(1))
+                    curve_bboxes: dict[int, tuple] = {}
+                    for _, ctag in all_curves:
+                        with contextlib.suppress(Exception):
+                            curve_bboxes[ctag] = kernel.getBoundingBox(1, ctag)
+                    for ltag in refinement_lines:
+                        if ltag in valid_lines:
+                            continue
+                        try:
+                            old_bbox = kernel.getBoundingBox(1, ltag)
+                        except Exception:
+                            continue
+                        for ctag, bbox in curve_bboxes.items():
+                            if ctag in valid_lines:
+                                continue
+                            if all(
+                                abs(a - b) < 0.01
+                                for a, b in zip(bbox, old_bbox, strict=True)
+                            ):
+                                valid_lines.append(ctag)
+                                break
+                if valid_lines:
+                    groups.setdefault("refinement_lines", {})[layer_name] = {
+                        "tags": sorted(set(valid_lines)),
+                    }
+                elif pec_entity:
+                    # Fallback to PEC surface boundary curves.
+                    surf_tags = [t for d, t in pec_entity.dimtags if d == 2]
+                    if surf_tags:
+                        fallback_lines = []
+                        for stag in surf_tags:
+                            try:
+                                b = gmsh.model.getBoundary(
+                                    [(2, stag)],
+                                    combined=False,
+                                    oriented=False,
+                                    recursive=False,
+                                )
+                                for bdim, btag in b:
+                                    if bdim == 1:
+                                        fallback_lines.append(btag)
+                            except Exception:
+                                pass
+                        if fallback_lines:
+                            groups.setdefault("refinement_lines", {})[layer_name] = {
+                                "tags": sorted(set(fallback_lines)),
+                            }
+            elif pec_entity:
+                # No explicit refinement_lines — fallback to PEC surface boundary.
+                surf_tags = [t for d, t in pec_entity.dimtags if d == 2]
+                if surf_tags:
+                    fallback_lines = []
+                    for stag in surf_tags:
+                        try:
+                            b = gmsh.model.getBoundary(
+                                [(2, stag)],
+                                combined=False,
+                                oriented=False,
+                                recursive=False,
+                            )
+                            for bdim, btag in b:
+                                if bdim == 1:
+                                    fallback_lines.append(btag)
+                        except Exception:
+                            pass
+                    if fallback_lines:
+                        groups.setdefault("refinement_lines", {})[layer_name] = {
+                            "tags": sorted(set(fallback_lines)),
+                        }
+
+            # Ultimate fallback: when the _pec entity was merged into a
+            # dielectric boundary by the boolean pipeline, query the live model
+            # for dim=2 surfaces whose bboxes match the pre-boolean PEC
+            # surfaces and harvest their boundary curves.
+            if not groups.get("refinement_lines", {}).get(layer_name, {}).get("tags"):
+                _pec_bboxes = (
+                    metal_tags.get("__pec_surface_bboxes__", {}).get(layer_name, [])
+                    if isinstance(metal_tags.get("__pec_surface_bboxes__"), dict)
+                    else []
+                )
+                if _pec_bboxes:
+                    all_surfaces = gmsh.model.getEntities(2)
+                    found_lines: set[int] = set()
+                    for _, stag in all_surfaces:
+                        try:
+                            actual_bbox = gmsh.model.getBoundingBox(2, stag)
+                        except Exception:
+                            continue
+                        for expected_bbox in _pec_bboxes:
+                            if all(
+                                abs(a - b) < 0.01
+                                for a, b in zip(actual_bbox, expected_bbox, strict=True)
+                            ):
+                                try:
+                                    b = gmsh.model.getBoundary(
+                                        [(2, stag)],
+                                        combined=False,
+                                        oriented=False,
+                                        recursive=False,
+                                    )
+                                    for bdim, btag in b:
+                                        if bdim == 1:
+                                            found_lines.add(btag)
+                                except Exception:
+                                    pass
+                                break
+                    if found_lines:
+                        groups.setdefault("refinement_lines", {})[layer_name] = {
+                            "tags": sorted(found_lines),
+                        }
+        else:
+            # No surfaces_xy but may have refinement_lines
+            refinement_lines = tag_info.get("refinement_lines", [])
+            if refinement_lines:
+                valid_lines = []
+                for ltag in refinement_lines:
+                    try:
+                        kernel.getBoundingBox(1, ltag)
+                        valid_lines.append(ltag)
+                    except Exception:
+                        pass
+                if valid_lines:
+                    groups.setdefault("refinement_lines", {})[layer_name] = {
+                        "tags": sorted(set(valid_lines)),
                     }
 
     # --- PEC block surfaces ---
@@ -148,9 +292,9 @@ def assign_physical_groups(
 
     # --- Volumetric conductor surfaces (finite thickness) ---
     for layer_name, tag_info in metal_tags.items():
-        if layer_name == "__shaped_dielectrics__":
+        if layer_name.startswith("__") and layer_name.endswith("__"):
             continue
-        if tag_info["volumes"]:
+        if tag_info.get("volumes"):
             for suffix in ("_xy", "_z"):
                 name = f"{layer_name}{suffix}"
                 entity = entity_by_name.get(name)
