@@ -337,9 +337,12 @@ class BoundaryModeConfig(BaseModel):
             "Save": self.save,
             "Target": self.target,
             "Tol": self.tolerance,
-            "MaxSize": self.max_size,
             "Type": self.solver_type,
         }
+        if (
+            self.max_size > 0
+        ):  # Even when the default is zero, passing it explicitly makes Palace fail
+            config["MaxSize"] = self.max_size
         if self.attributes is not None:
             config["Attributes"] = self.attributes
         return config
