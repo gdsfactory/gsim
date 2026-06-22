@@ -26,8 +26,19 @@
 # ### Define GSG electrode
 
 # %% papermill={"duration": 2.54829, "end_time": "2026-06-12T07:04:22.708430", "exception": false, "start_time": "2026-06-12T07:04:20.160140", "status": "completed"}
+from pathlib import Path
+
 import gdsfactory as gf
+import gdsfactory.component as gf_component
+import gdsfactory.config as gf_config
 from ihp import LAYER, PDK
+
+# Work around environments where /tmp/gdsfactory is not writable.
+# Both modules keep their own reference to GDSDIR_TEMP, so update both.
+gf_tmp = Path.home() / ".gdsfactory" / "tmp"
+gf_tmp.mkdir(parents=True, exist_ok=True)
+gf_config.GDSDIR_TEMP = gf_tmp
+gf_component.GDSDIR_TEMP = gf_tmp
 
 PDK.activate()
 
@@ -125,8 +136,53 @@ sim.plot_mesh(
 # %% [markdown] papermill={"duration": 0.003212, "end_time": "2026-06-12T07:04:31.011514", "exception": false, "start_time": "2026-06-12T07:04:31.008302", "status": "completed"}
 # ### Run simulation
 
-# %% papermill={"duration": 572.564296, "end_time": "2026-06-12T07:14:03.578757", "exception": false, "start_time": "2026-06-12T07:04:31.014461", "status": "completed"}
-results = sim.run()
+# %%
+import importlib
+
+import gsim.common.cross_section as cross_section
+from gsim.palace import BoundaryModeSim
+
+palace_executable = "/home/martin/Desktop/palace/build/bin/palace"
+
+# Reload in case cross_section.py changed during this session.
+importlib.reload(cross_section)
+
+# Build a BoundaryMode simulation on an x-normal cross section.
+mode_sim = BoundaryModeSim()
+mode_sim.set_output_dir("./palace-sim-cpw-waveport-2d")
+mode_sim.set_geometry(c.copy())
+mode_sim.set_stack(stack)
+mode_sim.set_cross_section("x=0")
+mode_sim.add_wave_port("o1", layer="topmetal2", max_size=True, mode=1, excited=False)
+
+# Inspect the geometric cross section before meshing.
+section = cross_section.extract_plane_section(c.copy(), stack, axis="x", value=0.0)
+print(f"Cross section x=0 intersects {len(section)} layer regions")
+
+mode_sim.mesh(
+    preset="default",
+    refined_mesh_size=2.0,
+    max_mesh_size=40.0,
+    fmax=150e9,
+    margin_x=0.0,
+    margin_y=50.0,
+)
+
+# Select the wave-port boundary attribute as the 2D solver cross section.
+port_attr = mode_sim._last_mesh_result.groups["port_surfaces"]["P1"]["phys_group"]
+mode_sim.set_boundary_mode(freq=50e9, num_modes=2, save=2, attributes=[port_attr])
+
+# Show the 2D boundary mesh (P1 surface only).
+mode_sim.plot_mesh(show_groups=["P1"], style="wireframe", interactive=True)
+
+mode_sim.write_config()
+mode_results = mode_sim.run_local(
+    palace_executable=palace_executable,
+    use_apptainer=False,
+    num_processes=16,
+    verbose=True,
+)
+mode_results
 
 # %% [markdown] papermill={"duration": 0.003248, "end_time": "2026-06-12T07:14:03.585116", "exception": false, "start_time": "2026-06-12T07:14:03.581868", "status": "completed"}
 # ### Plot S-parameters
