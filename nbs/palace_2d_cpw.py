@@ -97,42 +97,6 @@ cc = c.copy()
 cc.draw_ports()
 cc
 
-# %% [markdown] papermill={"duration": 0.000784, "end_time": "2026-06-12T07:04:22.710470", "exception": false, "start_time": "2026-06-12T07:04:22.709686", "status": "completed"}
-# ### Configure simulation
-
-# %% papermill={"duration": 0.639064, "end_time": "2026-06-12T07:04:23.350467", "exception": false, "start_time": "2026-06-12T07:04:22.711403", "status": "completed"}
-from gsim.common.stack import get_stack
-from gsim.palace import DrivenSim
-
-sim = DrivenSim()
-sim.set_output_dir("./palace-sim-cpw-waveport")
-sim.set_geometry(c)
-
-stack = get_stack()  # auto-detects active PDK
-sim.set_stack(stack)
-sim.set_airbox(margin_x=0.0, margin_y=50, z_above=100.0, z_below=100.0)
-
-# Wave ports — max_size fills the full domain boundary
-sim.add_wave_port("o1", layer="topmetal2", max_size=True, mode=1, excited=True)
-sim.add_wave_port("o2", layer="topmetal2", max_size=True, mode=1, excited=False)
-
-sim.set_driven(fmin=1e9, fmax=100e9, num_points=300)
-
-print(sim.validate_config())
-
-# %% [markdown] papermill={"duration": 0.000814, "end_time": "2026-06-12T07:04:23.352349", "exception": false, "start_time": "2026-06-12T07:04:23.351535", "status": "completed"}
-# ### Generate mesh
-
-# %% papermill={"duration": 5.823922, "end_time": "2026-06-12T07:04:29.177017", "exception": false, "start_time": "2026-06-12T07:04:23.353095", "status": "completed"}
-sim.mesh(preset="default", refined_mesh_size=2.0, max_mesh_size=40.0, fmax=150e9)
-
-# %% papermill={"duration": 1.826372, "end_time": "2026-06-12T07:04:31.004882", "exception": false, "start_time": "2026-06-12T07:04:29.178510", "status": "completed"}
-sim.plot_mesh(
-    style="solid",
-    transparent_groups=["air__None", "SiO2__None", "SiO2__passive", "air__passive"],
-    interactive=True,
-)
-
 # %% [markdown] papermill={"duration": 0.003212, "end_time": "2026-06-12T07:04:31.011514", "exception": false, "start_time": "2026-06-12T07:04:31.008302", "status": "completed"}
 # ### Run simulation
 
@@ -140,6 +104,7 @@ sim.plot_mesh(
 import importlib
 
 import gsim.common.cross_section as cross_section
+from gsim.common.stack import get_stack
 from gsim.palace import BoundaryModeSim
 
 palace_executable = "/home/martin/Desktop/palace/build/bin/palace"
@@ -150,8 +115,12 @@ importlib.reload(cross_section)
 # Build a BoundaryMode simulation on an x-normal cross section.
 mode_sim = BoundaryModeSim()
 mode_sim.set_output_dir("./palace-sim-cpw-waveport-2d")
-mode_sim.set_geometry(c.copy())
+
+stack = get_stack()  # auto-detects active PDK
 mode_sim.set_stack(stack)
+mode_sim.set_airbox(margin_x=50.0, margin_y=50, z_above=100.0, z_below=100.0)
+mode_sim.set_geometry(c)
+
 mode_sim.set_cross_section("x=0")
 mode_sim.set_boundary_mode(freq=50e9, num_modes=2, save=2)
 
@@ -172,8 +141,11 @@ mode_sim.mesh(
 # Show the native 2D domains used by the BoundaryMode solver.
 domain_groups = list(mode_sim._last_mesh_result.groups["volumes"].keys())
 print("2D domain groups:", domain_groups)
-mode_sim.plot_mesh(show_groups=domain_groups, style="solid", interactive=True)
 
+# %% [markdown] papermill={"duration": 0.003248, "end_time": "2026-06-12T07:14:03.585116", "exception": false, "start_time": "2026-06-12T07:14:03.581868", "status": "completed"}
+# ### Run simulation
+
+# %% papermill={"duration": 0.161449, "end_time": "2026-06-12T07:14:03.749486", "exception": false, "start_time": "2026-06-12T07:14:03.588037", "status": "completed"}
 mode_sim.write_config()
 mode_results = mode_sim.run_local(
     palace_executable=palace_executable,
@@ -183,11 +155,20 @@ mode_results = mode_sim.run_local(
 )
 mode_results
 
-# %% [markdown] papermill={"duration": 0.003248, "end_time": "2026-06-12T07:14:03.585116", "exception": false, "start_time": "2026-06-12T07:14:03.581868", "status": "completed"}
-# ### Plot S-parameters
-
-# %% papermill={"duration": 0.161449, "end_time": "2026-06-12T07:14:03.749486", "exception": false, "start_time": "2026-06-12T07:14:03.588037", "status": "completed"}
-results.plot_interactive()
-
 # %% papermill={"duration": 0.014154, "end_time": "2026-06-12T07:14:03.767046", "exception": false, "start_time": "2026-06-12T07:14:03.752892", "status": "completed"}
-results.plot_interactive(phase=True)
+import importlib
+
+import gsim.palace.field_viz as field_viz
+from gsim.palace import plot_fields_2d
+
+# Reload to ensure notebook uses latest field_viz implementation from disk.
+importlib.reload(field_viz)
+
+mode_results.print()
+
+# Centralized plotting utility from gsim source with tuned defaults.
+fig, ax, stream_inputs = plot_fields_2d("./palace-sim-cpw-waveport-2d")
+print(
+    f"streamplot grid={stream_inputs.u.shape}, "
+    f"seeds={stream_inputs.start_points.shape[0]}"
+)

@@ -8,7 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gsim.palace.results import SParams, get_port_map, load_sparams
+from gsim.palace.results import (
+    PalaceTextResults,
+    SParams,
+    get_port_map,
+    load_sparams,
+    load_text_results,
+)
 
 
 @pytest.fixture
@@ -252,3 +258,62 @@ class TestSParamsSaveLoad:
     def test_from_file_missing_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             SParams.from_file(tmp_path / "nonexistent.npz")
+
+
+@pytest.fixture
+def text_results_dir(tmp_path: Path) -> Path:
+    """Create a minimal BoundaryMode-style text output directory."""
+    palace_dir = tmp_path / "output" / "palace"
+    palace_dir.mkdir(parents=True)
+
+    (palace_dir / "mode-kn.csv").write_text(
+        "k_n,Re{lambda},Im{lambda}\n1,2.0,0.0\n2,1.8,0.0\n"
+    )
+    (palace_dir / "domain-E.csv").write_text("domain,energy\nair,0.4\nsio2,0.6\n")
+    (palace_dir / "error-indicators.csv").write_text("elem,error\n1,0.01\n2,0.02\n")
+    (palace_dir / "palace.json").write_text(
+        json.dumps({"problem": "BoundaryMode", "converged": True})
+    )
+    (palace_dir / "solver.log").write_text("iteration 1\niteration 2\n")
+    return tmp_path
+
+
+class TestTextResults:
+    """Tests for non-S-parameter text result parsing."""
+
+    def test_load_text_results_from_directory(self, text_results_dir: Path) -> None:
+        out = load_text_results(text_results_dir)
+        assert isinstance(out, PalaceTextResults)
+        assert "mode-kn.csv" in out.csv_tables
+        assert "palace.json" in out.json_data
+        assert "solver.log" in out.text_data
+
+    def test_load_text_results_from_dict(self, text_results_dir: Path) -> None:
+        results = {
+            "mode-kn.csv": text_results_dir / "output" / "palace" / "mode-kn.csv",
+            "palace.json": text_results_dir / "output" / "palace" / "palace.json",
+        }
+        out = load_text_results(results)
+        assert "mode-kn.csv" in out.csv_tables
+        assert "palace.json" in out.json_data
+
+    def test_str_contains_tables(self, text_results_dir: Path) -> None:
+        out = load_text_results(text_results_dir)
+        text = str(out)
+        assert "Palace Text Results" in text
+        assert "mode-kn.csv" in text
+        assert "solver.log (text)" in text
+
+    def test_print_alias_emits_pretty_text(
+        self, text_results_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = load_text_results(text_results_dir)
+        out.print(max_rows=1, max_lines=2)
+        captured = capsys.readouterr()
+        assert "Palace Text Results" in captured.out
+        assert "mode-kn.csv" in captured.out
+
+    def test_no_text_files_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "output" / "palace").mkdir(parents=True)
+        with pytest.raises(FileNotFoundError, match="parseable"):
+            load_text_results(tmp_path)

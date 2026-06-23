@@ -16,6 +16,8 @@ Usage::
 
 from __future__ import annotations
 
+import builtins
+import csv
 import json
 import logging
 import re
@@ -30,6 +32,106 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+
+class PalaceTextResults:
+    """Parsed Palace text output files with pretty-print helpers.
+
+    This is used for simulations that do not emit ``port-S.csv`` (for example,
+    BoundaryMode). CSV files are parsed into row dictionaries while JSON files
+    are decoded to Python objects.
+    """
+
+    def __init__(
+        self,
+        *,
+        files: dict[str, Path],
+        csv_tables: dict[str, list[dict[str, str]]],
+        json_data: dict[str, object],
+        text_data: dict[str, list[str]],
+    ) -> None:
+        """Create parsed text results."""
+        self.files = files
+        self.csv_tables = csv_tables
+        self.json_data = json_data
+        self.text_data = text_data
+
+    def keys(self) -> list[str]:
+        """Return available result file names."""
+        return sorted(self.files.keys())
+
+    def _format_csv_table(
+        self, name: str, rows: list[dict[str, str]], max_rows: int
+    ) -> str:
+        """Format one CSV table for terminal-friendly display."""
+        if not rows:
+            return f"{name}: <empty csv>"
+
+        columns = list(rows[0].keys())
+        widths = {col: len(col) for col in columns}
+        preview = rows[:max_rows]
+        for row in preview:
+            for col in columns:
+                widths[col] = max(widths[col], len(str(row.get(col, ""))))
+
+        header = " | ".join(col.ljust(widths[col]) for col in columns)
+        divider = "-+-".join("-" * widths[col] for col in columns)
+        lines = [f"{name} ({len(rows)} rows)", header, divider]
+        lines.extend(
+            " | ".join(str(row.get(col, "")).ljust(widths[col]) for col in columns)
+            for row in preview
+        )
+        if len(rows) > max_rows:
+            lines.append(f"... ({len(rows) - max_rows} more rows)")
+        return "\n".join(lines)
+
+    def _pretty_text(self, *, max_rows: int = 8, max_lines: int = 12) -> str:
+        """Build a readable summary of parsed text outputs."""
+        blocks: list[str] = ["Palace Text Results", "=" * 40]
+        blocks.append("Files:")
+        blocks.extend(f"- {name}" for name in sorted(self.files))
+
+        for name in sorted(self.csv_tables):
+            blocks.append("")
+            blocks.append(self._format_csv_table(name, self.csv_tables[name], max_rows))
+
+        for name in sorted(self.json_data):
+            blocks.append("")
+            payload = json.dumps(self.json_data[name], indent=2)
+            json_lines = payload.splitlines()
+            if len(json_lines) > max_lines:
+                payload = "\n".join(json_lines[:max_lines]) + "\n..."
+            blocks.append(f"{name} (json)\n{payload}")
+
+        for name in sorted(self.text_data):
+            blocks.append("")
+            lines = self.text_data[name]
+            preview = lines[:max_lines]
+            if len(lines) > max_lines:
+                preview = [*preview, "..."]
+            blocks.append(f"{name} (text)\n" + "\n".join(preview))
+
+        return "\n".join(blocks)
+
+    def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:
+        """Pretty-print text output summaries."""
+        builtins.print(  # noqa: T201
+            self._pretty_text(max_rows=max_rows, max_lines=max_lines)
+        )
+
+    def __repr__(self) -> str:
+        """Return concise object representation."""
+        return (
+            "PalaceTextResults("  # pragma: no cover - trivial repr
+            f"files={len(self.files)}, "
+            f"csv={len(self.csv_tables)}, "
+            f"json={len(self.json_data)}, "
+            f"text={len(self.text_data)})"
+        )
+
+    def __str__(self) -> str:
+        """Return pretty summary for notebook/terminal display."""
+        return self._pretty_text()
 
 
 # -----------------------------------------------------------------------
@@ -454,6 +556,77 @@ def load_sparams(
     return SParams(freq=freq, data=data, port_names=port_names, files=files)
 
 
+def load_text_results(source: str | Path | dict) -> PalaceTextResults:
+    """Load non-S-parameter Palace outputs from text files.
+
+    This parser targets result layouts such as BoundaryMode where Palace writes
+    summary CSV/TXT/JSON files under ``output/palace`` but no ``port-S.csv``.
+
+    Args:
+        source: Results dict from ``run_local()`` / ``run()``, simulation path,
+            or ``output/palace`` path.
+
+    Returns:
+        Parsed :class:`PalaceTextResults`.
+
+    Raises:
+        FileNotFoundError: If no parseable text output file is found.
+    """
+    # Reuse existing source normalization; for dict inputs preserve exact map.
+    if isinstance(source, dict):
+        files = {str(k): Path(v) for k, v in source.items()}
+    else:
+        _csv_path, base_dir = _resolve_source(source, require_csv=False)
+        roots = [
+            base_dir,
+            base_dir / "output" / "palace",
+        ]
+        files = {}
+        for root in roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for p in root.iterdir():
+                if p.is_file() and not p.name.startswith("."):
+                    files.setdefault(p.name, p)
+
+    parseable_suffixes = {".csv", ".txt", ".json", ".log"}
+    parseable = {
+        name: path
+        for name, path in files.items()
+        if path.suffix.lower() in parseable_suffixes
+    }
+    if not parseable:
+        raise FileNotFoundError("No parseable Palace text output files found")
+
+    csv_tables: dict[str, list[dict[str, str]]] = {}
+    json_data: dict[str, object] = {}
+    text_data: dict[str, list[str]] = {}
+
+    for name, path in sorted(parseable.items()):
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            with path.open(newline="") as f:
+                reader = csv.DictReader(f)
+                rows = [{k or "": v or "" for k, v in row.items()} for row in reader]
+            csv_tables[name] = rows
+            continue
+
+        if suffix == ".json":
+            with path.open() as f:
+                json_data[name] = json.load(f)
+            continue
+
+        with path.open(errors="replace") as f:
+            text_data[name] = [line.rstrip("\n") for line in f]
+
+    return PalaceTextResults(
+        files=files,
+        csv_tables=csv_tables,
+        json_data=json_data,
+        text_data=text_data,
+    )
+
+
 def get_port_map(source: str | Path | dict) -> dict[int, str]:
     """Return the ``{port_number: port_name}`` mapping.
 
@@ -652,22 +825,31 @@ def _find_paraview_dir(
     - Single-excitation (lumped ports): ``paraview/driven/CycleNNNNNN/`` (no subdir)
     Both are searched, with the explicit ``excitation_N`` folder taking priority.
     """
-    subdir = "driven_boundary" if boundary else "driven"
+    subdirs = (
+        ["driven_boundary", "boundarymode_boundary"]
+        if boundary
+        else ["driven", "boundarymode"]
+    )
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
     ]
     exc_dir: Path | None = None
     for root in search_roots:
-        # Layout 1: explicit excitation subfolder (wave ports / multi-excitation)
-        candidate = root / "paraview" / subdir / f"excitation_{excitation}"
-        if candidate.is_dir():
-            exc_dir = candidate
-            break
-        # Layout 2: flat — Cycle dirs sit directly under driven/ (lumped ports)
-        flat = root / "paraview" / subdir
-        if flat.is_dir() and any(flat.iterdir()):
-            exc_dir = flat
+        for subdir in subdirs:
+            # Layout 1: explicit excitation subfolder (wave ports / multi-excitation)
+            candidate = root / "paraview" / subdir / f"excitation_{excitation}"
+            if candidate.is_dir():
+                exc_dir = candidate
+                break
+
+            # Layout 2: flat — Cycle dirs sit directly under the solver folder
+            flat = root / "paraview" / subdir
+            if flat.is_dir() and any(flat.iterdir()):
+                exc_dir = flat
+                break
+
+        if exc_dir is not None:
             break
 
     if exc_dir is None:

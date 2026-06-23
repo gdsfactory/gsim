@@ -147,6 +147,23 @@ class TestBoundaryModeNative2D:
         assert "WavePort" not in boundaries
         assert "LumpedPort" not in boundaries
 
+    def test_config_has_non_air_dielectric_materials(self, boundarymode_sim):
+        """Native 2D BoundaryMode config must include non-air dielectric domains."""
+        boundarymode_sim.write_config()
+        config_path = Path(boundarymode_sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+
+        materials = config["Domains"]["Materials"]
+        perms = [
+            float(m.get("Permittivity", 1.0))
+            for m in materials
+            if isinstance(m.get("Permittivity"), int | float)
+        ]
+        assert any(p > 1.1 for p in perms), (
+            "Expected at least one non-air dielectric material in BoundaryMode "
+            "Domains/Materials"
+        )
+
 
 class TestCPWMeshVolumetricConductors:
     """Test mesh generation with volumetric (non-planar) conductors."""

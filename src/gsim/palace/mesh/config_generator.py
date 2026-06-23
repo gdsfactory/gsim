@@ -188,6 +188,19 @@ def generate_palace_config(
             stack.materials, driven_config.center_frequency
         )
 
+    # Support material keys with different capitalization conventions
+    # between stack layers and material dictionaries.
+    _materials_by_lower = {
+        str(name).lower(): props for name, props in stack_materials.items()
+    }
+
+    def _lookup_material(name: str) -> dict[str, object]:
+        props = stack_materials.get(name)
+        if isinstance(props, dict):
+            return props
+        fallback = _materials_by_lower.get(str(name).lower())
+        return fallback if isinstance(fallback, dict) else {}
+
     materials: list[dict[str, object]] = []
     for volume_name, info in groups["volumes"].items():
         material_name = volume_name
@@ -197,10 +210,13 @@ def generate_palace_config(
         if is_via or is_shaped_dielectric:
             layer = stack.layers.get(material_name)
             if layer is None:
-                continue
-            mat_props = stack_materials.get(layer.material, {})
+                # Native 2D material domains (e.g. sio2/sin) may not map to
+                # a stack layer name; resolve them directly as material names.
+                mat_props = _lookup_material(material_name)
+            else:
+                mat_props = _lookup_material(layer.material)
         else:
-            mat_props = stack_materials.get(material_name, {})
+            mat_props = _lookup_material(material_name)
 
         mat_entry: dict[str, object] = {"Attributes": [info["phys_group"]]}
 

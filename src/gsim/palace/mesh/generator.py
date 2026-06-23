@@ -423,8 +423,12 @@ def _generate_native_boundarymode_groups(
             entry: dict[str, object] = {
                 "phys_group": pg,
                 "tags": sorted_tags,
-                "is_shaped_dielectric": True,
             }
+            # Only layer-backed dielectric polygons are shaped dielectrics.
+            # Background dielectric slabs (e.g. sio2/sin material regions)
+            # should be treated as regular material domains.
+            if layer is not None and layer.layer_type == "dielectric":
+                entry["is_shaped_dielectric"] = True
             if layer is not None and layer.layer_type == "via":
                 entry["is_via"] = True
             groups["volumes"][layer_name] = entry
