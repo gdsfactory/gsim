@@ -23,7 +23,12 @@ Example::
 """
 
 from gsim.gcloud import RunResult, register_result_parser
-from gsim.meep.mode_solver import solve_cross_section_mode, solve_slab_mode
+from gsim.meep.mode_solver import (
+    mode_z_grid,
+    refractive_index_profile,
+    solve_cross_section_mode,
+    solve_slab_mode,
+)
 from gsim.meep.models import (
     FDTD,
     Domain,
@@ -68,6 +73,8 @@ __all__ = [
     "SourceConfig",
     "Symmetry",
     "WavelengthConfig",
+    "mode_z_grid",
+    "refractive_index_profile",
     "solve_cross_section_mode",
     "solve_slab_mode",
 ]

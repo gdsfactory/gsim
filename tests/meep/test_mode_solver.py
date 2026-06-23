@@ -34,9 +34,10 @@ class TestModeResult:
         assert result.fields == {}
 
     def test_requires_n_eff(self):
-        with pytest.raises(ValidationError):
-            from gsim.meep.models.results import ModeResult
+        """ModeResult requires n_eff."""
+        from gsim.meep.models.results import ModeResult
 
+        with pytest.raises(ValidationError):
             ModeResult(
                 wavelength=1.55,
                 frequency=1.0 / 1.55,
@@ -45,9 +46,10 @@ class TestModeResult:
             )
 
     def test_requires_wavelength(self):
-        with pytest.raises(ValidationError):
-            from gsim.meep.models.results import ModeResult
+        """ModeResult requires wavelength."""
+        from gsim.meep.models.results import ModeResult
 
+        with pytest.raises(ValidationError):
             ModeResult(
                 n_eff=2.5,
                 frequency=1.0 / 1.55,
@@ -229,6 +231,163 @@ class TestModeSolverUnit:
         assert callable(solve_cross_section_mode)
 
 
+class TestModeZGrid:
+    """Unit tests for mode_z_grid — no meep required."""
+
+    def test_z_grid_bounds_and_length(self):
+        """Z-grid spans stack extent and has correct length."""
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.mode_solver import mode_z_grid
+
+        layers = {
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-2.0,
+                zmax=0.0,
+                thickness=2.0,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        }
+        stack = LayerStack(layers=layers)
+        z_grid = mode_z_grid(stack, n_points=100)
+
+        assert len(z_grid) == 100
+        assert z_grid[0] < -1.0  # near bottom of cell
+        assert z_grid[-1] > 1.0  # near top of cell
+
+    def test_z_grid_centred(self):
+        """Z-grid is centred on stack midpoint (zero-mean)."""
+        import numpy as np
+
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.mode_solver import mode_z_grid
+
+        layers = {
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-2.0,
+                zmax=0.0,
+                thickness=2.0,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        }
+        stack = LayerStack(layers=layers)
+        z_grid = mode_z_grid(stack, n_points=200)
+
+        # Origin should be at stack midpoint: (-2 + 0.22)/2 = -0.89
+        # So grid is roughly symmetric around 0
+        assert abs(np.mean(z_grid)) < 0.1
+
+
+class TestRefractiveIndexProfile:
+    """Unit tests for refractive_index_profile — no meep required."""
+
+    def test_profile_length_matches_grid(self):
+        """Profile has same length as input z_grid."""
+        import numpy as np
+
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.mode_solver import (
+            mode_z_grid,
+            refractive_index_profile,
+        )
+
+        layers = {
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-2.0,
+                zmax=0.0,
+                thickness=2.0,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        }
+        stack = LayerStack(layers=layers)
+        z_grid = mode_z_grid(stack, n_points=50)
+        n_profile = refractive_index_profile(stack, z_grid, wavelength=1.55)
+
+        assert len(n_profile) == 50
+        assert isinstance(n_profile, np.ndarray)
+
+    def test_si_layer_higher_index(self):
+        """Si core region has higher index than SiO2 cladding."""
+        import numpy as np
+
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.mode_solver import (
+            mode_z_grid,
+            refractive_index_profile,
+        )
+
+        layers = {
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-2.0,
+                zmax=0.0,
+                thickness=2.0,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        }
+        stack = LayerStack(layers=layers)
+        z_grid = mode_z_grid(stack, n_points=200)
+        n_profile = refractive_index_profile(stack, z_grid, wavelength=1.55)
+
+        # Core is at z=0 to z=0.22, shifted by z_center
+        z_min = -2.0
+        z_max = 0.22
+        z_center = (z_min + z_max) / 2.0  # -0.89
+        core_z_lo = 0.0 - z_center  # 0.89
+        core_z_hi = 0.22 - z_center  # 1.11
+
+        core_mask = (z_grid >= core_z_lo) & (z_grid < core_z_hi)
+        box_mask = ~core_mask
+
+        assert np.mean(n_profile[core_mask]) > np.mean(n_profile[box_mask])
+
+
 class TestSimulationSolveMode:
     """Simulation.solve_mode() wrapper — no meep required."""
 
@@ -259,7 +418,7 @@ class TestSimulationSolveMode:
             sim.solve_mode(port="o1")
 
     def test_delegates_to_mode_solver(self):
-        """solve_mode with port delegates to cross-section solver and returns ModeResult."""
+        """solve_mode delegates to cross-section solver, returns ModeResult."""
         import gdsfactory as gf
 
         from gsim.meep import Simulation
@@ -302,6 +461,24 @@ class TestModeSolverIntegration:
         assert len(result.kdom) == 3
 
     @pytest.mark.meep_local
+    def test_solve_slab_mode_compute_group_index(self):
+        """solve_slab_mode with compute_group_index=True returns n_group."""
+        from gsim.common.stack import get_stack
+        from gsim.meep.mode_solver import solve_slab_mode
+
+        stack = get_stack()
+        result = solve_slab_mode(
+            stack=stack,
+            wavelength=1.55,
+            band_num=1,
+            parity="NO_PARITY",
+            compute_group_index=True,
+        )
+        assert result.n_eff > 1.0
+        assert result.n_group is not None
+        assert result.n_group > 0.0
+
+    @pytest.mark.meep_local
     def test_solve_slab_mode_returns_fields(self):
         """solve_slab_mode returns field profile arrays."""
         from gsim.common.stack import get_stack
@@ -313,7 +490,7 @@ class TestModeSolverIntegration:
             wavelength=1.55,
         )
         assert len(result.fields) > 0
-        for comp_name, arr in result.fields.items():
+        for arr in result.fields.values():
             assert arr is not None
             assert arr.ndim >= 1
 

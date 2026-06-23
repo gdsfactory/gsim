@@ -47,9 +47,9 @@ def _import_meep():
     return mp
 
 
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 # Material helpers
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 
 
 def _meep_medium(material_data: MaterialData) -> object:
@@ -63,15 +63,17 @@ def _meep_medium(material_data: MaterialData) -> object:
     return mp.Medium(epsilon=eps)
 
 
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 # Slab (1D) geometry builder
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 
 
 def _build_slab_xz_cell(
     stack: LayerStack,
     materials: dict[str, MaterialData],
     resolution: float,
+    *,
+    k_point: object | None = None,
 ) -> tuple[object, object]:
     """Build a 2D XZ MEEP simulation cell for a 1D slab (uniform layers).
 
@@ -82,6 +84,7 @@ def _build_slab_xz_cell(
         stack: Resolved :class:`LayerStack`.
         materials: ``MaterialData`` keyed by material name.
         resolution: Pixels per µm.
+        k_point: Optional Bloch-periodic wavevector (``mp.Vector3``).
 
     Returns:
         ``(sim, cell_size)`` — initialized MEEP :class:`Simulation` object
@@ -116,18 +119,21 @@ def _build_slab_xz_cell(
         )
         geometry.append(block)
 
-    sim = mp.Simulation(
+    sim_kwargs: dict = dict(
         cell_size=cell_size,
         geometry=geometry,
         resolution=resolution,
         default_material=mp.Medium(epsilon=1.0),
     )
+    if k_point is not None:
+        sim_kwargs["k_point"] = k_point
+    sim = mp.Simulation(**sim_kwargs)
     return sim, cell_size
 
 
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 # Cross-section (2D) geometry builder
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 
 
 def _build_component_xz_cell(
@@ -137,6 +143,8 @@ def _build_component_xz_cell(
     x_span: float,
     materials: dict[str, MaterialData],
     resolution: float,
+    *,
+    k_point: object | None = None,
 ) -> tuple[object, object]:
     """Build a 2D XZ MEEP simulation cell at a *y*-slice of a component.
 
@@ -151,6 +159,7 @@ def _build_component_xz_cell(
         x_span: Total *x* extent of the simulation cell (µm).
         materials: ``MaterialData`` keyed by material name.
         resolution: Pixels per µm.
+        k_point: Optional Bloch-periodic wavevector (``mp.Vector3``).
 
     Returns:
         ``(sim, cell_size)`` — initialized MEEP :class:`Simulation` object
@@ -188,12 +197,15 @@ def _build_component_xz_cell(
             )
             geometry.append(block)
 
-    sim = mp.Simulation(
+    sim_kwargs: dict = dict(
         cell_size=cell_size,
         geometry=geometry,
         resolution=resolution,
         default_material=mp.Medium(epsilon=1.0),
     )
+    if k_point is not None:
+        sim_kwargs["k_point"] = k_point
+    sim = mp.Simulation(**sim_kwargs)
     return sim, cell_size
 
 
@@ -202,9 +214,8 @@ def _poly_to_shapely(poly):
 
     Returns ``None`` if conversion fails.
     """
-    from shapely.geometry import Polygon
-
     import numpy as np
+    from shapely.geometry import Polygon
 
     # numpy array from get_polygons_points (Nx2 or NxM)
     if isinstance(poly, np.ndarray):
@@ -250,9 +261,7 @@ def _layer_x_intervals_at_y(
         return []
 
     try:
-        polys = component.get_polygons_points(
-            layers=(tuple(gds_layer),), merge=True
-        )
+        polys = component.get_polygons_points(layers=(tuple(gds_layer),), merge=True)
     except Exception:
         try:
             polys = component.dup().get_polygons_points(
@@ -315,9 +324,9 @@ def _merge_intervals(
     return merged
 
 
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 # Eigenmode computation helpers
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 
 
 def _compute_eigenmode(
@@ -327,6 +336,7 @@ def _compute_eigenmode(
     *,
     band_num: int = 1,
     parity: str = "NO_PARITY",
+    kpoint: object | None = None,
 ) -> ModeResult:
     """Run ``sim.get_eigenmode()`` and pack the result into a :class:`ModeResult`.
 
@@ -336,6 +346,8 @@ def _compute_eigenmode(
         wavelength: Free-space wavelength in µm.
         band_num: Mode band index (1 = fundamental).
         parity: Parity string (``"NO_PARITY"``, ``"EVEN_Y"``, etc.).
+        kpoint: Optional ``mp.Vector3`` wavevector for the eigenmode.
+            When set, MEEP can compute group velocity.
 
     Returns:
         :class:`ModeResult` with effective index, fields, wavevectors.
@@ -345,6 +357,8 @@ def _compute_eigenmode(
 
     frequency = 1.0 / wavelength
     parity_int = _PARITY_MAP.get(parity, 0)
+    if kpoint is None:
+        kpoint = mp.Vector3()
 
     # The mode propagates along X — we place a flux plane at the centre
     # of the cell in the YZ plane.
@@ -358,7 +372,7 @@ def _compute_eigenmode(
         mp.X,  # propagation direction
         where,
         band_num=band_num,
-        kpoint=mp.Vector3(),
+        kpoint=kpoint,
         parity=parity_int,
         resolution=0,
         eigensolver_tol=1e-12,
@@ -374,11 +388,9 @@ def _compute_eigenmode(
     # For slab and straight-waveguide cross-sections the profile is
     # uniform in X, so a 1D Z-scan captures the full mode shape.
     fields: dict[str, np.ndarray] = {}
-    nz = max(int(round(cell_size.z * sim.resolution)), 1)
+    nz = max(round(cell_size.z * sim.resolution), 1)
     dz = cell_size.z / nz
-    z_vals = np.linspace(
-        -cell_size.z / 2 + dz / 2, cell_size.z / 2 - dz / 2, nz
-    )
+    z_vals = np.linspace(-cell_size.z / 2 + dz / 2, cell_size.z / 2 - dz / 2, nz)
     for comp_name in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
         try:
             comp = getattr(mp, comp_name)
@@ -418,9 +430,92 @@ def _compute_eigenmode(
     )
 
 
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
+# Public utilities
+# ------------------------------------------------------------------
+
+
+def mode_z_grid(stack: LayerStack, n_points: int) -> np.ndarray:
+    """Compute Z-axis coordinates centred on the layer stack midpoint.
+
+    The returned grid has the same length as ``ModeResult.fields`` arrays
+    produced by :func:`solve_slab_mode` when the MEEP cell uses the
+    stack's z-extent.
+
+    Args:
+        stack: :class:`LayerStack` defining the vertical material profile.
+        n_points: Number of grid points (typically ``resolution * z_span``).
+
+    Returns:
+        ``np.ndarray`` of *z* coordinates in µm, origin at stack midpoint.
+    """
+    import numpy as np
+
+    z_min = min(layer.zmin for layer in stack.layers.values())
+    z_max = max(layer.zmax for layer in stack.layers.values())
+    span = z_max - z_min
+    dz = span / n_points
+    return np.linspace(-span / 2 + dz / 2, span / 2 - dz / 2, n_points)
+
+
+def refractive_index_profile(
+    stack: LayerStack,
+    z_grid: np.ndarray,
+    wavelength: float,
+) -> np.ndarray:
+    """Compute piecewise-constant refractive index along *z* at a wavelength.
+
+    Uses :func:`resolve_materials` to evaluate dispersive materials at
+    the target wavelength, then maps each *z*-coordinate to its enclosing
+    layer and computes ``n = sqrt(epsilon_diag)``.
+
+    Args:
+        stack: :class:`LayerStack` defining the vertical material profile.
+        z_grid: 1D array of *z* coordinates (MEEP frame, origin at stack
+            midpoint).  Typically obtained via :func:`mode_z_grid`.
+        wavelength: Free-space wavelength in µm for material evaluation.
+
+    Returns:
+        ``np.ndarray`` of refractive index values, same length as ``z_grid``.
+    """
+    import numpy as np
+
+    from gsim.meep.materials import resolve_materials
+
+    z_min = min(layer.zmin for layer in stack.layers.values())
+    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_center = (z_min + z_max) / 2.0
+
+    used_materials: set[str] = {layer.material for layer in stack.layers.values()}
+    used_materials.discard("air")
+    material_data = resolve_materials(
+        used_materials,
+        overrides={},
+        wavelength_um=wavelength,
+    )
+
+    n_profile = np.ones_like(z_grid)
+    for layer in stack.layers.values():
+        if layer.material == "air":
+            continue
+        mat = material_data.get(layer.material)
+        if mat is None or mat.epsilon_diag is None:
+            continue
+        eps = mat.epsilon_diag
+        if isinstance(eps, list):
+            eps = eps[0]
+        if eps <= 0:
+            continue
+        z_lo = layer.zmin - z_center
+        z_hi = layer.zmax - z_center
+        mask = (z_grid >= z_lo) & (z_grid < z_hi)
+        n_profile[mask] = np.sqrt(eps)
+    return n_profile
+
+
+# ------------------------------------------------------------------
 # Public API
-# ──────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------
 
 
 def solve_slab_mode(
@@ -430,6 +525,7 @@ def solve_slab_mode(
     band_num: int = 1,
     parity: str = "NO_PARITY",
     resolution: float = 32,
+    compute_group_index: bool = False,
 ) -> ModeResult:
     """Solve for the 1D slab mode of a uniform layer stack.
 
@@ -443,11 +539,15 @@ def solve_slab_mode(
         band_num: Mode band index (1 = fundamental TE/TM slab mode).
         parity: Parity of the mode (``"NO_PARITY"``, ``"EVEN_Y"``, etc.).
         resolution: Pixels per µm (default 32).
+        compute_group_index: If ``True``, performs a two-pass solve with
+            Bloch-periodic boundary conditions to obtain the group index
+            from MEEP's ``mode.group_velocity``.  The default ``False``
+            preserves the original single-pass performance.
 
     Returns:
         :class:`ModeResult` with effective index, field profiles, etc.
     """
-    _import_meep()
+    mp = _import_meep()
 
     from gsim.meep.materials import resolve_materials
 
@@ -470,7 +570,7 @@ def solve_slab_mode(
     sim.init_sim()
 
     try:
-        return _compute_eigenmode(
+        result = _compute_eigenmode(
             sim,
             cell_size,
             wavelength,
@@ -479,6 +579,32 @@ def solve_slab_mode(
         )
     finally:
         sim.reset_meep()
+
+    if not compute_group_index:
+        return result
+
+    import numpy as np
+
+    # Two-pass group index: rebuild with Bloch k_point from n_eff.
+    k = 2.0 * np.pi * result.n_eff / wavelength
+    sim2, cell_size2 = _build_slab_xz_cell(
+        stack,
+        material_data,
+        resolution,
+        k_point=mp.Vector3(k, 0.0, 0.0),
+    )
+    sim2.init_sim()
+    try:
+        return _compute_eigenmode(
+            sim2,
+            cell_size2,
+            wavelength,
+            band_num=band_num,
+            parity=parity,
+            kpoint=mp.Vector3(k, 0.0, 0.0),
+        )
+    finally:
+        sim2.reset_meep()
 
 
 def solve_cross_section_mode(
@@ -492,6 +618,7 @@ def solve_cross_section_mode(
     band_num: int = 1,
     parity: str = "NO_PARITY",
     resolution: float = 32,
+    compute_group_index: bool = False,
 ) -> ModeResult:
     """Solve for the eigenmode of a 2D waveguide cross-section.
 
@@ -518,11 +645,14 @@ def solve_cross_section_mode(
         band_num: Mode band index (1 = fundamental).
         parity: Parity of the mode.
         resolution: Pixels per µm (default 32).
+        compute_group_index: If ``True``, performs a two-pass solve with
+            Bloch-periodic boundary conditions to obtain the group index
+            from MEEP's ``mode.group_velocity``.
 
     Returns:
         :class:`ModeResult` with effective index, field profiles, etc.
     """
-    _import_meep()
+    mp = _import_meep()
 
     from gsim.meep.materials import resolve_materials
 
@@ -570,7 +700,7 @@ def solve_cross_section_mode(
     sim.init_sim()
 
     try:
-        return _compute_eigenmode(
+        result = _compute_eigenmode(
             sim,
             cell_size,
             wavelength,
@@ -579,3 +709,32 @@ def solve_cross_section_mode(
         )
     finally:
         sim.reset_meep()
+
+    if not compute_group_index:
+        return result
+
+    import numpy as np
+
+    # Two-pass group index: rebuild with Bloch k_point from n_eff.
+    k = 2.0 * np.pi * result.n_eff / wavelength
+    sim2, cell_size2 = _build_component_xz_cell(
+        component,
+        stack,
+        y_cut,
+        x_span,
+        material_data,
+        resolution,
+        k_point=mp.Vector3(k, 0.0, 0.0),
+    )
+    sim2.init_sim()
+    try:
+        return _compute_eigenmode(
+            sim2,
+            cell_size2,
+            wavelength,
+            band_num=band_num,
+            parity=parity,
+            kpoint=mp.Vector3(k, 0.0, 0.0),
+        )
+    finally:
+        sim2.reset_meep()
