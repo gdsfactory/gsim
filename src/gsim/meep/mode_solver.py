@@ -197,6 +197,37 @@ def _build_component_xz_cell(
     return sim, cell_size
 
 
+def _poly_to_shapely(poly):
+    """Convert a polygon (numpy array, tuple of coords, or klayout) to shapely.
+
+    Returns ``None`` if conversion fails.
+    """
+    from shapely.geometry import Polygon
+
+    import numpy as np
+
+    # numpy array from get_polygons_points (Nx2 or NxM)
+    if isinstance(poly, np.ndarray):
+        coords = poly.reshape(-1, 2)
+        if len(coords) >= 3:
+            return Polygon(coords)
+        return None
+
+    # list/tuple of coordinate pairs
+    if isinstance(poly, (tuple, list)):
+        return Polygon(poly)
+
+    # klayout PolygonWithProperties
+    if hasattr(poly, "to_simple_polygon"):
+        sp = poly.to_simple_polygon()
+        coords = [(sp.point(i).x, sp.point(i).y) for i in range(sp.num_points())]
+        if len(coords) >= 3:
+            return Polygon(coords)
+        return None
+
+    return None
+
+
 def _layer_x_intervals_at_y(
     component: Component,
     layer: object,
@@ -218,7 +249,17 @@ def _layer_x_intervals_at_y(
     if gds_layer is None:
         return []
 
-    polys = component.get_polygons(layers=(tuple(gds_layer),), merge=True)
+    try:
+        polys = component.get_polygons_points(
+            layers=(tuple(gds_layer),), merge=True
+        )
+    except Exception:
+        try:
+            polys = component.dup().get_polygons_points(
+                layers=(tuple(gds_layer),), merge=True
+            )
+        except Exception:
+            return []
     if not isinstance(polys, dict) or not polys:
         return []
 
@@ -228,9 +269,9 @@ def _layer_x_intervals_at_y(
     for polygons in polys.values():
         for poly in polygons if isinstance(polygons, list) else [polygons]:
             try:
-                from shapely.geometry import Polygon
-
-                spoly = Polygon(poly)
+                spoly = _poly_to_shapely(poly)
+                if spoly is None:
+                    continue
             except Exception:
                 continue
             if spoly.is_empty:
@@ -329,12 +370,23 @@ def _compute_eigenmode(
             f"at wavelength {wavelength} µm"
         )
 
-    # Extract field components — only those present
+    # Extract field profiles along Z at the cell centre (x=0, y=0).
+    # For slab and straight-waveguide cross-sections the profile is
+    # uniform in X, so a 1D Z-scan captures the full mode shape.
     fields: dict[str, np.ndarray] = {}
+    nz = max(int(round(cell_size.z * sim.resolution)), 1)
+    dz = cell_size.z / nz
+    z_vals = np.linspace(
+        -cell_size.z / 2 + dz / 2, cell_size.z / 2 - dz / 2, nz
+    )
     for comp_name in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
         try:
-            arr = mode.get_field(mp.component(comp_name.lower()))
-            if arr is not None:
+            comp = getattr(mp, comp_name)
+            arr = np.zeros(nz, dtype=np.complex128)
+            for iz, z in enumerate(z_vals):
+                pt = mp.Vector3(0.0, 0.0, float(z))
+                arr[iz] = mode.amplitude(pt, comp)
+            if np.any(arr != 0):
                 fields[comp_name] = arr
         except Exception:
             pass

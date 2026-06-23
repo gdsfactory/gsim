@@ -7,6 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 
+def _fake_import_error():
+    raise ImportError("pymeep")
+
+
 class TestModeResult:
     """ModeResult model validation — no meep required."""
 
@@ -184,22 +188,26 @@ class TestResolveStackAndMaterials:
 class TestModeSolverImport:
     """Lazy import behavior — no meep required."""
 
-    def test_solve_slab_mode_import_error_without_meep(self):
+    def test_solve_slab_mode_import_error_without_meep(self, monkeypatch):
         """Raises ImportError with clear message when meep not installed."""
-        from gsim.meep.mode_solver import solve_slab_mode
+        from gsim.meep import mode_solver
+
+        monkeypatch.setattr(mode_solver, "_import_meep", _fake_import_error)
 
         with pytest.raises(ImportError, match="pymeep"):
-            solve_slab_mode(
+            mode_solver.solve_slab_mode(
                 stack=None,
                 wavelength=1.55,
             )
 
-    def test_solve_cross_section_mode_import_error_without_meep(self):
+    def test_solve_cross_section_mode_import_error_without_meep(self, monkeypatch):
         """Raises ImportError with clear message when meep not installed."""
-        from gsim.meep.mode_solver import solve_cross_section_mode
+        from gsim.meep import mode_solver
+
+        monkeypatch.setattr(mode_solver, "_import_meep", _fake_import_error)
 
         with pytest.raises(ImportError, match="pymeep"):
-            solve_cross_section_mode(
+            mode_solver.solve_cross_section_mode(
                 component=None,
                 stack=None,
                 wavelength=1.55,
@@ -251,17 +259,20 @@ class TestSimulationSolveMode:
             sim.solve_mode(port="o1")
 
     def test_delegates_to_mode_solver(self):
-        """solve_mode with port triggers meep import (no meep = ImportError)."""
+        """solve_mode with port delegates to cross-section solver and returns ModeResult."""
         import gdsfactory as gf
 
         from gsim.meep import Simulation
+        from gsim.meep.models.results import ModeResult
 
         c = gf.components.straight(length=10, width=0.5)
         sim = Simulation()
         sim.geometry.component = c
 
-        with pytest.raises(ImportError, match="pymeep"):
-            sim.solve_mode(port="o1", wavelength=1.55)
+        result = sim.solve_mode(port="o1", wavelength=1.55)
+        assert isinstance(result, ModeResult)
+        assert result.n_eff > 1.0
+        assert result.wavelength == 1.55
 
 
 class TestModeSolverIntegration:

@@ -95,7 +95,7 @@ print(f"band    = {result.band_num}, parity = {result.parity}")
 # field component name (`"Ex"`, `"Ey"`, `"Ez"`, `"Hx"`, `"Hy"`, `"Hz"`).
 
 # %%
-if "result" in dir() and result.fields:
+if globals().get("result") and result.fields:
     import numpy as np
 
     for comp, arr in result.fields.items():
