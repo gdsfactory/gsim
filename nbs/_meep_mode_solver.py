@@ -23,7 +23,7 @@
 # **Requirements:**
 #
 # - Local MEEP installation: `conda install -c conda-forge pymeep`
-# - gdsfactory for cross-section mode and Geometry handling
+# - gdsfactory for cross-section mode and geometry handling
 #
 # **API:**
 #
@@ -36,6 +36,36 @@
 # All return a `ModeResult` with `.n_eff`, `.fields`, `.kdom`, `.n_group`, etc.
 
 # %% [markdown]
+# ### Setup
+
+# %%
+import gdsfactory as gf
+from gsim.common.stack import get_stack
+
+gf.gpdk.PDK.activate()
+
+try:
+    import meep as mp
+
+    print(f"MEEP {mp.__version__} ready")
+    HAS_MEEP = True
+except ImportError:
+    print(
+        "MEEP not found. Install it via conda-forge:\n"
+        "    conda install -c conda-forge pymeep"
+    )
+    HAS_MEEP = False
+
+stack = get_stack()
+
+# Show the layer stack
+for name, layer in stack.layers.items():
+    print(
+        f"  {name:20s}  z=[{layer.zmin:6.3f}, {layer.zmax:6.3f}]  "
+        f"t={layer.thickness:.3f}  material={layer.material}"
+    )
+
+# %% [markdown]
 # ### 1. Slab mode — uniform layer stack
 #
 # A slab mode solver treats the stack as infinite in *x* and *y*. The mode
@@ -43,10 +73,7 @@
 # effective-index building block used for variational 2D approximations.
 
 # %%
-from gsim.common.stack import get_stack
 from gsim.meep import solve_slab_mode
-
-stack = get_stack()  # defaults to active PDK stack
 
 result = solve_slab_mode(
     stack=stack,
@@ -56,10 +83,10 @@ result = solve_slab_mode(
     resolution=32,
 )
 
-print(f"n_eff = {result.n_eff:.4f}")
+print(f"n_eff   = {result.n_eff:.6f}")
 print(f"n_group = {result.n_group}")
-print(f"kdom = {result.kdom}")
-print(f"band = {result.band_num}, parity = {result.parity}")
+print(f"kdom    = {[f'{k:.6f}' for k in result.kdom]}")
+print(f"band    = {result.band_num}, parity = {result.parity}")
 
 # %% [markdown]
 # ### 2. Accessing field profiles
@@ -68,10 +95,13 @@ print(f"band = {result.band_num}, parity = {result.parity}")
 # field component name (`"Ex"`, `"Ey"`, `"Ez"`, `"Hx"`, `"Hy"`, `"Hz"`).
 
 # %%
-import numpy as np
+if "result" in dir() and result.fields:
+    import numpy as np
 
-for comp, arr in result.fields.items():
-    print(f"{comp}: shape={arr.shape}, |max|={np.abs(arr).max():.4f}")
+    for comp, arr in result.fields.items():
+        print(f"{comp}: shape={arr.shape}, |max|={np.abs(arr).max():.6f}")
+else:
+    print("No mode result available — run the slab mode cell first.")
 
 # %% [markdown]
 # ### 3. Cross-section mode — straight waveguide at a port
@@ -81,10 +111,7 @@ for comp, arr in result.fields.items():
 # layer stack, and computes the guided mode propagating along *x*.
 
 # %%
-import gdsfactory as gf
 from gsim.meep import solve_cross_section_mode
-
-gf.gpdk.PDK.activate()
 
 c = gf.components.straight(length=10, width=0.5)
 
@@ -97,9 +124,9 @@ result = solve_cross_section_mode(
     resolution=32,
 )
 
-print(f"n_eff = {result.n_eff:.4f}")
+print(f"n_eff   = {result.n_eff:.6f}")
 print(f"n_group = {result.n_group}")
-print(f"fields: {list(result.fields.keys())}")
+print(f"fields  = {list(result.fields.keys())}")
 
 # %% [markdown]
 # ### 4. Cross-section at an arbitrary position
@@ -118,7 +145,7 @@ result = solve_cross_section_mode(
     resolution=32,
 )
 
-print(f"n_eff = {result.n_eff:.4f}")
+print(f"n_eff = {result.n_eff:.6f}")
 
 # %% [markdown]
 # ### 5. Using the Simulation wrapper
@@ -129,37 +156,40 @@ print(f"n_eff = {result.n_eff:.4f}")
 # it falls back to slab mode.
 
 # %%
-from gsim import meep
+from gsim import meep as meep_mod
 
-sim = meep.Simulation()
+sim = meep_mod.Simulation()
 sim.geometry.component = c
 sim.geometry.stack = stack
 
 result = sim.solve_mode(port="o1", wavelength=1.55)
 
-print(f"n_eff = {result.n_eff:.4f}")
+print(f"n_eff = {result.n_eff:.6f}")
 
 # %% [markdown]
 # ### 6. Wavelength sweep (broadband n_eff)
 #
-# Loop over wavelengths to compute dispersion curves.
+# Loop over wavelengths to compute the dispersion curve.
 
 # %%
 wavelengths = [1.50, 1.52, 1.54, 1.55, 1.56, 1.58, 1.60]
 n_effs = []
 
 for wl in wavelengths:
-    result = sim.solve_mode(port="o1", wavelength=wl, band_num=1)
-    n_effs.append(result.n_eff)
-    print(f"  λ = {wl:.2f} µm → n_eff = {result.n_eff:.4f}")
+    result_mode = sim.solve_mode(port="o1", wavelength=wl, band_num=1)
+    n_effs.append(result_mode.n_eff)
+    print(f"  λ = {wl:.2f} µm → n_eff = {result_mode.n_eff:.6f}")
 
 # %%
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots()
-ax.plot(wavelengths, n_effs, "o-")
-ax.set_xlabel("Wavelength (µm)")
-ax.set_ylabel("n_eff")
-ax.set_title("Dispersion — fundamental TE mode")
-ax.grid(True, alpha=0.3)
-fig.tight_layout()
+if n_effs:
+    fig, ax = plt.subplots()
+    ax.plot(wavelengths, n_effs, "o-")
+    ax.set_xlabel("Wavelength (µm)")
+    ax.set_ylabel("n_eff")
+    ax.set_title("Dispersion — fundamental TE mode")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+else:
+    print("No dispersion data — run the wavelength sweep cell first.")
