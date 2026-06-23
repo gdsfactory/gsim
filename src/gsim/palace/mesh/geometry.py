@@ -163,14 +163,6 @@ def resolve_dielectric_regions(
         xmax = xmax_air if is_air_like else xmax0
         ymax = ymax_air if is_air_like else ymax0
 
-        # Background dielectric slabs from stack.dielectrics should share the
-        # same lateral footprint unless they are explicitly air/vacuum.
-        if not is_air_like:
-            xmin = xmin_air
-            ymin = ymin_air
-            xmax = xmax_air
-            ymax = ymax_air
-
         regions.append(
             DielectricRegion(
                 name=dielectric_name,
