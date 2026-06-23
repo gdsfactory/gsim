@@ -23,7 +23,7 @@ import logging
 import re
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypedDict, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,6 +34,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ModeMetrics(TypedDict):
+    """Parsed per-mode metrics from mode-kn.csv."""
+
+    k_n: complex
+    n_eff: complex
+    eta_eff: complex
+
+
 class PalaceTextResults:
     """Parsed Palace text output files with pretty-print helpers.
 
@@ -41,6 +49,8 @@ class PalaceTextResults:
     BoundaryMode). CSV files are parsed into row dictionaries while JSON files
     are decoded to Python objects.
     """
+
+    ETA0_OHM = 376.730313668
 
     def __init__(
         self,
@@ -55,6 +65,111 @@ class PalaceTextResults:
         self.csv_tables = csv_tables
         self.json_data = json_data
         self.text_data = text_data
+        self.modes = self._parse_modes()
+
+    @staticmethod
+    def _to_float(value: object) -> float:
+        """Return parsed float from CSV value or NaN when unavailable."""
+        if value is None:
+            return float("nan")
+        try:
+            text = str(value).strip()
+            if not text:
+                return float("nan")
+            return float(text)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    @staticmethod
+    def _format_complex(value: complex, *, sci: bool = True) -> str:
+        """Format complex number for compact readable output."""
+        if sci:
+            return f"{value.real:+.6e}{value.imag:+.6e}j"
+        return f"{value.real:.2f}{value.imag:+.2f}j"
+
+    def _parse_modes(self) -> dict[int, ModeMetrics]:
+        """Parse mode metrics from mode-kn.csv and compute eta_eff.
+
+        Returns:
+            Mapping ``{mode_id: {"k_n": complex, "n_eff": complex,
+            "eta_eff": complex}}``.
+        """
+        rows = self.csv_tables.get("mode-kn.csv", [])
+        modes: dict[int, ModeMetrics] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            kn_re = self._to_float(row.get("Re{kn} (1/m)"))
+            if not np.isfinite(kn_re):
+                kn_re = self._to_float(row.get("Re{kn}"))
+            if not np.isfinite(kn_re):
+                kn_re = self._to_float(row.get("k_n"))
+            kn_im = self._to_float(row.get("Im{kn} (1/m)"))
+            if not np.isfinite(kn_im):
+                kn_im = self._to_float(row.get("Im{kn}"))
+            if not np.isfinite(kn_im):
+                kn_im = 0.0
+            if not np.isfinite(kn_re):
+                kn_re = float("nan")
+            k_n = complex(kn_re, kn_im)
+
+            n_eff_re = self._to_float(row.get("Re{n_eff}"))
+            n_eff_im = self._to_float(row.get("Im{n_eff}"))
+            if not np.isfinite(n_eff_im):
+                n_eff_im = 0.0
+            if not np.isfinite(n_eff_re):
+                n_eff_re = float("nan")
+            n_eff = complex(n_eff_re, n_eff_im)
+
+            if np.isfinite(n_eff.real) and np.isfinite(n_eff.imag) and abs(n_eff) > 0.0:
+                eta_eff = self.ETA0_OHM / n_eff
+            else:
+                eta_eff = complex(float("nan"), float("nan"))
+
+            modes[mode_id] = {
+                "k_n": k_n,
+                "n_eff": n_eff,
+                "eta_eff": eta_eff,
+            }
+
+        return modes
+
+    @overload
+    def __getitem__(self, key: Literal["modes"]) -> dict[int, ModeMetrics]: ...
+
+    @overload
+    def __getitem__(self, key: int) -> ModeMetrics: ...
+
+    @overload
+    def __getitem__(self, key: str) -> ModeMetrics: ...
+
+    def __getitem__(
+        self,
+        key: str | int,
+    ) -> dict[int, ModeMetrics] | ModeMetrics:
+        """Dictionary-like access to parsed mode metrics.
+
+        Supported keys:
+        - ``"modes"`` -> full ``{mode_id: values}`` mapping
+        - integer mode id (for example ``1``)
+        - ``"mode_1"`` style string key
+        """
+        if key == "modes":
+            return self.modes
+        if isinstance(key, int):
+            return self.modes[key]
+        if isinstance(key, str) and key.startswith("mode_"):
+            mode_id = int(key.split("_", 1)[1])
+            return self.modes[mode_id]
+        raise KeyError(key)
 
     def keys(self) -> list[str]:
         """Return available result file names."""
@@ -86,32 +201,22 @@ class PalaceTextResults:
         return "\n".join(lines)
 
     def _pretty_text(self, *, max_rows: int = 8, max_lines: int = 12) -> str:
-        """Build a readable summary of parsed text outputs."""
-        blocks: list[str] = ["Palace Text Results", "=" * 40]
-        blocks.append("Files:")
-        blocks.extend(f"- {name}" for name in sorted(self.files))
+        """Build a compact mode summary matching BoundaryMode workflow needs."""
+        del max_rows
+        del max_lines
+        if not self.modes:
+            return "No mode data found in mode-kn.csv"
 
-        for name in sorted(self.csv_tables):
-            blocks.append("")
-            blocks.append(self._format_csv_table(name, self.csv_tables[name], max_rows))
-
-        for name in sorted(self.json_data):
-            blocks.append("")
-            payload = json.dumps(self.json_data[name], indent=2)
-            json_lines = payload.splitlines()
-            if len(json_lines) > max_lines:
-                payload = "\n".join(json_lines[:max_lines]) + "\n..."
-            blocks.append(f"{name} (json)\n{payload}")
-
-        for name in sorted(self.text_data):
-            blocks.append("")
-            lines = self.text_data[name]
-            preview = lines[:max_lines]
-            if len(lines) > max_lines:
-                preview = [*preview, "..."]
-            blocks.append(f"{name} (text)\n" + "\n".join(preview))
-
-        return "\n".join(blocks)
+        lines: list[str] = []
+        for mode_id in sorted(self.modes):
+            mode = self.modes[mode_id]
+            lines.append(
+                f"mode {mode_id}: "
+                f"k_n = {self._format_complex(mode['k_n'])}, "
+                f"n_eff = {self._format_complex(mode['n_eff'])}, "
+                f"eta_eff ~= {self._format_complex(mode['eta_eff'], sci=False)}"
+            )
+        return "\n".join(lines)
 
     def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:
         """Pretty-print text output summaries."""

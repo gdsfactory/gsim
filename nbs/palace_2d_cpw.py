@@ -153,18 +153,29 @@ mode_results = mode_sim.run_local(
     num_processes=16,
     verbose=True,
 )
-mode_results
 
 # %% papermill={"duration": 0.014154, "end_time": "2026-06-12T07:14:03.767046", "exception": false, "start_time": "2026-06-12T07:14:03.752892", "status": "completed"}
 import importlib
 
 import gsim.palace.field_viz as field_viz
+import gsim.palace.results as palace_results
 from gsim.palace import plot_fields_2d
 
-# Reload to ensure notebook uses latest field_viz implementation from disk.
+# Reload to ensure notebook uses latest implementation from disk.
 importlib.reload(field_viz)
+importlib.reload(palace_results)
 
+# If this kernel still holds an older PalaceTextResults object, rebuild it from disk.
+if not hasattr(mode_results, "modes"):
+    mode_results = palace_results.load_text_results("./palace-sim-cpw-waveport-2d")
+
+# Pretty-print mode summaries (k_n, n_eff, eta_eff).
 mode_results.print()
+
+# Dictionary-like access to parsed mode values.
+m1 = mode_results["mode_1"]
+print("mode_1 dict:", m1)
+print(f"mode_1 n_eff = {m1['n_eff']}, mode_1 k_n = {m1['k_n']}")
 
 # Centralized plotting utility from gsim source with tuned defaults.
 fig, ax, stream_inputs = plot_fields_2d("./palace-sim-cpw-waveport-2d")

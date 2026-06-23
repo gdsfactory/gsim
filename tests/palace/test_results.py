@@ -267,7 +267,9 @@ def text_results_dir(tmp_path: Path) -> Path:
     palace_dir.mkdir(parents=True)
 
     (palace_dir / "mode-kn.csv").write_text(
-        "k_n,Re{lambda},Im{lambda}\n1,2.0,0.0\n2,1.8,0.0\n"
+        "m,Re{kn} (1/m),Im{kn} (1/m),Re{n_eff},Im{n_eff}\n"
+        "1,2.0,0.0,1.50,0.00\n"
+        "2,1.8,-0.1,1.20,-0.05\n"
     )
     (palace_dir / "domain-E.csv").write_text("domain,energy\nair,0.4\nsio2,0.6\n")
     (palace_dir / "error-indicators.csv").write_text("elem,error\n1,0.01\n2,0.02\n")
@@ -287,6 +289,8 @@ class TestTextResults:
         assert "mode-kn.csv" in out.csv_tables
         assert "palace.json" in out.json_data
         assert "solver.log" in out.text_data
+        assert 1 in out.modes
+        assert out["mode_1"]["k_n"] == complex(2.0, 0.0)
 
     def test_load_text_results_from_dict(self, text_results_dir: Path) -> None:
         results = {
@@ -300,9 +304,10 @@ class TestTextResults:
     def test_str_contains_tables(self, text_results_dir: Path) -> None:
         out = load_text_results(text_results_dir)
         text = str(out)
-        assert "Palace Text Results" in text
-        assert "mode-kn.csv" in text
-        assert "solver.log (text)" in text
+        assert "mode 1:" in text
+        assert "k_n =" in text
+        assert "n_eff =" in text
+        assert "eta_eff ~=" in text
 
     def test_print_alias_emits_pretty_text(
         self, text_results_dir: Path, capsys: pytest.CaptureFixture[str]
@@ -310,8 +315,15 @@ class TestTextResults:
         out = load_text_results(text_results_dir)
         out.print(max_rows=1, max_lines=2)
         captured = capsys.readouterr()
-        assert "Palace Text Results" in captured.out
-        assert "mode-kn.csv" in captured.out
+        assert "mode 1:" in captured.out
+        assert "eta_eff ~=" in captured.out
+
+    def test_dictionary_style_mode_access(self, text_results_dir: Path) -> None:
+        out = load_text_results(text_results_dir)
+        modes = out["modes"]
+        assert 2 in modes
+        assert modes[2]["k_n"] == complex(1.8, -0.1)
+        assert out[1]["n_eff"] == complex(1.5, 0.0)
 
     def test_no_text_files_raises(self, tmp_path: Path) -> None:
         (tmp_path / "output" / "palace").mkdir(parents=True)
