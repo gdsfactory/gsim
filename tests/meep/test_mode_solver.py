@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -198,7 +200,7 @@ class TestModeSolverImport:
 
         with pytest.raises(ImportError, match="pymeep"):
             mode_solver.solve_slab_mode(
-                stack=None,
+                stack=cast(Any, None),
                 wavelength=1.55,
             )
 
@@ -210,8 +212,8 @@ class TestModeSolverImport:
 
         with pytest.raises(ImportError, match="pymeep"):
             mode_solver.solve_cross_section_mode(
-                component=None,
-                stack=None,
+                component=cast(Any, None),
+                stack=cast(Any, None),
                 wavelength=1.55,
                 x_span=2.0,
             )

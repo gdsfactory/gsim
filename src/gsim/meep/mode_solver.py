@@ -11,7 +11,7 @@ MEEP is an optional dependency imported lazily; see :func:`_import_meep`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gsim.meep.models.results import ModeResult
 
@@ -61,7 +61,7 @@ def _import_meep():
 # ------------------------------------------------------------------
 
 
-def _meep_medium(material_data: MaterialData) -> object:
+def _meep_medium(material_data: MaterialData) -> Any:
     """Convert a resolved MaterialData to a MEEP Medium object."""
     mp = _import_meep()
 
@@ -82,8 +82,8 @@ def _build_slab_xz_cell(
     materials: dict[str, MaterialData],
     resolution: float,
     *,
-    k_point: object | None = None,
-) -> tuple[object, object]:
+    k_point: Any | None = None,
+) -> tuple[Any, Any]:
     """Build a 2D XZ MEEP simulation cell for a 1D slab (uniform layers).
 
     Each non-air layer becomes a rectangular block spanning the full
@@ -157,8 +157,8 @@ def _build_component_xz_cell(
     materials: dict[str, MaterialData],
     resolution: float,
     *,
-    k_point: object | None = None,
-) -> tuple[object, object]:
+    k_point: Any | None = None,
+) -> tuple[Any, Any]:
     """Build a 2D XZ MEEP simulation cell at a *y*-slice of a component.
 
     For each non-air layer, the component's GDS polygons are intersected
@@ -346,13 +346,13 @@ def _merge_intervals(
 
 
 def _compute_eigenmode(
-    sim: object,
-    cell_size: object,
+    sim: Any,
+    cell_size: Any,
     wavelength: float,
     *,
     band_num: int = 1,
     parity: str = "NO_PARITY",
-    kpoint: object | None = None,
+    kpoint: Any | None = None,
 ) -> ModeResult:
     """Run ``sim.get_eigenmode()`` and pack the result into a :class:`ModeResult`.
 
@@ -453,7 +453,7 @@ def _compute_eigenmode(
 
 def _validate_mode(
     result: ModeResult,
-    material_data: dict[str, object],
+    material_data: dict[str, MaterialData],
     _stack: object,
     *,
     is_slab: bool = False,

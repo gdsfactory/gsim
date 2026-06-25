@@ -220,9 +220,6 @@ for idx, comp in enumerate(comps):
     ax = axes[idx // n_cols][idx % n_cols]
     arr = result_slab.fields[comp]
     ax.plot(z_slab, np.abs(arr), linewidth=1.2, label=f"|{comp}|")
-    ax.plot(
-        z_slab, arr.real, alpha=0.35, linestyle="--", linewidth=0.8, label=f"Re({comp})"
-    )
     ax.set_title(comp)
     ax.set_xlabel("z (um)")
     ax.set_ylabel("Amplitude")
@@ -440,36 +437,36 @@ for band in range(1, 5):
 # (band 1) is physically guided; higher bands may be MPB artefacts.
 
 # %%
-fig, ax = plt.subplots(figsize=(7, 4))
-for band in range(1, 5):
-    try:
-        r = solve_slab_mode(
-            stack=soi,
-            wavelength=1.55,
-            band_num=band,
-            parity="NO_PARITY",
-            resolution=64,
-        )
-        nz_r = len(next(iter(r.fields.values())))
-        zz = mode_z_grid(soi, n_points=nz_r)
-        if "Ey" in r.fields:
-            tag = "guided" if r.n_eff > n_sio2 else "leaky"
-            ax.plot(
-                zz,
-                np.abs(r.fields["Ey"]),
-                linewidth=1.3,
-                label=f"band {band} ({tag}) n={r.n_eff:.4f}",
+for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for band in range(1, 5):
+        try:
+            r = solve_slab_mode(
+                stack=soi,
+                wavelength=1.55,
+                band_num=band,
+                parity="NO_PARITY",
+                resolution=64,
             )
-    except RuntimeError:
-        pass
+            nz_r = len(next(iter(r.fields.values())))
+            zz = mode_z_grid(soi, n_points=nz_r)
+            if comp in r.fields:
+                tag = "guided" if r.n_eff > n_sio2 else "leaky"
+                ax.plot(
+                    zz,
+                    np.abs(r.fields[comp]),
+                    linewidth=1.3,
+                    label=f"band {band} ({tag}) n={r.n_eff:.4f}",
+                )
+        except RuntimeError:
+            pass
 
-ax.set_xlabel("z (um)")
-ax.set_ylabel("|Ey| (arb. units)")
-ax.set_title("Multi-band slab modes -- SOI 220 nm")
-ax.legend(fontsize="small", loc="upper right")
-ax.grid(True, alpha=0.2)
-fig.tight_layout()
-
+    ax.set_xlabel("z (um)")
+    ax.set_ylabel(f"|{comp}| (arb. units)")
+    ax.set_title("Multi-band slab modes -- SOI 220 nm")
+    ax.legend(fontsize="small", loc="upper right")
+    ax.grid(True, alpha=0.2)
+    fig.tight_layout()
 
 # %% [markdown]
 # ### Parity modes
