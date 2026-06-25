@@ -629,7 +629,8 @@ class Simulation(BaseModel):
             resolution: Pixels per µm (default 32).
 
         Returns:
-            :class:`ModeResult` with effective index, field profiles, etc.
+            :class:`ModeResult` with effective index, field profiles,
+            group index, etc.
         """
         from gsim.meep.mode_solver import (
             solve_cross_section_mode,

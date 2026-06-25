@@ -291,8 +291,9 @@ fig.tight_layout()
 # %% [markdown]
 # ### Group velocity validation
 #
-# Compare MEEP's two-pass `n_group` (via `compute_group_index=True`)
-# with the numerical derivative `n_g = n_eff - lambda * dn_eff/dlambda`.
+# MEEP's ``get_eigenmode`` returns ``mode.group_velocity`` directly,
+# giving the group index as ``n_group = 1/v_g``.  A fine wavelength
+# sweep shows the dispersion and group index together.
 
 # %%
 wl_fine = [1.45 + i * 0.005 for i in range(61)]  # 1.45-1.75 um
@@ -311,50 +312,27 @@ for wl in wl_fine:
 wl_arr = np.array(wl_fine)
 n_arr = np.array(n_eff_fine)
 
-# Numerical group index via central finite difference
-ng_numeric = n_arr[1:-1] - wl_arr[1:-1] * np.gradient(n_arr, wl_arr)[1:-1]
+fig, ax1 = plt.subplots()
+(line1,) = ax1.plot(wl_arr, n_arr, ".-", label="n_eff", linewidth=1)
+ax1.set_xlabel("Wavelength (um)")
+ax1.set_ylabel("n_eff")
+ax1.grid(True, alpha=0.3)
 
-fig, ax = plt.subplots()
-ax.plot(wl_arr, n_arr, ".-", label="n_eff", linewidth=1)
-ax.plot(wl_arr[1:-1], ng_numeric, ".-", label="n_group (numeric diff)", linewidth=1)
-ax.set_xlabel("Wavelength (um)")
-ax.set_ylabel("Index")
-ax.set_title("Dispersion -- fundamental TE mode (fine sweep)")
-ax.legend()
-ax.grid(True, alpha=0.3)
-fig.tight_layout()
-
-
-# %% [markdown]
-# ### Group velocity from MEEP two-pass solver
-#
-# Using `compute_group_index=True`, MEEP rebuilds the simulation with
-# Bloch-periodic boundary conditions at the mode's propagation
-# wavevector, enabling `mode.group_velocity`.
-
-# %%
-wl_meep = np.linspace(1.50, 1.60, 6)
-n_group_from_meep: list[float | None] = []
-
-for wl in wl_meep:
-    r = solve_slab_mode(
-        stack=stack,
-        wavelength=wl,
-        band_num=1,
-        compute_group_index=True,
+meep_valid = [(wl, ng) for wl, ng in zip(wl_fine, n_group_meep) if ng is not None]
+if meep_valid:
+    wl_v, ng_v = zip(*meep_valid)
+    ax2 = ax1.twinx()
+    (line2,) = ax2.plot(
+        wl_v, ng_v, "s-", color="C1", label="n_group (MEEP vg)", markersize=3
     )
-    n_group_from_meep.append(r.n_group)
+    ax2.set_ylabel("n_group")
+    lines = [line1, line2]
+    ax1.legend(lines, [l.get_label() for l in lines], loc="upper right")
+else:
+    ax1.legend(loc="upper right")
 
-fig, ax = plt.subplots()
-ax.plot(wl_arr[1:-1], ng_numeric, "o-", label="n_group (numeric diff)", markersize=4)
-ax.plot(wl_meep, n_group_from_meep, "s--", label="n_group (MEEP vg)", markersize=6)
-ax.set_xlabel("Wavelength (um)")
-ax.set_ylabel("n_group")
-ax.set_title("Group index validation -- MEEP vg vs numeric differentiation")
-ax.legend()
-ax.grid(True, alpha=0.3)
+ax1.set_title("Dispersion -- fundamental TE mode (fine sweep)")
 fig.tight_layout()
-
 
 # %% [markdown]
 # ### Multi-band modes
@@ -760,7 +738,7 @@ fig.tight_layout()
 # | Index profile | `refractive_index_profile(stack, z_grid, wavelength)` |
 # | Field profiles | `result.fields["Ey"]` -- 1D complex array along *z* |
 # | Dispersion sweep | Loop over wavelengths -> n_eff(lambda) |
-# | Group index | `compute_group_index=True` for MEEP vg, or numeric diff |
+# | Group index | `result.n_group` -- direct from `mode.group_velocity` |
 # | Multi-band | `band_num=1, 2, 3, ...` |
 # | Parity modes | `parity="EVEN_Y"` etc. |
 # | Core thickness sweep | Vary `layer.thickness` on a copy of the stack -> n_eff(t) |
