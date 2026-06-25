@@ -390,20 +390,23 @@ def _compute_eigenmode(
             f"at wavelength {wavelength} µm"
         )
 
-    # Extract field profiles along Z at the cell centre (x=0, y=0).
-    # For slab and straight-waveguide cross-sections the profile is
-    # uniform in X, so a 1D Z-scan captures the full mode shape.
+    # Extract full 2D (X, Z) mode profile at y=0 by sampling
+    # ``mode.amplitude()`` on a grid spanning the cell.
     fields: dict[str, np.ndarray] = {}
+    nx = max(round(cell_size.x * sim.resolution), 1)
     nz = max(round(cell_size.z * sim.resolution), 1)
+    dx = cell_size.x / nx
     dz = cell_size.z / nz
+    x_vals = np.linspace(-cell_size.x / 2 + dx / 2, cell_size.x / 2 - dx / 2, nx)
     z_vals = np.linspace(-cell_size.z / 2 + dz / 2, cell_size.z / 2 - dz / 2, nz)
     for comp_name in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
         try:
             comp = getattr(mp, comp_name)
-            arr = np.zeros(nz, dtype=np.complex128)
+            arr = np.zeros((nz, nx), dtype=np.complex128)
             for iz, z in enumerate(z_vals):
-                pt = mp.Vector3(0.0, 0.0, float(z))
-                arr[iz] = mode.amplitude(pt, comp)
+                for ix, x in enumerate(x_vals):
+                    pt = mp.Vector3(float(x), 0.0, float(z))
+                    arr[iz, ix] = mode.amplitude(pt, comp)
             if np.any(arr != 0):
                 fields[comp_name] = arr
         except Exception:
@@ -529,9 +532,9 @@ def _validate_mode(
 def mode_z_grid(stack: LayerStack, n_points: int) -> np.ndarray:
     """Compute Z-axis coordinates centred on the layer stack midpoint.
 
-    The returned grid has the same length as ``ModeResult.fields`` arrays
-    produced by :func:`solve_slab_mode` when the MEEP cell uses the
-    stack's z-extent.
+    The returned grid has the same length as the Z (first) axis of
+    ``ModeResult.fields`` arrays produced by :func:`solve_slab_mode`
+    and :func:`solve_cross_section_mode`.
 
     Args:
         stack: :class:`LayerStack` defining the vertical material profile.
@@ -547,6 +550,26 @@ def mode_z_grid(stack: LayerStack, n_points: int) -> np.ndarray:
     span = z_max - z_min
     dz = span / n_points
     return np.linspace(-span / 2 + dz / 2, span / 2 - dz / 2, n_points)
+
+
+def mode_x_grid(n_points: int, x_span: float) -> np.ndarray:
+    """Compute X-axis coordinates centred on the cell midpoint.
+
+    The returned grid has the same length as the X (second) axis of
+    ``ModeResult.fields`` arrays produced by
+    :func:`solve_cross_section_mode`.
+
+    Args:
+        n_points: Number of grid points (typically ``resolution * x_span``).
+        x_span: Total X-extent of the MEEP cell in µm.
+
+    Returns:
+        ``np.ndarray`` of *x* coordinates in µm, origin at cell midpoint.
+    """
+    import numpy as np
+
+    dx = x_span / n_points
+    return np.linspace(-x_span / 2 + dx / 2, x_span / 2 - dx / 2, n_points)
 
 
 def refractive_index_profile(

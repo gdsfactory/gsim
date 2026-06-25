@@ -50,6 +50,8 @@ pip-log.txt
 .DS_Store
 
 # folders
+.kilo/
+PLAN_mode_solver.md
 .cursor/
 .eggs/
 .hypothesis/

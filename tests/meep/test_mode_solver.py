@@ -390,6 +390,33 @@ class TestRefractiveIndexProfile:
         assert np.mean(n_profile[core_mask]) > np.mean(n_profile[box_mask])
 
 
+class TestModeXGrid:
+    """Unit tests for mode_x_grid — no meep required."""
+
+    def test_x_grid_bounds_and_length(self):
+        """X-grid spans cell extent and has correct length."""
+
+        from gsim.meep.mode_solver import mode_x_grid
+
+        x_grid = mode_x_grid(n_points=100, x_span=4.0)
+
+        assert len(x_grid) == 100
+        assert x_grid[0] > -2.1
+        assert x_grid[0] < -1.9
+        assert x_grid[-1] > 1.9
+        assert x_grid[-1] < 2.1
+
+    def test_x_grid_centred(self):
+        """X-grid is centred on origin (zero-mean)."""
+        import numpy as np
+
+        from gsim.meep.mode_solver import mode_x_grid
+
+        x_grid = mode_x_grid(n_points=200, x_span=6.0)
+
+        assert abs(np.mean(x_grid)) < 0.1
+
+
 class TestSimulationSolveMode:
     """Simulation.solve_mode() wrapper tests."""
 
