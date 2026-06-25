@@ -72,8 +72,9 @@ def cpw_component():
 class TestDrivenSimWorkflow:
     """End-to-end DrivenSim: configure -> validate -> mesh -> write_config."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def driven_sim(self, tmp_path_factory, cpw_component):
+    def driven_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh a DrivenSim with CPW ports."""
         tmp_path = tmp_path_factory.mktemp("driven")
         sim = DrivenSim()
@@ -170,8 +171,9 @@ class TestDrivenSimWorkflow:
 class TestDrivenSimInplanePorts:
     """DrivenSim with single-element inplane lumped ports."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def inplane_sim(self, tmp_path_factory, cpw_component):
+    def inplane_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh a DrivenSim with inplane lumped ports."""
         tmp_path = tmp_path_factory.mktemp("inplane")
         sim = DrivenSim()
@@ -284,8 +286,9 @@ def test_reactive_port_parameters_go_to_lumped_element(tmp_path, cpw_component):
 class TestEigenmodeSimWorkflow:
     """End-to-end EigenmodeSim: configure -> mesh -> write_config."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def eigenmode_sim(self, tmp_path_factory, cpw_component):
+    def eigenmode_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh an EigenmodeSim."""
         tmp_path = tmp_path_factory.mktemp("eigenmode")
         sim = EigenmodeSim()
@@ -357,8 +360,9 @@ class TestEigenmodeSimWorkflow:
 class TestElectrostaticSimWorkflow:
     """End-to-end ElectrostaticSim: configure -> mesh -> write_config."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def electrostatic_sim(self, tmp_path_factory, cpw_component):
+    def electrostatic_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh an ElectrostaticSim with terminals."""
         tmp_path = tmp_path_factory.mktemp("electrostatic")
         sim = ElectrostaticSim()
@@ -496,8 +500,9 @@ class TestValidationErrors:
 class TestMaterialOverrides:
     """Test material override configuration flows through to config."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def material_sim(self, tmp_path_factory, cpw_component):
+    def material_sim(cls, tmp_path_factory, cpw_component):
         """Create a DrivenSim with material overrides."""
         tmp_path = tmp_path_factory.mktemp("materials")
         sim = DrivenSim()

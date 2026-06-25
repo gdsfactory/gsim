@@ -634,6 +634,8 @@ def solve_slab_mode(
         :class:`ModeResult` with effective index, field profiles, and
         group index (from ``mode.group_velocity``).
     """
+    _import_meep()
+
     from gsim.meep.materials import resolve_materials
 
     if stack is None:
@@ -711,6 +713,8 @@ def solve_cross_section_mode(
         :class:`ModeResult` with effective index, field profiles, and
         group index (from ``mode.group_velocity``).
     """
+    _import_meep()
+
     from gsim.meep.materials import resolve_materials
 
     if stack is None:
