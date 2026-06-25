@@ -17,7 +17,7 @@
 #
 # The `gsim.meep` module exposes a standalone eigenmode solver for
 # **1D slab modes** and **2D waveguide cross-section modes**. This runs
-# MEEP locally -- no cloud job required -- and returns the effective index,
+# MEEP locally - no cloud job required - and returns the effective index,
 # field profiles, and wavevectors.
 #
 # **API overview:**
@@ -28,12 +28,12 @@
 # | `solve_cross_section_mode(component, stack, port=..., wavelength)` | 2D waveguide cross-section at a port |
 # | `mode_z_grid(stack, n_points)` | Z-axis coordinates for field arrays |
 # | `refractive_index_profile(stack, z_grid, wavelength)` | n(z) from the layer stack |
-# | `sim.solve_mode(port=..., wavelength)` | Simulation wrapper -- delegates to one of the above |
+# | `sim.solve_mode(port=..., wavelength)` | Simulation wrapper - delegates to one of the above |
 #
 # All solvers return a `ModeResult` with `.n_eff`, `.fields`, `.kdom`, `.n_group`, etc.
 
 # %% [markdown]
-# ## Part 1 -- Quick Start
+# ## Part 1 - Quick Start
 
 # %% [markdown]
 # ### Setup and imports
@@ -104,7 +104,7 @@ print(f"fields  = {list(result.fields.keys())}")
 
 
 # %% [markdown]
-# ## Part 2 -- Mode Results
+# ## Part 2 - Mode Results
 
 # %% [markdown]
 # ### Understanding ModeResult
@@ -193,7 +193,7 @@ ax_idx.set_ylabel("Refractive index")
 ax_idx.set_ylim(bottom=0.8)
 
 ax.set_title(
-    f"Mode profile -- {dom_comp}  (lambda={result_slab.wavelength:.2f} um, "
+    f"Mode profile - {dom_comp}  (lambda={result_slab.wavelength:.2f} um, "
     f"n_eff={result_slab.n_eff:.4f})"
 )
 ax.grid(True, alpha=0.2)
@@ -229,14 +229,14 @@ for idx in range(len(comps), n_rows * n_cols):
     axes[idx // n_cols][idx % n_cols].set_visible(False)
 
 fig.suptitle(
-    f"Field components -- slab mode  lambda={result_slab.wavelength:.2f} um",
+    f"Field components - slab mode  lambda={result_slab.wavelength:.2f} um",
     fontweight="bold",
 )
 fig.tight_layout()
 
 
 # %% [markdown]
-# ## Part 3 -- Advanced
+# ## Part 3 - Advanced
 
 # %% [markdown]
 # ### Simulation wrapper
@@ -284,7 +284,7 @@ if group_vals:
 else:
     ax1.legend(loc="upper right")
 
-ax1.set_title("Dispersion -- fundamental TE mode")
+ax1.set_title("Dispersion - fundamental TE mode")
 fig.tight_layout()
 
 
@@ -331,14 +331,14 @@ if meep_valid:
 else:
     ax1.legend(loc="upper right")
 
-ax1.set_title("Dispersion -- fundamental TE mode (fine sweep)")
+ax1.set_title("Dispersion - fundamental TE mode (fine sweep)")
 fig.tight_layout()
 
 # %% [markdown]
 # ### Multi-band modes
 #
 # The symmetric SOI slab (Si 220 nm core, SiO2 cladding) at lambda=1.55 um
-# has V-parameter approx 1.41 -- it supports a single TE mode (TE0).
+# has V-parameter approx 1.41 - it supports a single TE mode (TE0).
 # Bands beyond 1 are **leaky / radiation modes**: MEEP's MPB omega-solve
 # can converge to them because the finite PML-bounded cell discretises
 # the radiation continuum.  The library logs a warning for modes with
@@ -441,7 +441,7 @@ for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
 
     ax.set_xlabel("z (um)")
     ax.set_ylabel(f"|{comp}| (arb. units)")
-    ax.set_title("Multi-band slab modes -- SOI 220 nm")
+    ax.set_title("Multi-band slab modes - SOI 220 nm")
     ax.legend(fontsize="small", loc="upper right")
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
@@ -472,7 +472,7 @@ for parity in parities:
         print(f"  {parity:10s}: not found ({exc})")
 
 # %% [markdown]
-# ## Part 4 -- Validation
+# ## Part 4 - Validation
 
 # %% [markdown]
 # ### Analytical SOI slab benchmark
@@ -693,7 +693,7 @@ for band in range(2, 5):
 
 
 # %% [markdown]
-# ## Part 5 -- Parameter Studies
+# ## Part 5 - Parameter Studies
 
 # %% [markdown]
 # ### Core thickness sweep
@@ -736,9 +736,9 @@ fig.tight_layout()
 # | Simulation wrapper | `sim.solve_mode(port=..., wavelength=...)` |
 # | Z-grid utility | `mode_z_grid(stack, n_points)` |
 # | Index profile | `refractive_index_profile(stack, z_grid, wavelength)` |
-# | Field profiles | `result.fields["Ey"]` -- 1D complex array along *z* |
+# | Field profiles | `result.fields["Ey"]` - 1D complex array along *z* |
 # | Dispersion sweep | Loop over wavelengths -> n_eff(lambda) |
-# | Group index | `result.n_group` -- direct from `mode.group_velocity` |
+# | Group index | `result.n_group` - direct from `mode.group_velocity` |
 # | Multi-band | `band_num=1, 2, 3, ...` |
 # | Parity modes | `parity="EVEN_Y"` etc. |
 # | Core thickness sweep | Vary `layer.thickness` on a copy of the stack -> n_eff(t) |
