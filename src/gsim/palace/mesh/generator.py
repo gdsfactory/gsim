@@ -51,7 +51,12 @@ def _collect_pec_surface_lines(groups: dict) -> list[int]:
     pipeline may merge the conductor's boundary curves into the volume edges.
     This helper queries the live gmsh model for the boundary curves of each
     PEC surface and returns those that are valid dim-1 entities.
+
+    Requires an active gmsh session.  Silently returns an empty list when
+    gmsh has not been initialized (e.g. during unit tests with mocked geometry).
     """
+    if not gmsh.isInitialized():
+        return []
     lines: list[int] = []
     for surface_info in groups.get("pec_surfaces", {}).values():
         for stag in surface_info.get("tags", []):
@@ -77,8 +82,11 @@ def _get_domain_bbox(tol: float = 1e-3) -> tuple[float, float, float, float]:
     Uses the overall bounding box of all entities; any volume that spans
     the full domain (airbox, vacuum, substrate) determines the extents.
 
-    If gmsh is empty (e.g. unit tests), falls back to a zero-sized box.
+    If gmsh has not been initialized (e.g. unit tests), falls back to a
+    zero-sized box without emitting gmsh error noise.
     """
+    if not gmsh.isInitialized():
+        return (0.0, 0.0, 0.0, 0.0)
     try:
         xmin, ymin, _zmin, xmax, ymax, _zmax = gmsh.model.getBoundingBox(-1, -1)
     except Exception:
@@ -97,7 +105,12 @@ def _line_on_domain_boundary(
     endpoints sit on the same domain wall (x=xmin, x=xmax, y=ymin,
     or y=ymax).  This filters out large planar ground-plane sheets whose
     outer perimeter is just the simulation box outline.
+
+    Silently returns False when gmsh has not been initialized (e.g.
+    during unit tests with mocked geometry).
     """
+    if not gmsh.isInitialized():
+        return False
     try:
         tmin, tmax = gmsh.model.getParametrizationBounds(1, line_tag)
         p1 = gmsh.model.getValue(1, line_tag, tmin)
