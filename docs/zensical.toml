@@ -28,7 +28,7 @@ nav = [
     { "Cloud" = "api/cloud.md" }
   ] }
 ]
-site_dir = "../site"
+site_dir = "site"
 site_name = "gsim"
 site_url = "https://gdsfactory.com/gsim"
 

@@ -81,7 +81,7 @@ tree:
   @tree -a -I .git --gitignore
 
 clean: nbclean-all
-  rm -rf site
+  rm -rf site docs/site
   rm -rf .venv
   rm -f uv.lock
   rm -rf docs/nbs/*
