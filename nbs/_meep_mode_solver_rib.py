@@ -65,7 +65,7 @@ gf.gpdk.PDK.activate()
 # at the port Y-position to reconstruct the 2D (X,Z) geometry.
 
 # %%
-SLAB_WIDTH = 3.0  # um
+SLAB_WIDTH = 2.0  # um
 RIB_WIDTH = 0.5  # um
 LENGTH = 10.0  # um
 
@@ -105,9 +105,9 @@ layers = {
     "ox": Layer(
         name="box",
         gds_layer=(0, 0),
-        zmin=-1.0,
+        zmin=-1,
         zmax=0.0,
-        thickness=2.0,
+        thickness=1.0,
         material="sio2",
         layer_type="dielectric",
     ),
@@ -144,13 +144,26 @@ for name, l in stack.layers.items():
 # %%
 WAVELENGTH = 1.55  # um
 RESOLUTION = 64
+pml_thickness = 0 * WAVELENGTH
 
-y_span = SLAB_WIDTH  # port width + margin
-z_span = 2.22
-z_margin = (0, 1)
-y_grid = mode_y_grid(n_points=max(round(y_span * RESOLUTION), 1), y_span=y_span)
+y_span = SLAB_WIDTH
+z_margin = (0, 0.5)  # asymmetric: 0 below, 0.5 above
+
+z_min = min(l.zmin for l in stack.layers.values())
+z_max = max(l.zmax for l in stack.layers.values())
+actual_y_span = y_span + 2 * pml_thickness
+actual_z_span = (z_max - z_min) + z_margin[0] + z_margin[1] + 2 * pml_thickness
+
+y_grid = mode_y_grid(
+    n_points=max(round(actual_y_span * RESOLUTION), 1),
+    y_span=y_span,
+    pml_thickness=pml_thickness,
+)
 z_grid = mode_z_grid(
-    stack, n_points=max(round(z_span * RESOLUTION), 1), z_margin=z_margin
+    stack,
+    n_points=max(round(actual_z_span * RESOLUTION), 1),
+    z_margin=z_margin,
+    pml_thickness=pml_thickness,
 )
 result = solve_cross_section_mode(
     component=c,
@@ -163,6 +176,7 @@ result = solve_cross_section_mode(
     field_y_grid=y_grid,
     field_z_grid=z_grid,
     z_margin=z_margin,
+    pml_thickness=pml_thickness,
 )
 
 print(f"n_eff    = {result.n_eff:.6f}")
@@ -181,9 +195,9 @@ for comp, arr in result.fields.items():
 # %%
 y_um = y_grid
 z_um = z_grid
+# Right: refractive index distribution
 
-dom_comp = max(result.fields, key=lambda k: np.abs(result.fields[k]).max())
-field_2d = np.abs(result.fields[dom_comp])
+fig, ax2 = plt.subplots(1, 1, figsize=(7, 5))
 n_yz = refractive_index_profile(
     stack,
     WAVELENGTH,
@@ -193,20 +207,6 @@ n_yz = refractive_index_profile(
     port="o1",
 )
 
-nz, ny = field_2d.shape
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-# Left: field amplitude
-im = ax1.pcolormesh(y_um, z_um, field_2d, shading="auto", cmap="inferno")
-im2 = ax1.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="Greys", alpha=0.1)
-plt.colorbar(im, ax=ax1, label=f"|{dom_comp}| (arb. units)")
-ax1.set_xlabel("y (um)")
-ax1.set_ylabel("z (um)")
-ax1.set_title(f"|{dom_comp}|  n_eff={result.n_eff:.4f}")
-ax1.set_aspect("equal")
-
-# Right: refractive index distribution
 
 im2 = ax2.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="rainbow", alpha=0.85)
 plt.colorbar(im2, ax=ax2, label="n")
@@ -215,10 +215,27 @@ ax2.set_ylabel("z (um)")
 ax2.set_title("Refractive index")
 ax2.set_aspect("equal")
 
-fig.suptitle(
-    f"Rib waveguide fundamental TE mode  "
-    f"(lambda={WAVELENGTH:.2f} um, slab={SLAB_WIDTH:.1f}um, rib={RIB_WIDTH:.1f}um)",
-    fontweight="bold",
-)
-fig.tight_layout()
+
+for dom_comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
+    # dom_comp = max(result.fields, key=lambda k: np.abs(result.fields[k]).max())
+    field_2d = np.abs(result.fields[dom_comp])
+    nz, ny = field_2d.shape
+
+    fig, ax1 = plt.subplots(1, 1, figsize=(7, 5))
+
+    # Field amplitude
+    im = ax1.pcolormesh(y_um, z_um, field_2d, shading="auto", cmap="inferno")
+    im2 = ax1.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="Greys", alpha=0.1)
+    plt.colorbar(im, ax=ax1, label=f"|{dom_comp}| (arb. units)")
+    ax1.set_xlabel("y (um)")
+    ax1.set_ylabel("z (um)")
+    ax1.set_title(f"|{dom_comp}|  n_eff={result.n_eff:.4f}")
+    ax1.set_aspect("equal")
+
+    fig.suptitle(
+        f"Rib waveguide fundamental TE mode  \n"
+        f"(lambda={WAVELENGTH:.2f} um, slab={SLAB_WIDTH:.1f}um, rib={RIB_WIDTH:.1f}um)",
+        fontweight="bold",
+    )
+    fig.tight_layout()
 plt.show()

@@ -237,7 +237,7 @@ class TestModeZGrid:
     """Unit tests for mode_z_grid — no meep required."""
 
     def test_z_grid_bounds_and_length(self):
-        """Z-grid spans stack extent and has correct length."""
+        """Z-grid spans stack extent in absolute coordinates."""
         from gsim.common.stack.extractor import Layer, LayerStack
         from gsim.meep.mode_solver import mode_z_grid
 
@@ -265,12 +265,11 @@ class TestModeZGrid:
         z_grid = mode_z_grid(stack, n_points=100)
 
         assert len(z_grid) == 100
-        assert z_grid[0] < -1.0  # near bottom of cell
-        assert z_grid[-1] > 1.0  # near top of cell
+        assert z_grid[0] < -1.9  # near z_min = -2.0
+        assert z_grid[-1] > 0.2  # near z_max = 0.22
 
-    def test_z_grid_centred(self):
-        """Z-grid is centred on stack midpoint (zero-mean)."""
-        import numpy as np
+    def test_z_grid_absolute_coords(self):
+        """Z-grid values match absolute layer extents + margins."""
 
         from gsim.common.stack.extractor import Layer, LayerStack
         from gsim.meep.mode_solver import mode_z_grid
@@ -296,11 +295,52 @@ class TestModeZGrid:
             ),
         }
         stack = LayerStack(layers=layers)
-        z_grid = mode_z_grid(stack, n_points=200)
+        z_grid = mode_z_grid(stack, n_points=200, z_margin=(0.5, 0.5))
 
-        # Origin should be at stack midpoint: (-2 + 0.22)/2 = -0.89
-        # So grid is roughly symmetric around 0
-        assert abs(np.mean(z_grid)) < 0.1
+        z_min = -2.0
+        z_max = 0.22
+        zm_bottom, zm_top = 0.5, 0.5
+        expected_bottom = z_min - zm_bottom
+        expected_top = z_max + zm_top
+        assert z_grid[0] < -2.4  # below z_min - zm_bottom
+        assert z_grid[-1] > 0.6  # above z_max + zm_top
+        assert abs(z_grid[0] - expected_bottom) < 0.05
+        assert abs(z_grid[-1] - expected_top) < 0.05
+
+    def test_asymmetric_z_margin_grid_coverage(self):
+        """Asymmetric z_margin gives correct start/end bounds."""
+
+        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.mode_solver import mode_z_grid
+
+        layers = {
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-2.0,
+                zmax=0.0,
+                thickness=2.0,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=0.22,
+                thickness=0.22,
+                material="si",
+                layer_type="dielectric",
+            ),
+        }
+        stack = LayerStack(layers=layers)
+        z_grid = mode_z_grid(stack, n_points=200, z_margin=(0, 0.5))
+
+        z_min, z_max = -2.0, 0.22
+        expected_bottom = z_min  # margin_bottom = 0
+        expected_top = z_max + 0.5
+        assert abs(z_grid[0] - expected_bottom) < 0.05
+        assert abs(z_grid[-1] - expected_top) < 0.05
 
 
 class TestRefractiveIndexProfile:
@@ -377,14 +417,7 @@ class TestRefractiveIndexProfile:
         z_grid = mode_z_grid(stack, n_points=200)
         n_profile = refractive_index_profile(stack, 1.55, z_grid=z_grid)
 
-        # Core is at z=0 to z=0.22, shifted by z_center
-        z_min = -2.0
-        z_max = 0.22
-        z_center = (z_min + z_max) / 2.0  # -0.89
-        core_z_lo = 0.0 - z_center  # 0.89
-        core_z_hi = 0.22 - z_center  # 1.11
-
-        core_mask = (z_grid >= core_z_lo) & (z_grid < core_z_hi)
+        core_mask = (z_grid >= 0.0) & (z_grid < 0.22)
         box_mask = ~core_mask
 
         assert np.mean(n_profile[core_mask]) > np.mean(n_profile[box_mask])
