@@ -19,10 +19,10 @@
 # All three produce identical `Simulation` objects — pick whichever reads best for your use case.
 
 # %%
-from ubcpdk import PDK, cells
+import gdsfactory as gf
 
-PDK.activate()
-c = cells.ebeam_y_1550()
+gf.gpdk.PDK.activate()
+c = gf.components.mmi1x2()
 
 # %% [markdown]
 # ## 1. Callable style (recommended)

@@ -25,17 +25,17 @@
 # %%
 from pathlib import Path
 
+import gdsfactory as gf
 import gdsfactory.component as gfc
-from ubcpdk import PDK, cells
 
 # Use a workspace-local temp path for layer preview artifacts.
 gds_tmp = Path.cwd() / ".gdsfactory_tmp"
 gds_tmp.mkdir(parents=True, exist_ok=True)
 gfc.GDSDIR_TEMP = gds_tmp
 
-PDK.activate()
+gf.gpdk.PDK.activate()
 
-c = cells.coupler()
+c = gf.components.coupler()
 
 cc = c.copy()
 cc.draw_ports()
@@ -81,8 +81,6 @@ sim.set_driven(fmin=190e12, fmax=200e12, num_points=21)
 print(sim.validate_config())
 
 # %%
-import gdsfactory as gf
-
 active = gf.get_active_pdk()
 print("Active PDK:", active.name)
 
