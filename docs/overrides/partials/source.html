@@ -1,0 +1,20 @@
+<style>
+  /* Invert the white gdsfactory wordmark to dark in light mode so it stays visible. */
+  [data-md-color-scheme="default"] .md-source img {
+    filter: invert(1);
+  }
+</style>
+<a
+  href="{{ config.repo_url }}"
+  title="{{ config.repo_name }}"
+  class="md-source"
+  data-md-component="source"
+  target="_blank"
+  rel="noopener"
+>
+  <img
+    src="https://gdsfactory.com/static/images/GDSF_logo.png"
+    alt="{{ config.repo_name }}"
+    style="height: 0.8rem; width: auto; display: block"
+  />
+</a>
