@@ -19,7 +19,8 @@ nav = [
     { "QPDK Resonator" = "nbs/palace_qpdk_resonator.md" },
     { "Inductor" = "nbs/palace_inductor.md" },
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
-    { "Field Visualization" = "nbs/palace_cpw_fields.md" }
+    { "Field Visualization" = "nbs/palace_cpw_fields.md" },
+    { "T-Bar CPW Electrode MZM" = "nbs/palace_mzm.md" }
   ] },
   { "API Reference" = [
     { "Palace" = "api/palace.md" },
