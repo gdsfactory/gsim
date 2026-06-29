@@ -141,9 +141,9 @@ def test_add_dielectrics_margin_applies_only_to_airlike(monkeypatch) -> None:
         _Kernel(), geometry, stack, margin_x=5.0, margin_y=7.0, air_margin=0.0
     )
 
-    # SiO2 (substrate starting at z=-2 < 0) and air expand by margins.
-    # Passivation (thin film on top) keeps original bbox.
-    assert calls[0] == (-5.0, -7.0, -2.0, 15.0, 27.0, 0.5)
+    # Only air-like regions expand by margins.
+    # Non-air dielectrics keep original design footprint.
+    assert calls[0] == (0.0, 0.0, -2.0, 10.0, 20.0, 0.5)
     assert calls[1] == (-5.0, -7.0, 0.5, 15.0, 27.0, 8.0)
     assert calls[2] == (0.0, 0.0, 8.0, 10.0, 20.0, 9.0)
 

@@ -275,6 +275,64 @@ class EigenmodeConfig(BaseModel):
         return config
 
 
+class BoundaryModeConfig(BaseModel):
+    """Configuration for 2D boundary mode (waveguide cross-section) simulation.
+
+    Attributes:
+        freq: Operating frequency in Hz.
+        num_modes: Number of propagation modes to compute.
+        save: Number of modes to save as ParaView fields (0 = disabled).
+        target: Target effective index for shift-and-invert (0 = auto).
+        tolerance: Relative convergence tolerance for the eigensolver.
+        max_size: Maximum eigensolver subspace size (0 = default).
+        solver_type: Palace eigensolver type.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    freq: float = Field(default=5e9, gt=0, description="Operating frequency in Hz")
+    num_modes: int = Field(default=1, ge=1, description="Number of modes to compute")
+    save: int = Field(
+        default=0,
+        ge=0,
+        description="Number of modes to save as ParaView fields",
+    )
+    target: float = Field(
+        default=0.0,
+        description="Target effective index (0 = automatic shift)",
+    )
+    tolerance: float = Field(
+        default=1e-6,
+        gt=0,
+        description="Relative convergence tolerance",
+    )
+    max_size: int = Field(
+        default=0,
+        ge=0,
+        description="Maximum eigensolver subspace size (0 = default)",
+    )
+    solver_type: str = Field(
+        default="Default",
+        description="Palace eigensolver type for BoundaryMode",
+    )
+
+    def to_palace_config(self) -> dict:
+        """Convert to Palace JSON config format."""
+        config: dict[str, object] = {
+            "Freq": self.freq / 1e9,
+            "N": self.num_modes,
+            "Save": self.save,
+            "Target": self.target,
+            "Tol": self.tolerance,
+            "Type": self.solver_type,
+        }
+        if (
+            self.max_size > 0
+        ):  # Even when the default is zero, passing it explicitly makes Palace fail
+            config["MaxSize"] = self.max_size
+        return config
+
+
 class ElectrostaticConfig(BaseModel):
     """Configuration for electrostatic (capacitance matrix) simulation.
 
@@ -352,6 +410,7 @@ class TransientConfig(BaseModel):
 
 
 __all__ = [
+    "BoundaryModeConfig",
     "DrivenConfig",
     "EigenmodeConfig",
     "ElectrostaticConfig",

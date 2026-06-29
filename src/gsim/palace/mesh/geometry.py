@@ -37,6 +37,180 @@ class GeometryData:
     layer_bboxes: dict  # layer_num -> (xmin, ymin, xmax, ymax)
 
 
+@dataclass(frozen=True)
+class DielectricRegion:
+    """Resolved dielectric region used by mesh geometry builders.
+
+    Attributes:
+        name: Region name from stack.dielectrics (for diagnostics only).
+        material: Material key used for Palace grouping.
+        xmin/ymin/xmax/ymax: XY box extents in um.
+        zmin/zmax: Z extents in um.
+    """
+
+    name: str
+    material: str
+    xmin: float
+    ymin: float
+    xmax: float
+    ymax: float
+    zmin: float
+    zmax: float
+
+
+def resolve_dielectric_regions(
+    geometry: GeometryData,
+    stack: LayerStack,
+    margin_x: float,
+    margin_y: float | None = None,
+    air_margin: float = 0.0,
+    airbox_margin_x: float | None = None,
+    airbox_margin_y: float | None = None,
+    airbox_z_above: float | None = None,
+    airbox_z_below: float | None = None,
+) -> list[DielectricRegion]:
+    """Resolve dielectric/airbox regions exactly as the 3D pipeline does.
+
+    This is the source of truth for background dielectric boxes in Palace
+    meshing. It is shared by both 3D and native 2D mesh builders so stack
+    material selection stays consistent across solvers.
+    """
+    if margin_y is None:
+        margin_y = margin_x
+
+    if airbox_margin_x is None:
+        airbox_margin_x = air_margin
+    if airbox_margin_y is None:
+        airbox_margin_y = air_margin
+    if airbox_z_above is None:
+        airbox_z_above = air_margin
+    if airbox_z_below is None:
+        airbox_z_below = air_margin
+
+    xmin0, ymin0, xmax0, ymax0 = geometry.bbox
+    xmin_air = xmin0 - margin_x
+    ymin_air = ymin0 - margin_y
+    xmax_air = xmax0 + margin_x
+    ymax_air = ymax0 + margin_y
+
+    def _contains_air_token(name: str | None) -> bool:
+        if not name:
+            return False
+
+        normalized = name.strip().lower().replace("-", "_")
+        if normalized in {"air", "vacuum"}:
+            return True
+
+        tokens = [tok for tok in normalized.split("_") if tok]
+        return "air" in tokens or "vacuum" in tokens
+
+    def _is_air_or_vacuum(
+        material_name: str,
+        dielectric_name: str | None = None,
+    ) -> bool:
+        mat = stack.materials.get(material_name)
+        if isinstance(mat, dict):
+            mat_type = str(mat.get("type", "")).strip().lower()
+            eps = mat.get("permittivity")
+        else:
+            mat_type = str(getattr(mat, "type", "")).strip().lower()
+            eps = getattr(mat, "permittivity", None)
+
+        if mat_type == "dielectric":
+            try:
+                if eps is not None and abs(float(eps) - 1.0) <= 1e-9:
+                    return True
+            except (TypeError, ValueError):
+                pass
+
+        if _contains_air_token(material_name):
+            return True
+
+        return _contains_air_token(dielectric_name)
+
+    z_min_all = math.inf
+    z_max_all = -math.inf
+
+    use_airbox = any(
+        m > 0.0
+        for m in (
+            airbox_margin_x,
+            airbox_margin_y,
+            airbox_z_above,
+            airbox_z_below,
+        )
+    )
+
+    regions: list[DielectricRegion] = []
+    for dielectric in stack.dielectrics:
+        dielectric_name = str(dielectric.get("name", "dielectric"))
+        material = str(dielectric["material"])
+
+        is_air_like = _is_air_or_vacuum(material, dielectric_name=dielectric_name)
+        if is_air_like and use_airbox:
+            continue
+
+        d_zmin = float(dielectric["zmin"])
+        d_zmax = float(dielectric["zmax"])
+        if d_zmax <= d_zmin:
+            continue
+
+        z_min_all = min(z_min_all, d_zmin)
+        z_max_all = max(z_max_all, d_zmax)
+
+        xmin = xmin_air if is_air_like else xmin0
+        ymin = ymin_air if is_air_like else ymin0
+        xmax = xmax_air if is_air_like else xmax0
+        ymax = ymax_air if is_air_like else ymax0
+
+        regions.append(
+            DielectricRegion(
+                name=dielectric_name,
+                material=material,
+                xmin=xmin,
+                ymin=ymin,
+                xmax=xmax,
+                ymax=ymax,
+                zmin=d_zmin,
+                zmax=d_zmax,
+            )
+        )
+
+    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+        for layer in stack.layers.values():
+            z_min_all = min(z_min_all, layer.zmin)
+            z_max_all = max(z_max_all, layer.zmax)
+
+    if use_airbox:
+        if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+            raise ValueError(
+                "Cannot create airbox because stack z extents could not be resolved"
+            )
+
+        if (
+            airbox_margin_x is None
+            or airbox_margin_y is None
+            or airbox_z_above is None
+            or airbox_z_below is None
+        ):
+            raise ValueError("Explicit airbox margins must all be provided")
+
+        regions.append(
+            DielectricRegion(
+                name="airbox",
+                material="airbox",
+                xmin=xmin_air - airbox_margin_x,
+                ymin=ymin_air - airbox_margin_y,
+                xmax=xmax_air + airbox_margin_x,
+                ymax=ymax_air + airbox_margin_y,
+                zmin=z_min_all - airbox_z_below,
+                zmax=z_max_all + airbox_z_above,
+            )
+        )
+
+    return regions
+
+
 def extract_geometry(
     component, stack: LayerStack, *, decimate_tolerance: float | None = None
 ) -> GeometryData:
@@ -756,168 +930,30 @@ def add_dielectrics(
     Returns:
         Dict with material_name -> list of volume_tags
     """
-    if margin_y is None:
-        margin_y = margin_x
-
-    if airbox_margin_x is None:
-        airbox_margin_x = air_margin
-    if airbox_margin_y is None:
-        airbox_margin_y = air_margin
-    if airbox_z_above is None:
-        airbox_z_above = air_margin
-    if airbox_z_below is None:
-        airbox_z_below = air_margin
-
     dielectric_tags: dict[str, list[int]] = {}
-
-    xmin0, ymin0, xmax0, ymax0 = geometry.bbox
-    xmin_air = xmin0 - margin_x
-    ymin_air = ymin0 - margin_y
-    xmax_air = xmax0 + margin_x
-    ymax_air = ymax0 + margin_y
-
-    def _contains_air_token(name: str | None) -> bool:
-        """Return True when *name* clearly denotes air/vacuum."""
-        if not name:
-            return False
-
-        normalized = name.strip().lower().replace("-", "_")
-        if normalized in {"air", "vacuum"}:
-            return True
-
-        tokens = [tok for tok in normalized.split("_") if tok]
-        return "air" in tokens or "vacuum" in tokens
-
-    def _is_air_or_vacuum(
-        material_name: str,
-        dielectric_name: str | None = None,
-    ) -> bool:
-        """Return True when *material_name* represents air/vacuum.
-
-        Uses stack material metadata (permittivity ~1) first, then
-        falls back to name matching for robustness with custom stacks.
-        """
-        mat = stack.materials.get(material_name)
-        if isinstance(mat, dict):
-            mat_type = str(mat.get("type", "")).strip().lower()
-            eps = mat.get("permittivity")
-        else:
-            mat_type = str(getattr(mat, "type", "")).strip().lower()
-            eps = getattr(mat, "permittivity", None)
-
-        if mat_type == "dielectric":
-            try:
-                if eps is not None and abs(float(eps) - 1.0) <= 1e-9:
-                    return True
-            except (TypeError, ValueError):
-                pass
-
-        if _contains_air_token(material_name):
-            return True
-
-        return _contains_air_token(dielectric_name)
-
-    z_min_all = math.inf
-    z_max_all = -math.inf
-
-    use_airbox = any(
-        m > 0.0
-        for m in (
-            airbox_margin_x,
-            airbox_margin_y,
-            airbox_z_above,
-            airbox_z_below,
-        )
+    regions = resolve_dielectric_regions(
+        geometry,
+        stack,
+        margin_x,
+        margin_y,
+        air_margin,
+        airbox_margin_x=airbox_margin_x,
+        airbox_margin_y=airbox_margin_y,
+        airbox_z_above=airbox_z_above,
+        airbox_z_below=airbox_z_below,
     )
 
-    for dielectric in stack.dielectrics:
-        dielectric_name = dielectric.get("name")
-        material = dielectric["material"]
-
-        is_air_like = _is_air_or_vacuum(material, dielectric_name=dielectric_name)
-
-        # When building an explicit airbox, skip explicit air/vacuum layers.
-        if is_air_like and use_airbox:
-            continue
-
-        d_zmin = dielectric["zmin"]
-        d_zmax = dielectric["zmax"]
-
-        z_min_all = min(z_min_all, d_zmin)
-        z_max_all = max(z_max_all, d_zmax)
-
-        dielectric_tags.setdefault(material, [])
-
-        xmin = xmin_air if is_air_like else xmin0
-        ymin = ymin_air if is_air_like else ymin0
-        xmax = xmax_air if is_air_like else xmax0
-        ymax = ymax_air if is_air_like else ymax0
-
-        # When shaped dielectrics exist, ALL non-air dielectric boxes must
-        # extend to the air margins.  A shaped dielectric (e.g. waveguide
-        # core) carves out of the surrounding oxide/substrate boxes, so those
-        # boxes need to be large enough to fully surround the shaped volume.
-        #
-        # Also extend substrates (dielectrics starting at z ~ 0) to margins.
-        # A bulk substrate like sapphire or silicon should fill the same
-        # transverse extent as the surrounding air so the mesh domain is
-        # consistent and the substrate edge does not artificially truncate
-        # fields.
-        is_bulk_substrate = d_zmin <= 1e-6
-        if (
-            is_bulk_substrate or _detect_shaped_dielectric_layers(geometry, stack)
-        ) and not is_air_like:
-            xmin = xmin_air
-            ymin = ymin_air
-            xmax = xmax_air
-            ymax = ymax_air
-
+    for region in regions:
         box_tag = gmsh_utils.create_box(
             kernel,
-            xmin,
-            ymin,
-            d_zmin,
-            xmax,
-            ymax,
-            d_zmax,
+            region.xmin,
+            region.ymin,
+            region.zmin,
+            region.xmax,
+            region.ymax,
+            region.zmax,
         )
-        dielectric_tags[material].append(box_tag)
-
-    # Resolve stack z envelope even if dielectric list is sparse.
-    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-        for layer in stack.layers.values():
-            z_min_all = min(z_min_all, layer.zmin)
-            z_max_all = max(z_max_all, layer.zmax)
-
-    # Explicit single airbox (boolean pipeline handles overlap/subtraction).
-    if use_airbox:
-        if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-            raise ValueError(
-                "Cannot create airbox because stack z extents could not be resolved"
-            )
-
-        airbox_x = airbox_margin_x
-        airbox_y = airbox_margin_y
-        airbox_above = airbox_z_above
-        airbox_below = airbox_z_below
-        if (
-            airbox_x is None
-            or airbox_y is None
-            or airbox_above is None
-            or airbox_below is None
-        ):
-            raise ValueError("Explicit airbox margins must all be provided")
-
-        airbox_tag = gmsh_utils.create_box(
-            kernel,
-            xmin_air - airbox_margin_x,
-            ymin_air - airbox_margin_y,
-            z_min_all - airbox_z_below,
-            xmax_air + airbox_margin_x,
-            ymax_air + airbox_margin_y,
-            z_max_all + airbox_z_above,
-        )
-        dielectric_tags["airbox"] = [airbox_tag]
+        dielectric_tags.setdefault(region.material, []).append(box_tag)
 
     kernel.synchronize()
 

@@ -14,10 +14,10 @@ groups:
   - P4
   volumes:
   - air
-  - si
   - sin
+  - sio2
 mesh:
-  elements: 23487
+  elements: 23486
   invalid_elements: 0
-  nodes: 3063
-  tetrahedra: 15891
+  nodes: 3062
+  tetrahedra: 15890

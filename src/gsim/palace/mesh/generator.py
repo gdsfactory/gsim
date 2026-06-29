@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from dataclasses import dataclass, field
@@ -26,13 +27,20 @@ from .geometry import (
     add_ports,
     build_entities,
     extract_geometry,
+    resolve_dielectric_regions,
     resolve_mesh_domain_bounds,
 )
 from .groups import assign_physical_groups
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
-    from gsim.palace.models import DrivenConfig, EigenmodeConfig, NumericalConfig
+    from gsim.palace.models import (
+        BoundaryModeConfig,
+        CrossSectionPlaneConfig,
+        DrivenConfig,
+        EigenmodeConfig,
+        NumericalConfig,
+    )
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
 
@@ -135,6 +143,391 @@ class MeshResult:
     model_name: str = "palace"
     fmax: float = 100e9
     periodic_axis: str | None = None
+
+
+def _extract_native_boundarymode_rectangles(
+    component,
+    stack: LayerStack,
+    cross_section: CrossSectionPlaneConfig,
+) -> list[dict[str, float | str]]:
+    """Return axis-mapped 2D rectangles from the solver-agnostic section API."""
+    from gsim.common import cross_section as section_utils
+
+    section = section_utils.extract_plane_section(
+        component,
+        stack,
+        axis=cross_section.axis,
+        value=cross_section.value,
+    )
+
+    rects: list[dict[str, float | str]] = []
+    if cross_section.axis == "x":
+        for rect in section:
+            y0 = getattr(rect, "y0", None)
+            y1 = getattr(rect, "y1", None)
+            z0 = getattr(rect, "zmin", None)
+            z1 = getattr(rect, "zmax", None)
+            if y0 is None or y1 is None or z0 is None or z1 is None:
+                continue
+            y0 = float(y0)
+            y1 = float(y1)
+            z0 = float(z0)
+            z1 = float(z1)
+            if y1 <= y0 or z1 <= z0:
+                continue
+            rects.append(
+                {
+                    "layer_name": str(getattr(rect, "layer_name", "layer")),
+                    "h0": y0,
+                    "h1": y1,
+                    "v0": z0,
+                    "v1": z1,
+                }
+            )
+    elif cross_section.axis == "y":
+        for rect in section:
+            x0 = getattr(rect, "x0", None)
+            x1 = getattr(rect, "x1", None)
+            z0 = getattr(rect, "zmin", None)
+            z1 = getattr(rect, "zmax", None)
+            if x0 is None or x1 is None or z0 is None or z1 is None:
+                continue
+            x0 = float(x0)
+            x1 = float(x1)
+            z0 = float(z0)
+            z1 = float(z1)
+            if x1 <= x0 or z1 <= z0:
+                continue
+            rects.append(
+                {
+                    "layer_name": str(getattr(rect, "layer_name", "layer")),
+                    "h0": x0,
+                    "h1": x1,
+                    "v0": z0,
+                    "v1": z1,
+                }
+            )
+    else:
+        raise ValueError(
+            "Boundary mode native 2D currently supports only x/y cross sections."
+        )
+
+    return rects
+
+
+def _curve_on_native_2d_domain_wall(
+    curve_tag: int,
+    hmin: float,
+    vmin: float,
+    hmax: float,
+    vmax: float,
+    tol: float = 1e-6,
+) -> bool:
+    """Return True when a curve lies on the outer 2D domain boundary."""
+    try:
+        xmin, ymin, _zmin, xmax, ymax, _zmax = gmsh.model.getBoundingBox(1, curve_tag)
+    except Exception:
+        return False
+
+    on_hmin = abs(xmin - hmin) <= tol and abs(xmax - hmin) <= tol
+    on_hmax = abs(xmin - hmax) <= tol and abs(xmax - hmax) <= tol
+    on_vmin = abs(ymin - vmin) <= tol and abs(ymax - vmin) <= tol
+    on_vmax = abs(ymin - vmax) <= tol and abs(ymax - vmax) <= tol
+    return on_hmin or on_hmax or on_vmin or on_vmax
+
+
+def _generate_native_boundarymode_groups(
+    *,
+    kernel,
+    component,
+    geometry: GeometryData,
+    stack: LayerStack,
+    cross_section: CrossSectionPlaneConfig,
+    margin_x: float,
+    margin_y: float,
+    air_margin: float,
+    airbox_margin_x: float | None,
+    airbox_margin_y: float | None,
+    airbox_z_above: float | None,
+    airbox_z_below: float | None,
+) -> dict:
+    """Build a native 2D gmsh model and groups for BoundaryMode."""
+    if cross_section.axis not in {"x", "y"}:
+        raise ValueError(
+            "Boundary mode native 2D currently supports only x/y cross sections."
+        )
+
+    section_rects = _extract_native_boundarymode_rectangles(
+        component=component,
+        stack=stack,
+        cross_section=cross_section,
+    )
+    if not section_rects:
+        raise ValueError(
+            f"Cross section '{cross_section.spec}' does not intersect any stack layer "
+            "regions."
+        )
+
+    bounds = resolve_mesh_domain_bounds(
+        geometry,
+        stack,
+        margin_x=margin_x,
+        margin_y=margin_y,
+        air_margin=air_margin,
+        airbox_margin_x=airbox_margin_x,
+        airbox_margin_y=airbox_margin_y,
+        airbox_z_above=airbox_z_above,
+        airbox_z_below=airbox_z_below,
+    )
+
+    if cross_section.axis == "x":
+        hmin, hmax = bounds[1], bounds[4]
+    else:
+        hmin, hmax = bounds[0], bounds[3]
+    vmin, vmax = bounds[2], bounds[5]
+
+    if hmax <= hmin or vmax <= vmin:
+        raise ValueError("Native BoundaryMode 2D domain has invalid bounds.")
+
+    outer_surface = kernel.addRectangle(hmin, vmin, 0.0, hmax - hmin, vmax - vmin)
+    layer_inputs: list[tuple[str, int]] = []
+
+    for rect in section_rects:
+        h0 = float(rect["h0"])
+        h1 = float(rect["h1"])
+        v0 = float(rect["v0"])
+        v1 = float(rect["v1"])
+        if h1 <= h0 or v1 <= v0:
+            continue
+        stag = kernel.addRectangle(h0, v0, 0.0, h1 - h0, v1 - v0)
+        layer_inputs.append((str(rect["layer_name"]), stag))
+
+    # Reuse the 3D dielectric-region resolver so native 2D picks the same
+    # background stack materials as the volumetric pipeline.
+    for region in resolve_dielectric_regions(
+        geometry,
+        stack,
+        margin_x,
+        margin_y,
+        air_margin,
+        airbox_margin_x=airbox_margin_x,
+        airbox_margin_y=airbox_margin_y,
+        airbox_z_above=airbox_z_above,
+        airbox_z_below=airbox_z_below,
+    ):
+        if region.material == "airbox":
+            continue
+
+        if cross_section.axis == "x":
+            rh0 = float(region.ymin)
+            rh1 = float(region.ymax)
+        else:
+            rh0 = float(region.xmin)
+            rh1 = float(region.xmax)
+
+        h0 = max(rh0, hmin)
+        h1 = min(rh1, hmax)
+        z0 = max(region.zmin, vmin)
+        z1 = min(region.zmax, vmax)
+        if h1 <= h0 or z1 <= z0:
+            continue
+
+        stag = kernel.addRectangle(h0, z0, 0.0, h1 - h0, z1 - z0)
+        layer_inputs.append((region.material, stag))
+
+    if not layer_inputs:
+        raise ValueError(
+            f"Cross section '{cross_section.spec}' produced no meshing rectangles."
+        )
+
+    _, out_map = kernel.fragment(
+        [(2, outer_surface)],
+        [(2, tag) for _, tag in layer_inputs],
+    )
+    kernel.synchronize()
+
+    groups: dict[str, dict] = {
+        "volumes": {},
+        "conductor_surfaces": {},
+        "pec_surfaces": {},
+        "port_surfaces": {},
+        "boundary_surfaces": {},
+        "refinement_lines": {},
+    }
+
+    outer_parts = {tag for dim, tag in out_map[0] if dim == 2}
+    layer_surfaces: dict[str, set[int]] = {}
+    for idx, (layer_name, _tag) in enumerate(layer_inputs, start=1):
+        pieces = {tag for dim, tag in out_map[idx] if dim == 2}
+        if pieces:
+            layer_surfaces.setdefault(layer_name, set()).update(pieces)
+
+    # A fragment piece can be mapped to multiple parents. For native 2D
+    # conductor-as-boundary behavior, conductor/via pieces must not remain
+    # inside dielectric domain groups.
+    metal_piece_tags: set[int] = set()
+    for layer_name, pieces in layer_surfaces.items():
+        layer = stack.layers.get(layer_name)
+        if layer is not None and layer.layer_type in {"conductor", "via"}:
+            metal_piece_tags.update(pieces)
+
+    if metal_piece_tags:
+        for layer_name, pieces in list(layer_surfaces.items()):
+            layer = stack.layers.get(layer_name)
+            is_metal_like = layer is not None and layer.layer_type in {
+                "conductor",
+                "via",
+            }
+            if is_metal_like:
+                continue
+            filtered = pieces - metal_piece_tags
+            if filtered:
+                layer_surfaces[layer_name] = filtered
+            else:
+                layer_surfaces.pop(layer_name, None)
+
+    def _material_conductivity(layer_name: str) -> float | list[float] | None:
+        layer = stack.layers.get(layer_name)
+        if layer is None:
+            return None
+        mat_props = stack.materials.get(layer.material, {})
+        if isinstance(mat_props, dict):
+            return mat_props.get("conductivity")
+        return getattr(mat_props, "conductivity", None)
+
+    def _is_conductive(value: float | list[float] | None) -> bool:
+        if isinstance(value, list):
+            try:
+                return any(float(v) > 0.0 for v in value)
+            except (TypeError, ValueError):
+                return False
+        if isinstance(value, int | float):
+            return float(value) > 0.0
+        return False
+
+    assigned: set[int] = set()
+
+    for layer_name, surface_tags in sorted(layer_surfaces.items()):
+        sorted_tags = sorted(surface_tags)
+        layer = stack.layers.get(layer_name)
+        is_metal_like = layer is not None and layer.layer_type in {"conductor", "via"}
+
+        # Always consume the conductor interior from air assignment, but do
+        # not export it as a 2D domain material.
+        assigned.update(sorted_tags)
+
+        if not is_metal_like:
+            pg = gmsh.model.addPhysicalGroup(2, sorted_tags)
+            gmsh.model.setPhysicalName(2, pg, layer_name)
+
+            entry: dict[str, object] = {
+                "phys_group": pg,
+                "tags": sorted_tags,
+            }
+            # Only layer-backed dielectric polygons are shaped dielectrics.
+            # Background dielectric slabs (e.g. sio2/sin material regions)
+            # should be treated as regular material domains.
+            if layer is not None and layer.layer_type == "dielectric":
+                entry["is_shaped_dielectric"] = True
+            if layer is not None and layer.layer_type == "via":
+                entry["is_via"] = True
+            groups["volumes"][layer_name] = entry
+            continue
+
+        pec_curves: set[int] = set()
+        for stag in sorted_tags:
+            try:
+                boundaries = gmsh.model.getBoundary(
+                    [(2, stag)],
+                    combined=False,
+                    oriented=False,
+                    recursive=False,
+                )
+            except Exception:
+                continue
+            for dim, ctag in boundaries:
+                if dim == 1:
+                    pec_curves.add(ctag)
+
+        if pec_curves:
+            curve_tags = sorted(pec_curves)
+            sigma = _material_conductivity(layer_name)
+            if _is_conductive(sigma):
+                cond_pg = gmsh.model.addPhysicalGroup(1, curve_tags)
+                gmsh.model.setPhysicalName(1, cond_pg, f"{layer_name}_conductivity")
+                groups["conductor_surfaces"][layer_name] = {
+                    "phys_group": cond_pg,
+                    "tags": curve_tags,
+                }
+            else:
+                pec_pg = gmsh.model.addPhysicalGroup(1, curve_tags)
+                gmsh.model.setPhysicalName(1, pec_pg, f"{layer_name}_pec")
+                groups["pec_surfaces"][layer_name] = {
+                    "phys_group": pec_pg,
+                    "tags": curve_tags,
+                }
+
+    air_tags = sorted(outer_parts - assigned)
+    if air_tags:
+        air_pg = gmsh.model.addPhysicalGroup(2, air_tags)
+        gmsh.model.setPhysicalName(2, air_pg, "air")
+        groups["volumes"]["air"] = {"phys_group": air_pg, "tags": air_tags}
+
+    refinement_curves: set[int] = set()
+    for info in groups["conductor_surfaces"].values():
+        refinement_curves.update(int(t) for t in info.get("tags", []))
+    for info in groups["pec_surfaces"].values():
+        refinement_curves.update(int(t) for t in info.get("tags", []))
+    for vol_info in groups["volumes"].values():
+        for stag in vol_info.get("tags", []):
+            try:
+                boundaries = gmsh.model.getBoundary(
+                    [(2, int(stag))],
+                    combined=False,
+                    oriented=False,
+                    recursive=False,
+                )
+            except Exception:
+                continue
+            for dim, ctag in boundaries:
+                if dim != 1:
+                    continue
+                if _curve_on_native_2d_domain_wall(ctag, hmin, vmin, hmax, vmax):
+                    continue
+                refinement_curves.add(int(ctag))
+
+    if refinement_curves:
+        groups["refinement_lines"]["native_internal_curves"] = {
+            "tags": sorted(refinement_curves)
+        }
+
+    outer_curves: set[int] = set()
+    for stag in outer_parts:
+        try:
+            boundaries = gmsh.model.getBoundary(
+                [(2, stag)],
+                combined=False,
+                oriented=False,
+                recursive=False,
+            )
+        except Exception:
+            continue
+        for dim, ctag in boundaries:
+            if dim != 1:
+                continue
+            if _curve_on_native_2d_domain_wall(ctag, hmin, vmin, hmax, vmax):
+                outer_curves.add(ctag)
+
+    if outer_curves:
+        curve_tags = sorted(outer_curves)
+        outer_pg = gmsh.model.addPhysicalGroup(1, curve_tags)
+        gmsh.model.setPhysicalName(1, outer_pg, "absorbing")
+        groups["boundary_surfaces"]["absorbing"] = {
+            "phys_group": [outer_pg],
+            "tags": curve_tags,
+        }
+
+    return groups
 
 
 def _setup_mesh_fields(
@@ -397,6 +790,8 @@ def generate_mesh(
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
     numerical_config: NumericalConfig | None = None,
+    boundary_mode_config: BoundaryModeConfig | None = None,
+    cross_section: CrossSectionPlaneConfig | None = None,
     write_config: bool = True,
     planar_conductors: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
@@ -437,6 +832,8 @@ def generate_mesh(
         driven_config: Optional DrivenConfig for frequency sweep settings
         eigenmode_config: Optional EigenmodeConfig for eigenmode problems
         numerical_config: Optional NumericalConfig for solver settings
+        boundary_mode_config: Optional BoundaryModeConfig for 2D mode problems
+        cross_section: Explicit x/y cross-section plane for native BoundaryMode
         write_config: Whether to write config.json (default True)
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
@@ -484,6 +881,112 @@ def generate_mesh(
     port_info: list = []
 
     try:
+        if simulation_type == "boundarymode":
+            if ports:
+                raise ValueError(
+                    "Boundary mode uses cross_section-only native 2D meshing and "
+                    "does not support configured ports."
+                )
+            if cross_section is None:
+                raise ValueError(
+                    "Boundary mode requires an explicit cross section. "
+                    "Call set_cross_section('x=<value>') or "
+                    "set_cross_section('y=<value>')."
+                )
+
+            logger.info("Building native 2D BoundaryMode geometry...")
+            groups = _generate_native_boundarymode_groups(
+                kernel=kernel,
+                component=component,
+                geometry=geometry,
+                stack=stack,
+                cross_section=cross_section,
+                margin_x=margin_x,
+                margin_y=margin_y,
+                air_margin=air_margin,
+                airbox_margin_x=airbox_margin_x,
+                airbox_margin_y=airbox_margin_y,
+                airbox_z_above=airbox_z_above,
+                airbox_z_below=airbox_z_below,
+            )
+
+            refinement_lines = sorted(
+                {
+                    int(tag)
+                    for info in groups.get("refinement_lines", {}).values()
+                    for tag in info.get("tags", [])
+                }
+            )
+            if refinement_lines:
+                aggressive_size = max(refined_mesh_size * 0.5, 1e-4)
+                field_id = gmsh_utils.setup_mesh_refinement(
+                    refinement_lines,
+                    aggressive_size,
+                    max_mesh_size,
+                    sampling=400,
+                    dist_max=max_mesh_size * 0.5,
+                )
+                gmsh_utils.finalize_mesh_fields([field_id])
+            else:
+                gmsh.option.setNumber("Mesh.MeshSizeMin", refined_mesh_size)
+                gmsh.option.setNumber("Mesh.MeshSizeMax", max_mesh_size)
+
+            if show_gui:
+                gmsh.fltk.run()
+
+            if high_order_elements:
+                gmsh.option.setNumber("Mesh.ElementOrder", high_order_order)
+                gmsh.option.setNumber("Mesh.SecondOrderLinear", 0)
+                gmsh.option.setNumber(
+                    "Mesh.HighOrderOptimize", 1 if high_order_optimize else 0
+                )
+
+            logger.info("Generating native 2D BoundaryMode mesh...")
+            gmsh.model.mesh.generate(2)
+
+            if high_order_elements:
+                gmsh.model.mesh.setOrder(high_order_order)
+                if high_order_optimize:
+                    with contextlib.suppress(Exception):
+                        gmsh.model.mesh.optimize("HighOrder")
+
+            mesh_stats = collect_mesh_stats()
+
+            gmsh.option.setNumber("Mesh.Binary", 0)
+            gmsh.option.setNumber("Mesh.SaveAll", 0)
+            gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+            gmsh.write(str(msh_path))
+
+            if write_config:
+                config_path = generate_palace_config(
+                    groups,
+                    [],
+                    [],
+                    stack,
+                    output_dir,
+                    model_name,
+                    fmax,
+                    simulation_type,
+                    driven_config,
+                    eigenmode_config,
+                    numerical_config,
+                    boundary_mode_config,
+                    absorbing_boundary,
+                    periodic_axis,
+                )
+
+            return MeshResult(
+                mesh_path=msh_path,
+                config_path=config_path,
+                port_info=[],
+                mesh_stats=mesh_stats,
+                groups=groups,
+                output_dir=output_dir,
+                model_name=model_name,
+                fmax=fmax,
+                periodic_axis=periodic_axis,
+            )
+
         periodic_info: dict[str, object] | None = None
 
         # Add geometry
@@ -716,6 +1219,7 @@ def generate_mesh(
                 driven_config,
                 eigenmode_config,
                 numerical_config,
+                boundary_mode_config,
                 absorbing_boundary,
                 periodic_axis,
             )
