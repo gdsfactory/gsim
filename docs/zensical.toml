@@ -31,6 +31,8 @@ nav = [
 site_dir = "site"
 site_name = "gsim"
 site_url = "https://gdsfactory.com/gsim"
+repo_url = "https://gdsfactory.com/"
+repo_name = "gdsfactory.com"
 
 [project.plugins.search]
 
@@ -62,3 +64,20 @@ summary = true
 
 [project.theme]
 name = "material"
+custom_dir = "overrides"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-7"
+name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-4"
+name = "Switch to light mode"
