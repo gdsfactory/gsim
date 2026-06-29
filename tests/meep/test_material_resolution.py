@@ -409,3 +409,120 @@ class TestResolveMaterialsWithDispersion:
         assert "germanium" in materials
         ge = materials["germanium"]
         assert ge.epsilon_susceptibilities is not None
+
+
+class TestResolveMaterialsCaseInsensitive:
+    """Override key matching must be case-insensitive (issue #163)."""
+
+    def test_override_with_different_case_matches(self):
+        """User set_material('sio2', ...) matches stack material 'SiO2'."""
+        overrides = {
+            "sio2": MaterialProperties(permittivity=3.9),
+        }
+        materials = resolve_materials({"SiO2"}, overrides=overrides, wavelength_um=1.55)
+        assert "SiO2" in materials
+        assert materials["SiO2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
+    def test_override_with_upper_case_matches_lower_stack(self):
+        """User set_material('SIO2', ...) matches stack material 'sio2'."""
+        overrides = {
+            "SIO2": MaterialProperties(permittivity=3.9),
+        }
+        materials = resolve_materials({"sio2"}, overrides=overrides, wavelength_um=1.55)
+        assert "sio2" in materials
+        assert materials["sio2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
+    def test_override_with_mixed_case_and_whitespace(self):
+        """Mixed case and whitespace in override keys normalize correctly."""
+        overrides = {
+            "  SiO2  ": MaterialProperties(permittivity=3.9),
+        }
+        materials = resolve_materials({"SiO2"}, overrides=overrides, wavelength_um=1.55)
+        assert "SiO2" in materials
+        assert materials["SiO2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
+    def test_override_without_wavelength_legacy(self):
+        """Case-insensitive override works in legacy (no wavelength) path."""
+        overrides = {
+            "sio2": MaterialProperties(permittivity=3.9),
+        }
+        materials = resolve_materials({"SiO2"}, overrides=overrides)
+        assert "SiO2" in materials
+        assert materials["SiO2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
+    def test_duplicate_override_keys_warn(self):
+        """Two overrides that normalize to same key emit a warning."""
+        overrides = {
+            "SiO2": MaterialProperties(permittivity=3.9),
+            "sio2": MaterialProperties(permittivity=4.0),
+        }
+        with pytest.warns(UserWarning, match="Duplicate material entries"):
+            resolve_materials({"SiO2"}, overrides=overrides, wavelength_um=1.55)
+
+    def test_unmatched_override_key_warns(self):
+        """Override key that matches no stack material emits a warning."""
+        overrides = {
+            "made_up_material": MaterialProperties(permittivity=5.0),
+        }
+        with pytest.warns(UserWarning, match="do not match any material"):
+            resolve_materials({"SiO2"}, overrides=overrides, wavelength_um=1.55)
+
+    def test_unmatched_override_does_not_break_resolution(self):
+        """Unmatched override key warns but does not prevent resolution of
+        other materials."""
+        overrides = {
+            "unknown_key": MaterialProperties(permittivity=5.0),
+        }
+        with pytest.warns(UserWarning, match="do not match any material"):
+            materials = resolve_materials(
+                {"SiO2"}, overrides=overrides, wavelength_um=1.55
+            )
+        assert "SiO2" in materials
+
+
+class TestResolveMaterialsWithDispersionCaseInsensitive:
+    """resolved_materials_with_dispersion override matching must be
+    case-insensitive."""
+
+    def test_override_case_insensitive(self):
+        overrides = {
+            "SIO2": MaterialProperties(
+                permittivity=3.9,
+                dispersion_models=[
+                    DispersionModel(type="constant", permittivity=3.9),
+                ],
+            ),
+        }
+        materials = resolve_materials_with_dispersion(
+            {"sio2"},
+            overrides=overrides,
+            wavelength_um=1.55,
+            dispersion="false",
+        )
+        assert "sio2" in materials
+        assert materials["sio2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
+    def test_duplicate_override_warns(self):
+        overrides = {
+            "SiO2": MaterialProperties(permittivity=3.9),
+            "sio2": MaterialProperties(permittivity=4.0),
+        }
+        with pytest.warns(UserWarning, match="Duplicate material entries"):
+            resolve_materials_with_dispersion(
+                {"SiO2"},
+                overrides=overrides,
+                wavelength_um=1.55,
+                dispersion="false",
+            )
+
+    def test_unmatched_override_warns(self):
+        overrides = {
+            "fake": MaterialProperties(permittivity=5.0),
+        }
+        with pytest.warns(UserWarning, match="do not match any material"):
+            resolve_materials_with_dispersion(
+                {"SiO2"},
+                overrides=overrides,
+                wavelength_um=1.55,
+                dispersion="false",
+            )

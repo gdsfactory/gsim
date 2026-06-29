@@ -739,6 +739,59 @@ MATERIAL_ALIASES: dict[str, str] = {
 }
 
 
+def _normalize_material_keys[T](
+    d: dict[str, T],
+    *,
+    used_names: set[str] | None = None,
+    label: str = "overrides",
+) -> dict[str, T]:
+    """Normalize material dict keys to case-insensitive, warning on duplicates.
+
+    Strips whitespace and lowercases each key.  When multiple keys collapse
+    to the same normalized form a duplicate warning is emitted and the last
+    value wins.  When *used_names* is provided, keys that match no entry in
+    the set produce an unmatched-key warning.
+
+    Args:
+        d: Dict whose keys are material names (potentially mixed case).
+        used_names: Set of material names known to be in use.  If provided,
+            unmatched keys after normalization trigger a warning.
+        label: Human-readable label for the warning messages (e.g. "overrides",
+            "overlay").
+
+    Returns:
+        New dict with normalized keys.
+    """
+    normalized: dict[str, T] = {}
+    collisions: list[str] = []
+
+    for key, val in d.items():
+        key_lower = key.lower().strip()
+        if key_lower in normalized:
+            collisions.append(f"'{key}'")
+        normalized[key_lower] = val
+
+    if collisions:
+        warnings.warn(
+            f"Duplicate material entries in {label} after case normalization: "
+            f"{', '.join(collisions)}. Only the last value for each name kept.",
+            stacklevel=3,
+        )
+
+    if used_names is not None:
+        used_lower = {n.lower() for n in used_names}
+        unmatched = sorted(k for k in normalized if k not in used_lower)
+        if unmatched:
+            warnings.warn(
+                f"Material {label} key(s) {unmatched} do not match any "
+                f"material in the geometry ({sorted(used_names)}). "
+                f"Check spelling/case.",
+                stacklevel=3,
+            )
+
+    return normalized
+
+
 def get_material_properties(material_name: str) -> MaterialProperties | None:
     """Look up material properties by name."""
     name_lower = material_name.lower().strip()
@@ -763,6 +816,7 @@ def _resolve_with_overlay(
     """Look up material properties with optional PDK overlay.
 
     Priority: overlay entry > built-in database.
+    Matching is case-insensitive.
 
     Args:
         material_name: Material name from PDK
@@ -771,15 +825,19 @@ def _resolve_with_overlay(
     Returns:
         MaterialProperties if found, else None
     """
-    if overlay and material_name in overlay:
-        return overlay[material_name]
+    name_lower = material_name.lower().strip()
 
     if overlay:
+        for key, val in overlay.items():
+            if key.lower().strip() == name_lower:
+                return val
+
         from gsim.common.stack.overlays import merge_overlay
 
         merged = merge_overlay(overlay)
-        if material_name in merged:
-            return merged[material_name]
+        for key, val in merged.items():
+            if key.lower() == name_lower:
+                return val
 
     return get_material_properties(material_name)
 
@@ -808,9 +866,11 @@ def resolve_material_at_wavelength(
         ResolvedMaterial with evaluated properties, or None if not found
     """
     overrides = overrides or {}
+    name_lower = material_name.lower().strip()
 
-    if material_name in overrides:
-        return overrides[material_name].evaluate_at_wavelength(wavelength_um)
+    for key, val in overrides.items():
+        if key.lower().strip() == name_lower:
+            return val.evaluate_at_wavelength(wavelength_um)
 
     props = _resolve_with_overlay(material_name, overlay)
     if props is not None:
@@ -859,12 +919,11 @@ def should_enable_dispersion(
         True if dispersion should be enabled
     """
     overrides = overrides or {}
+    name_lower = material_name.lower().strip()
 
-    if material_name in overrides:
-        return (
-            overrides[material_name].index_variation(wavelength_um, bandwidth_um)
-            > threshold
-        )
+    for key, val in overrides.items():
+        if key.lower().strip() == name_lower:
+            return val.index_variation(wavelength_um, bandwidth_um) > threshold
 
     props = _resolve_with_overlay(material_name, overlay)
     if props is not None:

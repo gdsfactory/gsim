@@ -14,6 +14,7 @@ from gsim.common.stack.materials import (
     ResolvedMaterial,
     SellmeierTerm,
     ValidityRange,
+    _resolve_with_overlay,
     get_material_properties,
     resolve_material_at_wavelength,
     should_enable_dispersion,
@@ -502,3 +503,85 @@ class TestOverlayInResolution:
         resolved = resolve_material_at_wavelength("SiO2", 1.55, overlay=None)
         assert resolved is not None
         assert resolved.permittivity is not None
+
+
+class TestResolveMaterialAtWavelengthCaseInsensitive:
+    """resolve_material_at_wavelength override matching must be
+    case-insensitive."""
+
+    def test_override_different_case(self):
+        overrides = {
+            "sio2": MaterialProperties(permittivity=3.8),
+        }
+        resolved = resolve_material_at_wavelength("SiO2", 1.55, overrides=overrides)
+        assert resolved is not None
+        assert resolved.permittivity == 3.8
+
+    def test_override_whitespace(self):
+        overrides = {
+            "  SiO2  ": MaterialProperties(permittivity=3.8),
+        }
+        resolved = resolve_material_at_wavelength("SiO2", 1.55, overrides=overrides)
+        assert resolved is not None
+        assert resolved.permittivity == 3.8
+
+    def test_no_override_falls_through(self):
+        overrides = {
+            "other": MaterialProperties(permittivity=5.0),
+        }
+        resolved = resolve_material_at_wavelength("SiO2", 1.55, overrides=overrides)
+        assert resolved is not None
+        assert resolved.permittivity is not None
+
+
+class TestShouldEnableDispersionCaseInsensitive:
+    """should_enable_dispersion override matching must be case-insensitive."""
+
+    def test_override_different_case(self):
+        overrides = {
+            "SILICON": MaterialProperties(
+                permittivity=11.9,
+                dispersion_models=[
+                    DispersionModel(
+                        type="sellmeier",
+                        sellmeier_terms=[
+                            SellmeierTerm(B=10.668, C=0.3015**2),
+                        ],
+                        validity=ValidityRange(valid_wavelength=(1.36, 11)),
+                    ),
+                ],
+            ),
+        }
+        result = should_enable_dispersion("silicon", 1.55, 0.5, overrides=overrides)
+        assert result is True
+
+    def test_no_override_falls_through(self):
+        result = should_enable_dispersion(
+            "SiO2", 1.55, 0.1, overrides={"other": MaterialProperties()}
+        )
+        assert isinstance(result, bool)
+
+
+class TestResolveWithOverlayCaseInsensitive:
+    """_resolve_with_overlay must match overlay keys case-insensitively."""
+
+    def test_overlay_different_case_matches(self):
+        overlay = {
+            "sio2": MaterialProperties(permittivity=3.9),
+        }
+        result = _resolve_with_overlay("SiO2", overlay=overlay)
+        assert result is not None
+        assert result.permittivity == 3.9
+
+    def test_overlay_falls_to_merged(self):
+        overlay = {
+            "Si": MaterialProperties(permittivity=11.9),
+        }
+        result = _resolve_with_overlay("silicon", overlay=overlay)
+        assert result is not None
+        assert result.permittivity == 11.9
+
+    def test_no_overlay_falls_to_builtin(self):
+        result = _resolve_with_overlay("SiO2", overlay=None)
+        assert result is not None
+        assert result.permittivity is not None
