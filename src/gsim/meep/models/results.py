@@ -388,6 +388,22 @@ class ModeResult(BaseModel):
         n_group: Group index, if computable.
         band_num: Mode band index (1 = fundamental).
         parity: Parity of the mode (``"NO_PARITY"``, ``"EVEN_Y"``, etc.).
+        x_grid: X-axis grid coordinates in µm (absolute frame).  Populated
+            for XZ cross-section modes.  ``None`` when unavailable.
+        y_grid: Y-axis grid coordinates in µm (absolute frame).  Populated
+            for YZ cross-section modes.  ``None`` when unavailable.
+        z_grid: Z-axis grid coordinates in µm (absolute frame).  Populated
+            for both slab and cross-section modes.  ``None`` when
+            unavailable.
+        stack: :class:`LayerStack` used for mode solving.  Provides
+            material boundary context for index profile reconstruction.
+            ``None`` when unavailable.
+        component: GDSFactory :class:`Component` for cross-section modes.
+            ``None`` for slab modes.
+        port_or_position: Port name (``str``) or position ``(x, y)`` used
+            for cross-section mode extraction.  ``None`` for slab modes.
+        cross_section_plane: ``"xz"`` or ``"yz"`` for cross-section modes.
+            ``None`` for slab modes.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -400,3 +416,570 @@ class ModeResult(BaseModel):
     n_group: float | None = None
     band_num: int = 1
     parity: str = "NO_PARITY"
+    x_grid: np.ndarray | None = None
+    y_grid: np.ndarray | None = None
+    z_grid: np.ndarray | None = None
+    stack: Any | None = Field(default=None, exclude=True)
+    component: Any | None = Field(default=None, exclude=True)
+    port_or_position: str | tuple[float, float] | None = None
+    cross_section_plane: str | None = None
+
+    # ------------------------------------------------------------------
+    # plot_mode
+    # ------------------------------------------------------------------
+
+    _VALID_NORMS = frozenset({"abs", "real", "imag", "phase"})
+
+    def _auto_component(self) -> str:
+        """Return the field component with the largest ``max(|field|)``."""
+        best: str | None = None
+        best_val = -1.0
+        for name, arr in self.fields.items():
+            v = float(np.max(np.abs(arr)))
+            if v > best_val:
+                best_val = v
+                best = name
+        if best is None:
+            raise ValueError("No field components available.")
+        return best
+
+    @staticmethod
+    def _apply_norm(field: np.ndarray, norm: str) -> np.ndarray:
+        """Transform complex field array for display."""
+        if norm == "abs":
+            return np.abs(field)
+        if norm == "real":
+            return field.real
+        if norm == "imag":
+            return field.imag
+        if norm == "phase":
+            return np.angle(field)
+        raise ValueError(
+            f"Unknown norm {norm!r}. Must be one of: abs, real, imag, phase."
+        )
+
+    def _get_ndim(self) -> int:
+        """Return dimensionality from the first available field component."""
+        for arr in self.fields.values():
+            return arr.ndim
+        return 0
+
+    def _get_horizontal_grid(self) -> tuple[np.ndarray, str]:
+        """Return ``(horizontal_grid, axis_label)``.
+
+        Raises ``ValueError`` if both ``x_grid`` and ``y_grid`` are
+        populated (ambiguous geometry) or if no horizontal grid is set.
+        """
+        has_x = self.x_grid is not None
+        has_y = self.y_grid is not None
+        if has_x and has_y:
+            raise ValueError(
+                "Ambiguous geometry: both x_grid and y_grid are populated."
+            )
+        if has_y:
+            return self.y_grid, "y (µm)"
+        if has_x:
+            return self.x_grid, "x (µm)"
+        raise ValueError(
+            "No horizontal grid available. Set x_grid or y_grid on ModeResult."
+        )
+
+    def plot_mode(
+        self,
+        components: str | list[str] = "auto",
+        *,
+        norm: str = "abs",
+        index: bool = False,
+        ax: Any | None = None,
+        figsize: tuple[float, float] = (8, 6),
+        cmap: str = "inferno",
+        aspect: str = "equal",
+        title: str | None = "auto",
+        suptitle: str | None = "auto",
+        show: bool = True,
+        shared_colorbar: bool = False,
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """Plot eigenmode field profiles.
+
+        Args:
+            components: ``"auto"`` (dominant), ``"all"`` (every field), or
+                list of component names e.g. ``["Ey", "Hx"]``.
+            norm: ``"abs"`` (magnitude), ``"real"``, ``"imag"``, or
+                ``"phase"`` (angle in radians).
+            index: Overlay refractive index profile (twin-axis for 1D,
+                greyscale underlay for 2D).
+            ax: Existing matplotlib ``Axes``.  Only valid when
+                ``components`` resolves to a single component.
+            figsize: ``(width, height)`` tuple in inches.
+            cmap: Matplotlib colormap name for field data (default
+                ``"inferno"``).
+            aspect: ``"equal"`` or ``"auto"`` for ``pcolormesh`` subplots.
+            title: Per-subplot title. ``"auto"`` generates
+                ``|comp|  n_eff=...`` for single-component, component name
+                only for multi-component.  ``None`` suppresses.
+            suptitle: Figure-level suptitle.  ``"auto"`` generates
+                descriptive text for multi-component.  ``None`` suppresses.
+            show: Call ``plt.show()`` (default ``True``).  Set ``False``
+                for customisation before display.
+            shared_colorbar: Use a single colour bar for all subplots
+                instead of per-subplot colour bars.
+            **kwargs: Forwarded to the underlying matplotlib call
+                (``ax.plot`` for 1D, ``ax.pcolormesh`` for 2D).
+
+        Returns:
+            ``(fig, ax)`` for single-component, ``(fig, axes)`` for
+            multi-component.
+
+        Raises:
+            ValueError: If ``fields`` is empty, ``ax`` is passed with
+                multi-component, ``norm`` is invalid, or horizontal axis
+                is ambiguous.
+        """
+        if not self.fields:
+            raise ValueError(
+                "ModeResult has no field data. "
+                "Pass field grids to the solver to enable plotting."
+            )
+        if self.x_grid is not None and self.y_grid is not None:
+            raise ValueError(
+                "Ambiguous geometry: both x_grid and y_grid are populated."
+            )
+        if norm not in self._VALID_NORMS:
+            raise ValueError(
+                f"Unknown norm {norm!r}. Must be one of: "
+                f"{', '.join(sorted(self._VALID_NORMS))}."
+            )
+
+        resolved = self._resolve_components(components)
+        is_single = len(resolved) == 1
+        if ax is not None and not is_single:
+            raise ValueError(
+                "ax may only be passed when components resolves to a single component."
+            )
+
+        ndim = self._get_ndim()
+        if ndim == 0:
+            raise ValueError(
+                "ModeResult has no field data. "
+                "Pass field grids to the solver to enable plotting."
+            )
+
+        if ndim == 1:
+            return self._plot_mode_1d(
+                resolved,
+                norm=norm,
+                index=index,
+                ax=ax,
+                figsize=figsize,
+                title=title,
+                suptitle=suptitle,
+                show=show,
+                **kwargs,
+            )
+        return self._plot_mode_2d(
+            resolved,
+            norm=norm,
+            index=index,
+            ax=ax,
+            figsize=figsize,
+            cmap=cmap,
+            aspect=aspect,
+            title=title,
+            suptitle=suptitle,
+            show=show,
+            shared_colorbar=shared_colorbar,
+            **kwargs,
+        )
+
+    def _resolve_components(self, components: str | list[str]) -> list[str]:
+        """Resolve ``components`` to a concrete list of field names."""
+        if isinstance(components, str):
+            if components == "auto":
+                return [self._auto_component()]
+            if components == "all":
+                return [
+                    c for c in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz") if c in self.fields
+                ]
+            if components not in self.fields:
+                available = sorted(self.fields)
+                raise ValueError(
+                    f"Unknown component: {components!r}. Available: {available}."
+                )
+            return [components]
+        missing = [c for c in components if c not in self.fields]
+        if missing:
+            available = sorted(self.fields)
+            raise ValueError(
+                f"Unknown component(s): {missing}. Available: {available}."
+            )
+        return list(components)
+
+    # -- 1D helpers -------------------------------------------------------
+
+    def _make_title(
+        self, comp: str, user_title: str | None, is_single: bool
+    ) -> str | None:
+        """Build a per-subplot title from *user_title* and component info."""
+        if user_title is None:
+            return None
+        if user_title == "auto":
+            if is_single:
+                return f"|{comp}|  n_eff={self.n_eff:.4f}"
+            return comp
+        return user_title
+
+    def _plot_mode_1d(
+        self,
+        comps: list[str],
+        *,
+        norm: str,
+        index: bool,
+        ax: Any | None,
+        figsize: tuple[float, float],
+        title: str | None,
+        suptitle: str | None,
+        show: bool,
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """1D line-plot path: one subplot per component stacked vertically."""
+        import matplotlib.pyplot as plt
+
+        is_single = len(comps) == 1
+        z = self.z_grid
+        if z is None:
+            raise ValueError("z_grid must be set on ModeResult for 1D plotting.")
+
+        if ax is not None:
+            fig = ax.figure
+            axes = [ax]
+        else:
+            ncols = 1
+            fig, axes_arr = plt.subplots(
+                nrows=len(comps),
+                ncols=ncols,
+                figsize=figsize,
+                squeeze=False,
+            )
+            plt.close(fig)
+            axes = [axes_arr[i, 0] for i in range(len(comps))]
+
+        for i, comp in enumerate(comps):
+            ax_i = axes[i]
+            data = self._apply_norm(self.fields[comp], norm)
+            ax_i.plot(z, data, **kwargs)
+            if index:
+                ax_i_twin = ax_i.twinx()
+                n_prof = self._compute_index_profile_1d()
+                ax_i_twin.plot(z, n_prof, color="gray", linestyle="--", alpha=0.7)
+                ax_i_twin.set_ylabel("n", color="gray")
+            t = self._make_title(comp, title, is_single)
+            if t is not None:
+                ax_i.set_title(t)
+            ax_i.set_xlabel("z (µm)")
+
+        if suptitle == "auto" and not is_single:
+            norm_label = "|field|" if norm == "abs" else norm
+            fig.suptitle(f"Mode fields ({norm_label})", fontsize=12)
+        elif suptitle is not None and suptitle != "auto":
+            fig.suptitle(suptitle, fontsize=12)
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        if is_single:
+            return (fig, axes[0])
+        return (fig, axes_arr)  # Always return array for multi-component
+
+    def _compute_index_profile_1d(self) -> np.ndarray:
+        """Compute 1D refractive index profile from stored context."""
+        if self.stack is None:
+            raise ValueError(
+                "No stack stored on ModeResult. Cannot compute index profile."
+            )
+        if self.z_grid is None:
+            raise ValueError("z_grid must be set on ModeResult for index profile.")
+        from gsim.meep.mode_solver import refractive_index_profile
+
+        return refractive_index_profile(
+            self.stack,
+            self.wavelength,
+            z_grid=self.z_grid,
+        )
+
+    # -- 2D helpers -------------------------------------------------------
+
+    def _plot_mode_2d(
+        self,
+        comps: list[str],
+        *,
+        norm: str,
+        index: bool,
+        ax: Any | None,
+        figsize: tuple[float, float],
+        cmap: str,
+        aspect: str,
+        title: str | None,
+        suptitle: str | None,
+        show: bool,
+        shared_colorbar: bool,
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """2D pcolormesh path: subplot grid with optional index overlay."""
+        import matplotlib.pyplot as plt
+
+        is_single = len(comps) == 1
+        h_grid, h_label = self._get_horizontal_grid()
+        z = self.z_grid
+        if z is None:
+            raise ValueError("z_grid must be set on ModeResult for 2D plotting.")
+
+        if ax is not None:
+            fig = ax.figure
+            axes = [ax]
+            nrows = ncols = 1
+        else:
+            ncols = min(len(comps), 3)
+            nrows = (len(comps) + ncols - 1) // ncols
+            fig, axes_arr = plt.subplots(
+                nrows=nrows,
+                ncols=ncols,
+                figsize=figsize,
+                squeeze=False,
+            )
+            plt.close(fig)
+            axes = [axes_arr.flat[i] for i in range(len(comps))]
+
+        index_overlay: np.ndarray | None = None
+        if index:
+            index_overlay = self._compute_index_profile_2d()
+
+        images: list[Any] = []
+        vmin = vmax = None
+        if shared_colorbar:
+            vmin = min(
+                float(self._apply_norm(self.fields[c], norm).min()) for c in comps
+            )
+            vmax = max(
+                float(self._apply_norm(self.fields[c], norm).max()) for c in comps
+            )
+
+        for i, comp in enumerate(comps):
+            ax_i = axes[i]
+            data = self._apply_norm(self.fields[comp], norm)
+            if index_overlay is not None:
+                ax_i.pcolormesh(
+                    h_grid,
+                    z,
+                    index_overlay,
+                    cmap="Greys",
+                    alpha=0.1,
+                    shading="auto",
+                )
+            im = ax_i.pcolormesh(
+                h_grid,
+                z,
+                data,
+                cmap=cmap,
+                shading="auto",
+                vmin=vmin,
+                vmax=vmax,
+                **kwargs,
+            )
+            images.append(im)
+            ax_i.set_aspect(aspect)
+            t = self._make_title(comp, title, is_single)
+            if t is not None:
+                ax_i.set_title(t)
+            ax_i.set_xlabel(h_label)
+            ax_i.set_ylabel("z (µm)")
+            if not shared_colorbar:
+                fig.colorbar(im, ax=ax_i)
+
+        if shared_colorbar and images:
+            for ax_i in axes[len(comps) :]:
+                ax_i.set_visible(False)
+            fig.colorbar(images[-1], ax=axes, shrink=0.6)
+
+        if suptitle == "auto" and not is_single:
+            norm_label = "|field|" if norm == "abs" else norm
+            fig.suptitle(
+                f"Mode fields ({norm_label})  n_eff={self.n_eff:.4f}",
+                fontsize=12,
+            )
+        elif suptitle is not None and suptitle != "auto":
+            fig.suptitle(suptitle, fontsize=12)
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        if is_single:
+            return (fig, axes[0])
+        return (fig, axes_arr)
+
+    def _compute_index_profile_2d(self) -> np.ndarray:
+        """Compute 2D refractive index profile from stored context."""
+        if self.stack is None:
+            raise ValueError(
+                "No stack stored on ModeResult. Cannot compute index profile."
+            )
+        if self.z_grid is None:
+            raise ValueError("z_grid must be set on ModeResult.")
+        from gsim.meep.mode_solver import refractive_index_profile
+
+        h_grid, _ = self._get_horizontal_grid()
+        if self.y_grid is not None:
+            return refractive_index_profile(
+                self.stack,
+                self.wavelength,
+                z_grid=self.z_grid,
+                y_grid=h_grid,
+                component=self.component,
+                port=self.port_or_position
+                if isinstance(self.port_or_position, str)
+                else None,
+            )
+        return refractive_index_profile(
+            self.stack,
+            self.wavelength,
+            z_grid=self.z_grid,
+            x_grid=h_grid,
+            component=self.component,
+            port=self.port_or_position
+            if isinstance(self.port_or_position, str)
+            else None,
+        )
+
+    # ------------------------------------------------------------------
+    # plot_index
+    # ------------------------------------------------------------------
+
+    def plot_index(
+        self,
+        *,
+        ax: Any | None = None,
+        figsize: tuple[float, float] = (7, 5),
+        cmap: str = "RdYlBu",
+        show: bool = True,
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """Plot the refractive index profile from stored context.
+
+        Zero-argument when grid and stack fields are populated.
+        Auto-detects 1D vs 2D from the available grid arrays.
+
+        Args:
+            ax: Existing matplotlib ``Axes`` (optional).
+            figsize: ``(width, height)`` in inches.
+            cmap: Colormap name for 2D ``pcolormesh`` (default
+                ``"RdYlBu"``).
+            show: Call ``plt.show()`` (default ``True``).
+            **kwargs: Forwarded to ``ax.plot`` (1D) or ``ax.pcolormesh``
+                (2D).
+
+        Returns:
+            ``(fig, ax)``.
+
+        Raises:
+            ValueError: If ``stack``, ``wavelength``, or ``z_grid`` are
+                missing.
+        """
+        if self.stack is None:
+            raise ValueError(
+                "No stack stored on ModeResult. Cannot compute index profile."
+            )
+        if self.z_grid is None:
+            raise ValueError(
+                "No z_grid stored on ModeResult. Cannot compute index profile."
+            )
+
+        ndim = self._get_ndim()
+        if ndim <= 1 and self.y_grid is None and self.x_grid is None:
+            return self._plot_index_1d(
+                ax=ax,
+                figsize=figsize,
+                show=show,
+                cmap=cmap,
+                **kwargs,
+            )
+
+        return self._plot_index_2d(
+            ax=ax,
+            figsize=figsize,
+            cmap=cmap,
+            show=show,
+            **kwargs,
+        )
+
+    def _plot_index_1d(
+        self,
+        *,
+        ax: Any | None,
+        figsize: tuple[float, float],
+        show: bool,
+        cmap: str,  # noqa: ARG002
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """1D line-plot of n(z) from stored context."""
+        if self.z_grid is None:
+            raise ValueError("z_grid must be set on ModeResult.")
+        import matplotlib.pyplot as plt
+
+        n_prof = self._compute_index_profile_1d()
+        if ax is not None:
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
+            plt.close(fig)
+
+        ax.plot(self.z_grid, n_prof, **kwargs)
+        ax.set_xlabel("z (µm)")
+        ax.set_ylabel("n")
+        ax.set_title(f"Refractive index  (lambda={self.wavelength:.2f} um)")
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        return (fig, ax)
+
+    def _plot_index_2d(
+        self,
+        *,
+        ax: Any | None,
+        figsize: tuple[float, float],
+        cmap: str,
+        show: bool,
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """2D pcolormesh of n(y,z) or n(x,z) from stored context."""
+        if self.z_grid is None:
+            raise ValueError("z_grid must be set on ModeResult.")
+        import matplotlib.pyplot as plt
+
+        n_prof = self._compute_index_profile_2d()
+        h_grid, h_label = self._get_horizontal_grid()
+
+        if ax is not None:
+            fig = ax.figure
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
+            plt.close(fig)
+
+        im = ax.pcolormesh(
+            h_grid,
+            self.z_grid,
+            n_prof,
+            cmap=cmap,
+            shading="auto",
+            **kwargs,
+        )
+        ax.set_aspect("equal")
+        ax.set_xlabel(h_label)
+        ax.set_ylabel("z (µm)")
+        ax.set_title(f"Refractive index  (lambda={self.wavelength:.2f} um)")
+        fig.colorbar(im, ax=ax)
+
+        fig.tight_layout()
+        if show:
+            plt.show()
+        return (fig, ax)

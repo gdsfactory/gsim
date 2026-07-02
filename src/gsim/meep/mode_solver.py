@@ -742,6 +742,13 @@ def _compute_eigenmode(
     field_x_grid: np.ndarray | None = None,
     field_y_grid: np.ndarray | None = None,
     field_z_grid: np.ndarray | None = None,
+    x_grid: np.ndarray | None = None,
+    y_grid: np.ndarray | None = None,
+    z_grid: np.ndarray | None = None,
+    stack: Any | None = None,
+    component: Any | None = None,
+    port_or_position: str | tuple[float, float] | None = None,
+    cross_section_plane: str | None = None,
 ) -> ModeResult:
     """Run ``sim.get_eigenmode()`` and pack the result into a :class:`ModeResult`.
 
@@ -768,6 +775,20 @@ def _compute_eigenmode(
             (µm, origin at cell centre).  For YZ cells.
         field_z_grid: 1D array of *z* coordinates for field sampling
             (µm, origin at cell centre).  ``None`` skips extraction.
+        x_grid: User-facing X-axis grid (µm, absolute frame) stored on
+            :class:`ModeResult` for downstream plotting.  ``None`` if
+            unavailable.
+        y_grid: User-facing Y-axis grid (µm, absolute frame) stored on
+            :class:`ModeResult`.  ``None`` if unavailable.
+        z_grid: User-facing Z-axis grid (µm, absolute frame) stored on
+            :class:`ModeResult`.  ``None`` if unavailable.
+        stack: :class:`LayerStack` stored on :class:`ModeResult` for
+            index profile reconstruction.
+        component: GDSFactory :class:`Component` for cross-section modes.
+        port_or_position: Port name or ``(x, y)`` position for
+            cross-section modes.
+        cross_section_plane: ``"xz"`` or ``"yz"`` for cross-section
+            modes.  ``None`` for slab modes.
 
     Returns:
         :class:`ModeResult` with effective index, fields (if grids
@@ -854,6 +875,13 @@ def _compute_eigenmode(
         n_group=n_group,
         band_num=band_num,
         parity=parity,
+        x_grid=x_grid,
+        y_grid=y_grid,
+        z_grid=z_grid,
+        stack=stack,
+        component=component,
+        port_or_position=port_or_position,
+        cross_section_plane=cross_section_plane,
     )
 
 
@@ -1355,6 +1383,8 @@ def solve_slab_mode(
             eigensolver_tol=eigensolver_tol,
             field_x_grid=field_x_grid,
             field_z_grid=field_z_grid_meep,
+            z_grid=field_z_grid,
+            stack=stack,
         )
     finally:
         sim.reset_meep()
@@ -1581,6 +1611,13 @@ def solve_cross_section_mode(
             field_x_grid=field_x_grid,
             field_y_grid=field_y_grid,
             field_z_grid=field_z_grid_meep,
+            x_grid=field_x_grid,
+            y_grid=field_y_grid,
+            z_grid=field_z_grid,
+            stack=stack,
+            component=component,
+            port_or_position=port if port is not None else position,
+            cross_section_plane="yz" if _use_yz else "xz",
         )
     finally:
         sim.reset_meep()
@@ -1690,6 +1727,8 @@ def solve_slab_modes(
                     eigensolver_tol=eigensolver_tol,
                     field_x_grid=field_x_grid,
                     field_z_grid=field_z_grid_meep,
+                    z_grid=field_z_grid,
+                    stack=stack,
                 )
                 _validate_mode(result, material_data, stack, is_slab=True)
                 results[band_num] = result
@@ -1850,6 +1889,8 @@ def solve_slab_wavelength_sweep(
                 eigensolver_tol=eigensolver_tol,
                 field_x_grid=field_x_grid,
                 field_z_grid=field_z_grid_meep,
+                z_grid=field_z_grid,
+                stack=stack,
             )
             _validate_mode(result, material_data, stack, is_slab=True)
             results[wl] = result

@@ -303,6 +303,7 @@ include = ["tests/**"]
 
 [tool.ty.overrides.rules]
 possibly-missing-attribute = "ignore"
+invalid-argument-type = "ignore"
 
 [tool.ty.rules]
 missing-argument = "ignore"

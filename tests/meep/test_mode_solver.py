@@ -115,6 +115,74 @@ class TestModeResult:
         assert d["parity"] == "NO_PARITY"
         assert d["n_group"] is None
 
+    def test_new_grid_fields_default_to_none(self):
+        """x_grid, y_grid, z_grid default to None."""
+        from gsim.meep.models.results import ModeResult
+
+        result = ModeResult(
+            n_eff=2.5,
+            wavelength=1.55,
+            frequency=1.0 / 1.55,
+        )
+        assert result.x_grid is None
+        assert result.y_grid is None
+        assert result.z_grid is None
+
+    def test_new_context_fields_default(self):
+        """stack, component, port_or_position, cross_section_plane default."""
+        from gsim.meep.models.results import ModeResult
+
+        result = ModeResult(
+            n_eff=2.5,
+            wavelength=1.55,
+            frequency=1.0 / 1.55,
+        )
+        assert result.stack is None
+        assert result.component is None
+        assert result.port_or_position is None
+        assert result.cross_section_plane is None
+
+    def test_grid_fields_stored(self):
+        """x_grid, y_grid, z_grid are stored when provided."""
+        from gsim.meep.models.results import ModeResult
+
+        x = np.array([1.0, 2.0])
+        y = np.array([3.0, 4.0])
+        z = np.array([5.0, 6.0])
+        result = ModeResult(
+            n_eff=2.5,
+            wavelength=1.55,
+            frequency=1.0 / 1.55,
+            x_grid=x,
+            y_grid=y,
+            z_grid=z,
+            cross_section_plane="xz",
+        )
+        np.testing.assert_array_equal(result.x_grid, x)
+        np.testing.assert_array_equal(result.y_grid, y)
+        np.testing.assert_array_equal(result.z_grid, z)
+        assert result.cross_section_plane == "xz"
+
+    def test_model_dump_excludes_stack_and_component(self):
+        """stack and component are excluded from model_dump."""
+        from unittest.mock import MagicMock
+
+        from gsim.meep.models.results import ModeResult
+
+        mock_stack = MagicMock()
+        mock_comp = MagicMock()
+        result = ModeResult(
+            n_eff=2.5,
+            wavelength=1.55,
+            frequency=1.0 / 1.55,
+            stack=mock_stack,
+            component=mock_comp,
+        )
+        d = result.model_dump()
+        assert "stack" not in d
+        assert "component" not in d
+        assert "n_eff" in d
+
 
 class TestResolveStackAndMaterials:
     """_resolve_stack_and_materials() — no meep required."""

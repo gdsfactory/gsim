@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from gsim.meep.models.results import ModeResult
 
 
@@ -31,6 +33,62 @@ class ModeSweepResult:
             if r.band_num == n:
                 return r
         return None
+
+    def _find_result(self, wavelength: float, band: int | None = None) -> ModeResult:
+        """Return the ModeResult matching wavelength and optional band, or error."""
+        candidates = [r for r in self.results if r.wavelength == wavelength]
+        if not candidates:
+            available = sorted({r.wavelength for r in self.results})
+            raise ValueError(
+                f"No mode result found at wavelength={wavelength} µm. "
+                f"Available: {available}"
+            )
+        if band is not None:
+            for r in candidates:
+                if r.band_num == band:
+                    return r
+            available_bands = sorted({r.band_num for r in candidates})
+            raise ValueError(
+                f"No mode result found at wavelength={wavelength} µm, "
+                f"band={band}. Available bands: {available_bands}"
+            )
+        return candidates[0]
+
+    def plot_mode(
+        self,
+        wavelength: float,
+        band: int | None = None,
+        *,
+        components: str | list[str] = "auto",
+        **kwargs: Any,
+    ) -> tuple[Any, Any]:
+        """Delegate to ModeResult.plot_mode for mode at wavelength and optional band.
+
+        Args:
+            wavelength: Free-space wavelength in µm.
+            band: Mode band index (``None`` = first match).
+            components: ``"auto"``, ``"all"``, or list of component names.
+            **kwargs: Forwarded to :meth:`ModeResult.plot_mode`.
+
+        Returns:
+            ``(fig, ax)`` or ``(fig, axes)`` as from
+            :meth:`ModeResult.plot_mode`.
+        """
+        result = self._find_result(wavelength, band=band)
+        return result.plot_mode(components=components, **kwargs)
+
+    def plot_index(self, wavelength: float, **kwargs: Any) -> tuple[Any, Any]:
+        """Delegate to ModeResult.plot_index for the mode at wavelength.
+
+        Args:
+            wavelength: Free-space wavelength in µm.
+            **kwargs: Forwarded to :meth:`ModeResult.plot_index`.
+
+        Returns:
+            ``(fig, ax)`` as from :meth:`ModeResult.plot_index`.
+        """
+        result = self._find_result(wavelength)
+        return result.plot_index(**kwargs)
 
     def to_dict(self) -> dict[str, list]:
         """Convert results to a dict-of-lists suitable for ``pd.DataFrame``."""
