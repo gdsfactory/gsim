@@ -131,6 +131,8 @@ def _build_slab_xz_cell(
     resolution: float,
     z_margin: float | tuple[float, float] = 0.0,
     pml_thickness: float = 0.0,
+    *,
+    background_material: str = "air",
 ) -> tuple[Any, Any]:
     """Build a 2D XZ MEEP simulation cell for a 1D slab (uniform layers).
 
@@ -147,6 +149,10 @@ def _build_slab_xz_cell(
             ``(bottom, top)`` tuple adds asymmetric margins. Default 0.
         pml_thickness: PML absorber thickness in µm (default 0.0).
             Set to e.g. 1.0 to enable PML absorbing boundaries.
+        background_material: Material name for the MEEP default medium
+            (fills space not covered by any layer). Default ``"air"``
+            (epsilon=1.0). Set to e.g. ``"sio2"`` to model a buried-oxide
+            background without explicit full-span geometry layers.
 
     Returns:
         ``(sim, cell_size)`` — initialized MEEP :class:`Simulation` object
@@ -199,20 +205,52 @@ def _build_slab_xz_cell(
         )
         geometry.append(block)
 
+    bg = materials.get(background_material)
+    default_medium = _meep_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
     sim_kwargs: dict = dict(
         cell_size=cell_size,
         geometry=geometry,
         resolution=resolution,
-        default_material=mp.Medium(epsilon=1.0),
+        default_material=default_medium,
     )
     if pml_thickness > 0:
-        sim_kwargs["boundary_layers"] = [mp.PML(thickness=pml_thickness)]
+        sim_kwargs["boundary_layers"] = [
+            mp.PML(thickness=pml_thickness, direction=mp.X),
+            mp.PML(thickness=pml_thickness, direction=mp.Z),
+        ]
     sim = mp.Simulation(**sim_kwargs)
     return sim, cell_size
 
 
+def _subtract_intervals(
+    base: tuple[float, float],
+    subtract: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Return the sub-intervals of *base* remaining after removing *subtract*.
+
+    Used to carve "pillar" regions below a layer block that extend all
+    the way down to the cell floor when no lower layer is present.
+    """
+    result = [base]
+    for s0, s1 in subtract:
+        new_result: list[tuple[float, float]] = []
+        for r0, r1 in result:
+            if s1 <= r0 or s0 >= r1:
+                new_result.append((r0, r1))
+            else:
+                if r0 < s0:
+                    new_result.append((r0, min(s0, r1)))
+                if r1 > s1:
+                    new_result.append((max(s1, r0), r1))
+        result = new_result
+        if not result:
+            break
+    return result
+
+
 # ------------------------------------------------------------------
-# Cross-section (2D) geometry builder
+# Cross-section (2D) geometry builders
 # ------------------------------------------------------------------
 
 
@@ -225,6 +263,8 @@ def _build_component_xz_cell(
     resolution: float,
     z_margin: float | tuple[float, float] = 0.0,
     pml_thickness: float = 0.0,
+    *,
+    background_material: str = "air",
 ) -> tuple[Any, Any]:
     """Build a 2D XZ MEEP simulation cell at a *y*-slice of a component.
 
@@ -244,6 +284,9 @@ def _build_component_xz_cell(
             ``(bottom, top)`` tuple adds asymmetric margins. Default 0.
         pml_thickness: PML absorber thickness in µm (default 0.0).
             Set to e.g. 1.0 to enable PML absorbing boundaries.
+        background_material: Material name for the MEEP default medium
+            (fills space not covered by any layer). Default ``"air"``
+            (epsilon=1.0).
 
     Returns:
         ``(sim, cell_size)`` — initialized MEEP :class:`Simulation` object
@@ -258,9 +301,9 @@ def _build_component_xz_cell(
     else:
         z_margin_bottom = z_margin_top = z_margin
     z_center = (z_min + z_max) / 2.0 + (z_margin_top - z_margin_bottom) / 2.0
+    xz_span = x_span
     if pml_thickness > 0:
         x_span += 2 * pml_thickness
-    # Snap to integer pixel counts to avoid meep grid-volume warnings.
     x_span = round(x_span * resolution) / resolution
     z_span = (z_max - z_min) + z_margin_bottom + z_margin_top
     if pml_thickness > 0:
@@ -281,7 +324,7 @@ def _build_component_xz_cell(
             continue
         intervals = _layer_x_intervals_at_y(component, layer, y_cut)
         if not intervals and not _layer_has_any_polygon(component, layer):
-            intervals = [(-x_span / 2, x_span / 2)]
+            intervals = [(-xz_span / 2, xz_span / 2)]
         layer_data.append(
             {
                 "layer": layer,
@@ -335,37 +378,22 @@ def _build_component_xz_cell(
                 )
                 geometry.append(block)
 
+    bg = materials.get(background_material)
+    default_medium = _meep_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
     sim_kwargs: dict = dict(
         cell_size=cell_size,
         geometry=geometry,
         resolution=resolution,
-        default_material=mp.Medium(epsilon=1.0),
+        default_material=default_medium,
     )
     if pml_thickness > 0:
-        sim_kwargs["boundary_layers"] = [mp.PML(thickness=pml_thickness)]
+        sim_kwargs["boundary_layers"] = [
+            mp.PML(thickness=pml_thickness, direction=mp.X),
+            mp.PML(thickness=pml_thickness, direction=mp.Z),
+        ]
     sim = mp.Simulation(**sim_kwargs)
     return sim, cell_size
-
-
-def _subtract_intervals(
-    base: tuple[float, float],
-    subtract: list[tuple[float, float]],
-) -> list[tuple[float, float]]:
-    result = [base]
-    for s0, s1 in subtract:
-        new_result: list[tuple[float, float]] = []
-        for r0, r1 in result:
-            if s1 <= r0 or s0 >= r1:
-                new_result.append((r0, r1))
-            else:
-                if r0 < s0:
-                    new_result.append((r0, min(s0, r1)))
-                if r1 > s1:
-                    new_result.append((max(s1, r0), r1))
-        result = new_result
-        if not result:
-            break
-    return result
 
 
 def _build_component_yz_cell(
@@ -377,6 +405,8 @@ def _build_component_yz_cell(
     resolution: float,
     z_margin: float | tuple[float, float] = 0.0,
     pml_thickness: float = 0.0,
+    *,
+    background_material: str = "air",
 ) -> tuple[Any, Any]:
     """Build a 2D YZ MEEP simulation cell at an *x*-slice of a component.
 
@@ -396,6 +426,9 @@ def _build_component_yz_cell(
             ``(bottom, top)`` tuple adds asymmetric margins. Default 0.
         pml_thickness: PML absorber thickness in µm (default 0.0).
             Set to e.g. 1.0 to enable PML absorbing boundaries.
+        background_material: Material name for the MEEP default medium
+            (fills space not covered by any layer). Default ``"air"``
+            (epsilon=1.0).
 
     Returns:
         ``(sim, cell_size)`` — initialized MEEP :class:`Simulation` object
@@ -410,6 +443,7 @@ def _build_component_yz_cell(
     else:
         z_margin_bottom = z_margin_top = z_margin
     z_center = (z_min + z_max) / 2.0 + (z_margin_top - z_margin_bottom) / 2.0
+    yz_span = y_span
     if pml_thickness > 0:
         y_span += 2 * pml_thickness
     y_span = round(y_span * resolution) / resolution
@@ -432,7 +466,7 @@ def _build_component_yz_cell(
             continue
         intervals = _layer_y_intervals_at_x(component, layer, x_cut)
         if not intervals and not _layer_has_any_polygon(component, layer):
-            intervals = [(-y_span / 2, y_span / 2)]
+            intervals = [(-yz_span / 2, yz_span / 2)]
         layer_data.append(
             {
                 "layer": layer,
@@ -486,14 +520,20 @@ def _build_component_yz_cell(
                 )
                 geometry.append(block)
 
+    bg = materials.get(background_material)
+    default_medium = _meep_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
     sim_kwargs: dict = dict(
         cell_size=cell_size,
         geometry=geometry,
         resolution=resolution,
-        default_material=mp.Medium(epsilon=1.0),
+        default_material=default_medium,
     )
     if pml_thickness > 0:
-        sim_kwargs["boundary_layers"] = [mp.PML(thickness=pml_thickness)]
+        sim_kwargs["boundary_layers"] = [
+            mp.PML(thickness=pml_thickness, direction=mp.Y),
+            mp.PML(thickness=pml_thickness, direction=mp.Z),
+        ]
     sim = mp.Simulation(**sim_kwargs)
     return sim, cell_size
 
@@ -1008,6 +1048,7 @@ def refractive_index_profile(
     x_grid: np.ndarray | None = None,
     component: Component | None = None,
     port: str | None = None,
+    background_material: str = "air",
 ) -> np.ndarray:
     """Compute piecewise-constant refractive index at a wavelength.
 
@@ -1066,11 +1107,21 @@ def refractive_index_profile(
 
     used_materials: set[str] = {layer.material for layer in stack.layers.values()}
     used_materials.discard("air")
+    if background_material != "air":
+        used_materials.add(background_material)
     material_data = _resolve_materials_cached(
         used_materials,
         overrides={},
         wavelength_um=wavelength,
     )
+    bg_mat = material_data.get(background_material)
+    n_bg = 1.0
+    if bg_mat is not None and bg_mat.epsilon_diag is not None:
+        eps_bg = bg_mat.epsilon_diag
+        if isinstance(eps_bg, list):
+            eps_bg = eps_bg[0]
+        if eps_bg > 0:
+            n_bg = np.sqrt(eps_bg)
 
     if component is None or port is None:
         if y_grid is not None and x_grid is None and component is not None:
@@ -1082,7 +1133,7 @@ def refractive_index_profile(
             raise ValueError(
                 "port is required for 2D refractive_index_profile when x_grid is given"
             )
-        n_profile = np.ones_like(z_grid)
+        n_profile = np.full_like(z_grid, n_bg)
         for layer in stack.layers.values():
             if layer.material == "air":
                 continue
@@ -1146,7 +1197,8 @@ def refractive_index_profile(
 
     nh = len(horizontal_grid)
     nz = len(z_grid)
-    n_profile = np.ones((nz, nh))
+    n_profile = np.full((nz, nh), n_bg)
+    set_by_layer = np.zeros((nz, nh), dtype=bool)
 
     layer_h_masks: dict[tuple, np.ndarray] = {}
     for layer in stack.layers.values():
@@ -1180,15 +1232,17 @@ def refractive_index_profile(
             continue
         z_mask = (z_grid >= layer.zmin) & (z_grid < layer.zmax)
         n_profile[np.ix_(z_mask, h_mask)] = np.sqrt(eps)
+        set_by_layer[np.ix_(z_mask, h_mask)] = True
 
     for ih in range(nh):
         col = n_profile[:, ih]
-        non_air = np.where(col > 1.0 + 1e-8)[0]
-        if len(non_air) == 0:
+        col_set = set_by_layer[:, ih]
+        if not col_set.any():
             continue
-        first = non_air[0]
-        if first > 0:
-            col[:first] = col[first]
+        first_set = int(np.where(col_set)[0][0])
+        if first_set > 0:
+            fill_mask = ~col_set[:first_set]
+            col[:first_set][fill_mask] = col[first_set]
 
     return n_profile
 
@@ -1209,6 +1263,7 @@ def solve_slab_mode(
     pml_thickness: float = 0.0,
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
+    background_material: str = "air",
 ) -> ModeResult:
     """Solve for the 1D slab mode of a uniform layer stack.
 
@@ -1254,6 +1309,8 @@ def solve_slab_mode(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
+    if background_material != "air":
+        used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1268,6 +1325,7 @@ def solve_slab_mode(
         resolution,
         z_margin=_z_margin_cell,
         pml_thickness=pml_thickness,
+        background_material=background_material,
     )
     sim.init_sim()
 
@@ -1324,6 +1382,7 @@ def solve_cross_section_mode(
     field_x_grid: np.ndarray | None = None,
     field_y_grid: np.ndarray | None = None,
     field_z_grid: np.ndarray | None = None,
+    background_material: str = "air",
 ) -> ModeResult:
     """Solve for the eigenmode of a 2D waveguide cross-section.
 
@@ -1340,10 +1399,11 @@ def solve_cross_section_mode(
     vertical grids to sample the eigenmode fields on a 2D grid.
 
     One of ``port`` or ``position`` must be given:
-    - ``port="o1"`` — auto-extracts the cross-section at the port
-      centre, with span = ``port_width + 2 µm``.
-    - ``position=(x, y)`` — requires ``x_span`` for XZ or ``y_span`` for
-      YZ, and ``cross_section_plane`` must be set explicitly.
+     - ``port="o1"`` — auto-extracts the cross-section at the port
+       centre.  Requires ``y_span`` (YZ) or ``x_span`` (XZ) to be
+       passed explicitly.
+     - ``position=(x, y)`` — requires ``x_span`` for XZ or ``y_span`` for
+       YZ, and ``cross_section_plane`` must be set explicitly.
 
     Args:
         component: GDSFactory component with ports and polygons.
@@ -1367,7 +1427,7 @@ def solve_cross_section_mode(
         eigensolver_tol: MPB convergence tolerance (default 1e-6).
             Relax to 1e-5 for faster but less accurate solves.
         wavelength: Free-space wavelength in µm.
-        band_num: Mode band index (1 = fundamental).
+            band_num: Mode band index (1 = fundamental).
         parity: Parity of the mode.
         resolution: Pixels per µm (default 32).
         field_x_grid: 1D array of *x* coordinates for field sampling
@@ -1377,6 +1437,9 @@ def solve_cross_section_mode(
         field_z_grid: 1D array of *z* coordinates for field sampling
             (µm, absolute frame matching ``mode_z_grid``).  ``None``
             skips extraction.
+        background_material: Material name for the MEEP default medium
+            (fills space not covered by any layer). Default ``"air"``
+            (epsilon=1.0).
 
     Returns:
         :class:`ModeResult` with effective index, field profiles (if
@@ -1404,7 +1467,6 @@ def solve_cross_section_mode(
                 f"Port '{port}' not found in component. Available: {available}"
             )
         port_ori = float(getattr(port_info, "orientation", 0))
-        port_width = float(port_info.width)
 
         if cross_section_plane == "auto":
             _use_yz = port_ori % 180 == 0
@@ -1420,10 +1482,20 @@ def solve_cross_section_mode(
 
         if _use_yz:
             x_cut = float(port_info.center[0])
-            _span = y_span or (port_width + 2.0)
+            if y_span is None:
+                raise ValueError(
+                    "y_span is required for YZ cross-section with port. "
+                    "Pass y_span explicitly."
+                )
+            _span = y_span
         else:
             y_cut = float(port_info.center[1])
-            _span = x_span or (port_width + 2.0)
+            if x_span is None:
+                raise ValueError(
+                    "x_span is required for XZ cross-section with port. "
+                    "Pass x_span explicitly."
+                )
+            _span = x_span
     elif position is not None:
         if cross_section_plane == "auto":
             _use_yz = False  # default to XZ for position mode backward compat
@@ -1451,6 +1523,8 @@ def solve_cross_section_mode(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
+    if background_material != "air":
+        used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1468,6 +1542,7 @@ def solve_cross_section_mode(
             resolution,
             z_margin=z_margin,
             pml_thickness=pml_thickness,
+            background_material=background_material,
         )
     else:
         sim, cell_size = _build_component_xz_cell(
@@ -1479,6 +1554,7 @@ def solve_cross_section_mode(
             resolution,
             z_margin=z_margin,
             pml_thickness=pml_thickness,
+            background_material=background_material,
         )
     sim.init_sim()
 
@@ -1527,6 +1603,7 @@ def solve_slab_modes(
     resolution: float = 32,
     z_margin: float | tuple[float, float] = 0.0,
     pml_thickness: float = 0.0,
+    background_material: str = "air",
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
 ) -> dict[int, ModeResult]:
@@ -1565,6 +1642,8 @@ def solve_slab_modes(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
+    if background_material != "air":
+        used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1579,6 +1658,7 @@ def solve_slab_modes(
         resolution,
         z_margin=_z_margin_cell,
         pml_thickness=pml_thickness,
+        background_material=background_material,
     )
     sim.init_sim()
 
@@ -1637,6 +1717,7 @@ def solve_slab_wavelength_sweep(
     pml_thickness: float = 0.0,
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
+    background_material: str = "air",
 ) -> dict[float, ModeResult]:
     """Solve slab mode at multiple wavelengths reusing cell geometry.
 
@@ -1707,6 +1788,8 @@ def solve_slab_wavelength_sweep(
         )
 
     used_materials: set[str] = {s["name"] for s in _layer_specs}
+    if background_material != "air":
+        used_materials.add(background_material)
 
     field_x_grid: np.ndarray | None = None
     field_z_grid_meep: np.ndarray | None = None
@@ -1739,14 +1822,20 @@ def solve_slab_wavelength_sweep(
                 )
             )
 
+        bg = material_data.get(background_material)
+        default_medium = _meep_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
         sim_kwargs: dict = dict(
             cell_size=cell_size,
             geometry=geometry,
             resolution=resolution,
-            default_material=mp.Medium(epsilon=1.0),
+            default_material=default_medium,
         )
         if pml_thickness > 0:
-            sim_kwargs["boundary_layers"] = [mp.PML(thickness=pml_thickness)]
+            sim_kwargs["boundary_layers"] = [
+                mp.PML(thickness=pml_thickness, direction=mp.X),
+                mp.PML(thickness=pml_thickness, direction=mp.Z),
+            ]
 
         sim = mp.Simulation(**sim_kwargs)
         sim.init_sim()

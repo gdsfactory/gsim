@@ -608,11 +608,13 @@ class Simulation(BaseModel):
         port: str | None = None,
         position: tuple[float, float] | None = None,
         x_span: float | None = None,
+        y_span: float | None = None,
         wavelength: float,
         band_num: int = 1,
         parity: str = "NO_PARITY",
         resolution: float = 32,
         field_x_grid: np.ndarray | None = None,
+        field_y_grid: np.ndarray | None = None,
         field_z_grid: np.ndarray | None = None,
     ) -> Any:
         """Compute a waveguide eigenmode via MEEP.
@@ -627,17 +629,20 @@ class Simulation(BaseModel):
         given coordinate arrays.
 
         Args:
-            port: Port name to auto-extract cross-section location and
-                *x*-span.
+            port: Port name to auto-extract cross-section location.
             position: Arbitrary ``(x, y)`` — *y* is used for the cut
-                plane. Requires ``x_span``.
-            x_span: Total *x*-extent of the cell in µm. Auto-derived
-                from port width when ``port`` is given.
+                plane. Requires ``x_span`` or ``y_span``.
+            x_span: Total *x*-extent of the cell in µm for XZ
+                cross-sections.  Required when cross-section is XZ.
+            y_span: Total *y*-extent of the cell in µm for YZ
+                cross-sections.  Required when cross-section is YZ.
             wavelength: Free-space wavelength in µm.
             band_num: Mode band index (1 = fundamental).
             parity: Parity string.
             resolution: Pixels per µm (default 32).
             field_x_grid: 1D array of *x* coordinates for field sampling
+                (µm, origin at cell centre).  ``None`` skips extraction.
+            field_y_grid: 1D array of *y* coordinates for field sampling
                 (µm, origin at cell centre).  ``None`` skips extraction.
             field_z_grid: 1D array of *z* coordinates for field sampling
                 (µm, origin at cell centre).  ``None`` skips extraction.
@@ -665,11 +670,13 @@ class Simulation(BaseModel):
                 port=port,
                 position=position,
                 x_span=x_span,
+                y_span=y_span,
                 wavelength=wavelength,
                 band_num=band_num,
                 parity=parity,
                 resolution=resolution,
                 field_x_grid=field_x_grid,
+                field_y_grid=field_y_grid,
                 field_z_grid=field_z_grid,
             )
 

@@ -65,7 +65,7 @@ gf.gpdk.PDK.activate()
 # at the port Y-position to reconstruct the 2D (X,Z) geometry.
 
 # %%
-SLAB_WIDTH = 2.0  # um
+SLAB_WIDTH = 11.0  # um
 RIB_WIDTH = 0.5  # um
 LENGTH = 10.0  # um
 
@@ -143,11 +143,11 @@ for name, l in stack.layers.items():
 
 # %%
 WAVELENGTH = 1.55  # um
-RESOLUTION = 64
-pml_thickness = 0 * WAVELENGTH
+RESOLUTION = 32
+pml_thickness = 1 * WAVELENGTH
 
 y_span = SLAB_WIDTH
-z_margin = (0, 0.5)  # asymmetric: 0 below, 0.5 above
+z_margin = (0, 1)  # asymmetric: 0 below, 0.5 above
 
 z_min = min(l.zmin for l in stack.layers.values())
 z_max = max(l.zmax for l in stack.layers.values())
@@ -169,6 +169,7 @@ result = solve_cross_section_mode(
     component=c,
     stack=stack,
     port="o1",
+    y_span=y_span,
     wavelength=WAVELENGTH,
     band_num=1,
     parity="NO_PARITY",
@@ -214,6 +215,7 @@ ax2.set_xlabel("y (um)")
 ax2.set_ylabel("z (um)")
 ax2.set_title("Refractive index")
 ax2.set_aspect("equal")
+plt.show()
 
 
 for dom_comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):

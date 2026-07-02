@@ -491,7 +491,7 @@ class TestSimulationSolveMode:
         sim = Simulation()
         sim.geometry.component = c
 
-        result = sim.solve_mode(port="o1", wavelength=1.55)
+        result = sim.solve_mode(port="o1", y_span=2.5, wavelength=1.55)
         assert isinstance(result, ModeResult)
         assert result.n_eff > 1.0
         assert result.wavelength == 1.55
@@ -584,6 +584,7 @@ class TestModeSolverIntegration:
             component=c,
             stack=stack,
             port="o1",
+            y_span=x_span,
             wavelength=1.55,
             band_num=1,
             parity="NO_PARITY",
@@ -642,5 +643,5 @@ class TestModeSolverIntegration:
         sim.geometry.component = c
         sim.geometry.stack = stack
 
-        result = sim.solve_mode(port="o1", wavelength=1.55)
+        result = sim.solve_mode(port="o1", y_span=2.5, wavelength=1.55)
         assert result.n_eff > 1.0
