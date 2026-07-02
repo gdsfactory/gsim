@@ -238,10 +238,10 @@ class Domain(BaseModel):
         description="XY margin between geometry and PML in um",
     )
     margin_z_above: float = Field(
-        default=0.5, ge=0, description="Z margin above core in um"
+        default=0.0, ge=0, description="Z margin above core in um"
     )
     margin_z_below: float = Field(
-        default=0.5, ge=0, description="Z margin below core in um"
+        default=0.0, ge=0, description="Z margin below core in um"
     )
     port_margin: float = Field(
         default=0.5,
@@ -533,6 +533,10 @@ class ModeSolver(BaseModel):
     n_field_x: int = Field(default=0, ge=0)
     n_field_y: int = Field(default=0, ge=0)
     n_field_z: int = Field(default=0, ge=0)
+    background_material: str = Field(
+        default="air",
+        description="MEEP default_material (e.g. 'sio2' for oxide-clad waveguides).",
+    )
 
     @model_validator(mode="after")
     def _validate_where_constraints(self) -> ModeSolver:
