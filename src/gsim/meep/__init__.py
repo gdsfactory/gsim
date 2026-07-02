@@ -40,6 +40,7 @@ from gsim.meep.models import (
     Geometry,
     Material,
     ModeResult,
+    ModeSolver,
     ModeSource,
     ResolutionConfig,
     SimConfig,
@@ -48,6 +49,7 @@ from gsim.meep.models import (
     Symmetry,
     WavelengthConfig,
 )
+from gsim.meep.results import ModeSweepResult
 from gsim.meep.simulation import BuildResult, Simulation
 
 
@@ -69,7 +71,9 @@ __all__ = [
     "Geometry",
     "Material",
     "ModeResult",
+    "ModeSolver",
     "ModeSource",
+    "ModeSweepResult",
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",

@@ -242,16 +242,18 @@ fig.tight_layout()
 # %% [markdown]
 # ### Simulation wrapper
 #
-# `Simulation.solve_mode()` resolves the stack and materials internally,
-# then delegates to :func:`solve_slab_mode`.
+# `Simulation.solve_modes()` resolves the stack and materials internally
+# from the `mode_solver` configuration, then delegates to the appropriate
+# solver.
 
 # %%
 from gsim import meep as meep_mod
 
 sim = meep_mod.Simulation()
 sim.geometry.stack = stack
+sim.mode_solver(wavelengths=[1.55])
 
-result = sim.solve_mode(wavelength=1.55)
+result = sim.solve_modes().results[0]
 print(f"n_eff = {result.n_eff:.6f}")
 
 # %% [markdown]
@@ -690,7 +692,7 @@ fig.tight_layout()
 # | Feature | API |
 # |---|---|
 # | Slab modes (1D) | `solve_slab_mode(stack, wavelength=...)` |
-# | Simulation wrapper | `sim.solve_mode(wavelength=...)` |
+# | Simulation wrapper | `sim.mode_solver(wavelengths=[1.55]); sim.solve_modes()` |
 # | Z-grid utility | `mode_z_grid(stack, n_points)` |
 # | Index profile | `refractive_index_profile(stack, z_grid, wavelength)` |
 # | Field profiles | `result.fields["Ey"]` — 1D complex array along *z* |

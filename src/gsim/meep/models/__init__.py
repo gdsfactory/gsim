@@ -5,6 +5,7 @@ from gsim.meep.models.api import (
     Domain,
     Geometry,
     Material,
+    ModeSolver,
     ModeSource,
     Symmetry,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "Material",
     "MaterialData",
     "ModeResult",
+    "ModeSolver",
     "ModeSource",
     "PortData",
     "ResolutionConfig",

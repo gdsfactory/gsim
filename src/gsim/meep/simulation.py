@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
@@ -19,11 +19,9 @@ from gsim.meep.models.api import (
     FiberSource,
     Geometry,
     Material,
+    ModeSolver,
     ModeSource,
 )
-
-if TYPE_CHECKING:
-    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +102,7 @@ class Simulation(BaseModel):
     )
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
+    mode_solver: ModeSolver = Field(default_factory=ModeSolver)
 
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -599,95 +598,175 @@ class Simulation(BaseModel):
         return stack, material_data
 
     # -------------------------------------------------------------------------
-    # solve_mode — standalone eigenmode solving
+    # solve_modes — eigenmode solving from mode_solver configuration
     # -------------------------------------------------------------------------
 
-    def solve_mode(
-        self,
-        *,
-        port: str | None = None,
-        position: tuple[float, float] | None = None,
-        x_span: float | None = None,
-        y_span: float | None = None,
-        wavelength: float,
-        band_num: int = 1,
-        parity: str = "NO_PARITY",
-        resolution: float = 32,
-        field_x_grid: np.ndarray | None = None,
-        field_y_grid: np.ndarray | None = None,
-        field_z_grid: np.ndarray | None = None,
-    ) -> Any:
-        """Compute a waveguide eigenmode via MEEP.
+    def solve_modes(self) -> Any:
+        """Solve eigenmodes from ``self.mode_solver`` configuration.
 
-        Resolves the layer stack and materials via the three-tier pipeline,
-        then delegates to :func:`solve_cross_section_mode` or
-        :func:`solve_slab_mode` depending on whether a component is set.
-
-        By default no field profiles are extracted.  Pass ``field_z_grid``
-        (for slab modes) or both ``field_x_grid`` and ``field_z_grid``
-        (for cross-section modes) to sample ``mode.amplitude()`` on the
-        given coordinate arrays.
-
-        Args:
-            port: Port name to auto-extract cross-section location.
-            position: Arbitrary ``(x, y)`` — *y* is used for the cut
-                plane. Requires ``x_span`` or ``y_span``.
-            x_span: Total *x*-extent of the cell in µm for XZ
-                cross-sections.  Required when cross-section is XZ.
-            y_span: Total *y*-extent of the cell in µm for YZ
-                cross-sections.  Required when cross-section is YZ.
-            wavelength: Free-space wavelength in µm.
-            band_num: Mode band index (1 = fundamental).
-            parity: Parity string.
-            resolution: Pixels per µm (default 32).
-            field_x_grid: 1D array of *x* coordinates for field sampling
-                (µm, origin at cell centre).  ``None`` skips extraction.
-            field_y_grid: 1D array of *y* coordinates for field sampling
-                (µm, origin at cell centre).  ``None`` skips extraction.
-            field_z_grid: 1D array of *z* coordinates for field sampling
-                (µm, origin at cell centre).  ``None`` skips extraction.
+        Reads wavelengths, band count, and geometry context from the
+        :class:`ModeSolver` model and dispatches to the appropriate
+        low-level solvers with shared-cell optimizations where applicable.
 
         Returns:
-            :class:`ModeResult` with effective index, field profiles
-            (if grids provided), group index, etc.
+            :class:`ModeSweepResult` wrapping all solved :class:`ModeResult`
+            objects.
+
+        Raises:
+            ValueError: If ``wavelengths`` is empty, or if cross-section
+                mode is requested without a component, port, or position.
         """
         from gsim.meep.mode_solver import (
+            mode_x_grid,
+            mode_y_grid,
+            mode_z_grid,
             solve_cross_section_mode,
             solve_slab_mode,
+            solve_slab_modes,
+            solve_slab_wavelength_sweep,
         )
+        from gsim.meep.models.results import ModeResult
+        from gsim.meep.results import ModeSweepResult
 
-        _stack, _materials = self._resolve_stack_and_materials(wavelength=wavelength)
+        ms = self.mode_solver
+
+        if not ms.wavelengths:
+            raise ValueError("mode_solver.wavelengths must not be empty")
+
+        resolution = self.solver.resolution
+        pml_thickness = self.domain.pml
+        z_margin = (self.domain.margin_z_below, self.domain.margin_z_above)
+
+        component = self.geometry.component
+        where = ms.where
+
+        if where == "auto":
+            has_port_or_pos = ms.port is not None or ms.position is not None
+            if component is not None and has_port_or_pos:
+                where_effective = "cross_section"
+            else:
+                where_effective = "slab"
+        else:
+            where_effective = where
+
+        if where_effective == "cross_section":
+            if component is None:
+                raise ValueError(
+                    "cross_section mode requires a component — "
+                    "set sim.geometry.component first."
+                )
+            if ms.port is None and ms.position is None:
+                raise ValueError(
+                    "cross_section mode requires port or position — "
+                    "set mode_solver.port or mode_solver.position."
+                )
+
+        if ms.band is not None:
+            band_nums = [ms.band]
+        else:
+            band_nums = list(range(1, ms.num_bands + 1))
+
+        first_wavelength = ms.wavelengths[0]
+        _stack, _materials = self._resolve_stack_and_materials(
+            wavelength=first_wavelength
+        )
         stack = self.geometry.stack
         if stack is None:
             raise ValueError("Stack resolution failed.")
 
-        component = self.geometry.component
+        background_material = "air"
 
-        if component is not None and (port is not None or position is not None):
-            return solve_cross_section_mode(
-                component=component,
-                stack=stack,
-                port=port,
-                position=position,
-                x_span=x_span,
-                y_span=y_span,
-                wavelength=wavelength,
-                band_num=band_num,
-                parity=parity,
-                resolution=resolution,
-                field_x_grid=field_x_grid,
-                field_y_grid=field_y_grid,
-                field_z_grid=field_z_grid,
-            )
-
-        return solve_slab_mode(
-            stack=stack,
-            wavelength=wavelength,
-            band_num=band_num,
-            parity=parity,
-            resolution=resolution,
-            field_z_grid=field_z_grid,
+        n_field_x = ms.n_field_x
+        n_field_y = ms.n_field_y
+        n_field_z = ms.n_field_z
+        field_x_grid = (
+            mode_x_grid(n_field_x, ms.x_span or 0.0, pml_thickness)
+            if n_field_x > 0 and ms.x_span is not None
+            else None
         )
+        field_y_grid = (
+            mode_y_grid(n_field_y, ms.y_span or 0.0, pml_thickness)
+            if n_field_y > 0 and ms.y_span is not None
+            else None
+        )
+        field_z_grid = (
+            mode_z_grid(stack, n_field_z, z_margin, pml_thickness)
+            if n_field_z > 0
+            else None
+        )
+
+        results: list[ModeResult] = []
+
+        if where_effective == "slab":
+            if len(ms.wavelengths) > 1 and len(band_nums) == 1:
+                sweep_results = solve_slab_wavelength_sweep(
+                    stack=stack,
+                    wavelengths=ms.wavelengths,
+                    band_num=band_nums[0],
+                    parity=ms.parity,
+                    resolution=resolution,
+                    z_margin=z_margin,
+                    pml_thickness=pml_thickness,
+                    eigensolver_tol=ms.eigensolver_tol,
+                    field_z_grid=field_z_grid,
+                    background_material=background_material,
+                )
+                results.extend(sweep_results.values())
+            elif len(ms.wavelengths) == 1 and len(band_nums) > 1:
+                band_results = solve_slab_modes(
+                    stack=stack,
+                    wavelength=ms.wavelengths[0],
+                    band_nums=band_nums,
+                    parity=ms.parity,
+                    resolution=resolution,
+                    z_margin=z_margin,
+                    pml_thickness=pml_thickness,
+                    eigensolver_tol=ms.eigensolver_tol,
+                    field_z_grid=field_z_grid,
+                    background_material=background_material,
+                )
+                results.extend(band_results.values())
+            else:
+                for wl in ms.wavelengths:
+                    for bn in band_nums:
+                        mode_result = solve_slab_mode(
+                            stack=stack,
+                            wavelength=wl,
+                            band_num=bn,
+                            parity=ms.parity,
+                            resolution=resolution,
+                            z_margin=z_margin,
+                            pml_thickness=pml_thickness,
+                            eigensolver_tol=ms.eigensolver_tol,
+                            field_z_grid=field_z_grid,
+                            background_material=background_material,
+                        )
+                        results.append(mode_result)
+        else:
+            for wl in ms.wavelengths:
+                for bn in band_nums:
+                    mode_result = solve_cross_section_mode(
+                        component=component,
+                        stack=stack,
+                        port=ms.port,
+                        position=ms.position,
+                        x_span=ms.x_span,
+                        y_span=ms.y_span,
+                        wavelength=wl,
+                        band_num=bn,
+                        parity=ms.parity,
+                        resolution=resolution,
+                        z_margin=z_margin,
+                        pml_thickness=pml_thickness,
+                        eigensolver_tol=ms.eigensolver_tol,
+                        field_x_grid=field_x_grid,
+                        field_y_grid=field_y_grid,
+                        field_z_grid=field_z_grid,
+                        background_material=background_material,
+                    )
+                    results.append(mode_result)
+
+        return ModeSweepResult(results)
 
     # -------------------------------------------------------------------------
     # build_config — single source of truth
