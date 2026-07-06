@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# %% [markdown] papermill={"duration": 0.002197, "end_time": "2026-04-22T12:26:09.180844", "exception": false, "start_time": "2026-04-22T12:26:09.178647", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.001879, "end_time": "2026-07-06T15:20:20.052281", "exception": false, "start_time": "2026-07-06T15:20:20.050402", "status": "completed"}
 # # 2D Grating Coupler
 #
 # This notebook demonstrates **2D FDTD in the XZ cross-section plane** using `gsim.meep`. Unlike the top-down XY effective-index sim, this one models the vertical stack (substrate / BOX / core / cladding) and a Gaussian-beam fiber source above the chip — the standard grating-coupler workflow.
@@ -20,10 +20,10 @@
 #
 # **Requirements:** GDSFactory+ account for cloud simulation.
 
-# %% [markdown] papermill={"duration": 0.000763, "end_time": "2026-04-22T12:26:09.182596", "exception": false, "start_time": "2026-04-22T12:26:09.181833", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.001059, "end_time": "2026-07-06T15:20:20.054799", "exception": false, "start_time": "2026-07-06T15:20:20.053740", "status": "completed"}
 # ### Load a grating coupler + feed straight
 
-# %% papermill={"duration": 1.246279, "end_time": "2026-04-22T12:26:10.429520", "exception": false, "start_time": "2026-04-22T12:26:09.183241", "status": "completed"}
+# %% papermill={"duration": 1.175557, "end_time": "2026-07-06T15:20:21.231280", "exception": false, "start_time": "2026-07-06T15:20:20.055723", "status": "completed"}
 import gdsfactory as gf
 
 gf.gpdk.PDK.activate()
@@ -37,7 +37,7 @@ s_r.connect("o1", gc_r.ports["o1"])
 c.add_port("o2", port=s_r.ports["o2"])
 c
 
-# %% [markdown] papermill={"duration": 0.000767, "end_time": "2026-04-22T12:26:10.431296", "exception": false, "start_time": "2026-04-22T12:26:10.430529", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.000798, "end_time": "2026-07-06T15:20:21.233232", "exception": false, "start_time": "2026-07-06T15:20:21.232434", "status": "completed"}
 # ### Configure the XZ 2D simulation
 #
 # Key differences from the XY notebook:
@@ -45,7 +45,7 @@ c
 # - `sim.source_fiber(...)` replaces the port-based mode source.
 # - `sim.monitors = ["o2"]` monitors the waveguide end (feed straight).
 
-# %% papermill={"duration": 0.052953, "end_time": "2026-04-22T12:26:10.484942", "exception": false, "start_time": "2026-04-22T12:26:10.431989", "status": "completed"}
+# %% papermill={"duration": 0.055659, "end_time": "2026-07-06T15:20:21.289674", "exception": false, "start_time": "2026-07-06T15:20:21.234015", "status": "completed"}
 from gsim import meep
 from gsim.common.stack import get_stack
 from gsim.meep.models.api import Material
@@ -74,27 +74,27 @@ sim.source_fiber(
 )
 
 sim.monitors = ["o2"]
-sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5)
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, margin_z=(1.5, 0))
 sim.num_freqs = 21
 
 print(sim.validate_config())
 
-# %% [markdown] papermill={"duration": 0.00072, "end_time": "2026-04-22T12:26:10.486504", "exception": false, "start_time": "2026-04-22T12:26:10.485784", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.000729, "end_time": "2026-07-06T15:20:21.291360", "exception": false, "start_time": "2026-07-06T15:20:21.290631", "status": "completed"}
 # ### Preview the XZ cross-section
 
-# %% papermill={"duration": 0.855926, "end_time": "2026-04-22T12:26:11.343222", "exception": false, "start_time": "2026-04-22T12:26:10.487296", "status": "completed"}
+# %% papermill={"duration": 0.513783, "end_time": "2026-07-06T15:20:21.805866", "exception": false, "start_time": "2026-07-06T15:20:21.292083", "status": "completed"}
 sim.plot_2d(slices="y")
 
-# %% [markdown] papermill={"duration": 0.005152, "end_time": "2026-04-22T12:26:11.351144", "exception": false, "start_time": "2026-04-22T12:26:11.345992", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.000872, "end_time": "2026-07-06T15:20:21.808274", "exception": false, "start_time": "2026-07-06T15:20:21.807402", "status": "completed"}
 # ### Run the simulation
 
-# %% papermill={"duration": 132.689187, "end_time": "2026-04-22T12:28:24.042091", "exception": false, "start_time": "2026-04-22T12:26:11.352904", "status": "completed"}
+# %% papermill={"duration": 264.33169, "end_time": "2026-07-06T15:24:46.140801", "exception": false, "start_time": "2026-07-06T15:20:21.809111", "status": "completed"}
 result = sim.run()
 
-# %% papermill={"duration": 0.156844, "end_time": "2026-04-22T12:28:24.199924", "exception": false, "start_time": "2026-04-22T12:28:24.043080", "status": "completed"}
+# %% papermill={"duration": 0.126819, "end_time": "2026-07-06T15:24:46.269650", "exception": false, "start_time": "2026-07-06T15:24:46.142831", "status": "completed"}
 result.plot_interactive()
 
-# %% papermill={"duration": 0.006374, "end_time": "2026-04-22T12:28:24.210107", "exception": false, "start_time": "2026-04-22T12:28:24.203733", "status": "completed"}
+# %% papermill={"duration": 0.006356, "end_time": "2026-07-06T15:24:46.277574", "exception": false, "start_time": "2026-07-06T15:24:46.271218", "status": "completed"}
 result.show_animation()
 
-# %% papermill={"duration": 0.008708, "end_time": "2026-04-22T12:28:24.221683", "exception": false, "start_time": "2026-04-22T12:28:24.212975", "status": "completed"}
+# %% papermill={"duration": 0.001424, "end_time": "2026-07-06T15:24:46.280804", "exception": false, "start_time": "2026-07-06T15:24:46.279380", "status": "completed"}
