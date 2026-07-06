@@ -219,9 +219,10 @@ class TestCallableAPI:
 
     def test_domain_callable(self):
         sim = Simulation()
-        sim.domain(pml=0.5, margin=0.2)
+        sim.domain(pml=0.5, margin_x=0.2, margin_y=0.2)
         assert sim.domain.pml == 0.5
-        assert sim.domain.margin == 0.2
+        assert sim.domain.margin_x == 0.2
+        assert sim.domain.margin_y == 0.2
 
     def test_geometry_callable(self):
         sim = Simulation()
@@ -262,9 +263,10 @@ class TestWholeObjectAssignment:
 
     def test_domain(self):
         sim = Simulation()
-        sim.domain = Domain(pml=0.5, margin=0.2)
+        sim.domain = Domain(pml=0.5, margin_x=0.2, margin_y=0.2)
         assert sim.domain.pml == 0.5
-        assert sim.domain.margin == 0.2
+        assert sim.domain.margin_x == 0.2
+        assert sim.domain.margin_y == 0.2
 
     def test_solver(self):
         sim = Simulation()
@@ -428,14 +430,29 @@ class TestConfigTranslation:
 
     def test_domain_translation(self):
         sim = Simulation()
-        sim.domain = Domain(pml=0.5, margin=0.3, margin_z_above=1.0, margin_z_below=0.8)
+        sim.domain = Domain(pml=0.5, margin_x=0.3, margin_y=0.3, margin_z=(0.8, 1.0))
         cfg = sim._domain_config()
         assert cfg.dpml == 0.5
-        assert cfg.margin_xy == 0.3
-        assert cfg.margin_z_above == 1.0
-        assert cfg.margin_z_below == 0.8
+        assert cfg.margin_x_low == 0.3
+        assert cfg.margin_x_high == 0.3
+        assert cfg.margin_y_low == 0.3
+        assert cfg.margin_y_high == 0.3
+        assert cfg.margin_z_high == 1.0
+        assert cfg.margin_z_low == 0.8
         assert cfg.source_port_offset == 0.1
         assert cfg.distance_source_to_monitors == 0.2
+
+    def test_domain_translation_asymmetric_margins(self):
+        """Per-axis margins map to per-side DomainConfig fields."""
+        sim = Simulation()
+        sim.domain(margin_x=(0.3, 0.7), margin_y=0.5, margin_z=(0.4, 1.1))
+        cfg = sim._domain_config()
+        assert cfg.margin_x_low == 0.3
+        assert cfg.margin_x_high == 0.7
+        assert cfg.margin_y_low == 0.5
+        assert cfg.margin_y_high == 0.5
+        assert cfg.margin_z_low == 0.4
+        assert cfg.margin_z_high == 1.1
 
     def test_resolution_translation(self):
         sim = Simulation()
@@ -805,10 +822,10 @@ class TestXZAutoCrop:
         # Reference is the drawn core (zmax=0.22). Beam plane at z=1.42.
         sim.source_fiber(x=0.0, z=1.42, waist=5.4, angle_deg=14.5)
 
-        initial_margin = sim.domain.margin_z_above
+        initial_margin = sim.domain.resolved_margin_z()[1]
         sim.build_config()
         # Margin grows to (z - core_top) + waist/2 so the beam plane sits
         # inside the cell: (1.42 - 0.22) + 5.4/2 = 3.9.
         expected = (1.42 - 0.22) + 5.4 / 2
-        assert sim.domain.margin_z_above == pytest.approx(expected)
-        assert sim.domain.margin_z_above > initial_margin
+        assert sim.domain.resolved_margin_z()[1] == pytest.approx(expected)
+        assert sim.domain.resolved_margin_z()[1] > initial_margin

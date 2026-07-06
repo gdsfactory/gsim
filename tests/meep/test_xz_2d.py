@@ -78,7 +78,7 @@ def _build_minimal_gc_sim():
     sim.num_freqs = 5
     sim.monitors = ["o1"]
     sim.domain.pml = 1.0
-    sim.domain.margin = 0.5
+    sim.domain(margin_x=0.5, margin_y=0.5)
     return sim
 
 

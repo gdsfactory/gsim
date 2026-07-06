@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Geometry
@@ -229,20 +229,30 @@ class Domain(BaseModel):
             "Vertical crop reference: None = auto (highest-n layer actually "
             "drawn by the component, i.e. the photonic core), 'stack' = full "
             "non-air material stack, or a specific layer name. "
-            "margin_z_above/below are measured from this reference."
+            "margin_z is measured from this reference."
         ),
     )
     pml: float = Field(default=1.0, ge=0, description="PML thickness in um")
-    margin: float = Field(
+    margin_x: float | tuple[float, float] = Field(
         default=0.5,
-        ge=0,
-        description="XY margin between geometry and PML in um",
+        description=(
+            "Air gap between geometry and PML along X in um. Scalar = both "
+            "sides equal; (low, high) = (-x side, +x side)."
+        ),
     )
-    margin_z_above: float = Field(
-        default=0.5, ge=0, description="Z margin above core in um"
+    margin_y: float | tuple[float, float] = Field(
+        default=0.5,
+        description=(
+            "Air gap between geometry and PML along Y in um. Scalar = both "
+            "sides equal; (low, high) = (-y side, +y side)."
+        ),
     )
-    margin_z_below: float = Field(
-        default=0.5, ge=0, description="Z margin below core in um"
+    margin_z: float | tuple[float, float] = Field(
+        default=0.5,
+        description=(
+            "Vertical margin around the z_ref reference in um. Scalar = both "
+            "sides equal; (low, high) = (below, above)."
+        ),
     )
     port_margin: float = Field(
         default=0.5,
@@ -252,7 +262,7 @@ class Domain(BaseModel):
     extend_ports: float = Field(
         default=0.0,
         ge=0,
-        description="Extend ports into PML (um). 0 = auto (margin + pml).",
+        description="Extend ports into PML (um). 0 = auto (max XY margin + pml).",
     )
     source_port_offset: float = Field(
         default=0.1,
@@ -271,6 +281,41 @@ class Domain(BaseModel):
         default_factory=list,
         description="Mirror symmetry planes. Not yet used in production runs.",
     )
+
+    @field_validator("margin_x", "margin_y", "margin_z", mode="before")
+    @classmethod
+    def _validate_margin(cls, v: Any) -> Any:
+        """Accept a non-negative scalar or a (low, high) tuple of them."""
+        if isinstance(v, (int, float)):
+            if v < 0:
+                raise ValueError("margin must be >= 0")
+            return float(v)
+        try:
+            low, high = v
+        except (TypeError, ValueError):
+            raise ValueError("margin must be a number or a (low, high) tuple") from None
+        if low < 0 or high < 0:
+            raise ValueError("margin sides must be >= 0")
+        return (float(low), float(high))
+
+    @staticmethod
+    def _as_pair(v: float | tuple[float, float]) -> tuple[float, float]:
+        """Normalize a scalar or (low, high) tuple to a (low, high) pair."""
+        if isinstance(v, tuple):
+            return v
+        return (float(v), float(v))
+
+    def resolved_margin_x(self) -> tuple[float, float]:
+        """Return XY margin as ``(-x side, +x side)``."""
+        return self._as_pair(self.margin_x)
+
+    def resolved_margin_y(self) -> tuple[float, float]:
+        """Return XY margin as ``(-y side, +y side)``."""
+        return self._as_pair(self.margin_y)
+
+    def resolved_margin_z(self) -> tuple[float, float]:
+        """Return vertical margin as ``(below, above)``."""
+        return self._as_pair(self.margin_z)
 
     def __call__(self, **kwargs: Any) -> Domain:
         """Update fields in place. Returns self for chaining."""

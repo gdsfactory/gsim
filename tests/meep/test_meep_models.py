@@ -133,9 +133,12 @@ class TestSimConfig:
             resolution=ResolutionConfig(pixels_per_um=32),
             domain=DomainConfig(
                 dpml=1.0,
-                margin_xy=0.5,
-                margin_z_above=0.5,
-                margin_z_below=0.5,
+                margin_x_low=0.5,
+                margin_x_high=0.5,
+                margin_y_low=0.5,
+                margin_y_high=0.5,
+                margin_z_low=0.5,
+                margin_z_high=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
                 source_port_offset=0.1,
@@ -452,25 +455,32 @@ class TestDomainConfig:
     def test_custom(self):
         cfg = DomainConfig(
             dpml=0.5,
-            margin_xy=0.2,
-            margin_z_above=0.3,
-            margin_z_below=0.4,
+            margin_x_low=0.2,
+            margin_x_high=0.2,
+            margin_y_low=0.2,
+            margin_y_high=0.2,
+            margin_z_low=0.4,
+            margin_z_high=0.3,
             port_margin=0.5,
             extend_ports=0.0,
             source_port_offset=0.1,
             distance_source_to_monitors=0.2,
         )
         assert cfg.dpml == 0.5
-        assert cfg.margin_xy == 0.2
-        assert cfg.margin_z_above == 0.3
-        assert cfg.margin_z_below == 0.4
+        assert cfg.margin_x_low == 0.2
+        assert cfg.margin_x_high == 0.2
+        assert cfg.margin_z_high == 0.3
+        assert cfg.margin_z_low == 0.4
 
     def test_extend_ports_custom(self):
         cfg = DomainConfig(
             dpml=1.0,
-            margin_xy=0.5,
-            margin_z_above=0.5,
-            margin_z_below=0.5,
+            margin_x_low=0.5,
+            margin_x_high=0.5,
+            margin_y_low=0.5,
+            margin_y_high=0.5,
+            margin_z_low=0.5,
+            margin_z_high=0.5,
             port_margin=0.5,
             extend_ports=2.5,
             source_port_offset=0.1,
@@ -481,9 +491,12 @@ class TestDomainConfig:
     def test_extend_ports_serialization(self):
         cfg = DomainConfig(
             dpml=1.0,
-            margin_xy=0.5,
-            margin_z_above=0.5,
-            margin_z_below=0.5,
+            margin_x_low=0.5,
+            margin_x_high=0.5,
+            margin_y_low=0.5,
+            margin_y_high=0.5,
+            margin_z_low=0.5,
+            margin_z_high=0.5,
             port_margin=0.5,
             extend_ports=3.0,
             source_port_offset=0.1,
@@ -495,9 +508,12 @@ class TestDomainConfig:
     def test_model_dump(self):
         cfg = DomainConfig(
             dpml=2.0,
-            margin_xy=0.5,
-            margin_z_above=1.0,
-            margin_z_below=1.5,
+            margin_x_low=0.5,
+            margin_x_high=0.5,
+            margin_y_low=0.5,
+            margin_y_high=0.5,
+            margin_z_low=1.5,
+            margin_z_high=1.0,
             port_margin=0.5,
             extend_ports=0.0,
             source_port_offset=0.1,
@@ -505,9 +521,65 @@ class TestDomainConfig:
         )
         d = cfg.model_dump()
         assert d["dpml"] == 2.0
-        assert d["margin_xy"] == 0.5
-        assert d["margin_z_above"] == 1.0
-        assert d["margin_z_below"] == 1.5
+        assert d["margin_x_low"] == 0.5
+        assert d["margin_z_high"] == 1.0
+        assert d["margin_z_low"] == 1.5
+
+
+class TestPublicDomainMargins:
+    """Test the public Domain margin API (validator + normalization)."""
+
+    def test_scalar_and_tuple_ok(self):
+        from gsim.meep.models.api import Domain
+
+        d = Domain(margin_x=0.5, margin_y=0.5, margin_z=(0.5, 1.0))
+        assert d.margin_x == 0.5
+        assert d.margin_z == (0.5, 1.0)
+
+    def test_default_margins(self):
+        from gsim.meep.models.api import Domain
+
+        d = Domain()
+        assert d.margin_x == 0.5
+        assert d.margin_y == 0.5
+        assert d.margin_z == 0.5
+
+    def test_negative_scalar_rejected(self):
+        from gsim.meep.models.api import Domain
+
+        with pytest.raises(ValidationError):
+            Domain(margin_x=-1)
+
+    def test_negative_tuple_side_rejected(self):
+        from gsim.meep.models.api import Domain
+
+        with pytest.raises(ValidationError):
+            Domain(margin_z=(-0.1, 1.0))
+
+    def test_wrong_length_tuple_rejected(self):
+        from gsim.meep.models.api import Domain
+
+        with pytest.raises(ValidationError):
+            Domain(margin_z=(1, 2, 3))  # ty: ignore[invalid-argument-type]
+
+    def test_resolved_scalar_returns_pair(self):
+        from gsim.meep.models.api import Domain
+
+        d = Domain(margin_x=0.5, margin_y=0.7, margin_z=0.9)
+        assert d.resolved_margin_x() == (0.5, 0.5)
+        assert d.resolved_margin_y() == (0.7, 0.7)
+        assert d.resolved_margin_z() == (0.9, 0.9)
+
+    def test_resolved_tuple_passthrough(self):
+        from gsim.meep.models.api import Domain
+
+        d = Domain(margin_x=(0.3, 0.7), margin_y=(0.1, 0.2), margin_z=(0.4, 1.1))
+        assert d.resolved_margin_x() == (0.3, 0.7)
+        assert d.resolved_margin_y() == (0.1, 0.2)
+        # margin_z tuple order is (below, above)
+        below, above = d.resolved_margin_z()
+        assert below == 0.4
+        assert above == 1.1
 
 
 class TestSimConfigComponentBbox:
@@ -538,9 +610,12 @@ class TestSimConfigComponentBbox:
             resolution=ResolutionConfig(pixels_per_um=32),
             domain=DomainConfig(
                 dpml=1.0,
-                margin_xy=0.5,
-                margin_z_above=0.5,
-                margin_z_below=0.5,
+                margin_x_low=0.5,
+                margin_x_high=0.5,
+                margin_y_low=0.5,
+                margin_y_high=0.5,
+                margin_z_low=0.5,
+                margin_z_high=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
                 source_port_offset=0.1,
@@ -613,9 +688,12 @@ class TestDomainInSimConfig:
             resolution=ResolutionConfig(pixels_per_um=32),
             domain=DomainConfig(
                 dpml=0.5,
-                margin_xy=0.2,
-                margin_z_above=0.5,
-                margin_z_below=0.5,
+                margin_x_low=0.2,
+                margin_x_high=0.2,
+                margin_y_low=0.2,
+                margin_y_high=0.2,
+                margin_z_low=0.5,
+                margin_z_high=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
                 source_port_offset=0.1,
@@ -644,7 +722,7 @@ class TestDomainInSimConfig:
         data = json.loads(path.read_text())
         assert "domain" in data
         assert data["domain"]["dpml"] == 0.5
-        assert data["domain"]["margin_xy"] == 0.2
+        assert data["domain"]["margin_x_low"] == 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -893,9 +971,12 @@ class TestSimConfig2D:
             resolution=ResolutionConfig(pixels_per_um=32),
             domain=DomainConfig(
                 dpml=1.0,
-                margin_xy=0.5,
-                margin_z_above=0.5,
-                margin_z_below=0.5,
+                margin_x_low=0.5,
+                margin_x_high=0.5,
+                margin_y_low=0.5,
+                margin_y_high=0.5,
+                margin_z_low=0.5,
+                margin_z_high=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
                 source_port_offset=0.1,
@@ -1149,9 +1230,12 @@ class TestOverlay:
 
         domain_cfg = DomainConfig(
             dpml=1.0,
-            margin_xy=0.5,
-            margin_z_above=0.0,
-            margin_z_below=0.0,
+            margin_x_low=0.5,
+            margin_x_high=0.5,
+            margin_y_low=0.5,
+            margin_y_high=0.5,
+            margin_z_low=0.0,
+            margin_z_high=0.0,
             port_margin=0.5,
             extend_ports=0.0,
             source_port_offset=0.1,
@@ -1181,7 +1265,7 @@ class TestOverlay:
 
         overlay = build_sim_overlay(gm, domain_cfg, port_data)
 
-        # cell_min = geo_min - (margin_xy + dpml) for xy, - dpml for z
+        # cell_min = geo_min - (margin_x/y + dpml) for xy, - dpml for z
         assert overlay.cell_min[0] == pytest.approx(-3.5)  # -2 - (0.5 + 1.0)
         assert overlay.cell_min[1] == pytest.approx(-2.5)  # -1 - (0.5 + 1.0)
         assert overlay.cell_min[2] == pytest.approx(-1.0)  # 0 - 1.0
@@ -1216,9 +1300,12 @@ class TestOverlay:
 
         domain_cfg = DomainConfig(
             dpml=1.0,
-            margin_xy=0.5,
-            margin_z_above=0.5,
-            margin_z_below=0.5,
+            margin_x_low=0.5,
+            margin_x_high=0.5,
+            margin_y_low=0.5,
+            margin_y_high=0.5,
+            margin_z_low=0.5,
+            margin_z_high=0.5,
             port_margin=0.5,
             extend_ports=0.0,
             source_port_offset=0.1,
@@ -1252,7 +1339,7 @@ class TestScriptDomainConfig:
         script = generate_meep_script()
         assert "domain" in script
         assert "dpml" in script
-        assert "margin_xy" in script
+        assert "margin_x_low" in script
 
     def test_script_uses_dpml_from_config(self):
         """Verify the script no longer hardcodes padding = 1.0."""
@@ -1702,9 +1789,12 @@ class TestSimConfigXZ:
             resolution=dict(pixels_per_um=25),
             domain=dict(
                 dpml=1.0,
-                margin_xy=0.5,
-                margin_z_above=0.5,
-                margin_z_below=0.5,
+                margin_x_low=0.5,
+                margin_x_high=0.5,
+                margin_y_low=0.5,
+                margin_y_high=0.5,
+                margin_z_low=0.5,
+                margin_z_high=0.5,
                 port_margin=0.5,
                 extend_ports=0.0,
                 source_port_offset=0.1,

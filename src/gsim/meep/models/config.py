@@ -26,28 +26,39 @@ class DomainConfig(BaseModel):
     """Simulation domain sizing: margins around geometry + PML thickness.
 
     Margins control how much material (from the layer stack) is kept around
-    the vertical crop reference (``domain.z_ref``).  ``margin_z_above`` /
-    ``margin_z_below`` set the crop window above/below that reference.  Along
-    XY the margin is the gap between the geometry bounding-box and the PML
-    inner edge.
+    the vertical crop reference (``domain.z_ref``).  ``margin_z_low`` /
+    ``margin_z_high`` set the crop window below/above that reference.  Along
+    XY the margins are the per-side gaps between the geometry bounding-box and
+    the PML inner edge (``*_low`` = -axis side, ``*_high`` = +axis side).
 
     Cell size formula:
-        cell_x = bbox_width  + 2*(margin_xy + dpml)
-        cell_y = bbox_height + 2*(margin_xy + dpml)
+        cell_x = bbox_width  + margin_x_low + margin_x_high + 2*dpml
+        cell_y = bbox_height + margin_y_low + margin_y_high + 2*dpml
         cell_z = z_extent + 2*dpml  (z-margins baked into z_extent)
+    The cell center is shifted by (margin_*_high - margin_*_low)/2 per axis so
+    asymmetric margins place more room on the intended side.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     dpml: float = Field(ge=0, description="PML thickness in um")
-    margin_xy: float = Field(
-        ge=0, description="XY margin between geometry and PML in um"
+    margin_x_low: float = Field(
+        ge=0, description="XY margin on the -x side (geometry to PML) in um"
     )
-    margin_z_above: float = Field(
-        ge=0, description="Z margin above the z_ref reference in um"
+    margin_x_high: float = Field(
+        ge=0, description="XY margin on the +x side (geometry to PML) in um"
     )
-    margin_z_below: float = Field(
+    margin_y_low: float = Field(
+        ge=0, description="XY margin on the -y side (geometry to PML) in um"
+    )
+    margin_y_high: float = Field(
+        ge=0, description="XY margin on the +y side (geometry to PML) in um"
+    )
+    margin_z_low: float = Field(
         ge=0, description="Z margin below the z_ref reference in um"
+    )
+    margin_z_high: float = Field(
+        ge=0, description="Z margin above the z_ref reference in um"
     )
     port_margin: float = Field(
         ge=0,
@@ -56,7 +67,7 @@ class DomainConfig(BaseModel):
     extend_ports: float = Field(
         ge=0,
         description="Length to extend waveguide ports into PML in um. "
-        "0 = auto (margin_xy + dpml).",
+        "0 = auto (max XY margin + dpml).",
     )
     source_port_offset: float = Field(
         ge=0,

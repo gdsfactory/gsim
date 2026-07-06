@@ -74,8 +74,8 @@ sim.source_fiber(
 )
 
 sim.monitors = ["o2"]
-sim.domain(pml=1.0, margin=0.5)
-sim.num_freqs = 101
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5)
+sim.num_freqs = 21
 
 print(sim.validate_config())
 

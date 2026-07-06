@@ -61,9 +61,9 @@ sim.materials = {
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5)
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5)
 sim.solver(resolution=25, mode="2d", z_cut="auto")
-sim.num_freqs = 101
+sim.num_freqs = 21
 sim.solver.stop_when_energy_decayed()
 
 print(sim.validate_config())

@@ -41,9 +41,9 @@ sim.materials = {
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 101
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5, z_ref="stack")
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver(resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0)
 
 # %% [markdown]
@@ -67,12 +67,13 @@ sim.materials = {
 sim.source.port = "o1"
 sim.source.wavelength = 1.55
 sim.source.wavelength_span = 0.01
-sim.num_freqs = 101
+sim.num_freqs = 21
 
 sim.monitors = ["o1", "o2", "o3"]
 
 sim.domain.pml = 1.0
-sim.domain.margin = 0.5
+sim.domain.margin_x = 0.5
+sim.domain.margin_y = 0.5
 sim.domain.z_ref = "stack"
 
 sim.solver.resolution = 20
@@ -97,9 +98,9 @@ sim.materials = {
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source = ModeSource(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 101
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain = Domain(pml=1.0, margin=0.5, z_ref="stack")
+sim.domain = Domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver = FDTD(
     resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0
 )
@@ -121,9 +122,9 @@ sim.materials = {
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 101
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5, z_ref="stack")
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver(resolution=20, simplify_tol=0.01)
 
 # Conditional tweaks with attribute style

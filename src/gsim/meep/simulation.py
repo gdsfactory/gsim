@@ -326,13 +326,14 @@ class Simulation(BaseModel):
         return min(zmins), max(zmaxs)
 
     def _expand_margin_z_above_for_fiber(self, ref_top: float) -> None:
-        """Bump ``domain.margin_z_above`` to include the fiber source plane.
+        """Bump the above (high) side of ``margin_z`` to include the fiber plane.
 
         When the user configures ``sim.source_fiber(...)`` the Gaussian beam
         sits at absolute z = ``fs.z``. The z-crop shrinks the stack around
-        the resolved ``z_ref`` top, so ``margin_z_above`` must be large enough
-        that ``ref_top + margin_z_above`` still sits above the beam plane
-        plus a waist-sized buffer (otherwise the fiber ends up in PML).
+        the resolved ``z_ref`` top, so the above (high) side of ``margin_z``
+        must be large enough that ``ref_top + margin_z_high`` still sits above
+        the beam plane plus a waist-sized buffer (otherwise the fiber ends up
+        in PML).
 
         Args:
             ref_top: Top (zmax) of the resolved vertical-crop reference (um).
@@ -342,9 +343,10 @@ class Simulation(BaseModel):
         fs = self.fiber_source
         # Room for the beam plane + beam-half-waist so the Gaussian tail
         # is inside the sim cell before PML.
+        mz_low, mz_high = self.domain.resolved_margin_z()
         needed = (fs.z - ref_top) + max(fs.waist / 2.0, 0.5)
-        if self.domain.margin_z_above < needed:
-            self.domain.margin_z_above = needed
+        if mz_high < needed:
+            self.domain.margin_z = (mz_low, needed)
 
     def _resolve_z_ref_extent(self) -> tuple[float, float, str, float | None, bool]:
         """Resolve ``domain.z_ref`` to a vertical reference window.
@@ -415,7 +417,7 @@ class Simulation(BaseModel):
     ) -> None:
         """Crop the stack vertically around the resolved ``z_ref`` window.
 
-        Preserves ``[ref_zmin - margin_z_below, ref_zmax + margin_z_above]``
+        Preserves ``[ref_zmin - margin_z_low, ref_zmax + margin_z_high]``
         and trims/removes layers and dielectrics outside it. Guarded by
         ``_z_cropped`` so repeat ``build_config`` calls don't re-crop.
 
@@ -432,8 +434,9 @@ class Simulation(BaseModel):
         if stack is None:
             raise ValueError("No stack configured for z-crop.")
 
-        z_lo = ref_zmin - self.domain.margin_z_below
-        z_hi = ref_zmax + self.domain.margin_z_above
+        mz_low, mz_high = self.domain.resolved_margin_z()
+        z_lo = ref_zmin - mz_low
+        z_hi = ref_zmax + mz_high
 
         # Filter and clip layers
         cropped: dict[str, Layer] = {}
@@ -547,11 +550,17 @@ class Simulation(BaseModel):
         """Translate Domain -> DomainConfig."""
         from gsim.meep.models.config import DomainConfig
 
+        mx = self.domain.resolved_margin_x()
+        my = self.domain.resolved_margin_y()
+        mz = self.domain.resolved_margin_z()
         return DomainConfig(
             dpml=self.domain.pml,
-            margin_xy=self.domain.margin,
-            margin_z_above=self.domain.margin_z_above,
-            margin_z_below=self.domain.margin_z_below,
+            margin_x_low=mx[0],
+            margin_x_high=mx[1],
+            margin_y_low=my[0],
+            margin_y_high=my[1],
+            margin_z_low=mz[0],
+            margin_z_high=mz[1],
             port_margin=self.domain.port_margin,
             extend_ports=self.domain.extend_ports,
             source_port_offset=self.domain.source_port_offset,
@@ -652,9 +661,9 @@ class Simulation(BaseModel):
         # window comes from domain.z_ref (default: the drawn photonic core).
         if (is_3d or plane == "xz") and not self._z_cropped:
             ref_zmin, ref_zmax, ref_name, ref_n, is_auto = self._resolve_z_ref_extent()
-            # When a fiber source is configured in XZ mode, expand
-            # margin_z_above so the cropped stack still contains the beam
-            # plane (and a little PML headroom) — measured from the ref top.
+            # When a fiber source is configured in XZ mode, expand the
+            # above (high) side of margin_z so the cropped stack still
+            # contains the beam plane (and PML headroom) — from the ref top.
             self._expand_margin_z_above_for_fiber(ref_zmax)
             self._apply_z_crop(ref_zmin, ref_zmax, ref_name, ref_n, is_auto)
 
@@ -686,7 +695,15 @@ class Simulation(BaseModel):
         # Compute port extension length
         extend_length = domain_cfg.extend_ports
         if extend_length == 0.0:
-            extend_length = domain_cfg.margin_xy + domain_cfg.dpml
+            extend_length = (
+                max(
+                    domain_cfg.margin_x_low,
+                    domain_cfg.margin_x_high,
+                    domain_cfg.margin_y_low,
+                    domain_cfg.margin_y_high,
+                )
+                + domain_cfg.dpml
+            )
 
         # Extend waveguide ports into PML region
         original_bbox: list[float] | None = None
