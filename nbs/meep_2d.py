@@ -42,7 +42,7 @@ c
 # %% [markdown] papermill={"duration": 0.000681, "end_time": "2026-06-12T07:45:51.914774", "exception": false, "start_time": "2026-06-12T07:45:51.914093", "status": "completed"}
 # ### Configure 2D simulation
 #
-# The only difference from a 3D simulation is `sim.solver.is_3d = False`.
+# The only difference from a 3D simulation is `sim.solver(mode="2d", z_cut="auto")`.
 # This collapses the z-dimension, ignores sidewall angles, and enforces TE polarization.
 
 # %% papermill={"duration": 0.057654, "end_time": "2026-06-12T07:45:51.973158", "exception": false, "start_time": "2026-06-12T07:45:51.915504", "status": "completed"}
@@ -61,8 +61,8 @@ sim.materials = {
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5)
-sim.solver(resolution=25, is_3d=False)
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5)
+sim.solver(resolution=25, mode="2d", z_cut="auto")
 sim.num_freqs = 21
 sim.solver.stop_when_energy_decayed()
 

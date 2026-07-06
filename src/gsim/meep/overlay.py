@@ -122,7 +122,10 @@ def build_sim_overlay(
     """
     gmin, gmax = geometry_model.bbox
     dpml = domain_config.dpml
-    margin_xy = domain_config.margin_xy
+    mx_lo = domain_config.margin_x_low
+    mx_hi = domain_config.margin_x_high
+    my_lo = domain_config.margin_y_low
+    my_hi = domain_config.margin_y_high
 
     # XY: use original component bbox if available (port extension
     # changes geometry bbox)
@@ -133,17 +136,17 @@ def build_sim_overlay(
         xy_min_x, xy_min_y = gmin[0], gmin[1]
         xy_max_x, xy_max_y = gmax[0], gmax[1]
 
-    # XY: margin_xy is gap between geometry bbox and PML
-    # Z: margin_z_above/below is already baked into the geometry bbox via set_z_crop(),
+    # XY: per-side margins are the gap between geometry bbox and PML
+    # Z: margin_z_low/high is already baked into the geometry bbox via set_z_crop(),
     #    so only add dpml beyond the geometry z-extent
     cell_min = (
-        xy_min_x - margin_xy - dpml,
-        xy_min_y - margin_xy - dpml,
+        xy_min_x - mx_lo - dpml,
+        xy_min_y - my_lo - dpml,
         gmin[2] - dpml,
     )
     cell_max = (
-        xy_max_x + margin_xy + dpml,
-        xy_max_y + margin_xy + dpml,
+        xy_max_x + mx_hi + dpml,
+        xy_max_y + my_hi + dpml,
         gmax[2] + dpml,
     )
 
