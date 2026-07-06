@@ -36,7 +36,9 @@ def make_sbend_sim():
     sim.num_freqs = 5
     sim.monitors = ["o2"]
     sim.domain.pml = 1.0
-    sim.domain.margin = 0.5
+    sim.domain.margin_x = 0.5
+    sim.domain.margin_y = 0.5
+    sim.domain.margin_z = 0.5
     sim.solver.resolution = 10
     sim.solver.stop_when_energy_decayed(dt=15.0, decay_by=0.05)
     return sim
@@ -78,7 +80,9 @@ def make_2d_xz_gc_sim():
 
     sim.monitors = ["o2"]
     sim.domain.pml = 1.0
-    sim.domain.margin = 0.5
+    sim.domain.margin_x = 0.5
+    sim.domain.margin_y = 0.5
+    sim.domain.margin_z = 0.5
     sim.num_freqs = 11
     return sim
 
