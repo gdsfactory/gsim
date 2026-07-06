@@ -1460,49 +1460,81 @@ class TestRender2dOverlay:
 # ---------------------------------------------------------------------------
 
 
-class TestGeometryYCut:
-    """Tests for the Geometry.y_cut field."""
+class TestGeometryFields:
+    """Geometry is now just component + stack (no z_crop / y_cut)."""
 
-    def test_default_is_none(self):
+    def test_fields(self):
         from gsim.meep.models.api import Geometry
 
-        g = Geometry()
-        assert g.y_cut is None
+        assert set(Geometry.model_fields) == {"component", "stack"}
 
-    def test_accepts_float(self):
+    def test_forbids_removed_fields(self):
         from gsim.meep.models.api import Geometry
 
-        g = Geometry(y_cut=1.5)
-        assert g.y_cut == 1.5
+        with pytest.raises(ValidationError):
+            Geometry(y_cut=1.5)  # ty: ignore[unknown-argument]
+        with pytest.raises(ValidationError):
+            Geometry(z_crop="auto")  # ty: ignore[unknown-argument]
 
 
-class TestFDTDPlane:
-    """Tests for the FDTD.plane field and its validator."""
+class TestFDTDMode:
+    """Tests for the FDTD.mode field, cut planes, and validator."""
 
-    def test_default_is_xy(self):
+    def test_default_is_3d_no_cuts(self):
         from gsim.meep.models.api import FDTD
 
         s = FDTD()
-        assert s.plane == "xy"
+        assert s.mode == "3d"
+        assert s.resolved_is_3d() is True
+        assert s.resolved_plane() is None
 
-    def test_xz_with_is_3d_false_ok(self):
+    def test_xz_2d_via_y_cut(self):
         from gsim.meep.models.api import FDTD
 
-        s = FDTD(is_3d=False, plane="xz")
-        assert s.plane == "xz"
+        s = FDTD(mode="2d", y_cut="auto")
+        assert s.resolved_is_3d() is False
+        assert s.resolved_plane() == "xz"
+        assert s.resolved_cut() == "auto"
 
-    def test_xz_with_is_3d_true_errors(self):
+    def test_xy_2d_via_z_cut(self):
         from gsim.meep.models.api import FDTD
 
-        with pytest.raises(ValidationError, match="plane='xz' requires is_3d=False"):
-            FDTD(is_3d=True, plane="xz")
+        s = FDTD(mode="2d", z_cut="auto")
+        assert s.resolved_plane() == "xy"
+        assert s.resolved_cut() == "auto"
 
-    def test_setting_plane_xz_when_is_3d_true_errors(self):
+    def test_3d_with_cut_errors(self):
         from gsim.meep.models.api import FDTD
 
-        s = FDTD()
-        with pytest.raises(ValidationError, match="plane='xz' requires is_3d=False"):
-            s.plane = "xz"
+        with pytest.raises(ValidationError, match="3d mode requires"):
+            FDTD(mode="3d", y_cut=1.0)
+
+    def test_2d_with_no_cut_errors(self):
+        from gsim.meep.models.api import FDTD
+
+        with pytest.raises(ValidationError, match="exactly one"):
+            FDTD(mode="2d")
+
+    def test_2d_with_two_cuts_errors(self):
+        from gsim.meep.models.api import FDTD
+
+        with pytest.raises(ValidationError, match="exactly one"):
+            FDTD(mode="2d", y_cut=1.0, z_cut=1.0)
+
+    def test_x_cut_not_implemented(self):
+        from gsim.meep.models.api import FDTD
+
+        with pytest.raises(NotImplementedError, match="YZ plane"):
+            FDTD(mode="2d", x_cut="auto")
+
+    def test_callable_batches_mode_and_cut(self):
+        from gsim.meep.models.api import FDTD
+
+        # Setting mode + cut in one call must not trip the intermediate
+        # (mode='2d', zero cuts) invalid state.
+        s = FDTD()(mode="2d", y_cut="auto")
+        assert s.mode == "2d"
+        assert s.y_cut == "auto"
 
 
 class TestFiberSource:
@@ -1548,8 +1580,7 @@ class TestSimulationFiberSource:
         from gsim.meep.simulation import Simulation
 
         sim = Simulation()
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
 
         sim.source_fiber(
             x=0.0,
@@ -1566,12 +1597,85 @@ class TestSimulationFiberSource:
         # ModeSource is still present but build_config must prefer fiber_source.
         assert isinstance(sim.source, ModeSource)
 
-    def test_sim_fiber_helper_rejects_when_is_3d_true(self):
+    def test_sim_fiber_helper_rejects_when_3d(self):
         from gsim.meep.simulation import Simulation
 
-        sim = Simulation()  # defaults: is_3d=True
-        with pytest.raises(ValueError, match="fiber source requires is_3d=False"):
+        sim = Simulation()  # defaults: mode='3d'
+        with pytest.raises(ValueError, match="fiber source requires solver"):
             sim.source_fiber(x=0.0, z=1.0, waist=5.4)
+
+
+class TestDrawnCoreDetection:
+    """Tests for _find_highest_n_layer_in_component (auto z-crop reference)."""
+
+    @staticmethod
+    def _stack_with_undrawn_ge():
+        from gsim.common.stack import Layer, LayerStack
+
+        return LayerStack(
+            pdk_name="test",
+            units="um",
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+                # Higher-index but NOT drawn by the component below.
+                "ge": Layer(
+                    name="ge",
+                    gds_layer=(99, 0),
+                    zmin=0.3,
+                    zmax=0.5,
+                    thickness=0.2,
+                    material="ge",
+                    layer_type="dielectric",
+                ),
+            },
+            materials={},
+            dielectrics=[],
+            simulation={},
+        )
+
+    def _straight_on_core(self):
+        import gdsfactory as gf
+
+        c = gf.Component()
+        c.add_polygon([(-5, -0.25), (5, -0.25), (5, 0.25), (-5, 0.25)], layer=(1, 0))
+        return c
+
+    def test_picks_drawn_core_not_undrawn_ge(self):
+        from gsim.meep.ports import (
+            _find_highest_n_layer,
+            _find_highest_n_layer_in_component,
+        )
+
+        stack = self._stack_with_undrawn_ge()
+        component = self._straight_on_core()
+
+        # Global helper picks Ge (highest n), which is the undrawn layer.
+        global_layer, _ = _find_highest_n_layer(stack)
+        assert global_layer.name == "ge"
+
+        # Drawn-aware helper picks the Si core the component actually draws.
+        drawn_layer, n = _find_highest_n_layer_in_component(component, stack)
+        assert drawn_layer.name == "core"
+        assert n == pytest.approx(11.9**0.5, abs=1e-3)
+
+    def test_fallback_when_nothing_drawn(self):
+        import gdsfactory as gf
+
+        from gsim.meep.ports import _find_highest_n_layer_in_component
+
+        stack = self._stack_with_undrawn_ge()
+        empty = gf.Component()  # draws nothing
+        layer, _ = _find_highest_n_layer_in_component(empty, stack)
+        # Falls back to the global highest-n layer.
+        assert layer.name == "ge"
 
 
 class TestSimConfigXZ:

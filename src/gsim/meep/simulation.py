@@ -105,6 +105,10 @@ class Simulation(BaseModel):
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
 
+    # Private: guards against double vertical-cropping when build_config()
+    # is called more than once (e.g. plot_2d then run) on the same sim.
+    _z_cropped: bool = PrivateAttr(default=False)
+
     # Extra hints forwarded into the config JSON (not part of the schema).
     _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -170,8 +174,8 @@ class Simulation(BaseModel):
     def source_fiber(self, **kwargs: Any) -> FiberSource:
         """Configure a tilted Gaussian-beam fiber source (XZ 2D only).
 
-        Replaces any previous fiber source. Requires ``solver.is_3d=False``
-        (and eventually ``solver.plane='xz'`` at ``build_config`` time).
+        Replaces any previous fiber source. Requires ``solver.mode='2d'``
+        (and ``solver.y_cut`` set for the XZ plane at ``build_config`` time).
 
         The ``waist`` kwarg is the 1/e² intensity *radius* (= MFD / 2),
         matching MEEP's ``beam_w0``. Typical SMF-28 values:
@@ -184,10 +188,10 @@ class Simulation(BaseModel):
         Returns:
             The newly created :class:`FiberSource` instance.
         """
-        if self.solver.is_3d:
+        if self.solver.resolved_is_3d():
             raise ValueError(
-                "fiber source requires is_3d=False (and plane='xz') — "
-                "currently is_3d=True"
+                "fiber source requires solver.mode='2d' (with y_cut set for "
+                "the XZ plane) — currently mode='3d'"
             )
         self.fiber_source = FiberSource(**kwargs)
         return self.fiber_source
@@ -212,7 +216,7 @@ class Simulation(BaseModel):
 
         if self.geometry.component is not None:
             ports = list(self.geometry.component.ports)
-            if not ports and self.solver.plane != "xz":
+            if not ports and self.solver.resolved_plane() != "xz":
                 errors.append("Component has no ports.")
             elif self.source.port is not None:
                 port_names = [p.name for p in ports]
@@ -321,73 +325,112 @@ class Simulation(BaseModel):
             return None
         return min(zmins), max(zmaxs)
 
-    def _expand_margin_z_above_for_fiber(self) -> None:
+    def _expand_margin_z_above_for_fiber(self, ref_top: float) -> None:
         """Bump ``domain.margin_z_above`` to include the fiber source plane.
 
         When the user configures ``sim.source_fiber(...)`` the Gaussian beam
         sits at absolute z = ``fs.z``. The z-crop shrinks the stack around
-        the physical-stack top, so ``margin_z_above`` must be large enough
-        that ``stack_top + margin_z_above`` still sits above the beam plane
+        the resolved ``z_ref`` top, so ``margin_z_above`` must be large enough
+        that ``ref_top + margin_z_above`` still sits above the beam plane
         plus a waist-sized buffer (otherwise the fiber ends up in PML).
+
+        Args:
+            ref_top: Top (zmax) of the resolved vertical-crop reference (um).
         """
         if self.fiber_source is None:
             return
         fs = self.fiber_source
-        extent = self._stack_material_extent()
-        if extent is None:
-            return
-        _, stack_top = extent
         # Room for the beam plane + beam-half-waist so the Gaussian tail
         # is inside the sim cell before PML.
-        needed = (fs.z - stack_top) + max(fs.waist / 2.0, 0.5)
+        needed = (fs.z - ref_top) + max(fs.waist / 2.0, 0.5)
         if self.domain.margin_z_above < needed:
             self.domain.margin_z_above = needed
 
-    # -------------------------------------------------------------------------
-    # Internal: z-crop
-    # -------------------------------------------------------------------------
+    def _resolve_z_ref_extent(self) -> tuple[float, float, str, float | None, bool]:
+        """Resolve ``domain.z_ref`` to a vertical reference window.
 
-    def _apply_z_crop(self) -> None:
-        """Apply z-crop to the stack if geometry.z_crop is set.
+        Single source of truth for both the fiber-margin expansion and the
+        z-crop. Interprets ``domain.z_ref``:
 
-        Only applies once per stack — after cropping, sets z_crop to None
-        to prevent double-cropping on subsequent calls.
+        - ``None`` -> auto: highest-n layer the component actually draws
+          (the photonic core). Falls back to the full stack extent.
+        - ``"stack"`` -> the full non-air material extent (BOX..cladding).
+        - ``"<name>"`` -> that specific layer's z-extent.
+
+        Returns:
+            ``(ref_zmin, ref_zmax, ref_name, ref_n, is_auto)`` where ``ref_n``
+            is the reference layer's refractive index (or None) and ``is_auto``
+            is True when ``z_ref`` was left as the default.
         """
-        if self.geometry.z_crop is None:
-            return
-
-        from gsim.common.stack.extractor import Layer, LayerStack
+        from gsim.meep.ports import _find_highest_n_layer_in_component
 
         stack = self.geometry.stack
         if stack is None:
             raise ValueError("No stack configured for z-crop.")
 
-        z_crop_setting = self.geometry.z_crop
+        z_ref = self.domain.z_ref
 
-        # Determine the z-range to preserve ("ref window") before margins.
-        # "auto" uses the full non-air stack extent (BOX through cladding),
-        # so the fabricated stack stays intact and only synthetic air
-        # padding above/below gets trimmed. A named layer restricts the
-        # window to that single layer's z-extent.
-        ref_name: str
-        if z_crop_setting == "auto":
+        if z_ref == "stack":
             extent = self._stack_material_extent()
             if extent is None:
                 raise ValueError(
                     "Could not detect any non-air layers/dielectrics for "
-                    "auto z-crop. Set geometry.z_crop to an explicit layer name."
+                    "z_ref='stack'. Set domain.z_ref to an explicit layer name."
                 )
-            ref_zmin, ref_zmax = extent
-            ref_name = "stack"
-        else:
-            ref_name = z_crop_setting
-            if ref_name not in stack.layers:
-                raise ValueError(
-                    f"Layer '{ref_name}' not found. "
-                    f"Available: {list(stack.layers.keys())}"
-                )
-            ref: Layer = stack.layers[ref_name]
-            ref_zmin, ref_zmax = ref.zmin, ref.zmax
+            return extent[0], extent[1], "stack", None, False
+
+        if z_ref is None:
+            layer, n = _find_highest_n_layer_in_component(
+                self.geometry.component, stack
+            )
+            if layer is None:
+                extent = self._stack_material_extent()
+                if extent is None:
+                    raise ValueError(
+                        "Could not detect any drawn optical layer or non-air "
+                        "stack for auto z_ref. Set domain.z_ref explicitly."
+                    )
+                return extent[0], extent[1], "stack", None, True
+            return layer.zmin, layer.zmax, layer.name, n, True
+
+        # Named layer
+        if z_ref not in stack.layers:
+            raise ValueError(
+                f"Layer '{z_ref}' not found. Available: {list(stack.layers.keys())}"
+            )
+        ref = stack.layers[z_ref]
+        return ref.zmin, ref.zmax, z_ref, None, False
+
+    # -------------------------------------------------------------------------
+    # Internal: z-crop
+    # -------------------------------------------------------------------------
+
+    def _apply_z_crop(
+        self,
+        ref_zmin: float,
+        ref_zmax: float,
+        ref_name: str,
+        ref_n: float | None,
+        is_auto: bool,
+    ) -> None:
+        """Crop the stack vertically around the resolved ``z_ref`` window.
+
+        Preserves ``[ref_zmin - margin_z_below, ref_zmax + margin_z_above]``
+        and trims/removes layers and dielectrics outside it. Guarded by
+        ``_z_cropped`` so repeat ``build_config`` calls don't re-crop.
+
+        Args:
+            ref_zmin: Bottom of the reference window (um).
+            ref_zmax: Top of the reference window (um).
+            ref_name: Name of the reference ('stack' or a layer name).
+            ref_n: Refractive index of the reference layer (or None).
+            is_auto: Whether the reference was auto-detected (``z_ref=None``).
+        """
+        from gsim.common.stack.extractor import Layer, LayerStack
+
+        stack = self.geometry.stack
+        if stack is None:
+            raise ValueError("No stack configured for z-crop.")
 
         z_lo = ref_zmin - self.domain.margin_z_below
         z_hi = ref_zmax + self.domain.margin_z_above
@@ -433,10 +476,21 @@ class Simulation(BaseModel):
             dielectrics=cropped_dielectrics,
             simulation=stack.simulation,
         )
+        if is_auto:
+            n_str = f"n={ref_n:.2f}, " if ref_n is not None else ""
+            logger.info(
+                "z-crop reference auto-detected: %r (%sz=[%.4g, %.4g]); "
+                "window z=[%.4g, %.4g]",
+                ref_name,
+                n_str,
+                ref_zmin,
+                ref_zmax,
+                z_lo,
+                z_hi,
+            )
         logger.info(
-            "z_crop=%r applied (ref=%r, z=[%.4g, %.4g]); trimmed %d layer(s): %s; "
+            "z-crop applied (ref=%r, z=[%.4g, %.4g]); trimmed %d layer(s): %s; "
             "removed %d layer(s) fully outside crop: %s",
-            z_crop_setting,
             ref_name,
             z_lo,
             z_hi,
@@ -445,11 +499,9 @@ class Simulation(BaseModel):
             len(removed_names),
             removed_names,
         )
-        # Clear z_crop so repeat calls to build_config() (e.g. plot_2d then run)
-        # don't re-crop an already-cropped stack. Invariant: after this method
-        # runs successfully, self.geometry.stack is the cropped stack and
-        # self.geometry.z_crop is None.
-        self.geometry.z_crop = None
+        # Guard against re-cropping an already-cropped stack on repeat
+        # build_config() calls (e.g. plot_2d then run).
+        self._z_cropped = True
 
     # -------------------------------------------------------------------------
     # Internal: translate to config objects
@@ -585,8 +637,8 @@ class Simulation(BaseModel):
         if not validation.valid:
             raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
 
-        is_3d = self.solver.is_3d
-        plane = self.solver.plane
+        is_3d = self.solver.resolved_is_3d()
+        plane = self.solver.resolved_plane()
 
         # Resolve stack
         self._ensure_stack()
@@ -596,35 +648,31 @@ class Simulation(BaseModel):
             raise ValueError("No geometry set.")
 
         # Apply z-crop for 3D and XZ 2D (both use the vertical dimension).
-        # XY 2D collapses z entirely so cropping is meaningless.
-        if is_3d or plane == "xz":
-            # For XZ 2D, default z_crop to "auto" so users don't end up with
-            # a huge auto-built stack (e.g. the 5 µm air_above) pinning the
-            # cell height. This mirrors what 3D notebooks do explicitly.
-            if plane == "xz" and self.geometry.z_crop is None:
-                self.geometry.z_crop = "auto"
-
+        # XY 2D collapses z entirely so cropping is meaningless. The crop
+        # window comes from domain.z_ref (default: the drawn photonic core).
+        if (is_3d or plane == "xz") and not self._z_cropped:
+            ref_zmin, ref_zmax, ref_name, ref_n, is_auto = self._resolve_z_ref_extent()
             # When a fiber source is configured in XZ mode, expand
             # margin_z_above so the cropped stack still contains the beam
-            # plane (and a little PML headroom).
-            self._expand_margin_z_above_for_fiber()
-
-            self._apply_z_crop()
+            # plane (and a little PML headroom) — measured from the ref top.
+            self._expand_margin_z_above_for_fiber(ref_zmax)
+            self._apply_z_crop(ref_zmin, ref_zmax, ref_name, ref_n, is_auto)
 
         import gdsfactory as gf
 
         original_component = self.geometry.component.copy()
         stack = self.geometry.stack
 
-        # Resolve y_cut default for XZ 2D sims.
+        # Resolve the XZ cut Y-coordinate ('auto'/None -> bbox center).
+        cut = self.solver.resolved_cut()
         if plane == "xz":
-            if self.geometry.y_cut is None:
+            if cut is None or cut == "auto":
                 bbox = original_component.dbbox()
                 y_cut: float | None = (bbox.bottom + bbox.top) / 2.0
             else:
-                y_cut = self.geometry.y_cut
+                y_cut = float(cut)
         else:
-            y_cut = self.geometry.y_cut
+            y_cut = None
 
         # Build config objects
         domain_cfg = self._domain_config()
@@ -700,10 +748,12 @@ class Simulation(BaseModel):
         # Build FiberSourceConfig (XZ 2D only) with pre-computed k-direction.
         fiber_source_cfg: FiberSourceConfig | None = None
         if self.fiber_source is not None:
-            if self.solver.is_3d:
-                raise ValueError("fiber source requires is_3d=False (and plane='xz')")
+            if self.solver.resolved_is_3d():
+                raise ValueError(
+                    "fiber source requires solver.mode='2d' (with y_cut set)"
+                )
             if plane != "xz":
-                raise ValueError("fiber source requires plane='xz'")
+                raise ValueError("fiber source requires solver.y_cut set (XZ plane)")
 
             theta = math.radians(self.fiber_source.angle_deg)
             k_direction = [math.sin(theta), 0.0, -math.cos(theta)]
@@ -783,7 +833,9 @@ class Simulation(BaseModel):
         # Build SimConfig
         sim_config = SimConfig(
             is_3d=is_3d,
-            plane=plane,
+            # Internal config plane is always concrete; 3D ignores it, so
+            # default None -> "xy" to keep the emitted JSON schema unchanged.
+            plane=plane or "xy",
             y_cut=y_cut,
             fiber_source=fiber_source_cfg,
             gds_filename="layout.gds",
@@ -1078,8 +1130,8 @@ class Simulation(BaseModel):
         Uses :meth:`build_config` so the plot shows exactly what meep
         processes — including extended ports and PML boundaries.
 
-        In XZ 2D mode (``solver.plane='xz'``), ``slices`` defaults to
-        ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
+        In XZ 2D mode (``solver.mode='2d'`` with ``y_cut`` set), ``slices``
+        defaults to ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
 
         Accepts the same keyword arguments as :func:`gsim.meep.viz.plot_2d`.
         """
@@ -1087,7 +1139,7 @@ class Simulation(BaseModel):
 
         result = self.build_config()
 
-        if self.solver.plane == "xz":
+        if self.solver.resolved_plane() == "xz":
             kwargs.setdefault("slices", "y")
             if kwargs.get("slices") == "y":
                 kwargs.setdefault("y", result.config.y_cut)
@@ -1115,8 +1167,8 @@ class Simulation(BaseModel):
         Uses :meth:`build_config` so the plot shows exactly what meep
         processes — including extended ports and PML boundaries.
 
-        In XZ 2D mode (``solver.plane='xz'``), ``slices`` defaults to
-        ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
+        In XZ 2D mode (``solver.mode='2d'`` with ``y_cut`` set), ``slices``
+        defaults to ``"y"`` and ``y`` defaults to the resolved ``y_cut``.
 
         Accepts the same keyword arguments as
         :func:`gsim.meep.viz.plot_2d_interactive`.
@@ -1128,7 +1180,7 @@ class Simulation(BaseModel):
 
         result = self.build_config()
 
-        if self.solver.plane == "xz":
+        if self.solver.resolved_plane() == "xz":
             kwargs.setdefault("slices", "y")
             if kwargs.get("slices") == "y":
                 kwargs.setdefault("y", result.config.y_cut)

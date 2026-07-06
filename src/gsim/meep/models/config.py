@@ -26,9 +26,10 @@ class DomainConfig(BaseModel):
     """Simulation domain sizing: margins around geometry + PML thickness.
 
     Margins control how much material (from the layer stack) is kept around
-    the waveguide core.  ``set_z_crop()`` uses ``margin_z_above`` /
-    ``margin_z_below`` to determine the crop window.  Along XY the margin
-    is the gap between the geometry bounding-box and the PML inner edge.
+    the vertical crop reference (``domain.z_ref``).  ``margin_z_above`` /
+    ``margin_z_below`` set the crop window above/below that reference.  Along
+    XY the margin is the gap between the geometry bounding-box and the PML
+    inner edge.
 
     Cell size formula:
         cell_x = bbox_width  + 2*(margin_xy + dpml)
@@ -43,10 +44,10 @@ class DomainConfig(BaseModel):
         ge=0, description="XY margin between geometry and PML in um"
     )
     margin_z_above: float = Field(
-        ge=0, description="Z margin above core kept by set_z_crop in um"
+        ge=0, description="Z margin above the z_ref reference in um"
     )
     margin_z_below: float = Field(
-        ge=0, description="Z margin below core kept by set_z_crop in um"
+        ge=0, description="Z margin below the z_ref reference in um"
     )
     port_margin: float = Field(
         ge=0,

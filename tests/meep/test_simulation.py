@@ -225,9 +225,14 @@ class TestCallableAPI:
 
     def test_geometry_callable(self):
         sim = Simulation()
-        sim.geometry(component="placeholder", z_crop="auto")
+        sim.geometry(component="placeholder")
         assert sim.geometry.component == "placeholder"
-        assert sim.geometry.z_crop == "auto"
+
+    def test_domain_z_ref_callable(self):
+        sim = Simulation()
+        assert sim.domain.z_ref is None
+        sim.domain(z_ref="stack")
+        assert sim.domain.z_ref == "stack"
 
     def test_solver_callable(self):
         sim = Simulation()
@@ -333,8 +338,7 @@ class TestWavelengthDerivation:
         # a WavelengthConfig with num_freqs=11 because _wavelength_config
         # read self.source.num_freqs, ignoring the fiber source.
         sim = Simulation()
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source_fiber(
             x=0.0,
             z=2.0,
@@ -350,8 +354,7 @@ class TestWavelengthDerivation:
 
     def test_wavelength_config_picks_fiber_source_when_active(self):
         sim = Simulation()
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source.wavelength = 1.31
         sim.source.wavelength_span = 0.02
         sim.source_fiber(
@@ -367,8 +370,7 @@ class TestWavelengthDerivation:
 
     def test_both_sources_rejected_at_validate(self):
         sim = Simulation()
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source.port = "o1"
         sim.source_fiber(x=0.0, z=2.0, waist=5.2)
         result = sim.validate_config()
@@ -471,25 +473,23 @@ class TestConfigTranslation:
 
 
 class Test2DMode:
-    """Tests for 2D simulation mode (is_3d=False)."""
+    """Tests for 2D simulation mode (mode='2d')."""
 
-    def test_fdtd_is_3d_default_true(self):
+    def test_fdtd_default_mode_3d(self):
         f = FDTD()
-        assert f.is_3d is True
+        assert f.mode == "3d"
+        assert f.resolved_is_3d() is True
 
-    def test_fdtd_is_3d_false(self):
-        f = FDTD(is_3d=False)
-        assert f.is_3d is False
+    def test_fdtd_mode_2d(self):
+        f = FDTD(mode="2d", z_cut="auto")
+        assert f.mode == "2d"
+        assert f.resolved_is_3d() is False
 
-    def test_solver_assignment(self):
+    def test_solver_callable_mode_2d(self):
         sim = Simulation()
-        sim.solver.is_3d = False
-        assert sim.solver.is_3d is False
-
-    def test_solver_callable(self):
-        sim = Simulation()
-        sim.solver(is_3d=False)
-        assert sim.solver.is_3d is False
+        sim.solver(mode="2d", z_cut="auto")
+        assert sim.solver.mode == "2d"
+        assert sim.solver.resolved_plane() == "xy"
 
     def test_build_config_2d_port_z_zero(self):
         """In 2D mode, build_config produces port z-centers at 0."""
@@ -505,7 +505,7 @@ class Test2DMode:
         }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver(mode="2d", z_cut="auto")
 
         result = sim.build_config()
         for port in result.config.ports:
@@ -525,7 +525,7 @@ class Test2DMode:
         }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver(mode="2d", z_cut="auto")
 
         result = sim.build_config()
         assert result.config.is_3d is False
@@ -564,7 +564,7 @@ class Test2DMode:
         }
         sim.source.port = "o1"
         sim.monitors = ["o1", "o2"]
-        sim.solver.is_3d = False
+        sim.solver(mode="2d", z_cut="auto")
 
         out = sim.write_config(tmp_path / "sim2d")
         config_data = json.loads((out / "sim_config.json").read_text())
@@ -638,8 +638,7 @@ class TestXZBuildConfig:
             "si": 12.0,
             "SiO2": 2.1,
         }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
 
         result = sim.build_config()
@@ -652,14 +651,12 @@ class TestXZBuildConfig:
 
         sim = Simulation()
         sim.geometry.component = _xz_straight_component()
-        sim.geometry.y_cut = 0.1
         sim.geometry.stack = _xz_trivial_stack()
         sim.materials = {
             "si": 12.0,
             "SiO2": 2.1,
         }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut=0.1)
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
 
         result = sim.build_config()
@@ -675,8 +672,7 @@ class TestXZBuildConfig:
             "si": 12.0,
             "SiO2": 2.1,
         }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
 
         result = sim.build_config()
@@ -695,8 +691,7 @@ class TestXZBuildConfig:
             "si": 12.0,
             "SiO2": 2.1,
         }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
         sim.source_fiber(x=0.0, z=1.22, angle_deg=14.5, waist=5.4)
 
         result = sim.build_config()
@@ -745,17 +740,16 @@ class TestXZValidation:
             simulation={},
         )
         sim.materials = {"si": 12.0}
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
 
         with pytest.raises(ValueError, match="no valid monitors and no fiber source"):
             sim.build_config()
 
 
 class TestXZAutoCrop:
-    """Tests for XZ 2D auto z-crop + fiber-aware margin."""
+    """Tests for XZ 2D z_ref crop (default drawn core) + fiber-aware margin."""
 
-    def test_xz_defaults_z_crop_auto(self):
+    def _base_sim(self):
         from gsim.meep.simulation import Simulation
 
         sim = Simulation()
@@ -765,65 +759,39 @@ class TestXZAutoCrop:
             "si": 12.0,
             "SiO2": 2.1,
         }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
+        sim.solver(mode="2d", y_cut="auto")
+        return sim
+
+    def test_default_z_ref_crops_around_drawn_core(self):
+        sim = self._base_sim()
+        assert sim.domain.z_ref is None  # default -> auto drawn core
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
 
         sim.build_config()
 
-        # build_config resolves z_crop to "auto", applies it, then clears it.
-        assert sim.geometry.z_crop is None
-        # Stack should have been cropped around the core layer.
+        assert sim._z_cropped is True  # guard set after crop
         assert sim.geometry.stack is not None
         z_min = min(l.zmin for l in sim.geometry.stack.layers.values())
         z_max = max(l.zmax for l in sim.geometry.stack.layers.values())
         # Core is at [0.0, 0.22]; cropped range should be a few um at most.
         assert z_max - z_min < 10.0
 
-    def test_xz_fiber_expands_margin_z_above(self):
-        from gsim.meep.simulation import Simulation
-
-        sim = Simulation()
-        sim.geometry.component = _xz_straight_component()
-        sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {
-            "si": 12.0,
-            "SiO2": 2.1,
-        }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
-        # Clad zmax is 1.0 (see _xz_trivial_stack), so absolute z=1.42 is
-        # 0.42 um above the top of the physical stack.
-        sim.source_fiber(x=0.0, z=1.42, waist=5.4, angle_deg=14.5)
-
-        initial_margin = sim.domain.margin_z_above
+    def test_default_z_ref_crops_box_to_margin_below(self):
+        """Default (core) reference crops the BOX to margin_z_below below core."""
+        sim = self._base_sim()  # margin_z_below defaults to 0.5
+        sim.source_fiber(x=0.0, z=1.22, waist=5.4)
         sim.build_config()
-        # Margin should grow to at least (z - stack_top) + waist/2 so the
-        # fiber beam plane sits inside the simulation cell.
-        assert sim.domain.margin_z_above >= 0.42 + 5.4 / 2
-        assert sim.domain.margin_z_above > initial_margin
 
-    def test_xz_auto_crop_preserves_full_box(self):
-        """Auto z-crop must keep the full BOX dielectric intact.
+        assert sim.geometry.stack is not None
+        box = next(d for d in sim.geometry.stack.dielectrics if d["name"] == "box")
+        # core zmin (0.0) - margin_z_below (0.5) = -0.5
+        assert box["zmin"] == pytest.approx(-0.5)
+        assert box["zmax"] == 0.0
 
-        Regression for the GC notebook where margin_z_below=0.5 µm was
-        chopping a real 2 µm SOI BOX down to 0.5 µm because the crop was
-        referenced to the core layer.
-        """
-        from gsim.meep.simulation import Simulation
-
-        sim = Simulation()
-        sim.geometry.component = _xz_straight_component()
-        sim.geometry.stack = _xz_trivial_stack()
-        sim.materials = {
-            "si": 12.0,
-            "SiO2": 2.1,
-        }
-        sim.solver.is_3d = False
-        sim.solver.plane = "xz"
-        # Default margin_z_below=0.5 would previously crop the 2 µm BOX
-        # to 0.5 µm. Option A references the full non-air stack extent,
-        # so the BOX stays full thickness.
+    def test_z_ref_stack_preserves_full_box(self):
+        """z_ref='stack' keeps the full non-air stack (BOX intact)."""
+        sim = self._base_sim()
+        sim.domain(z_ref="stack")
         sim.source_fiber(x=0.0, z=1.22, waist=5.4)
         sim.build_config()
 
@@ -831,3 +799,16 @@ class TestXZAutoCrop:
         box = next(d for d in sim.geometry.stack.dielectrics if d["name"] == "box")
         assert box["zmin"] == -2.0
         assert box["zmax"] == 0.0
+
+    def test_xz_fiber_expands_margin_z_above(self):
+        sim = self._base_sim()
+        # Reference is the drawn core (zmax=0.22). Beam plane at z=1.42.
+        sim.source_fiber(x=0.0, z=1.42, waist=5.4, angle_deg=14.5)
+
+        initial_margin = sim.domain.margin_z_above
+        sim.build_config()
+        # Margin grows to (z - core_top) + waist/2 so the beam plane sits
+        # inside the cell: (1.42 - 0.22) + 5.4/2 = 3.9.
+        expected = (1.42 - 0.22) + 5.4 / 2
+        assert sim.domain.margin_z_above == pytest.approx(expected)
+        assert sim.domain.margin_z_above > initial_margin

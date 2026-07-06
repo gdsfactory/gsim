@@ -17,7 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Geometry(BaseModel):
-    """Physical layout: component + layer stack + optional z-crop."""
+    """Physical layout: component + layer stack.
+
+    The vertical crop reference lives on ``Domain.z_ref`` and the 2D cut
+    plane lives on ``FDTD`` (``solver.y_cut`` / ``z_cut``).
+    """
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -27,18 +31,6 @@ class Geometry(BaseModel):
 
     component: Any = None
     stack: Any = None
-    z_crop: str | None = Field(
-        default=None,
-        description='Z-crop mode: "auto" | layer_name | None (no crop)',
-    )
-    y_cut: float | None = Field(
-        default=None,
-        description=(
-            "Y coordinate of the XZ cross-section cut (um). "
-            "Only meaningful when solver.is_3d=False and solver.plane='xz'. "
-            "None -> resolved to the component bbox Y-center at build time."
-        ),
-    )
 
     def __call__(self, **kwargs: Any) -> Geometry:
         """Update fields in place. Returns self for chaining."""
@@ -160,7 +152,7 @@ class FiberSource(BaseModel):
     The beam center sits at (``x``, ``z``) in the XZ plane — ``z`` is the
     absolute Z coordinate of the beam plane (um). The beam tilts from the
     +Z normal by ``angle_deg`` toward +X. Only valid in XZ 2D mode
-    (``solver.is_3d=False, solver.plane='xz'``).
+    (``solver.mode='2d'`` with ``solver.y_cut`` set).
 
     Beam waist convention (matches MEEP's ``beam_w0``):
 
@@ -231,6 +223,15 @@ class Domain(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
+    z_ref: str | None = Field(
+        default=None,
+        description=(
+            "Vertical crop reference: None = auto (highest-n layer actually "
+            "drawn by the component, i.e. the photonic core), 'stack' = full "
+            "non-air material stack, or a specific layer name. "
+            "margin_z_above/below are measured from this reference."
+        ),
+    )
     pml: float = Field(default=1.0, ge=0, description="PML thickness in um")
     margin: float = Field(
         default=0.5,
@@ -288,21 +289,34 @@ class FDTD(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
-    is_3d: bool = Field(
-        default=True,
+    mode: Literal["2d", "3d"] = Field(
+        default="3d",
         description=(
-            "Run a full 3D simulation (True) or an effective-index 2D "
-            "simulation (False). 2D collapses the z-dimension, ignores "
-            "sidewall angles, and enforces transverse-electric parity "
-            "(EVEN_Y+ODD_Z)."
+            "Dimensionality: '3d' runs a full 3D simulation; '2d' runs an "
+            "effective-index / cross-section simulation. In 2D the plane is "
+            "implied by which of x_cut/y_cut/z_cut is set."
         ),
     )
-    plane: Literal["xy", "xz"] = Field(
-        default="xy",
+    x_cut: float | Literal["auto"] | None = Field(
+        default=None,
         description=(
-            "2D simulation plane. 'xy' is the effective-index top-down sim; "
-            "'xz' is a vertical cross-section (for grating couplers and "
-            "edge couplers). Only meaningful when is_3d=False."
+            "YZ cross-section plane (perpendicular to X). Reserved — not yet "
+            "implemented. 'auto' = bbox-centered."
+        ),
+    )
+    y_cut: float | Literal["auto"] | None = Field(
+        default=None,
+        description=(
+            "XZ cross-section plane (perpendicular to Y), for grating and "
+            "edge couplers. 'auto' = component bbox Y-center; a float sets the "
+            "Y coordinate of the cross-section (um)."
+        ),
+    )
+    z_cut: float | Literal["auto"] | None = Field(
+        default=None,
+        description=(
+            "XY top-down plane (perpendicular to Z), the effective-index sim. "
+            "'auto' = centered; a float sets the Z coordinate (advisory)."
         ),
     )
     resolution: int = Field(default=32, ge=4, description="Pixels per micrometer")
@@ -459,9 +473,15 @@ class FDTD(BaseModel):
         return self
 
     def __call__(self, **kwargs: Any) -> FDTD:
-        """Update fields in place. Returns self for chaining."""
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+        """Update fields in place (validated as one batch). Returns self.
+
+        Unlike per-field assignment, the ``mode``/cut invariant is checked
+        against the *final* state, so ``solver(mode="2d", y_cut="auto")``
+        never trips on an invalid intermediate (mode set, cut not yet).
+        """
+        validated = FDTD.model_validate({**self.__dict__, **kwargs})
+        for name in FDTD.model_fields:
+            object.__setattr__(self, name, getattr(validated, name))
         return self
 
     # Dispersion control
@@ -491,8 +511,55 @@ class FDTD(BaseModel):
     verbose_interval: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
-    def _validate_plane_vs_3d(self) -> FDTD:
-        """Reject ``plane='xz'`` when ``is_3d`` is True."""
-        if self.is_3d and self.plane == "xz":
-            raise ValueError("plane='xz' requires is_3d=False")
+    def _validate_mode(self) -> FDTD:
+        """Validate mode against the set of active cut planes.
+
+        - ``mode='3d'`` -> none of x_cut/y_cut/z_cut may be set.
+        - ``mode='2d'`` -> exactly one of x_cut/y_cut/z_cut must be set.
+        - ``x_cut`` (YZ plane) is reserved and not yet implemented.
+        """
+        cuts = {
+            "x_cut": self.x_cut,
+            "y_cut": self.y_cut,
+            "z_cut": self.z_cut,
+        }
+        n_set = sum(v is not None for v in cuts.values())
+        if self.mode == "3d":
+            if n_set:
+                raise ValueError(
+                    "3d mode requires x_cut/y_cut/z_cut to all be None "
+                    f"(got {n_set} set)"
+                )
+        else:  # mode == "2d"
+            if n_set != 1:
+                raise ValueError(
+                    "2d mode requires exactly one of x_cut/y_cut/z_cut "
+                    f"(got {n_set} set)"
+                )
+        if self.x_cut is not None:
+            raise NotImplementedError("YZ plane (x_cut) not yet supported")
         return self
+
+    # -- Translation helpers (mode/cuts -> internal is_3d/plane/cut) --
+
+    def resolved_is_3d(self) -> bool:
+        """Whether this solves a full 3D simulation."""
+        return self.mode == "3d"
+
+    def resolved_plane(self) -> Literal["xy", "xz"] | None:
+        """Internal 2D plane name implied by the active cut ('xz'|'xy'|None)."""
+        if self.y_cut is not None:
+            return "xz"
+        if self.z_cut is not None:
+            return "xy"
+        return None
+
+    def resolved_cut(self) -> float | str | None:
+        """Value of the active cut ('auto', a float, or None in 3D)."""
+        if self.y_cut is not None:
+            return self.y_cut
+        if self.z_cut is not None:
+            return self.z_cut
+        if self.x_cut is not None:
+            return self.x_cut
+        return None

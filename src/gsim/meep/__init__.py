@@ -9,7 +9,7 @@ Example::
     from gsim import meep
 
     sim = meep.Simulation()
-    sim.geometry(component=ybranch, z_crop="auto")
+    sim.geometry(component=ybranch)
     sim.materials = {
         "si": Material(permittivity=12.0),
         "SiO2": Material(permittivity=2.1),

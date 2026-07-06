@@ -43,15 +43,15 @@ from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
-sim.geometry(component=c, z_crop="auto")
+sim.geometry(component=c)
 sim.materials = {
     "si": Material(refractive_index=3.47),
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 11
+sim.num_freqs = 101
 sim.monitors = ["o1", "o2"]
-sim.domain(pml=1.0, margin=0.5)
+sim.domain(pml=1.0, margin=0.5, z_ref="stack")
 sim.solver(resolution=20, save_animation=True, verbose_interval=5.0)
 sim.solver.stop_after_sources(time=100)
 

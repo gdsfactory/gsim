@@ -41,7 +41,7 @@ c
 # ### Configure the XZ 2D simulation
 #
 # Key differences from the XY notebook:
-# - `sim.solver(plane="xz", is_3d=False)` picks the vertical cross-section sim.
+# - `sim.solver(mode="2d", y_cut="auto")` picks the vertical XZ cross-section sim.
 # - `sim.source_fiber(...)` replaces the port-based mode source.
 # - `sim.monitors = ["o2"]` monitors the waveguide end (feed straight).
 
@@ -60,7 +60,7 @@ sim.materials = {
     "SiO2": Material(refractive_index=1.44),
 }
 
-sim.solver(resolution=25, is_3d=False, plane="xz", save_animation=True)
+sim.solver(resolution=25, mode="2d", y_cut="auto", save_animation=True)
 sim.solver.stop_when_energy_decayed()
 
 sim.source_fiber(
@@ -75,7 +75,7 @@ sim.source_fiber(
 
 sim.monitors = ["o2"]
 sim.domain(pml=1.0, margin=0.5)
-sim.num_freqs = 21
+sim.num_freqs = 101
 
 print(sim.validate_config())
 

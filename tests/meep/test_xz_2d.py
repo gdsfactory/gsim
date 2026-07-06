@@ -64,8 +64,7 @@ def _build_minimal_gc_sim():
     sim.geometry.component = c
     sim.geometry.stack = stack
     sim.materials = {"si": 12.0, "SiO2": 2.1}
-    sim.solver.is_3d = False
-    sim.solver.plane = "xz"
+    sim.solver(mode="2d", y_cut="auto")
     sim.solver.resolution = 15
     sim.solver.stop_when_energy_decayed()
     sim.source_fiber(

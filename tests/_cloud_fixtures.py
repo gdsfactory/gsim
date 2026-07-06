@@ -63,9 +63,7 @@ def make_2d_xz_gc_sim():
     sim.geometry.component = c
     sim.materials = {"si": 12.0, "SiO2": 2.1}
 
-    sim.solver.is_3d = False
-    sim.solver.plane = "xz"
-    sim.solver.resolution = 25
+    sim.solver(mode="2d", y_cut="auto", resolution=25)
     sim.solver.stop_when_energy_decayed(dt=15.0, decay_by=0.05)
 
     sim.source_fiber(

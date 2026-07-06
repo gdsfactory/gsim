@@ -45,14 +45,14 @@ stack = get_stack()  # auto-detects active PDK
 
 sim = meep.Simulation()
 
-sim.geometry(component=c, stack=stack, z_crop="auto")
+sim.geometry(component=c, stack=stack)
 sim.materials = {
     "si": Material(refractive_index=3.47),
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5)
+sim.domain(pml=1.0, margin=0.5, z_ref="stack")
 sim.solver(resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0)
 sim.solver.stop_when_energy_decayed()
 
