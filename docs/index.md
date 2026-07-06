@@ -62,4 +62,5 @@ result = sim.run()
 
 ## API Reference
 
-See the [API docs](api.md) for full details.
+See the API docs for full details: [Palace](api/palace.md), [Meep](api/meep.md), [Common](api/common.md),
+[Cloud](api/cloud.md).
