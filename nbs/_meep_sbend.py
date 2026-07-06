@@ -19,18 +19,17 @@
 #
 # **Requirements:**
 #
-# - UBC PDK: `uv pip install ubcpdk`
 # - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
 # %% [markdown]
-# ### Load a pcell from UBC PDK
+# ### Load a component from GDSFactory
 
 # %%
-from ubcpdk import PDK, cells
+import gdsfactory as gf
 
-PDK.activate()
+gf.gpdk.PDK.activate()
 
-c = cells.bend_s(size=(20.0, 5.0))
+c = gf.components.bend_s(size=(20.0, 5.0))
 
 c
 

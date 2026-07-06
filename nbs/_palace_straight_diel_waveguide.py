@@ -21,11 +21,11 @@
 # ### Build straight waveguide geometry
 
 # %%
-from ubcpdk import PDK, cells
+import gdsfactory as gf
 
-PDK.activate()
+gf.gpdk.PDK.activate()
 
-c = cells.straight(length=10.0)
+c = gf.components.straight(length=10.0)
 
 cc = c.copy()
 cc.draw_ports()

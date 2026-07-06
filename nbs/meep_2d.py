@@ -29,7 +29,7 @@
 # - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
 # %% [markdown] papermill={"duration": 0.000836, "end_time": "2026-06-12T07:45:50.783250", "exception": false, "start_time": "2026-06-12T07:45:50.782414", "status": "completed"}
-# ### Load a pcell from UBC PDK
+# ### Load a component from GDSFactory
 
 # %% papermill={"duration": 1.129147, "end_time": "2026-06-12T07:45:51.913152", "exception": false, "start_time": "2026-06-12T07:45:50.784005", "status": "completed"}
 import gdsfactory as gf

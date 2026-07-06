@@ -19,18 +19,17 @@
 #
 # **Requirements:**
 #
-# - UBC PDK: `uv pip install ubcpdk`
 # - [GDSFactory+](https://gdsfactory.com) account for cloud simulation
 
 # %% [markdown] papermill={"duration": 0.001996, "end_time": "2026-04-04T19:47:36.595345", "exception": false, "start_time": "2026-04-04T19:47:36.593349", "status": "completed"}
-# ### Load a pcell from UBC PDK
+# ### Load a component from GDSFactory
 
 # %% papermill={"duration": 3.17493, "end_time": "2026-04-04T19:47:39.772105", "exception": false, "start_time": "2026-04-04T19:47:36.597175", "status": "completed"}
-from ubcpdk import PDK, cells
+import gdsfactory as gf
 
-PDK.activate()
+gf.gpdk.PDK.activate()
 
-c = cells.ebeam_y_1550()
+c = gf.components.mmi1x2()
 c
 
 # %% [markdown] papermill={"duration": 0.000956, "end_time": "2026-04-04T19:47:39.774192", "exception": false, "start_time": "2026-04-04T19:47:39.773236", "status": "completed"}
