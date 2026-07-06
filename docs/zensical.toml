@@ -22,7 +22,7 @@ nav = [
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
-  { "Changelog" = "../CHANGELOG.md" },
+  { "Changelog" = "CHANGELOG.md" },
   { "API Reference" = [
     { "Palace" = "api/palace.md" },
     { "Meep" = "api/meep.md" },
