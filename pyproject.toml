@@ -25,6 +25,10 @@ dependencies = [
   "trame-vuetify",
 ]
 
+[project.optional-dependencies]
+# Palace binary resolution and field visualization via palace-toolkit.
+palace-toolkit = ["palace-toolkit"]
+
 [dependency-groups]
 dev = [
   "build>=1.2.0",
@@ -162,6 +166,14 @@ module = "plotly"
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
 module = "plotly.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "palacetoolkit"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "palacetoolkit.*"
 
 [tool.pylsp-mypy]
 enabled = true

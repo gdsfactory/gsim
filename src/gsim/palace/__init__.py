@@ -107,6 +107,30 @@ from gsim.palace.results import (
     load_sparams,
 )
 
+# Runtime / binary resolution (optional palace-toolkit dependency)
+from gsim.palace.runtime import resolve_palace_binary, resolve_palace_library_dir
+
+# Field-visualization (NaN-free direct mesh rendering)
+from gsim.palace.fields import (
+    BoundaryFieldData,
+    SelectorContext,
+    VolumeFieldData,
+    activate_vector_component,
+    build_selector_context,
+    extract_axis_slice,
+    extract_boundary_cells,
+    extract_plane_slice,
+    extract_slice_contours,
+    load_boundary_field_data,
+    load_volume_field_data,
+    plot_boundary_field,
+    plot_volume_contours,
+    plot_volume_slice,
+    resolve_boundary_type_attributes,
+    resolve_entity_attributes,
+    resolve_scalar_field,
+)
+
 # Visualization
 from gsim.viz import plot_cross_section, plot_mesh
 
@@ -160,10 +184,18 @@ __all__ = [
     "plot_cross_section",
     "plot_mesh",
     "plot_stack",
+    "plot_boundary_field",
+    "plot_volume_contours",
+    "plot_volume_slice",
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "resolve_boundary_type_attributes",
+    "resolve_entity_attributes",
+    "resolve_palace_binary",
+    "resolve_palace_library_dir",
     "resolve_palace_materials_at_frequency",
+    "resolve_scalar_field",
     "run_simulation",
 ]
 
