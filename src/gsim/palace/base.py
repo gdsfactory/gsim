@@ -1912,11 +1912,23 @@ class PalaceSimMixin:
         # possible, else fall back to raw files dict.
         from gsim.palace.results import load_sparams, load_text_results
 
+        # Extract frequency from config for BoundaryMode/DrivenSim results.
+        _freq_hz = None
+        if hasattr(self, "boundary_mode") and self.boundary_mode is not None:
+            _freq_hz = getattr(self.boundary_mode, "freq", None)
+        elif hasattr(self, "driven") and self.driven is not None:
+            # DrivenSim stores freq inside wave ports; try to extract first one.
+            ports = getattr(self.driven, "ports", []) or []
+            for p in ports:
+                _freq_hz = getattr(p, "freq", None)
+                if _freq_hz is not None:
+                    break
+
         try:
             return load_sparams(files)
         except FileNotFoundError:
             try:
-                return load_text_results(files)
+                return load_text_results(files, freq=_freq_hz)
             except FileNotFoundError:
                 return files
 
