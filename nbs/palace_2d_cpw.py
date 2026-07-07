@@ -109,8 +109,8 @@ c = gsg_electrode(
     length=800,
     s_width=20,
     g_width=40,
-    g_width_top=40,
-    g_width_bottom=40,
+    g_width_top=60,
+    g_width_bottom=30,
     gap_width_top=15,
     gap_width_bottom=15,
 )

@@ -370,7 +370,6 @@ def plot_fields_2d(
         cmap=cmap,
         title=label,
     )
-    fig.colorbar(stream_inputs._im, ax=ax, label="E_t")  # noqa: SLF001
     plt.tight_layout()
     if show:
         plt.show()
@@ -404,8 +403,23 @@ def _plot_single_2d(
     streamplot_maxlength: float = 2.8,
     cmap: str = "hot",
     title: str = "In-plane |E_t|",
+    colorbar_label: str | None = None,
 ) -> StreamplotInputs2D:
-    """Render a single 2D field panel on a given Axes."""
+    """Render a single 2D field panel on a given Axes.
+
+    Parameters
+    ----------
+    source, field, normal, origin, excitation, cycle, boundary, ...
+        See :func:`plot_fields_2d`.
+    ax:
+        Matplotlib Axes to render into.
+    title:
+        Panel title.  When ``colorbar_label`` is not set, the field name
+        is appended to the title automatically.
+    colorbar_label:
+        Label for the colorbar.  If ``None``, derived from *field*
+        (e.g. ``"E_real"`` -> ``"|E_t| [a.u.]"``).
+    """
     stream_inputs = extract_streamplot_inputs_2d(
         source,
         field=field,
@@ -423,6 +437,18 @@ def _plot_single_2d(
         streamplot_min_frac=streamplot_min_frac,
         grid_resolution=grid_resolution,
     )
+
+    if colorbar_label is None:
+        # Derive a human-readable label from the field name.
+        base = field.replace("_real", "").replace("_imag", "")
+        if base.startswith("E"):
+            colorbar_label = "|E_t| [a.u.]"
+        elif base.startswith(("B", "H")):
+            colorbar_label = f"|{base}_t| [a.u.]"
+        elif base.startswith("J"):
+            colorbar_label = f"|{base}| [a.u.]"
+        else:
+            colorbar_label = f"|{base}|"
 
     x_grid, y_grid = np.meshgrid(stream_inputs.x, stream_inputs.y)
     et = np.asarray(stream_inputs.et_mag, dtype=float)
@@ -460,11 +486,13 @@ def _plot_single_2d(
         stream_kwargs["start_points"] = start_points
 
     ax.streamplot(**stream_kwargs)
-    ax.set_title(title)
+    # Append field info below the title.
+    ax.set_title(f"{title}  ({field})", fontsize=10)
     ax.set_aspect("equal")
     label_h, label_v = _plane_axis_labels(stream_inputs.normal)
     ax.set_xlabel(label_h)
     ax.set_ylabel(label_v)
+    ax.figure.colorbar(im, ax=ax, label=colorbar_label)
 
     # Stash the pcolormesh handle so the caller can add a colorbar.
     object.__setattr__(stream_inputs, "_im", im)
