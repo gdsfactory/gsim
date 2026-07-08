@@ -122,6 +122,7 @@ from gsim.palace.fields import (
     extract_plane_slice,
     extract_slice_contours,
     load_boundary_field_data,
+    load_field_context,
     load_volume_field_data,
     plot_boundary_field,
     plot_volume_contours,

@@ -370,6 +370,83 @@ def load_volume_field_data(
     )
 
 
+def load_field_context(
+    source: str | Path | dict,
+    *,
+    excitation: int = 1,
+    step_index: int = 0,
+    mesh_filename: str = "palace.msh",
+    config_filename: str = "config.json",
+) -> tuple[Any, Any, SelectorContext, dict[str, int]]:
+    """Load volume + boundary meshes and build a :class:`SelectorContext`.
+
+    This is a convenience helper that bundles the common field-visualization
+    setup: it loads the ParaView volume and boundary datasets via
+    :func:`gsim.palace.results.load_fields`, reads the mesh physical-group
+    map (``pg_map``) from the Gmsh ``.msh`` file with ``meshio``, and builds
+    a :class:`SelectorContext` from the Palace ``config.json``.
+
+    The mesh and config files are expected to live in the simulation
+    directory, which is resolved as the parent of the results directory
+    (i.e. ``results_dir.parent.parent`` for the typical
+    ``<sim_dir>/output/palace/`` layout).
+
+    Parameters
+    ----------
+    source :
+        Results dict or directory path (same as
+        :func:`gsim.palace.results.load_fields`).
+    excitation :
+        Excitation index (1-based).
+    step_index :
+        ParaView cycle index (0 = last available).
+    mesh_filename :
+        Name of the Gmsh mesh file in the simulation directory.
+    config_filename :
+        Name of the Palace config file in the simulation directory.
+
+    Returns
+    -------
+    tuple
+        ``(volume_mesh, boundary_mesh, selector_context, pg_map)`` where
+        ``volume_mesh`` and ``boundary_mesh`` are ``pyvista.DataSet``
+        objects, ``selector_context`` is a :class:`SelectorContext`, and
+        ``pg_map`` is the physical-group name -> attribute-tag mapping.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the mesh or config file cannot be located in the resolved
+        simulation directory.
+    """
+    import meshio
+
+    from gsim.palace.results import _resolve_source, load_fields
+
+    _, base_dir = _resolve_source(source, require_csv=False)
+    sim_dir = Path(base_dir).parent.parent
+
+    msh_path = sim_dir / mesh_filename
+    config_path = sim_dir / config_filename
+    if not msh_path.exists():
+        msg = f"Mesh file not found at {msh_path}"
+        raise FileNotFoundError(msg)
+    if not config_path.exists():
+        msg = f"Palace config not found at {config_path}"
+        raise FileNotFoundError(msg)
+
+    cycle = step_index if step_index else None
+    vol = load_fields(source, excitation=excitation, cycle=cycle, boundary=False)
+    bnd = load_fields(source, excitation=excitation, cycle=cycle, boundary=True)
+
+    mio = meshio.read(str(msh_path))
+    pg_map = {name: tag for name, (tag, _dim) in mio.field_data.items()}
+
+    ctx = build_selector_context(config_path, pg_map)
+
+    return vol, bnd, ctx, pg_map
+
+
 # ---------------------------------------------------------------------------
 # Slicing helpers
 # ---------------------------------------------------------------------------
@@ -511,6 +588,66 @@ def resolve_scalar_field(
 # ---------------------------------------------------------------------------
 
 
+def _auto_clim(
+    values: np.ndarray,
+    *,
+    log_scale: bool = False,
+    signed: bool = False,
+    lo_percentile: float = 2.0,
+    hi_percentile: float = 98.0,
+) -> tuple[float, float]:
+    """Compute percentile-based color limits matching the legacy ``plot_topview``.
+
+    The old :func:`gsim.viz.plot_topview` used ``vmin=0`` / ``vmax=98th
+    percentile`` for linear scales and a :class:`~matplotlib.colors.LogNorm`
+    spanning the 2nd–98th percentiles for log scales.  This compresses the
+    dynamic range so localized peaks (e.g. current crowding at conductor
+    edges) remain visible instead of being washed out by the full min–max
+    range, which is what PyVista's default ``clim=None`` would do.
+
+    Parameters
+    ----------
+    signed :
+        If ``True``, the data is signed (e.g. a vector component ``E_y``
+        rendered with a diverging colormap).  In that case symmetric limits
+        ``[-vlim, +vlim]`` are returned, where ``vlim`` is the
+        ``hi_percentile`` of ``|values|`` — matching the legacy ``symmetric``
+        behavior so the colormap is centered at zero and both polarities are
+        visible.  When ``False`` (default, e.g. for magnitudes), ``vmin`` is
+        clamped to ``0.0``.
+    """
+    vals = np.asarray(values, dtype=float)
+    finite = vals[np.isfinite(vals)]
+
+    if log_scale:
+        pos = finite[finite > 0.0]
+        if pos.size == 0:
+            return (1e-10, 1e-9)
+        vmin = float(np.percentile(pos, lo_percentile))
+        vmax = float(np.percentile(pos, hi_percentile))
+        if vmax <= vmin:
+            vmax = vmin * 1.01
+        return (max(vmin, 1e-12), max(vmax, vmin * 1.01))
+
+    if finite.size == 0:
+        return (0.0, 1.0)
+
+    if signed:
+        vlim = float(np.percentile(np.abs(finite), hi_percentile))
+        if not np.isfinite(vlim) or vlim <= 0.0:
+            vlim = float(np.nanmax(np.abs(finite)))
+        if vlim <= 0.0:
+            vlim = 1.0
+        return (-vlim, vlim)
+
+    vmax = float(np.percentile(finite, hi_percentile))
+    if not np.isfinite(vmax) or vmax <= 0.0:
+        vmax = float(np.nanmax(finite)) if finite.size else 1.0
+    if vmax <= 0.0:
+        vmax = 1.0
+    return (0.0, vmax)
+
+
 def plot_boundary_field(
     data: BoundaryFieldData,
     scalar_field: str | None = None,
@@ -545,6 +682,13 @@ def plot_boundary_field(
         is computed in-place.
     component :
         Vector component to extract (``"mag"``, ``"x"``, ``"y"``, ``"z"``).
+    clim :
+        Explicit ``(vmin, vmax)`` color limits.  When ``None`` (default),
+        percentile-based limits are computed automatically (``vmin=0``,
+        ``vmax=98th percentile`` for linear; 2nd–98th percentile for
+        ``log_scale``).  This matches the legacy ``plot_topview`` behavior
+        so localized peaks such as current crowding at conductor edges
+        remain clearly visible.
     log_scale :
         If ``True``, use logarithmic coloring.  Non-positive values are
         clamped to a small positive floor.
@@ -575,8 +719,8 @@ def plot_boundary_field(
     )
 
     scalar_name_for_plot = scalar_name
+    vals = np.asarray(data.mesh.point_data[scalar_name], dtype=float)
     if log_scale:
-        vals = np.asarray(data.mesh.point_data[scalar_name], dtype=float)
         if np.any(vals <= 0.0):
             pos = vals[vals > 0.0]
             if pos.size == 0:
@@ -587,6 +731,17 @@ def plot_boundary_field(
             safe_name = f"{scalar_name}_logsafe"
             data.mesh.point_data[safe_name] = np.where(vals > 0.0, vals, floor)
             scalar_name_for_plot = safe_name
+            vals = np.asarray(data.mesh.point_data[safe_name], dtype=float)
+
+    if clim is None:
+        # Signed data (vector components x/y/z, or scalar fields with
+        # negative values) gets symmetric limits so diverging colormaps
+        # are centered at zero and both polarities are visible.
+        is_signed = (
+            (vector_field is not None and component in ("x", "y", "z"))
+            or (scalar_field is not None and np.nanmin(vals) < 0.0)
+        )
+        clim = _auto_clim(vals, log_scale=log_scale, signed=is_signed)
 
     pl = pv.Plotter(off_screen=off_screen)
     pl.set_background("white")
@@ -630,6 +785,10 @@ def plot_volume_slice(
 
     The slice is extracted via :func:`extract_axis_slice` and rendered
     directly — no NaN from probe-grid resampling.
+
+    When ``clim`` is ``None``, percentile-based color limits are computed
+    automatically (see :func:`_auto_clim`) so localized peaks remain
+    visible, matching the legacy ``plot_cross_section`` behavior.
     """
     pv = _require_pyvista()
     slice_mesh = extract_axis_slice(data, axis=axis, value=value)
@@ -641,6 +800,14 @@ def plot_volume_slice(
         component=component,
         output_name=output_name,
     )
+
+    if clim is None:
+        _slice_vals = np.asarray(slice_mesh.point_data[scalar_name], dtype=float)
+        _is_signed = (
+            (vector_field is not None and component in ("x", "y", "z"))
+            or (scalar_field is not None and np.nanmin(_slice_vals) < 0.0)
+        )
+        clim = _auto_clim(_slice_vals, signed=_is_signed)
 
     pl = pv.Plotter(off_screen=off_screen)
     pl.set_background("white")
