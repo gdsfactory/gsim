@@ -674,7 +674,7 @@ class Simulation(BaseModel):
         if stack is None:
             raise ValueError("Stack resolution failed.")
 
-        background_material = "air"
+        background_material = ms.background_material
 
         n_field_x = ms.n_field_x
         n_field_y = ms.n_field_y

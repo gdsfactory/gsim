@@ -11,6 +11,7 @@ MEEP is an optional dependency imported lazily; see :func:`_import_meep`.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 from gsim.meep.models.results import ModeResult
@@ -332,6 +333,7 @@ def _build_component_xz_cell(
                 "z_lo": layer.zmin - z_center,
                 "z_hi": layer.zmax - z_center,
                 "intervals": intervals,
+                "sidewall_angle": getattr(layer, "sidewall_angle", 0.0),
             }
         )
 
@@ -350,15 +352,36 @@ def _build_component_xz_cell(
                 continue
             z_lo = ld["z_lo"]
             z_hi = ld["z_hi"]
-            block_z_center = (z_lo + z_hi) / 2.0
             block_z_size = z_hi - z_lo
+            sw_angle_deg = ld.get("sidewall_angle", 0.0)
             if block_z_size > 0:
-                block = mp.Block(
-                    size=mp.Vector3(x_size, mp.inf, block_z_size),
-                    center=mp.Vector3(x_center, 0.0, block_z_center),
-                    material=ld["medium"],
-                )
-                geometry.append(block)
+                if sw_angle_deg:
+                    sw_rad = math.radians(sw_angle_deg)
+                    n_sub = max(2, math.ceil(block_z_size * resolution))
+                    sub_h = block_z_size / n_sub
+                    for k in range(n_sub):
+                        frac = (k + 0.5) / n_sub
+                        offset = frac * block_z_size * math.tan(sw_rad)
+                        x0_k = x0 + offset
+                        x1_k = x1 - offset
+                        x_size_k = x1_k - x0_k
+                        if x_size_k <= 0:
+                            continue
+                        sub_z_center = z_lo + (k + 0.5) * sub_h
+                        block = mp.Block(
+                            size=mp.Vector3(x_size_k, mp.inf, sub_h),
+                            center=mp.Vector3((x0_k + x1_k) / 2.0, 0.0, sub_z_center),
+                            material=ld["medium"],
+                        )
+                        geometry.append(block)
+                else:
+                    block_z_center = (z_lo + z_hi) / 2.0
+                    block = mp.Block(
+                        size=mp.Vector3(x_size, mp.inf, block_z_size),
+                        center=mp.Vector3(x_center, 0.0, block_z_center),
+                        material=ld["medium"],
+                    )
+                    geometry.append(block)
 
             bottom_free = _subtract_intervals((x0, x1), below_intervals)
             for bx0, bx1 in bottom_free:
@@ -474,6 +497,7 @@ def _build_component_yz_cell(
                 "z_lo": layer.zmin - z_center,
                 "z_hi": layer.zmax - z_center,
                 "intervals": intervals,
+                "sidewall_angle": getattr(layer, "sidewall_angle", 0.0),
             }
         )
 
@@ -492,15 +516,36 @@ def _build_component_yz_cell(
                 continue
             z_lo = ld["z_lo"]
             z_hi = ld["z_hi"]
-            block_z_center = (z_lo + z_hi) / 2.0
             block_z_size = z_hi - z_lo
+            sw_angle_deg = ld.get("sidewall_angle", 0.0)
             if block_z_size > 0:
-                block = mp.Block(
-                    size=mp.Vector3(mp.inf, y_size, block_z_size),
-                    center=mp.Vector3(0.0, y_center, block_z_center),
-                    material=ld["medium"],
-                )
-                geometry.append(block)
+                if sw_angle_deg:
+                    sw_rad = math.radians(sw_angle_deg)
+                    n_sub = max(2, math.ceil(block_z_size * resolution))
+                    sub_h = block_z_size / n_sub
+                    for k in range(n_sub):
+                        frac = (k + 0.5) / n_sub
+                        offset = frac * block_z_size * math.tan(sw_rad)
+                        y0_k = y0 + offset
+                        y1_k = y1 - offset
+                        y_size_k = y1_k - y0_k
+                        if y_size_k <= 0:
+                            continue
+                        sub_z_center = z_lo + (k + 0.5) * sub_h
+                        block = mp.Block(
+                            size=mp.Vector3(mp.inf, y_size_k, sub_h),
+                            center=mp.Vector3(0.0, (y0_k + y1_k) / 2.0, sub_z_center),
+                            material=ld["medium"],
+                        )
+                        geometry.append(block)
+                else:
+                    block_z_center = (z_lo + z_hi) / 2.0
+                    block = mp.Block(
+                        size=mp.Vector3(mp.inf, y_size, block_z_size),
+                        center=mp.Vector3(0.0, y_center, block_z_center),
+                        material=ld["medium"],
+                    )
+                    geometry.append(block)
 
             bottom_free = _subtract_intervals((y0, y1), below_intervals)
             for by0, by1 in bottom_free:

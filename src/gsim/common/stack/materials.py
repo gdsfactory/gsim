@@ -121,11 +121,27 @@ class DispersionModel(BaseModel):
     - ``sellmeier``: Sellmeier equation with B, C terms (optical)
     - ``lorentzian``: Lorentzian susceptibility poles (general dispersive)
     - ``constant``: Constant permittivity (single-frequency)
+
+    Per-axis anisotropic models:
+        Set ``axis`` to ``"xx"``, ``"yy"``, or ``"zz"`` to restrict a model
+        to one dielectric-tensor component.  When a material has per-axis
+        models covering the target wavelength,
+        :meth:`MaterialProperties.evaluate_at_wavelength` combines them
+        into a tensor permittivity ``[eps_xx, eps_yy, eps_zz]``.
+        Models with ``axis=None`` are isotropic (apply to all axes) and
+        serve as fallback for axes without a dedicated model.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     type: Literal["sellmeier", "lorentzian", "constant"]
+    axis: Literal["xx", "yy", "zz"] | None = Field(
+        default=None,
+        description=(
+            "Dielectric-tensor component this model applies to. "
+            "None = isotropic (all axes)."
+        ),
+    )
 
     sellmeier_terms: list[SellmeierTerm] | None = Field(
         default=None,
@@ -217,6 +233,31 @@ def _as_list(val: float | list[float] | None, n: int = 3) -> list[float] | None:
 def _is_tensor(val: float | list[float] | None) -> bool:
     """Check if a value is an anisotropic tensor (list of 3)."""
     return isinstance(val, list)
+
+
+_AXES: tuple[Literal["xx", "yy", "zz"], ...] = ("xx", "yy", "zz")
+
+
+def _find_best_covering_model(
+    models: list[DispersionModel],
+    wavelength_um: float,
+) -> DispersionModel | None:
+    """Find the best model covering a wavelength from a list of candidates.
+
+    Priority: covering model > unspecified-validity model > None.
+    """
+    covered: list[DispersionModel] = []
+    unspecified: list[DispersionModel] = []
+    for m in models:
+        if m.validity.is_unspecified:
+            unspecified.append(m)
+        elif m.validity.covers_wavelength(wavelength_um):
+            covered.append(m)
+    if covered:
+        return covered[0]
+    if unspecified:
+        return unspecified[0]
+    return None
 
 
 class ResolvedMaterial(BaseModel):
@@ -375,37 +416,26 @@ class MaterialProperties(BaseModel):
         """Evaluate material properties at a specific wavelength.
 
         Resolution strategy:
-        1. Scan dispersion_models for one whose validity covers the wavelength.
-        2. If no model covers it, use a model with unspecified validity (warn).
-        3. If no dispersion models, fall back to the permittivity field directly.
+        1. Group dispersion_models by ``axis`` (None = isotropic).
+        2. If any per-axis models exist, evaluate each axis independently,
+           falling back to isotropic models for uncovered axes.  The
+           result is a tensor permittivity [eps_xx, eps_yy, eps_zz].
+        3. If only isotropic models, pick the best covering one (scalar).
+        4. If no dispersion models, fall back to the permittivity field.
         """
-        covered_models = []
-        unspecified_models = []
-
+        axis_models: dict[str | None, list[DispersionModel]] = {
+            None: [],
+            "xx": [],
+            "yy": [],
+            "zz": [],
+        }
         for model in self.dispersion_models:
-            if model.validity.is_unspecified:
-                unspecified_models.append(model)
-            elif model.validity.covers_wavelength(wavelength_um):
-                covered_models.append(model)
+            axis_models[model.axis].append(model)
 
-        selected: DispersionModel | None = None
-        within_validity = True
-        validity_note = ""
-
-        if covered_models:
-            selected = covered_models[0]
-            within_validity = True
-        elif unspecified_models:
-            selected = unspecified_models[0]
-            within_validity = True
-            validity_note = (
-                f"validity range unspecified (source: {selected.source or 'unknown'})"
-            )
-            warnings.warn(
-                f"Material model for evaluation at wavelength={wavelength_um} um "
-                f"has unspecified validity range. {validity_note}",
-                stacklevel=3,
-            )
+        has_anisotropic = any(
+            axis_models[ax]
+            for ax in _AXES  # type: ignore[arg-type]
+        )
 
         base = ResolvedMaterial(
             permittivity=self.permittivity,
@@ -415,17 +445,67 @@ class MaterialProperties(BaseModel):
             material_axes=self.material_axes,
         )
 
+        if has_anisotropic:
+            eps_components: list[float] = []
+            model_types: set[str] = set()
+            model_sources: list[str] = []
+            all_within_validity = True
+            validity_notes: list[str] = []
+
+            for ax in _AXES:
+                model = _find_best_covering_model(
+                    axis_models[ax],
+                    wavelength_um,  # type: ignore[arg-type]
+                )
+                if model is None:
+                    model = _find_best_covering_model(axis_models[None], wavelength_um)
+                if model is None:
+                    eps_components.append(1.0)
+                    validity_notes.append(f"{ax}: no model found, using eps=1.0")
+                    all_within_validity = False
+                    continue
+
+                eps_components.append(model.evaluate_permittivity(wavelength_um))
+                model_types.add(model.type)
+                if model.source:
+                    model_sources.append(f"{ax}({model.source})")
+                if model.validity.is_unspecified:
+                    validity_notes.append(
+                        f"{ax}: validity unspecified ({model.source or 'unknown'})"
+                    )
+
+            base.permittivity = eps_components
+            if any(t in ("sellmeier", "lorentzian") for t in model_types):
+                base.conductivity = None
+            base.model_type = "/".join(sorted(model_types)) if model_types else ""
+            base.model_source = "; ".join(model_sources) if model_sources else ""
+            base.within_validity = all_within_validity
+            base.validity_note = "; ".join(validity_notes) if validity_notes else ""
+            return base
+
+        if self.dispersion_models:
+            selected = _find_best_covering_model(self.dispersion_models, wavelength_um)
+        else:
+            selected = None
+
+        within_validity = True
+        validity_note = ""
+
+        if selected is not None and selected.validity.is_unspecified:
+            validity_note = (
+                f"validity range unspecified (source: {selected.source or 'unknown'})"
+            )
+            warnings.warn(
+                f"Material model for evaluation at wavelength={wavelength_um} um "
+                f"has unspecified validity range. {validity_note}",
+                stacklevel=3,
+            )
+
         if selected is not None:
             eps = selected.evaluate_permittivity(wavelength_um)
             base.permittivity = (
                 self.permittivity if _is_tensor(self.permittivity) else eps
             )
-            # When a dispersive model (Sellmeier/Lorentzian) covers the
-            # target wavelength, the material behaves as a dielectric at
-            # this frequency — any conductivity from the RF constant model
-            # is physically incorrect and must be dropped.  For example,
-            # silicon has sigma=2 S/m at RF but is a pure dielectric
-            # (n~3.47) at optical wavelengths.
             if selected.type in ("sellmeier", "lorentzian"):
                 base.conductivity = None
             base.model_type = selected.type
@@ -709,13 +789,43 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
             ),
         ],
     ),
-    "tfln": MaterialProperties(
-        permittivity=44.0,
+    "linbo3": MaterialProperties(
         dispersion_models=[
             DispersionModel(
-                type="constant",
-                permittivity=44.0,
-                source="unspecified",
+                type="sellmeier",
+                axis="xx",
+                sellmeier_terms=[
+                    SellmeierTerm(B=2.6734, C=0.01764),
+                    SellmeierTerm(B=1.2290, C=0.05914),
+                    SellmeierTerm(B=12.614, C=474.60),
+                ],
+                epsilon_inf=1.0,
+                validity=ValidityRange(valid_wavelength=(0.4, 5.0)),
+                source="Zelmon et al. 1997 (LiNbO3 ordinary, o-polarized)",
+            ),
+            DispersionModel(
+                type="sellmeier",
+                axis="yy",
+                sellmeier_terms=[
+                    SellmeierTerm(B=2.6734, C=0.01764),
+                    SellmeierTerm(B=1.2290, C=0.05914),
+                    SellmeierTerm(B=12.614, C=474.60),
+                ],
+                epsilon_inf=1.0,
+                validity=ValidityRange(valid_wavelength=(0.4, 5.0)),
+                source="Zelmon et al. 1997 (LiNbO3 ordinary, o-polarized)",
+            ),
+            DispersionModel(
+                type="sellmeier",
+                axis="zz",
+                sellmeier_terms=[
+                    SellmeierTerm(B=2.9804, C=0.02047),
+                    SellmeierTerm(B=0.5981, C=0.0666),
+                    SellmeierTerm(B=8.9543, C=416.08),
+                ],
+                epsilon_inf=1.0,
+                validity=ValidityRange(valid_wavelength=(0.4, 5.0)),
+                source="Zelmon et al. 1997 (LiNbO3 extraordinary, e-polarized)",
             ),
         ],
     ),
@@ -736,6 +846,8 @@ MATERIAL_ALIASES: dict[str, str] = {
     "si3n4": "Si3N4",
     "si": "silicon",
     "ge": "germanium",
+    "tfln": "linbo3",
+    "lithium_niobate": "linbo3",
 }
 
 

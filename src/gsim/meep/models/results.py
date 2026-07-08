@@ -216,8 +216,6 @@ class SParameterResult(BaseModel):
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots()
-        plt.close(fig)  # prevent double display in notebooks
-
         ylabel = "|S| (dB)" if db else "|S|"
         names = self._resolve_keys(keys)
         for name in names:
@@ -492,7 +490,7 @@ class ModeResult(BaseModel):
         index: bool = False,
         ax: Any | None = None,
         figsize: tuple[float, float] = (8, 6),
-        cmap: str = "inferno",
+        cmap: str | None = None,
         aspect: str = "equal",
         title: str | None = "auto",
         suptitle: str | None = "auto",
@@ -512,8 +510,10 @@ class ModeResult(BaseModel):
             ax: Existing matplotlib ``Axes``.  Only valid when
                 ``components`` resolves to a single component.
             figsize: ``(width, height)`` tuple in inches.
-            cmap: Matplotlib colormap name for field data (default
-                ``"inferno"``).
+            cmap: Matplotlib colormap name for field data.  When ``None``
+                (default), auto-selected: ``"inferno"`` for ``abs``,
+                ``"RdBu_r"`` for ``real``/``imag``, ``"twilight"`` for
+                ``"phase"``.
             aspect: ``"equal"`` or ``"auto"`` for ``pcolormesh`` subplots.
             title: Per-subplot title. ``"auto"`` generates
                 ``|comp|  n_eff=...`` for single-component, component name
@@ -552,6 +552,8 @@ class ModeResult(BaseModel):
             )
 
         resolved = self._resolve_components(components)
+        if cmap is None:
+            cmap = self._colormap_for_norm(norm)  # type: ignore[assignment]
         is_single = len(resolved) == 1
         if ax is not None and not is_single:
             raise ValueError(
@@ -615,6 +617,17 @@ class ModeResult(BaseModel):
             )
         return list(components)
 
+    @staticmethod
+    def _colormap_for_norm(norm: str) -> str:
+        """Return a sensible colormap for a given field *norm*."""
+        if norm == "abs":
+            return "inferno"
+        if norm in ("real", "imag"):
+            return "RdBu_r"
+        if norm == "phase":
+            return "twilight"
+        return "inferno"
+
     # -- 1D helpers -------------------------------------------------------
 
     def _make_title(
@@ -661,7 +674,6 @@ class ModeResult(BaseModel):
                 figsize=figsize,
                 squeeze=False,
             )
-            plt.close(fig)
             axes = [axes_arr[i, 0] for i in range(len(comps))]
 
         for i, comp in enumerate(comps):
@@ -687,6 +699,7 @@ class ModeResult(BaseModel):
         fig.tight_layout()
         if show:
             plt.show()
+
         if is_single:
             return (fig, axes[0])
         return (fig, axes_arr)  # Always return array for multi-component
@@ -747,7 +760,6 @@ class ModeResult(BaseModel):
                 figsize=figsize,
                 squeeze=False,
             )
-            plt.close(fig)
             axes = [axes_arr.flat[i] for i in range(len(comps))]
 
         index_overlay: np.ndarray | None = None
@@ -767,15 +779,6 @@ class ModeResult(BaseModel):
         for i, comp in enumerate(comps):
             ax_i = axes[i]
             data = self._apply_norm(self.fields[comp], norm)
-            if index_overlay is not None:
-                ax_i.pcolormesh(
-                    h_grid,
-                    z,
-                    index_overlay,
-                    cmap="Greys",
-                    alpha=0.1,
-                    shading="auto",
-                )
             im = ax_i.pcolormesh(
                 h_grid,
                 z,
@@ -786,6 +789,15 @@ class ModeResult(BaseModel):
                 vmax=vmax,
                 **kwargs,
             )
+            if index_overlay is not None:
+                ax_i.pcolormesh(
+                    h_grid,
+                    z,
+                    index_overlay,
+                    cmap="Greys",
+                    alpha=0.25,
+                    shading="auto",
+                )
             images.append(im)
             ax_i.set_aspect(aspect)
             t = self._make_title(comp, title, is_single)
@@ -813,6 +825,7 @@ class ModeResult(BaseModel):
         fig.tight_layout()
         if show:
             plt.show()
+
         if is_single:
             return (fig, axes[0])
         return (fig, axes_arr)
@@ -930,7 +943,6 @@ class ModeResult(BaseModel):
             fig = ax.figure
         else:
             fig, ax = plt.subplots(figsize=figsize)
-            plt.close(fig)
 
         ax.plot(self.z_grid, n_prof, **kwargs)
         ax.set_xlabel("z (µm)")
@@ -940,6 +952,7 @@ class ModeResult(BaseModel):
         fig.tight_layout()
         if show:
             plt.show()
+
         return (fig, ax)
 
     def _plot_index_2d(
@@ -963,7 +976,6 @@ class ModeResult(BaseModel):
             fig = ax.figure
         else:
             fig, ax = plt.subplots(figsize=figsize)
-            plt.close(fig)
 
         im = ax.pcolormesh(
             h_grid,
@@ -982,4 +994,5 @@ class ModeResult(BaseModel):
         fig.tight_layout()
         if show:
             plt.show()
+
         return (fig, ax)

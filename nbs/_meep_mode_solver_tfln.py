@@ -25,9 +25,11 @@
 #  - LiNbO3 slab: 220 nm thick, extends laterally
 #  - LiNbO3 ridge: 180 nm on top of slab -> total 400 nm
 #  - Ridge width w0 = 1.1 um
-#  - Sidewall angle 17deg (PolySlab with taper) -> **approximated as vertical**
-#    here because the GDS-based mode solver uses rectangular polygons.
-#    The n_eff difference is < 0.01 for ridge waveguides at this aspect ratio.
+#  - Sidewall angle 17deg (PolySlab with taper) -> **supported via staircase
+#    approximation** (stacked ``mp.Block`` sub-layers).  The layer's
+#    ``sidewall_angle`` parameter is passed through from the
+#    :class:`Layer` model.  The n_eff difference vs. vertical
+#    sidewalls is ~0.0045 (1.8533 vs 1.8578) at this aspect ratio.
 #
 # **Key concept** --- ``background_material="sio2"`` sets the MEEP
 # ``default_material`` to SiO2, matching Tidy3D's ``medium=SiO2``.  Any
@@ -45,20 +47,8 @@ import gdsfactory as gf
 import matplotlib.pyplot as plt
 import numpy as np
 
+import gsim.meep as gm
 from gsim.common.stack.extractor import Layer, LayerStack
-from gsim.common.stack.materials import (
-    MATERIALS_DB,
-    DispersionModel,
-    MaterialProperties,
-    SellmeierTerm,
-    ValidityRange,
-)
-from gsim.meep import (
-    mode_y_grid,
-    mode_z_grid,
-    refractive_index_profile,
-    solve_cross_section_mode,
-)
 
 try:
     import meep as mp
@@ -75,50 +65,25 @@ plt.close()
 gf.gpdk.PDK.activate()
 
 # %% [markdown]
-# ### Register LiNbO3 material (Zelmon 1997, extraordinary axis)
+# ### LiNbO3 material (Zelmon 1997)
 #
-# LiNbO3 is birefringent.  The Tidy3D example uses
-# ``LiNbO3.Zelmon1997(1)`` --- the extraordinary axis.  For x-cut TFLN
-# the TE mode's dominant E-field aligns with this axis.
+# LiNbO3 is birefringent and is now registered as a uniaxial material
+# in ``gsim.common.stack.materials.MATERIALS_DB`` (notebook no longer
+# manually registers it).  Both ordinary and extraordinary Sellmeier
+# models from Zelmon et al. (JOSA B 14(12), 3319--3322, 1997) are included:
 #
-# Sellmeier (Zelmon et al., JOSA B 14(12), 3319--3322, 1997):
-#   n_e^2 = 1 + 2.9804 lambda^2/(lambda^2 - 0.02047) + 0.5981 lambda^2/(lambda^2 - 0.0666)
-#             + 8.9543 lambda^2/(lambda^2 - 416.08)
+# Ordinary:
+#   n_o^2 = 1 + 2.6734 lam^2/(lam^2 - 0.01764) + 1.2290 lam^2/(lam^2 - 0.05914)
+#             + 12.614 lam^2/(lam^2 - 474.60)
+#
+# Extraordinary:
+#   n_e^2 = 1 + 2.9804 lam^2/(lam^2 - 0.02047) + 0.5981 lam^2/(lam^2 - 0.0666)
+#             + 8.9543 lam^2/(lam^2 - 416.08)
+#
+# For x-cut TFLN the TE mode's dominant E-field aligns with the
+# extraordinary axis (zz).  The Tidy3D example uses
+# ``LiNbO3.Zelmon1997(1)`` (extraordinary axis).
 
-# %%
-MATERIALS_DB["linbo3"] = MaterialProperties(
-    permittivity=4.9064,
-    dispersion_models=[
-        DispersionModel(
-            type="sellmeier",
-            sellmeier_terms=[
-                SellmeierTerm(B=2.9804, C=0.02047),
-                SellmeierTerm(B=0.5981, C=0.0666),
-                SellmeierTerm(B=8.9543, C=416.08),
-            ],
-            epsilon_inf=1.0,
-            validity=ValidityRange(valid_wavelength=(0.4, 5.0)),
-            source="Zelmon et al. 1997 (LiNbO3 extraordinary, e-polarized)",
-        ),
-    ],
-)
-
-from gsim.common.stack.materials import resolve_material_at_wavelength
-
-resolved = resolve_material_at_wavelength("linbo3", 1.55)
-n_linbo3 = (
-    np.sqrt(resolved.permittivity)
-    if resolved and resolved.permittivity
-    else np.sqrt(4.9064)
-)
-print(f"n(LiNbO3 e-axis) at 1.55 um = {n_linbo3:.4f}")
-resolved_sio2 = resolve_material_at_wavelength("sio2", 1.55)
-n_sio2 = (
-    np.sqrt(resolved_sio2.permittivity)
-    if resolved_sio2 and resolved_sio2.permittivity
-    else 1.444
-)
-print(f"n(SiO2) at 1.55 um = {n_sio2:.4f}")
 
 # %% [markdown]
 # ### Build the GDS component
@@ -132,11 +97,12 @@ print(f"n(SiO2) at 1.55 um = {n_sio2:.4f}")
 # as full-width backgrounds (``mode_solver.py:434--435``).
 #
 # **Sidewall angle note**: the Tidy3D example uses ``PolySlab(sidewall_angle=17deg)``
-# which produces a trapezoidal ridge cross-section.  GDS polygons are
-# rectangular, so we approximate with vertical sidewalls.
+# which produces a trapezoidal ridge cross-section.  The 2D mode solver now
+# supports this via a staircase approximation (stacked ``mp.Block`` sub-layers).
+# Set ``sidewall_angle=17.0`` on the ridge ``Layer`` to enable it.
 
 # %%
-SLAB_WIDTH = 12.0  # um --- wide slab (matches Tidy3D plane_size)
+SLAB_WIDTH = 5.0  # um --- wide slab (matches Tidy3D plane_size)
 CORE_WIDTH = 1.1  # um --- w0 from reference design
 LENGTH = 10.0  # um --- waveguide length (arbitrary for mode solving)
 
@@ -217,6 +183,7 @@ layers = {
         thickness=RIDGE_THICKNESS,
         material="linbo3",
         layer_type="dielectric",
+        sidewall_angle=17.0,
     ),
 }
 stack = LayerStack(layers=layers)
@@ -230,107 +197,66 @@ for name, l in stack.layers.items():
 
 # %% [markdown]
 # ### Solve the fundamental TE-like mode
+#
+# Use the declarative :class:`Simulation` + :class:`ModeSolver` API.
+# Grids are auto-constructed from ``y_span``, ``n_field_y``, and
+# ``n_field_z`` settings on the mode solver.
 
 # %%
 WAVELENGTH = 1.55  # um
 RESOLUTION = 32  # grid points per um
-PML_THICKNESS = WAVELENGTH  # um --- absorbing BCs prevent lateral standing waves
+PML_THICKNESS = WAVELENGTH  # um
 
-y_span = SLAB_WIDTH
-z_margin = (0.0, 1)  # asymmetric: no margin below BOX, 0.5 um above ridge
-
-z_min = min(l.zmin for l in stack.layers.values())
-z_max = max(l.zmax for l in stack.layers.values())
-actual_y_span = y_span + 2 * PML_THICKNESS
-actual_z_span = (z_max - z_min) + z_margin[0] + z_margin[1] + 2 * PML_THICKNESS
-
-y_grid = mode_y_grid(
-    n_points=max(round(actual_y_span * RESOLUTION), 1),
-    y_span=y_span,
-    pml_thickness=PML_THICKNESS,
+sim = gm.Simulation(
+    geometry=gm.Geometry(component=c, stack=stack),
+    domain=gm.Domain(
+        pml=PML_THICKNESS,
+        margin_z_above=0.5,
+    ),
 )
-z_grid = mode_z_grid(
-    stack,
-    n_points=max(round(actual_z_span * RESOLUTION), 1),
-    z_margin=z_margin,
-    pml_thickness=PML_THICKNESS,
-)
+sim.mode_solver.wavelengths = [WAVELENGTH]
+sim.mode_solver.fundamental().at_port("o1")
+sim.mode_solver.y_span = SLAB_WIDTH
+sim.mode_solver.n_field_y = 100
+sim.mode_solver.n_field_z = 100
+sim.mode_solver.background_material = "sio2"
 
-result = solve_cross_section_mode(
-    component=c,
-    stack=stack,
-    port="o1",
-    y_span=y_span,
-    wavelength=WAVELENGTH,
-    band_num=1,
-    parity="NO_PARITY",
-    resolution=RESOLUTION,
-    field_y_grid=y_grid,
-    field_z_grid=z_grid,
-    z_margin=z_margin,
-    pml_thickness=PML_THICKNESS,
-    background_material="sio2",
-)
+sweep = sim.solve_modes()
+mode = sweep.at(WAVELENGTH).band(1)
 
-print(f"n_eff     = {result.n_eff}  (Tidy3D ref: ~1.85)")
-print(f"n_group   = {result.n_group}     (Tidy3D ref: ~2.20)")
-print(f"kdom      = {[f'{k:.6f}' for k in result.kdom]}")
-print(f"band      = {result.band_num}, parity = {result.parity}")
-print(f"fields    = {list(result.fields.keys())}")
-for comp, arr in result.fields.items():
+print(f"n_eff     = {mode.n_eff}  (Tidy3D ref: ~1.85)")
+print(f"n_group   = {mode.n_group}     (Tidy3D ref: ~2.20)")
+print(f"kdom      = {[f'{k:.6f}' for k in mode.kdom]}")
+print(f"band      = {mode.band_num}, parity = {mode.parity}")
+print(f"fields    = {list(mode.fields.keys())}")
+for comp, arr in mode.fields.items():
     print(f"  {comp}: shape={arr.shape}  |max|={np.abs(arr).max():.6f}")
 
 # %% [markdown]
-# ### 2D mode profiles --- all six field components
+# ### Refractive index profile
 #
-# The fundamental TE-like mode of the TFLN ridge waveguide has its
-# primary electric field component in E_y (TE-like polarization).
+# Use ``ModeResult.plot_index()`` which auto-computes ``n`` from the
+# stored :class:`LayerStack` and grid arrays.
 
 # %%
-y_um = y_grid
-z_um = z_grid
+mode.plot_index(show=True)
 
-n_yz = refractive_index_profile(
-    stack,
-    WAVELENGTH,
-    z_grid=z_um,
-    y_grid=y_um,
-    component=c,
-    port="o1",
-    background_material="sio2",
-)
+# %% [markdown]
+# ### 2D mode profile — all field components
+#
+# Use ``ModeResult.plot_mode()`` with ``components="all"`` and
+# ``index=True`` to overlay the refractive index as a greyscale underlay.
 
-# Refractive index map
-fig, ax_rn = plt.subplots(1, 1, figsize=(7, 5))
-im_rn = ax_rn.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="rainbow", alpha=0.85)
-plt.colorbar(im_rn, ax=ax_rn, label="n")
-ax_rn.set_xlabel("y (um)")
-ax_rn.set_ylabel("z (um)")
-ax_rn.set_title("Refractive index --- TFLN ridge waveguide")
-ax_rn.set_aspect("equal")
-fig.tight_layout()
-
-# Field amplitude for each component
-for dom_comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
-    field_2d = np.abs(result.fields[dom_comp])
-
-    fig, ax1 = plt.subplots(1, 1, figsize=(7, 5))
-
-    im = ax1.pcolormesh(y_um, z_um, field_2d, shading="auto", cmap="inferno")
-    ax1.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="Greys", alpha=0.1)
-    plt.colorbar(im, ax=ax1, label=f"|{dom_comp}| (arb. units)")
-    ax1.set_xlabel("y (um)")
-    ax1.set_ylabel("z (um)")
-    ax1.set_title(f"|{dom_comp}|  n_eff={result.n_eff:.4f}")
-    ax1.set_aspect("equal")
-
-    fig.suptitle(
+# %%
+mode.plot_mode(
+    components="all",
+    norm="abs",
+    index=True,
+    suptitle=(
         f"TFLN ridge waveguide fundamental TE mode\n"
-        f"(lambda={WAVELENGTH:.2f} um, w0={CORE_WIDTH:.1f} um, "
+        f"(λ={WAVELENGTH:.2f} µm, w0={CORE_WIDTH:.1f} µm, "
         f"h_slab={SLAB_THICKNESS * 1000:.0f} nm, h_ridge={RIDGE_THICKNESS * 1000:.0f} nm, "
-        f"bg=SiO2)",
-        fontweight="bold",
-    )
-    fig.tight_layout()
-
-plt.show()
+        f"bg=SiO2)"
+    ),
+    show=True,
+)

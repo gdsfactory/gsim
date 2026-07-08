@@ -35,13 +35,8 @@ import gdsfactory as gf
 import matplotlib.pyplot as plt
 import numpy as np
 
+import gsim.meep as gm
 from gsim.common.stack.extractor import Layer, LayerStack
-from gsim.meep import (
-    mode_y_grid,
-    mode_z_grid,
-    refractive_index_profile,
-    solve_cross_section_mode,
-)
 
 try:
     import meep as mp
@@ -65,7 +60,7 @@ gf.gpdk.PDK.activate()
 # at the port Y-position to reconstruct the 2D (X,Z) geometry.
 
 # %%
-SLAB_WIDTH = 11.0  # um
+SLAB_WIDTH = 3.0  # um
 RIB_WIDTH = 0.5  # um
 LENGTH = 10.0  # um
 
@@ -140,104 +135,63 @@ for name, l in stack.layers.items():
 
 # %% [markdown]
 # ### Solve the fundamental mode
+#
+# Use the declarative :class:`Simulation` + :class:`ModeSolver` API.
 
 # %%
 WAVELENGTH = 1.55  # um
 RESOLUTION = 32
-pml_thickness = 1 * WAVELENGTH
+PML_THICKNESS = 1 * WAVELENGTH
 
-y_span = SLAB_WIDTH
-z_margin = (0, 1)  # asymmetric: 0 below, 0.5 above
 
-z_min = min(l.zmin for l in stack.layers.values())
-z_max = max(l.zmax for l in stack.layers.values())
-actual_y_span = y_span + 2 * pml_thickness
-actual_z_span = (z_max - z_min) + z_margin[0] + z_margin[1] + 2 * pml_thickness
-
-y_grid = mode_y_grid(
-    n_points=max(round(actual_y_span * RESOLUTION), 1),
-    y_span=y_span,
-    pml_thickness=pml_thickness,
+sim = gm.Simulation(
+    geometry=gm.Geometry(component=c, stack=stack),
+    domain=gm.Domain(
+        pml=PML_THICKNESS,
+        margin_z_above=0.5,
+    ),
 )
-z_grid = mode_z_grid(
-    stack,
-    n_points=max(round(actual_z_span * RESOLUTION), 1),
-    z_margin=z_margin,
-    pml_thickness=pml_thickness,
-)
-result = solve_cross_section_mode(
-    component=c,
-    stack=stack,
-    port="o1",
-    y_span=y_span,
-    wavelength=WAVELENGTH,
-    band_num=1,
-    parity="NO_PARITY",
-    resolution=RESOLUTION,
-    field_y_grid=y_grid,
-    field_z_grid=z_grid,
-    z_margin=z_margin,
-    pml_thickness=pml_thickness,
-)
+sim.mode_solver.wavelengths = [WAVELENGTH]
+sim.mode_solver.fundamental().at_port("o1")
+sim.mode_solver.y_span = SLAB_WIDTH
+sim.mode_solver.n_field_y = 100
+sim.mode_solver.n_field_z = 100
 
-print(f"n_eff    = {result.n_eff:.6f}")
-print(f"n_group  = {result.n_group}")
-print(f"kdom     = {[f'{k:.6f}' for k in result.kdom]}")
-print(f"band     = {result.band_num}, parity = {result.parity}")
-print(f"fields   = {list(result.fields.keys())}")
-for comp, arr in result.fields.items():
+sweep = sim.solve_modes()
+mode = sweep.at(WAVELENGTH).band(1)
+
+print(f"n_eff    = {mode.n_eff:.6f}")
+print(f"n_group  = {mode.n_group}")
+print(f"kdom     = {[f'{k:.6f}' for k in mode.kdom]}")
+print(f"band     = {mode.band_num}, parity = {mode.parity}")
+print(f"fields   = {list(mode.fields.keys())}")
+for comp, arr in mode.fields.items():
     print(f"  {comp}: shape={arr.shape}  |max|={np.abs(arr).max():.6f}")
 
 # %% [markdown]
-# ### 2D mode profile - dominant component
+# ### Refractive index profile
 #
-# The fundamental TE-like rib mode has its primary electric field in Ey.
+# Use ``ModeResult.plot_index()`` which auto-computes ``n`` from the
+# stored :class:`LayerStack` and grid arrays.
 
 # %%
-y_um = y_grid
-z_um = z_grid
-# Right: refractive index distribution
+mode.plot_index(show=True)
 
-fig, ax2 = plt.subplots(1, 1, figsize=(7, 5))
-n_yz = refractive_index_profile(
-    stack,
-    WAVELENGTH,
-    z_grid=z_um,
-    y_grid=y_um,
-    component=c,
-    port="o1",
+
+# %% [markdown]
+# ### 2D mode profile — all field components
+#
+# Use ``ModeResult.plot_mode()`` with ``components="all"`` and
+# ``index=True`` to overlay the refractive index as a greyscale underlay.
+
+# %%
+mode.plot_mode(
+    components="all",
+    norm="abs",
+    index=True,
+    suptitle=(
+        f"Rib waveguide fundamental TE mode\n"
+        f"(λ={WAVELENGTH:.2f} µm, slab={SLAB_WIDTH:.1f} µm, rib={RIB_WIDTH:.1f} µm)"
+    ),
+    show=True,
 )
-
-
-im2 = ax2.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="rainbow", alpha=0.85)
-plt.colorbar(im2, ax=ax2, label="n")
-ax2.set_xlabel("y (um)")
-ax2.set_ylabel("z (um)")
-ax2.set_title("Refractive index")
-ax2.set_aspect("equal")
-plt.show()
-
-
-for dom_comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
-    # dom_comp = max(result.fields, key=lambda k: np.abs(result.fields[k]).max())
-    field_2d = np.abs(result.fields[dom_comp])
-    nz, ny = field_2d.shape
-
-    fig, ax1 = plt.subplots(1, 1, figsize=(7, 5))
-
-    # Field amplitude
-    im = ax1.pcolormesh(y_um, z_um, field_2d, shading="auto", cmap="inferno")
-    im2 = ax1.pcolormesh(y_um, z_um, n_yz, shading="auto", cmap="Greys", alpha=0.1)
-    plt.colorbar(im, ax=ax1, label=f"|{dom_comp}| (arb. units)")
-    ax1.set_xlabel("y (um)")
-    ax1.set_ylabel("z (um)")
-    ax1.set_title(f"|{dom_comp}|  n_eff={result.n_eff:.4f}")
-    ax1.set_aspect("equal")
-
-    fig.suptitle(
-        f"Rib waveguide fundamental TE mode  \n"
-        f"(lambda={WAVELENGTH:.2f} um, slab={SLAB_WIDTH:.1f}um, rib={RIB_WIDTH:.1f}um)",
-        fontweight="bold",
-    )
-    fig.tight_layout()
-plt.show()
