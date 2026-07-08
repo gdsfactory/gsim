@@ -357,23 +357,19 @@ def _build_component_xz_cell(
             if block_z_size > 0:
                 if sw_angle_deg:
                     sw_rad = math.radians(sw_angle_deg)
-                    n_sub = max(2, math.ceil(block_z_size * resolution))
-                    sub_h = block_z_size / n_sub
-                    for k in range(n_sub):
-                        frac = (k + 0.5) / n_sub
-                        offset = frac * block_z_size * math.tan(sw_rad)
-                        x0_k = x0 + offset
-                        x1_k = x1 - offset
-                        x_size_k = x1_k - x0_k
-                        if x_size_k <= 0:
-                            continue
-                        sub_z_center = z_lo + (k + 0.5) * sub_h
-                        block = mp.Block(
-                            size=mp.Vector3(x_size_k, mp.inf, sub_h),
-                            center=mp.Vector3((x0_k + x1_k) / 2.0, 0.0, sub_z_center),
-                            material=ld["medium"],
-                        )
-                        geometry.append(block)
+                    vertices = [
+                        mp.Vector3(x0, -1000.0, z_lo),
+                        mp.Vector3(x1, -1000.0, z_lo),
+                        mp.Vector3(x1, 1000.0, z_lo),
+                        mp.Vector3(x0, 1000.0, z_lo),
+                    ]
+                    prism = mp.Prism(
+                        vertices=vertices,
+                        height=block_z_size,
+                        material=ld["medium"],
+                        sidewall_angle=sw_rad,
+                    )
+                    geometry.append(prism)
                 else:
                     block_z_center = (z_lo + z_hi) / 2.0
                     block = mp.Block(
@@ -521,23 +517,19 @@ def _build_component_yz_cell(
             if block_z_size > 0:
                 if sw_angle_deg:
                     sw_rad = math.radians(sw_angle_deg)
-                    n_sub = max(2, math.ceil(block_z_size * resolution))
-                    sub_h = block_z_size / n_sub
-                    for k in range(n_sub):
-                        frac = (k + 0.5) / n_sub
-                        offset = frac * block_z_size * math.tan(sw_rad)
-                        y0_k = y0 + offset
-                        y1_k = y1 - offset
-                        y_size_k = y1_k - y0_k
-                        if y_size_k <= 0:
-                            continue
-                        sub_z_center = z_lo + (k + 0.5) * sub_h
-                        block = mp.Block(
-                            size=mp.Vector3(mp.inf, y_size_k, sub_h),
-                            center=mp.Vector3(0.0, (y0_k + y1_k) / 2.0, sub_z_center),
-                            material=ld["medium"],
-                        )
-                        geometry.append(block)
+                    vertices = [
+                        mp.Vector3(-1000.0, y0, z_lo),
+                        mp.Vector3(1000.0, y0, z_lo),
+                        mp.Vector3(1000.0, y1, z_lo),
+                        mp.Vector3(-1000.0, y1, z_lo),
+                    ]
+                    prism = mp.Prism(
+                        vertices=vertices,
+                        height=block_z_size,
+                        material=ld["medium"],
+                        sidewall_angle=sw_rad,
+                    )
+                    geometry.append(prism)
                 else:
                     block_z_center = (z_lo + z_hi) / 2.0
                     block = mp.Block(

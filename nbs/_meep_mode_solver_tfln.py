@@ -16,26 +16,23 @@
 # # MEEP Mode Solver - TFLN Ridge Waveguide
 #
 # Compute the fundamental TE mode of a **thin-film lithium niobate (TFLN)**
-# ridge waveguide at lambda = 1.55 um --- reproducing the *Optical Waveguide*
-# section of the Tidy3D TFLN EOM example.
-# https://www.flexcompute.com/tidy3d/examples/notebooks/TFLNTidy3d/
+# ridge waveguide at lambda = 1.55 um.
 #
 # **Reference design** (*Ying Li et al.*, ACS Omega 2023, 8(10), 9644--9651):
-#  - SiO2 cladding everywhere (Tidy3D sets ``medium=SiO2`` --- **no Si substrate**)
+#  - SiO2 cladding everywhere (no Si substrate)
 #  - LiNbO3 slab: 220 nm thick, extends laterally
 #  - LiNbO3 ridge: 180 nm on top of slab -> total 400 nm
 #  - Ridge width w0 = 1.1 um
-#  - Sidewall angle 17deg (PolySlab with taper) -> **supported via staircase
-#    approximation** (stacked ``mp.Block`` sub-layers).  The layer's
-#    ``sidewall_angle`` parameter is passed through from the
-#    :class:`Layer` model.  The n_eff difference vs. vertical
-#    sidewalls is ~0.0045 (1.8533 vs 1.8578) at this aspect ratio.
+#  - Sidewall angle 17deg -> **supported via ``mp.Prism``**
+#    with native ``sidewall_angle`` parameter (in radians).
+#    The n_eff difference vs. vertical sidewalls is ~0.0045
+#    (1.8533 vs 1.8578).
 #
 # **Key concept** --- ``background_material="sio2"`` sets the MEEP
-# ``default_material`` to SiO2, matching Tidy3D's ``medium=SiO2``.  Any
+# ``default_material`` to SiO2.  Any
 # space not covered by an explicit layer is filled with SiO2 instead of air.
 #
-# **Expected results** (Tidy3D reference):
+# **Expected results**:
 #  - n_eff ~ 1.85 (fundamental TE-like mode, mode_index=0)
 #  - n_group ~ 2.20
 
@@ -81,8 +78,7 @@ gf.gpdk.PDK.activate()
 #             + 8.9543 lam^2/(lam^2 - 416.08)
 #
 # For x-cut TFLN the TE mode's dominant E-field aligns with the
-# extraordinary axis (zz).  The Tidy3D example uses
-# ``LiNbO3.Zelmon1997(1)`` (extraordinary axis).
+# extraordinary axis (zz).
 
 
 # %% [markdown]
@@ -96,13 +92,12 @@ gf.gpdk.PDK.activate()
 # separate GDS layer needed.  Layers without GDS polygons are treated
 # as full-width backgrounds (``mode_solver.py:434--435``).
 #
-# **Sidewall angle note**: the Tidy3D example uses ``PolySlab(sidewall_angle=17deg)``
-# which produces a trapezoidal ridge cross-section.  The 2D mode solver now
-# supports this via a staircase approximation (stacked ``mp.Block`` sub-layers).
-# Set ``sidewall_angle=17.0`` on the ridge ``Layer`` to enable it.
+# **Sidewall angle note**: set ``sidewall_angle=17.0`` on the ridge
+# :class:`Layer` to create a trapezoidal ridge cross-section via
+# ``mp.Prism`` with native ``sidewall_angle``.
 
 # %%
-SLAB_WIDTH = 5.0  # um --- wide slab (matches Tidy3D plane_size)
+SLAB_WIDTH = 5.0  # um --- wide slab
 CORE_WIDTH = 1.1  # um --- w0 from reference design
 LENGTH = 10.0  # um --- waveguide length (arbitrary for mode solving)
 
@@ -143,7 +138,7 @@ print(f"  Layers: {list(c.layers)}")
 # ### Layer stack
 #
 # Vertical material profile.  SiO2 fills all background space via
-# ``background_material="sio2"``, matching Tidy3D's ``medium=SiO2``.
+# ``background_material="sio2"``.
 #
 # | Region  | Material | Z-range (um)   | GDS layer |
 # |---------|----------|----------------|-----------|
@@ -204,7 +199,7 @@ for name, l in stack.layers.items():
 
 # %%
 WAVELENGTH = 1.55  # um
-RESOLUTION = 32  # grid points per um
+RESOLUTION = 64  # grid points per um
 PML_THICKNESS = WAVELENGTH  # um
 
 sim = gm.Simulation(
@@ -217,15 +212,15 @@ sim = gm.Simulation(
 sim.mode_solver.wavelengths = [WAVELENGTH]
 sim.mode_solver.fundamental().at_port("o1")
 sim.mode_solver.y_span = SLAB_WIDTH
-sim.mode_solver.n_field_y = 100
-sim.mode_solver.n_field_z = 100
+sim.mode_solver.n_field_y = 1000
+sim.mode_solver.n_field_z = 1000
 sim.mode_solver.background_material = "sio2"
 
 sweep = sim.solve_modes()
 mode = sweep.at(WAVELENGTH).band(1)
 
-print(f"n_eff     = {mode.n_eff}  (Tidy3D ref: ~1.85)")
-print(f"n_group   = {mode.n_group}     (Tidy3D ref: ~2.20)")
+print(f"n_eff     = {mode.n_eff}")
+print(f"n_group   = {mode.n_group}")
 print(f"kdom      = {[f'{k:.6f}' for k in mode.kdom]}")
 print(f"band      = {mode.band_num}, parity = {mode.parity}")
 print(f"fields    = {list(mode.fields.keys())}")
