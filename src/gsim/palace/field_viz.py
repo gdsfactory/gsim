@@ -232,11 +232,13 @@ def plot_fields_2d(
     source: str | Path | dict | pv.DataSet,
     *,
     field: str = "E_real",
+    scalar: str = "magnitude",
     normal: Axis = "x",
     origin: float = 0.0,
     excitation: int | list[int] = 1,
     cycles: int | list[int] | None = None,
     boundary: bool = False,
+    chip_bounds: tuple[float, float, float, float] | None = None,
     grid_resolution: tuple[int, int] = (360, 240),
     streamplot_density: float = 1.0,
     streamplot_linewidth: float = 0.9,
@@ -270,6 +272,23 @@ def plot_fields_2d(
 
     ``excitation`` is kept for backwards compatibility with wave-port
     simulations that use ``excitation_N`` subdirectories.
+
+    Parameters
+    ----------
+    scalar:
+        Scalar field for the colormap background.  One of:
+        - ``"magnitude"`` (default) — in-plane magnitude |E_t|
+        - ``"real"`` — phase-locked signed real part of the first
+          in-plane component (``u`` grid, e.g. E_y for x-normal);
+          captures field polarity across gaps.  Colormap switches
+          to ``RdBu``.
+        - A component name like ``"Ey"``, ``"Ez"`` — plots the real
+          part of that complex field component (raw, no phase locking)
+    chip_bounds:
+        If set, limits the plot axes to ``(h_min, h_max, v_min, v_max)``
+        so the airbox around the chip is cropped out.  The coordinate
+        order follows the in-plane axes (e.g. y- then z-axis for an
+        x-normal cross section).
     """
     import matplotlib.pyplot as plt
 
@@ -305,6 +324,7 @@ def plot_fields_2d(
                 source,
                 ax=ax,
                 field=field,
+                scalar=scalar,
                 normal=normal,
                 origin=origin,
                 excitation=excitation
@@ -312,6 +332,7 @@ def plot_fields_2d(
                 else excitation[idx],
                 cycle=cyc,
                 boundary=boundary,
+                chip_bounds=chip_bounds,
                 grid_resolution=grid_resolution,
                 streamplot_density=streamplot_density,
                 streamplot_linewidth=streamplot_linewidth,
@@ -347,11 +368,13 @@ def plot_fields_2d(
         source,
         ax=ax,
         field=field,
+        scalar=scalar,
         normal=normal,
         origin=origin,
         excitation=excitation if not isinstance(excitation, list) else excitation[0],
         cycle=cyc,
         boundary=boundary,
+        chip_bounds=chip_bounds,
         grid_resolution=grid_resolution,
         streamplot_density=streamplot_density,
         streamplot_linewidth=streamplot_linewidth,
@@ -381,11 +404,13 @@ def _plot_single_2d(
     *,
     ax: Any,
     field: str = "E_real",
+    scalar: str = "magnitude",
     normal: Axis = "x",
     origin: float = 0.0,
     excitation: int = 1,
     cycle: int | None = None,
     boundary: bool = False,
+    chip_bounds: tuple[float, float, float, float] | None = None,
     grid_resolution: tuple[int, int] = (360, 240),
     streamplot_density: float = 1.0,
     streamplot_linewidth: float = 0.9,
@@ -413,6 +438,15 @@ def _plot_single_2d(
         See :func:`plot_fields_2d`.
     ax:
         Matplotlib Axes to render into.
+    scalar:
+        Scalar field to display in the colormap. One of:
+        - ``"magnitude"`` (default) — in-plane magnitude ``|E_t|``
+        - ``"real"`` — phase-locked real in-plane magnitude
+        - Anything else (e.g. ``"Ey"``, ``"Ez"``) — real/imag part of that
+          field component, derived from the complex field vectors.
+    chip_bounds:
+        If set, limits the plot axes to ``(h_min, h_max, v_min, v_max)``
+        to crop out the airbox and focus on the chip region.
     title:
         Panel title.  When ``colorbar_label`` is not set, the field name
         is appended to the title automatically.
@@ -441,18 +475,79 @@ def _plot_single_2d(
     if colorbar_label is None:
         # Derive a human-readable label from the field name.
         base = field.replace("_real", "").replace("_imag", "")
-        if base.startswith("E"):
-            colorbar_label = "|E_t| [a.u.]"
-        elif base.startswith(("B", "H")):
+        if scalar == "magnitude":
             colorbar_label = f"|{base}_t| [a.u.]"
-        elif base.startswith("J"):
-            colorbar_label = f"|{base}| [a.u.]"
+        elif scalar == "real":
+            # u is the first in-plane component (e.g. E_y for x-normal).
+            label_h, _ = _plane_axis_labels(stream_inputs.normal)
+            colorbar_label = f"{base}_{label_h} (signed) [a.u.]"
         else:
-            colorbar_label = f"|{base}|"
+            colorbar_label = f"{scalar} [a.u.]"
+        # If scalar is "magnitude" and base starts with E it's the default.
+        if scalar == "magnitude" and base.startswith("E"):
+            colorbar_label = "|E_t| [a.u.]"
 
     x_grid, y_grid = np.meshgrid(stream_inputs.x, stream_inputs.y)
-    et = np.asarray(stream_inputs.et_mag, dtype=float)
-    im = ax.pcolormesh(x_grid, y_grid, et, cmap=cmap, shading="gouraud")
+    scalar_vlim: tuple[float, float] | None = None
+
+    if scalar == "magnitude":
+        scalar_data = np.asarray(stream_inputs.et_mag, dtype=float)
+    elif scalar == "real":
+        # Use the first in-plane component (phase-locked, signed real).
+        # For an x-normal CPW cross-section this is the y-component,
+        # which captures the cross-gap field polarity.
+        scalar_data = np.asarray(stream_inputs.u, dtype=float)
+        # Switch to a diverging colormap for signed data unless user overrode it.
+        if cmap == "hot":
+            cmap = "RdBu"
+        # Center the colormap limits at 0.
+        vlim = max(abs(np.nanmin(scalar_data)), abs(np.nanmax(scalar_data)))
+        scalar_vlim = (-vlim, vlim) if np.isfinite(vlim) and vlim > 0 else None
+    else:
+        # scalar is a component name like "Ey", "Ez" — reload raw data.
+        ds = _source_to_dataset(
+            source, excitation=excitation, cycle=cycle, boundary=boundary
+        )
+        planar, used_normal, _, _ = _slice_plane(ds, normal=normal, origin=origin)
+        probe, _H, _V = _plane_grid(
+            planar,
+            normal=used_normal,
+            origin=origin,
+            grid_resolution=grid_resolution,
+        )
+        sampled = probe.sample(planar, snap_to_closest_point=True)
+
+        field_base = field.replace("_real", "").replace("_imag", "")
+        comp_idx = {"x": 0, "y": 1, "z": 2}.get(scalar)
+        if comp_idx is None:
+            comp_idx = {"Ex": 0, "Ey": 1, "Ez": 2}.get(scalar)
+
+        if comp_idx is not None:
+            er = np.asarray(
+                sampled.point_data[f"{field_base}_real"], dtype=float
+            ).reshape(-1, 3)
+            ei_name = f"{field_base}_imag"
+            if ei_name in sampled.point_data:
+                ei = np.asarray(sampled.point_data[ei_name], dtype=float).reshape(-1, 3)
+                ec = er + 1j * ei
+                raw = np.real(ec[:, comp_idx])
+            else:
+                raw = er[:, comp_idx]
+        else:
+            raw = np.asarray(stream_inputs.et_mag, dtype=float).ravel()
+
+        n_v, n_h = stream_inputs.u.shape
+        scalar_data = raw.reshape(n_v, n_h)
+
+    im = ax.pcolormesh(
+        x_grid,
+        y_grid,
+        scalar_data,
+        cmap=cmap,
+        shading="gouraud",
+        vmin=scalar_vlim[0] if scalar_vlim else None,
+        vmax=scalar_vlim[1] if scalar_vlim else None,
+    )
 
     start_points = stream_inputs.start_points
     if use_targeted_gap_seeds and start_points.shape[0] >= 2:
@@ -493,6 +588,12 @@ def _plot_single_2d(
     ax.set_xlabel(label_h)
     ax.set_ylabel(label_v)
     ax.figure.colorbar(im, ax=ax, label=colorbar_label)
+
+    # Crop to chip region when requested.
+    if chip_bounds is not None:
+        h_min, h_max, v_min, v_max = chip_bounds
+        ax.set_xlim(h_min, h_max)
+        ax.set_ylim(v_min, v_max)
 
     # Stash the pcolormesh handle so the caller can add a colorbar.
     object.__setattr__(stream_inputs, "_im", im)

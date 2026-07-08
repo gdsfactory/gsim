@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.2
+#       jupytext_version: 1.19.3
 #   kernelspec:
 #     display_name: .venv
 #     language: python
@@ -24,6 +24,10 @@
 
 # %% [markdown] papermill={"duration": 0.003686, "end_time": "2026-06-12T07:04:20.157977", "exception": false, "start_time": "2026-06-12T07:04:20.154291", "status": "completed"}
 # ### Define GSG electrode
+
+# %%
+# %load_ext autoreload
+# %autoreload 2
 
 # %% papermill={"duration": 2.54829, "end_time": "2026-06-12T07:04:22.708430", "exception": false, "start_time": "2026-06-12T07:04:20.160140", "status": "completed"}
 from pathlib import Path
@@ -109,8 +113,8 @@ c = gsg_electrode(
     length=800,
     s_width=20,
     g_width=40,
-    g_width_top=60,
-    g_width_bottom=30,
+    g_width_top=40,
+    g_width_bottom=40,
     gap_width_top=15,
     gap_width_bottom=15,
 )
@@ -197,9 +201,73 @@ if not hasattr(mode_results, "freq_hz") or mode_results.freq_hz is None:
 mode_results.print()
 
 # Centralized plotting utility from gsim source with tuned defaults.
-# For boundary mode, cycles=[1, 2] selects the ParaView cycles corresponding
+# For boundary mode, cycles=[1, 2] selects the ParaView cycles corresponding.
+# Use chip_bounds to crop the airbox — here (y_min, y_max, z_min, z_max)
+# covers the electrode stack without the surrounding air region.
+# chip_ymax = 90  # g_width_top/2 + max_gap + s_width/2 + margin
+# chip_ymin = -60
+# chip_zmax = 30.0  # top of metal + small margin
+# chip_zmin = -10.0  # bottom of stack + small margin
+
 fig, axes, stream_inputs_list = plot_fields_2d(
     "./palace-sim-cpw-waveport-2d",
+    field="E_real",
+    scalar="real",
     cycles=[1, 2],
+    # chip_bounds=(chip_ymin, chip_ymax, chip_zmin, chip_zmax),
     show=True,
 )
+
+# %% [markdown]
+# ### Phase analysis of the electric field in the two gaps
+#
+# For a quasi-TEM CPW mode, the electric field in the two gaps (signal-to-ground) should be $180^\circ$ out of phase. We probe the complex $\vec{E}$ field at points inside each gap and compare their phases.
+
+# %%
+import numpy as np
+import pyvista as pv
+
+from gsim.palace.results import load_fields
+
+# Geometry parameters matching the gsg_electrode() call above.
+_s_width = 20
+_gap_width_top = 15
+_gap_width_bottom = 15
+
+# Probe points: middle of each gap, at the metal layer height (z ~ 0).
+#   top gap center:    y = +s_width/2 + gap_width_top/2
+#   bottom gap center: y = -s_width/2 - gap_width_bottom/2
+gap_top_y = _s_width / 2 + _gap_width_top / 2
+gap_bot_y = -(_s_width / 2 + _gap_width_bottom / 2)
+probe_pts = np.array([[0.0, gap_top_y, 0.0], [0.0, gap_bot_y, 0.0]])
+
+print("Probe points:")
+print(f"  top gap center:    y = {gap_top_y:+.2f}")
+print(f"  bottom gap center: y = {gap_bot_y:+.2f}\n")
+
+for mode_idx in [1, 2]:
+    ds = load_fields("./palace-sim-cpw-waveport-2d", cycle=mode_idx)
+
+    # Build a pyvista PolyData probe set and sample the dataset.
+    probe = pv.PolyData(probe_pts)
+    sampled = probe.sample(ds, snap_to_closest_point=True)
+
+    # Complex E = E_real + 1j * E_imag (3-component vectors).
+    er = np.asarray(sampled.point_data["E_real"]).reshape(-1, 3)
+    ei = np.asarray(sampled.point_data["E_imag"]).reshape(-1, 3)
+    ec = er + 1j * ei
+
+    # Use the vector sum's phase as a robust scalar.
+    phase_top = np.angle(np.sum(ec[0]))
+    phase_bot = np.angle(np.sum(ec[1]))
+    delta = np.degrees(phase_top - phase_bot)
+    delta = (delta + 180.0) % 360.0 - 180.0  # wrap to (-180, 180]
+
+    print(f"Mode {mode_idx}:")
+    print(
+        f"  top gap    |E|={np.abs(ec[0]).mean():.4e},  phase={np.degrees(phase_top):+7.1f} deg"
+    )
+    print(
+        f"  bottom gap |E|={np.abs(ec[1]).mean():.4e},  phase={np.degrees(phase_bot):+7.1f} deg"
+    )
+    print(f"  phase difference = {delta:+7.1f} deg  (expect ~180 for quasi-TEM)\n")
