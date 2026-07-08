@@ -240,13 +240,13 @@ mode.plot_index(show=True)
 # ### 2D mode profile — all field components
 #
 # Use ``ModeResult.plot_mode()`` with ``components="all"`` and
-# ``index=True`` to overlay the refractive index as a greyscale underlay.
+# ``geometry=True`` to overlay structural geometry boundaries.
 
 # %%
 mode.plot_mode(
     components="all",
     norm="abs",
-    index=True,
+    geometry=True,
     suptitle=(
         f"TFLN ridge waveguide fundamental TE mode\n"
         f"(λ={WAVELENGTH:.2f} µm, w0={CORE_WIDTH:.1f} µm, "

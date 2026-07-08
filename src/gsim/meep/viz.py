@@ -225,6 +225,180 @@ def build_overlay(
 
 
 # ---------------------------------------------------------------------------
+# Cross-section geometry from gsim LayerStack (no PDK dependency)
+# ---------------------------------------------------------------------------
+
+
+def build_cross_section_rectangles(
+    component: Component,
+    stack: LayerStack,
+    slice_axis: str,
+    slice_coord: float,
+) -> list[dict[str, Any]]:
+    """Build rectangle outlines for a cross-section of a gsim LayerStack.
+
+    Extracts GDS polygons from *component* for each layer in *stack*,
+    intersects them with a horizontal or vertical slice line, and returns
+    rectangle data suitable for ``ax.add_patch(Rectangle(...))``.
+
+    Unlike :func:`build_geometry_model`, this function does **not** rely on
+    the active PDK's layer stack — it uses the *gsim* :class:`LayerStack`
+    directly so cross-section geometry for custom material stacks
+    (e.g. TFLN) is rendered correctly.
+
+    Layers that have no GDS polygons at all (``_layer_has_any_polygon``
+    returns ``False``) are skipped, since their boundaries are already
+    implicit from adjacent layers.
+
+    Args:
+        component: gdsfactory Component with GDS polygons.
+        stack: gsim :class:`LayerStack` defining z-extents and materials.
+        slice_axis: ``"y"`` for an XZ cross-section (horizontal slice),
+            ``"x"`` for a YZ cross-section (vertical slice).
+        slice_coord: Coordinate of the slice line (µm).
+
+    Returns:
+        List of dicts with keys ``h_min``, ``h_max``, ``z_min``, ``z_max``,
+        ``layer_name``, ``material``.
+    """
+    import numpy as np
+    from shapely.geometry import LineString, MultiLineString, Polygon
+
+    if not stack.layers:
+        return []
+
+    def _has_any_polygon(layer: object) -> bool:
+        gds = getattr(layer, "gds_layer", None)
+        if gds is None:
+            return False
+        try:
+            polys = component.get_polygons_points(layers=(gds,), merge=True)
+        except Exception:
+            return False
+        else:
+            if not isinstance(polys, dict):
+                return False
+            for v in polys.values():
+                items = v if isinstance(v, list) else [v]
+                if len(items) > 0:
+                    return True
+            return False
+
+    if slice_axis == "y":
+        cut_line = LineString([(-1e6, slice_coord), (1e6, slice_coord)])
+    elif slice_axis == "x":
+        cut_line = LineString([(slice_coord, -1e6), (slice_coord, 1e6)])
+    else:
+        raise ValueError(f"slice_axis must be 'x' or 'y', got {slice_axis!r}")
+
+    rectangles: list[dict[str, Any]] = []
+    for layer in stack.layers.values():
+        if layer.material == "air":
+            continue
+        gds_layer = layer.gds_layer
+        if gds_layer is None:
+            continue
+        thickness = layer.zmax - layer.zmin
+        if thickness <= 0:
+            continue
+
+        try:
+            polys = component.get_polygons_points(layers=(gds_layer,), merge=True)
+        except Exception:
+            try:
+                polys = component.dup().get_polygons_points(
+                    layers=(gds_layer,), merge=True
+                )
+            except Exception:
+                polys = {}
+
+        poly_items: list = []
+        if isinstance(polys, dict):
+            for poly_list in polys.values():
+                items = poly_list if isinstance(poly_list, list) else [poly_list]
+                poly_items.extend(items)
+
+        if not poly_items:
+            if _has_any_polygon(layer):
+                continue
+            rectangles.append(
+                {
+                    "h_min": -float("inf"),
+                    "h_max": float("inf"),
+                    "z_min": layer.zmin,
+                    "z_max": layer.zmax,
+                    "layer_name": layer.name,
+                    "material": layer.material,
+                }
+            )
+            continue
+
+        for poly in poly_items:
+            if isinstance(poly, np.ndarray):
+                coords = poly.reshape(-1, 2)
+                if len(coords) >= 3:
+                    spoly = Polygon(coords)
+                else:
+                    continue
+            elif isinstance(poly, (tuple, list)):
+                spoly = Polygon(poly)
+            elif hasattr(poly, "to_simple_polygon"):
+                sp = poly.to_simple_polygon()
+                coords = [
+                    (sp.point(i).x, sp.point(i).y) for i in range(sp.num_points())
+                ]
+                if len(coords) >= 3:
+                    spoly = Polygon(coords)
+                else:
+                    continue
+            else:
+                continue
+
+            if spoly.is_empty or not spoly.is_valid:
+                continue
+
+            intersection = spoly.intersection(cut_line)
+            if intersection.is_empty:
+                continue
+
+            segments: list[LineString] = []
+            if isinstance(intersection, LineString):
+                segments.append(intersection)
+            elif isinstance(intersection, MultiLineString):
+                segments.extend(intersection.geoms)
+            else:
+                segments.extend(
+                    g
+                    for g in getattr(intersection, "geoms", [])
+                    if isinstance(g, LineString)
+                )
+
+            for seg in segments:
+                coords = list(seg.coords)
+                if len(coords) < 2:
+                    continue
+                if slice_axis == "y":
+                    h_vals = [c[0] for c in coords]
+                else:
+                    h_vals = [c[1] for c in coords]
+                h_min, h_max = min(h_vals), max(h_vals)
+                if h_max - h_min < 1e-9:
+                    continue
+                rectangles.append(
+                    {
+                        "h_min": h_min,
+                        "h_max": h_max,
+                        "z_min": layer.zmin,
+                        "z_max": layer.zmax,
+                        "layer_name": layer.name,
+                        "material": layer.material,
+                    }
+                )
+
+    return rectangles
+
+
+# ---------------------------------------------------------------------------
 # Public plot functions
 # ---------------------------------------------------------------------------
 

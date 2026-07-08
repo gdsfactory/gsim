@@ -766,6 +766,10 @@ class Simulation(BaseModel):
                     )
                     results.append(mode_result)
 
+        domain_cfg = self._domain_config()
+        for r in results:
+            r.domain_config = domain_cfg
+
         return ModeSweepResult(results)
 
     # -------------------------------------------------------------------------

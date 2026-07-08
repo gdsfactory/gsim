@@ -419,6 +419,7 @@ class ModeResult(BaseModel):
     z_grid: np.ndarray | None = None
     stack: Any | None = Field(default=None, exclude=True)
     component: Any | None = Field(default=None, exclude=True)
+    domain_config: Any | None = Field(default=None, exclude=True)
     port_or_position: str | tuple[float, float] | None = None
     cross_section_plane: str | None = None
 
@@ -488,6 +489,8 @@ class ModeResult(BaseModel):
         *,
         norm: str = "abs",
         index: bool = False,
+        geometry: bool = False,
+        geom_kwargs: dict[str, Any] | None = None,
         ax: Any | None = None,
         figsize: tuple[float, float] = (8, 6),
         cmap: str | None = None,
@@ -507,6 +510,15 @@ class ModeResult(BaseModel):
                 ``"phase"`` (angle in radians).
             index: Overlay refractive index profile (twin-axis for 1D,
                 greyscale underlay for 2D).
+            geometry: Overlay structural geometry boundaries (material
+                interfaces).  1D: horizontal lines at dielectric
+                z-interfaces.  2D: prism outline rectangles at the
+                cross-section plane.  Requires ``stack`` (and
+                ``component`` + ``domain_config`` for 2D).
+            geom_kwargs: Forwarded to the geometry overlay's matplotlib
+                artist.  Defaults: ``color="white"``, ``linestyle="-"``,
+                ``linewidth=1.0``, ``zorder=50``.  User values override
+                defaults.  Only used when ``geometry=True``.
             ax: Existing matplotlib ``Axes``.  Only valid when
                 ``components`` resolves to a single component.
             figsize: ``(width, height)`` tuple in inches.
@@ -572,6 +584,8 @@ class ModeResult(BaseModel):
                 resolved,
                 norm=norm,
                 index=index,
+                geometry=geometry,
+                geom_kwargs=geom_kwargs,
                 ax=ax,
                 figsize=figsize,
                 title=title,
@@ -583,6 +597,8 @@ class ModeResult(BaseModel):
             resolved,
             norm=norm,
             index=index,
+            geometry=geometry,
+            geom_kwargs=geom_kwargs,
             ax=ax,
             figsize=figsize,
             cmap=cmap,
@@ -648,6 +664,8 @@ class ModeResult(BaseModel):
         *,
         norm: str,
         index: bool,
+        geometry: bool,
+        geom_kwargs: dict[str, Any] | None,
         ax: Any | None,
         figsize: tuple[float, float],
         title: str | None,
@@ -679,7 +697,10 @@ class ModeResult(BaseModel):
         for i, comp in enumerate(comps):
             ax_i = axes[i]
             data = self._apply_norm(self.fields[comp], norm)
+
             ax_i.plot(z, data, **kwargs)
+            if geometry and self.stack is not None:
+                self._draw_geometry_overlay_1d(ax_i, **(geom_kwargs or {}))
             if index:
                 ax_i_twin = ax_i.twinx()
                 n_prof = self._compute_index_profile_1d()
@@ -728,6 +749,8 @@ class ModeResult(BaseModel):
         *,
         norm: str,
         index: bool,
+        geometry: bool,
+        geom_kwargs: dict[str, Any] | None,
         ax: Any | None,
         figsize: tuple[float, float],
         cmap: str,
@@ -798,6 +821,8 @@ class ModeResult(BaseModel):
                     alpha=0.25,
                     shading="auto",
                 )
+            if geometry:
+                self._draw_geometry_overlay_2d(ax_i, **(geom_kwargs or {}))
             images.append(im)
             ax_i.set_aspect(aspect)
             t = self._make_title(comp, title, is_single)
@@ -862,6 +887,171 @@ class ModeResult(BaseModel):
             if isinstance(self.port_or_position, str)
             else None,
         )
+
+    # ------------------------------------------------------------------
+    # geometry overlay helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _geom_default_kwargs() -> dict[str, Any]:
+        """Return default matplotlib kwargs for geometry overlay lines."""
+        return {"color": "white", "linestyle": "-", "linewidth": 1.0, "zorder": 50}
+
+    def _draw_geometry_overlay_1d(self, ax: Any, **geom_kwargs: Any) -> None:
+        """Draw horizontal lines at dielectric z-interfaces.
+
+        Each unique z-boundary from ``stack.dielectrics`` gets a line
+        across the full x-span.
+        """
+        if self.stack is None or not self.stack.dielectrics:
+            return
+
+        cfg = self._geom_default_kwargs()
+        cfg.update(geom_kwargs)
+
+        z_vals: set[float] = set()
+        for diel in self.stack.dielectrics:
+            z_vals.add(diel["zmin"])
+            z_vals.add(diel["zmax"])
+
+        for z in sorted(z_vals):
+            ax.axhline(y=z, **cfg)
+
+    def _draw_geometry_overlay_2d(self, ax: Any, **geom_kwargs: Any) -> None:
+        """Draw prism outline rectangles at the cross-section slice plane.
+
+        Requires ``component`` and ``stack`` on this result.
+        For an XZ view (``cross_section_plane == "xz"``) the slice is at
+        the port y-coordinate; for YZ it is at the port x-coordinate.
+
+        Uses :func:`gsim.meep.viz.build_cross_section_rectangles` which
+        extracts polygon intersections from the *gsim* :class:`LayerStack`
+        directly — no PDK layer stack dependency.
+        """
+        import math
+
+        from matplotlib.patches import Rectangle
+
+        import gsim.meep.viz as meep_viz
+
+        if self.component is None or self.stack is None:
+            logger.info(
+                "Geometry overlay requires component and stack "
+                "on ModeResult — skipping geometry boundaries."
+            )
+            return
+
+        if self.cross_section_plane == "xz":
+            slice_axis = "y"
+            if isinstance(self.port_or_position, tuple):
+                slice_coord = self.port_or_position[1]
+            elif isinstance(self.port_or_position, str):
+                port = next(
+                    (
+                        p
+                        for p in self.component.ports
+                        if p.name == self.port_or_position
+                    ),
+                    None,
+                )
+                if port is None:
+                    logger.info(
+                        "Port %r not found on component — "
+                        "skipping geometry boundaries.",
+                        self.port_or_position,
+                    )
+                    return
+                slice_coord = port.center[1]
+            else:
+                logger.info(
+                    "Cannot determine slice coordinate — skipping geometry boundaries."
+                )
+                return
+        elif self.cross_section_plane == "yz":
+            slice_axis = "x"
+            if isinstance(self.port_or_position, tuple):
+                slice_coord = self.port_or_position[0]
+            elif isinstance(self.port_or_position, str):
+                port = next(
+                    (
+                        p
+                        for p in self.component.ports
+                        if p.name == self.port_or_position
+                    ),
+                    None,
+                )
+                if port is None:
+                    return
+                slice_coord = port.center[0]
+            else:
+                return
+        else:
+            return
+
+        try:
+            rects = meep_viz.build_cross_section_rectangles(
+                self.component, self.stack, slice_axis, slice_coord
+            )
+        except Exception:
+            logger.info(
+                "Could not build cross-section geometry — "
+                "skipping geometry boundaries.",
+                exc_info=True,
+            )
+            return
+
+        if not rects:
+            return
+
+        h_min_geom: float = float("inf")
+        h_max_geom: float = -float("inf")
+        z_min_geom: float = float("inf")
+        z_max_geom: float = -float("inf")
+
+        cfg = self._geom_default_kwargs()
+        cfg.update(geom_kwargs)
+        rect_kwargs: dict[str, Any] = {k: v for k, v in cfg.items() if k != "color"}
+        rect_kwargs.setdefault("edgecolor", cfg["color"])
+        rect_kwargs.setdefault("facecolor", "none")
+
+        layer_drawn: set[str] = set()
+        for rect in rects:
+            h_min = rect["h_min"]
+            h_max = rect["h_max"]
+            z_min = rect["z_min"]
+            z_max = rect["z_max"]
+            layer_name = rect["layer_name"]
+
+            if math.isinf(h_min) or math.isinf(h_max):
+                ax_h_min, ax_h_max = ax.get_xlim()
+                h_min = ax_h_min
+                h_max = ax_h_max
+
+            if h_max - h_min < 1e-12:
+                continue
+
+            label = layer_name if layer_name not in layer_drawn else None
+            layer_drawn.add(layer_name)
+
+            ax.add_patch(
+                Rectangle(
+                    (h_min, z_min),
+                    h_max - h_min,
+                    z_max - z_min,
+                    label=label,
+                    **rect_kwargs,
+                )
+            )
+            h_min_geom = min(h_min_geom, h_min)
+            h_max_geom = max(h_max_geom, h_max)
+            z_min_geom = min(z_min_geom, z_min)
+            z_max_geom = max(z_max_geom, z_max)
+
+        if h_min_geom < float("inf"):
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            ax.set_xlim(min(xlim[0], h_min_geom), max(xlim[1], h_max_geom))
+            ax.set_ylim(min(ylim[0], z_min_geom), max(ylim[1], z_max_geom))
 
     # ------------------------------------------------------------------
     # plot_index
