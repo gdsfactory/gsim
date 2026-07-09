@@ -525,7 +525,7 @@ def _mock_gcloud(monkeypatch: pytest.MonkeyPatch) -> None:
         "run_simulation",
     ):
         setattr(gcloud, name, lambda *a, **kw: None)  # noqa: ARG005
-    gcloud.RunResult = type("RunResult", (), {})  # type: ignore[attr-defined]
+    gcloud.RunResult = type("RunResult", (), {})  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "gsim.gcloud", gcloud)
 
 
@@ -535,11 +535,7 @@ def _no_palacetoolkit(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     if "palacetoolkit" in sys.modules:
         old = sys.modules["palacetoolkit"]
         monkeypatch.delitem(sys.modules, "palacetoolkit", raising=False)
-        monkeypatch.delitem(
-            sys.modules.get("palacetoolkit.palace_runtime", None),
-            "palacetoolkit.palace_runtime",
-            raising=False,
-        )  # type: ignore[union-attr]
+        monkeypatch.delitem(sys.modules, "palacetoolkit.palace_runtime", raising=False)
         yield
         sys.modules["palacetoolkit"] = old
     else:
@@ -547,9 +543,8 @@ def _no_palacetoolkit(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
 
 
 class TestResolvePalaceBinary:
-    def test_returns_none_when_nothing_found(
-        self, _mock_gcloud: None, _no_palacetoolkit: None
-    ) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud", "_no_palacetoolkit")
+    def test_returns_none_when_nothing_found(self) -> None:
         from gsim.palace.runtime import resolve_palace_binary
 
         with pytest.MonkeyPatch().context() as mp:
@@ -562,7 +557,8 @@ class TestResolvePalaceBinary:
                 result = resolve_palace_binary()
                 assert result is None
 
-    def test_uses_palace_bin_env(self, _mock_gcloud: None) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_uses_palace_bin_env(self) -> None:
         from gsim.palace.runtime import resolve_palace_binary
 
         fake_bin = Path("/usr/local/bin/palace")
@@ -574,7 +570,8 @@ class TestResolvePalaceBinary:
             result = resolve_palace_binary()
             assert result is not None
 
-    def test_delegates_to_palacetoolkit(self, _mock_gcloud: None) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_delegates_to_palacetoolkit(self) -> None:
         from gsim.palace.runtime import resolve_palace_binary
 
         fake_ptk_bin = Path("/opt/palacetoolkit/bin/palace")
@@ -589,7 +586,8 @@ class TestResolvePalaceBinary:
             result = resolve_palace_binary()
             assert result is not None
 
-    def test_prefer_bundled_skips_env(self, _mock_gcloud: None) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_prefer_bundled_skips_env(self) -> None:
         from gsim.palace.runtime import resolve_palace_binary
 
         with pytest.MonkeyPatch().context() as mp:
@@ -600,16 +598,16 @@ class TestResolvePalaceBinary:
 
 
 class TestResolvePalaceLibraryDir:
-    def test_returns_none_without_palacetoolkit(
-        self, _mock_gcloud: None, _no_palacetoolkit: None
-    ) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud", "_no_palacetoolkit")
+    def test_returns_none_without_palacetoolkit(self) -> None:
         from gsim.palace.runtime import resolve_palace_library_dir
 
         with pytest.MonkeyPatch().context() as mp:
             mp.setattr("gsim.palace.runtime._palacetoolkit_available", lambda: False)
             assert resolve_palace_library_dir() is None
 
-    def test_delegates_to_palacetoolkit(self, _mock_gcloud: None) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_delegates_to_palacetoolkit(self) -> None:
         from gsim.palace.runtime import resolve_palace_library_dir
 
         fake_lib = Path("/opt/palacetoolkit/lib")
@@ -625,7 +623,8 @@ class TestResolvePalaceLibraryDir:
 
 
 class TestPalacetoolkitAvailable:
-    def test_true_when_installed(self, _mock_gcloud: None) -> None:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_true_when_installed(self) -> None:
         from gsim.palace.runtime import _palacetoolkit_available
 
         # Since we mocked gcloud but not palacetoolkit, if it's actually

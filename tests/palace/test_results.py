@@ -665,7 +665,7 @@ class TestLoadFieldContext:
         fake_vol = SimpleNamespace(n_points=100, n_cells=10, _kind="vol")
         fake_bnd = SimpleNamespace(n_points=50, n_cells=5, _kind="bnd")
 
-        def fake_load_fields(source, *, excitation=1, cycle=None, boundary=False):
+        def fake_load_fields(_source, *, _excitation=1, _cycle=None, boundary=False):
             return fake_bnd if boundary else fake_vol
 
         monkeypatch.setattr("gsim.palace.results.load_fields", fake_load_fields)
@@ -700,6 +700,8 @@ class TestLoadFieldContext:
 
         with pytest.raises(FileNotFoundError, match="Palace config not found"):
             fields_mod.load_field_context(results_dir)
+
+
 @pytest.fixture
 def text_results_dir(tmp_path: Path) -> Path:
     """Create a minimal BoundaryMode-style text output directory."""

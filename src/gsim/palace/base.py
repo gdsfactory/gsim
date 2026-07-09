@@ -1827,15 +1827,6 @@ class PalaceSimMixin:
                         "palace_executable parameter, or install palace-toolkit: "
                         "pip install gsim[palace-toolkit]"
                     )
-            else:
-                # Resolve command names (e.g. "palace") via PATH.
-                resolved = shutil.which(str(exe_candidate))
-                if resolved is None:
-                    raise FileNotFoundError(
-                        f"Palace executable not found: {exe_candidate}. "
-                        "Install Palace directly or provide correct path via "
-                        "palace_executable parameter."
-                    )
                 exe_path = Path(resolved)
 
             if not os.access(exe_path, os.X_OK):

@@ -123,7 +123,7 @@ def _binary_is_runnable(binary: Path, timeout: float = 15.0) -> bool:
 
     bin_str = str(binary)
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [bin_str, "--version"],
             capture_output=True,
             text=True,
