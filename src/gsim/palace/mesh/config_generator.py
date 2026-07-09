@@ -16,6 +16,7 @@ from gsim.palace.ports.config import PortType
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models import (
+        BoundaryModeConfig,
         DrivenConfig,
         EigenmodeConfig,
         ElectrostaticConfig,
@@ -37,6 +38,7 @@ def generate_palace_config(
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
     numerical_config: NumericalConfig | None = None,
+    boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
     periodic_axis: str | None = None,
     hints: dict[str, Any] | None = None,
@@ -69,6 +71,7 @@ def generate_palace_config(
     if simulation_type not in (
         "driven",
         "eigenmode",
+        "boundarymode",
         "electrostatic",
         "electrostatics",
     ):
@@ -105,6 +108,17 @@ def generate_palace_config(
             },
         )
 
+    if boundary_mode_config is not None:
+        solver_boundarymode = boundary_mode_config.to_palace_config()
+    else:
+        solver_boundarymode = {
+            "Freq": fmax / 1e9,
+            "N": 1,
+            "Save": 0,
+            "Tol": 1.0e-6,
+            "Type": "Default",
+        }
+
     solver_conf: dict[str, object]
     if numerical_config is not None:
         solver_conf = dict(numerical_config.to_solver_config())
@@ -131,16 +145,30 @@ def generate_palace_config(
             solver_conf["Electrostatic"] = electrostatic_config.to_palace_config()
         else:
             solver_conf["Electrostatic"] = {"Save": 0}
+    elif simulation_type == "boundarymode":
+        solver_conf["BoundaryMode"] = solver_boundarymode
+    else:
+        raise NotImplementedError
+
+    problem_type_map = {
+        "driven": "Driven",
+        "eigenmode": "Eigenmode",
+        "boundarymode": "BoundaryMode",
+        "electrostatic": "Electrostatic",
+        "electrostatics": "Electrostatic",
+    }
+
+    model_l0 = 1e-6
 
     config: dict[str, object] = {
         "Problem": {
-            "Type": simulation_type.capitalize(),
+            "Type": problem_type_map[simulation_type],
             "Verbose": 3,
             "Output": f"output/{model_name}",
         },
         "Model": {
             "Mesh": f"{model_name}.msh",
-            "L0": 1e-6,  # um
+            "L0": model_l0,  # um
             "Refinement": {
                 "UniformLevels": 0,
                 "Tol": 1e-2,
@@ -160,6 +188,19 @@ def generate_palace_config(
             stack.materials, driven_config.center_frequency
         )
 
+    # Support material keys with different capitalization conventions
+    # between stack layers and material dictionaries.
+    _materials_by_lower = {
+        str(name).lower(): props for name, props in stack_materials.items()
+    }
+
+    def _lookup_material(name: str) -> dict[str, object]:
+        props = stack_materials.get(name)
+        if isinstance(props, dict):
+            return props
+        fallback = _materials_by_lower.get(str(name).lower())
+        return fallback if isinstance(fallback, dict) else {}
+
     materials: list[dict[str, object]] = []
     for volume_name, info in groups["volumes"].items():
         material_name = volume_name
@@ -169,10 +210,13 @@ def generate_palace_config(
         if is_via or is_shaped_dielectric:
             layer = stack.layers.get(material_name)
             if layer is None:
-                continue
-            mat_props = stack_materials.get(layer.material, {})
+                # Native 2D material domains (e.g. sio2/sin) may not map to
+                # a stack layer name; resolve them directly as material names.
+                mat_props = _lookup_material(material_name)
+            else:
+                mat_props = _lookup_material(layer.material)
         else:
-            mat_props = stack_materials.get(material_name, {})
+            mat_props = _lookup_material(material_name)
 
         mat_entry: dict[str, object] = {"Attributes": [info["phys_group"]]}
 
@@ -231,8 +275,9 @@ def generate_palace_config(
     conductors: list[dict[str, object]] = []
 
     for name, info in groups["conductor_surfaces"].items():
-        # Extract layer name from "layer_xy" or "layer_z"
-        layer_name = name.rsplit("_", 1)[0]
+        # Extract layer name from "layer_xy" / "layer_z" (3D) or use
+        # the raw key directly for native 2D conductor boundaries.
+        layer_name = name.rsplit("_", 1)[0] if name.endswith(("_xy", "_z")) else name
         layer = stack.layers.get(layer_name)
         if layer:
             mat_props = stack_materials.get(layer.material, {})
@@ -248,6 +293,7 @@ def generate_palace_config(
     pec_attrs: list[int] = [
         info["phys_group"] for info in groups.get("pec_surfaces", {}).values()
     ]
+    boundaries: dict[str, object]
 
     is_electrostatic = simulation_type in ("electrostatic", "electrostatics")
 
@@ -327,6 +373,13 @@ def generate_palace_config(
         }
         if ground_attrs:
             boundaries["Ground"] = {"Attributes": sorted(set(ground_attrs))}
+
+    elif simulation_type == "boundarymode":
+        boundaries = {}
+        if conductors:
+            boundaries["Conductivity"] = conductors
+        if pec_attrs:
+            boundaries["PEC"] = {"Attributes": sorted(set(pec_attrs))}
 
     else:
         lumped_ports: list[dict[str, object]] = []
@@ -499,7 +552,7 @@ def generate_palace_config(
 
         floquet_vector = eigenmode_config.compute_floquet_wave_vector(
             periodic_axis=axis_lit,
-            l0=float(config["Model"]["L0"]),
+            l0=model_l0,
         )
 
         boundaries["Periodic"] = {
@@ -651,6 +704,7 @@ def write_config(
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
     numerical_config: NumericalConfig | None = None,
+    boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
     hints: dict[str, Any] | None = None,
     electrostatic_config: ElectrostaticConfig | None = None,
@@ -698,6 +752,7 @@ def write_config(
         driven_config=driven_config,
         eigenmode_config=eigenmode_config,
         numerical_config=numerical_config,
+        boundary_mode_config=boundary_mode_config,
         absorbing_boundary=absorbing_boundary,
         periodic_axis=mesh_result.periodic_axis,
         hints=hints,

@@ -13,7 +13,7 @@ import gdsfactory as gf
 import pytest
 
 from gsim.common import Layer, LayerStack
-from gsim.palace import DrivenSim
+from gsim.palace import BoundaryModeSim, DrivenSim
 
 
 def _make_cpw_component():
@@ -68,6 +68,18 @@ def _make_sim(component, tmp_path, planar_conductors=False, layer="topmetal2"):
     return sim
 
 
+def _make_boundarymode_sim(component, tmp_path):
+    """Create, configure, and mesh a native 2D BoundaryModeSim."""
+    sim = BoundaryModeSim()
+    sim.set_output_dir(str(tmp_path / "palace-sim-boundarymode"))
+    sim.set_geometry(component)
+    sim.set_stack(substrate_thickness=2.0, air_above=300.0)
+    sim.set_cross_section("x=0")
+    sim.set_boundary_mode(freq=10e9, num_modes=1, save=0)
+    sim.mesh(preset="coarse")
+    return sim
+
+
 @pytest.fixture(scope="module")
 def volumetric_sim(tmp_path_factory):
     """Mesh once with volumetric conductors, share across tests."""
@@ -82,6 +94,75 @@ def planar_sim(tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp("planar")
     component = _make_cpw_component()
     return _make_sim(component, tmp_path, planar_conductors=True, layer="metal1")
+
+
+@pytest.fixture(scope="module")
+def boundarymode_sim(tmp_path_factory):
+    """Mesh once with native 2D boundary mode, share across tests."""
+    tmp_path = tmp_path_factory.mktemp("boundarymode2d")
+    component = _make_cpw_component()
+    return _make_boundarymode_sim(component, tmp_path)
+
+
+class TestBoundaryModeNative2D:
+    """Test native 2D BoundaryMode meshing/config behavior."""
+
+    def test_mesh_has_no_ports(self, boundarymode_sim):
+        """Native 2D BoundaryMode should not emit port groups."""
+        groups = boundarymode_sim._last_mesh_result.groups
+        assert groups["port_surfaces"] == {}
+
+    def test_mesh_has_domains_and_boundary_conductors(self, boundarymode_sim):
+        """Native 2D BoundaryMode mesh includes domains and boundary conductors."""
+        groups = boundarymode_sim._last_mesh_result.groups
+        assert len(groups["volumes"]) > 0, "No 2D material domains found"
+        assert (
+            len(groups["conductor_surfaces"]) > 0 or len(groups["pec_surfaces"]) > 0
+        ), "No conductive/PEC edge groups found"
+
+    def test_mesh_conductors_not_in_domain_volumes(self, boundarymode_sim):
+        """Conductor interiors should be excluded from BoundaryMode volume domains."""
+        groups = boundarymode_sim._last_mesh_result.groups
+        for layer_name in groups["conductor_surfaces"]:
+            assert layer_name not in groups["volumes"]
+
+    def test_mesh_stats_are_2d(self, boundarymode_sim):
+        """Native BoundaryMode mesh should not report tetrahedra."""
+        stats = boundarymode_sim._last_mesh_result.mesh_stats
+        assert stats.get("tetrahedra", 0) == 0
+
+    def test_config_is_boundarymode_native_2d(self, boundarymode_sim):
+        """Config should be BoundaryMode with conductive/PEC boundaries and no ports."""
+        boundarymode_sim.write_config()
+        config_path = Path(boundarymode_sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+
+        assert config["Problem"]["Type"] == "BoundaryMode"
+        assert "Attributes" not in config["Solver"]["BoundaryMode"]
+
+        boundaries = config["Boundaries"]
+        assert "Conductivity" in boundaries or "PEC" in boundaries, (
+            "Missing conductive/PEC boundaries in native 2D BoundaryMode"
+        )
+        assert "WavePort" not in boundaries
+        assert "LumpedPort" not in boundaries
+
+    def test_config_has_non_air_dielectric_materials(self, boundarymode_sim):
+        """Native 2D BoundaryMode config must include non-air dielectric domains."""
+        boundarymode_sim.write_config()
+        config_path = Path(boundarymode_sim._output_dir) / "config.json"
+        config = json.loads(config_path.read_text())
+
+        materials = config["Domains"]["Materials"]
+        perms = [
+            float(m.get("Permittivity", 1.0))
+            for m in materials
+            if isinstance(m.get("Permittivity"), int | float)
+        ]
+        assert any(p > 1.1 for p in perms), (
+            "Expected at least one non-air dielectric material in BoundaryMode "
+            "Domains/Materials"
+        )
 
 
 class TestCPWMeshVolumetricConductors:

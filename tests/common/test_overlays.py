@@ -129,3 +129,20 @@ class TestMergeOverlay:
         }
         merge_overlay(overlay)
         assert len(MATERIALS_DB) == original_count
+
+    def test_merge_case_insensitive_override(self):
+        """merge_overlay matches overlay keys case-insensitively to base."""
+        overlay = {
+            "sio2": MaterialProperties(permittivity=3.8),
+        }
+        merged = merge_overlay(overlay)
+        assert merged["SiO2"].permittivity == 3.8
+
+    def test_merge_case_insensitive_preserves_base(self):
+        """Case-insensitive merge preserves non-overlaid base materials."""
+        overlay = {
+            "custom_material": MaterialProperties(permittivity=5.0),
+        }
+        merged = merge_overlay(overlay)
+        assert "aluminum" in merged
+        assert merged["custom_material"].permittivity == 5.0

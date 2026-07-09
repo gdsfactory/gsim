@@ -34,6 +34,7 @@ from gsim.common.stack.materials import (
     ResolvedMaterial,
     _as_list,
     _is_tensor,
+    _normalize_material_keys,
     get_material_properties,
     resolve_material_at_wavelength,
     should_enable_dispersion,
@@ -350,11 +351,14 @@ def resolve_materials(
         Dict mapping material name to MaterialData
     """
     overrides = overrides or {}
+    normalized_overrides = _normalize_material_keys(
+        overrides, used_names=used_material_names, label="overrides"
+    )
     materials: dict[str, MaterialData] = {}
 
     for name in sorted(used_material_names):
-        if name in overrides:
-            props = overrides[name]
+        if name.lower() in normalized_overrides:
+            props = normalized_overrides[name.lower()]
             if wavelength_um is not None:
                 resolved = props.evaluate_at_wavelength(wavelength_um)
                 if resolved.behavior == "conductive":
@@ -454,6 +458,9 @@ def resolve_materials_with_dispersion(
         Dict mapping material name to MaterialData
     """
     overrides = overrides or {}
+    normalized_overrides = _normalize_material_keys(
+        overrides, used_names=used_material_names, label="overrides"
+    )
     materials: dict[str, MaterialData] = {}
     force_dispersion = dispersion == "true"
     force_nodispersion = dispersion == "false"
@@ -462,9 +469,10 @@ def resolve_materials_with_dispersion(
         resolved: ResolvedMaterial | None
         props: MaterialProperties | None = None
 
-        if name in overrides:
-            resolved = overrides[name].evaluate_at_wavelength(wavelength_um)
-            props = overrides[name]
+        if name.lower() in normalized_overrides:
+            override_props = normalized_overrides[name.lower()]
+            resolved = override_props.evaluate_at_wavelength(wavelength_um)
+            props = override_props
         else:
             resolved = resolve_material_at_wavelength(
                 name, wavelength_um, overlay=overlay

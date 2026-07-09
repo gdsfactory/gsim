@@ -12,10 +12,10 @@ groups:
   - P2
   volumes:
   - air
-  - si
   - sin
+  - sio2
 mesh:
-  elements: 6095
+  elements: 6094
   invalid_elements: 0
-  nodes: 863
-  tetrahedra: 3709
+  nodes: 864
+  tetrahedra: 3708

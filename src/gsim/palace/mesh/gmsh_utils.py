@@ -887,6 +887,10 @@ def setup_mesh_refinement(
     boundary_line_tags: list[int],
     refined_cellsize: float,
     max_cellsize: float,
+    *,
+    sampling: int = 200,
+    dist_min: float = 0.0,
+    dist_max: float | None = None,
 ) -> int:
     """Set up mesh refinement near boundary lines.
 
@@ -894,6 +898,9 @@ def setup_mesh_refinement(
         boundary_line_tags: list of curve tags for refinement
         refined_cellsize: mesh size near boundaries
         max_cellsize: mesh size far from boundaries
+        sampling: Number of sample points for Distance field evaluation
+        dist_min: Distance where SizeMin applies
+        dist_max: Distance where SizeMax applies (defaults to max_cellsize)
 
     Returns:
         Field ID for the minimum field
@@ -901,15 +908,19 @@ def setup_mesh_refinement(
     # Distance field from boundary curves
     gmsh.model.mesh.field.add("Distance", 1)
     gmsh.model.mesh.field.setNumbers(1, "CurvesList", boundary_line_tags)
-    gmsh.model.mesh.field.setNumber(1, "Sampling", 200)
+    gmsh.model.mesh.field.setNumber(1, "Sampling", int(sampling))
 
     # Threshold field for gradual size transition
     gmsh.model.mesh.field.add("Threshold", 2)
     gmsh.model.mesh.field.setNumber(2, "InField", 1)
     gmsh.model.mesh.field.setNumber(2, "SizeMin", refined_cellsize)
     gmsh.model.mesh.field.setNumber(2, "SizeMax", max_cellsize)
-    gmsh.model.mesh.field.setNumber(2, "DistMin", 0)
-    gmsh.model.mesh.field.setNumber(2, "DistMax", max_cellsize)
+    gmsh.model.mesh.field.setNumber(2, "DistMin", dist_min)
+    gmsh.model.mesh.field.setNumber(
+        2,
+        "DistMax",
+        max_cellsize if dist_max is None else float(dist_max),
+    )
 
     return 2
 

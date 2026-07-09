@@ -16,12 +16,14 @@ Usage::
 
 from __future__ import annotations
 
+import builtins
+import csv
 import json
 import logging
 import re
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypedDict, overload
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +32,211 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+
+class ModeMetrics(TypedDict):
+    """Parsed per-mode metrics from mode-kn.csv."""
+
+    k_n: complex
+    n_eff: complex
+    eta_eff: complex
+
+
+class PalaceTextResults:
+    """Parsed Palace text output files with pretty-print helpers.
+
+    This is used for simulations that do not emit ``port-S.csv`` (for example,
+    BoundaryMode). CSV files are parsed into row dictionaries while JSON files
+    are decoded to Python objects.
+    """
+
+    ETA0_OHM = 376.730313668
+
+    def __init__(
+        self,
+        *,
+        files: dict[str, Path],
+        csv_tables: dict[str, list[dict[str, str]]],
+        json_data: dict[str, object],
+        text_data: dict[str, list[str]],
+    ) -> None:
+        """Create parsed text results."""
+        self.files = files
+        self.csv_tables = csv_tables
+        self.json_data = json_data
+        self.text_data = text_data
+        self.modes = self._parse_modes()
+
+    @staticmethod
+    def _to_float(value: object) -> float:
+        """Return parsed float from CSV value or NaN when unavailable."""
+        if value is None:
+            return float("nan")
+        try:
+            text = str(value).strip()
+            if not text:
+                return float("nan")
+            return float(text)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    @staticmethod
+    def _format_complex(value: complex, *, sci: bool = True) -> str:
+        """Format complex number for compact readable output."""
+        if sci:
+            return f"{value.real:+.6e}{value.imag:+.6e}j"
+        return f"{value.real:.2f}{value.imag:+.2f}j"
+
+    def _parse_modes(self) -> dict[int, ModeMetrics]:
+        """Parse mode metrics from mode-kn.csv and compute eta_eff.
+
+        Returns:
+            Mapping ``{mode_id: {"k_n": complex, "n_eff": complex,
+            "eta_eff": complex}}``.
+        """
+        rows = self.csv_tables.get("mode-kn.csv", [])
+        modes: dict[int, ModeMetrics] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            kn_re = self._to_float(row.get("Re{kn} (1/m)"))
+            if not np.isfinite(kn_re):
+                kn_re = self._to_float(row.get("Re{kn}"))
+            if not np.isfinite(kn_re):
+                kn_re = self._to_float(row.get("k_n"))
+            kn_im = self._to_float(row.get("Im{kn} (1/m)"))
+            if not np.isfinite(kn_im):
+                kn_im = self._to_float(row.get("Im{kn}"))
+            if not np.isfinite(kn_im):
+                kn_im = 0.0
+            if not np.isfinite(kn_re):
+                kn_re = float("nan")
+            k_n = complex(kn_re, kn_im)
+
+            n_eff_re = self._to_float(row.get("Re{n_eff}"))
+            n_eff_im = self._to_float(row.get("Im{n_eff}"))
+            if not np.isfinite(n_eff_im):
+                n_eff_im = 0.0
+            if not np.isfinite(n_eff_re):
+                n_eff_re = float("nan")
+            n_eff = complex(n_eff_re, n_eff_im)
+
+            if np.isfinite(n_eff.real) and np.isfinite(n_eff.imag) and abs(n_eff) > 0.0:
+                eta_eff = self.ETA0_OHM / n_eff
+            else:
+                eta_eff = complex(float("nan"), float("nan"))
+
+            modes[mode_id] = {
+                "k_n": k_n,
+                "n_eff": n_eff,
+                "eta_eff": eta_eff,
+            }
+
+        return modes
+
+    @overload
+    def __getitem__(self, key: Literal["modes"]) -> dict[int, ModeMetrics]: ...
+
+    @overload
+    def __getitem__(self, key: int) -> ModeMetrics: ...
+
+    @overload
+    def __getitem__(self, key: str) -> ModeMetrics: ...
+
+    def __getitem__(
+        self,
+        key: str | int,
+    ) -> dict[int, ModeMetrics] | ModeMetrics:
+        """Dictionary-like access to parsed mode metrics.
+
+        Supported keys:
+        - ``"modes"`` -> full ``{mode_id: values}`` mapping
+        - integer mode id (for example ``1``)
+        - ``"mode_1"`` style string key
+        """
+        if key == "modes":
+            return self.modes
+        if isinstance(key, int):
+            return self.modes[key]
+        if isinstance(key, str) and key.startswith("mode_"):
+            mode_id = int(key.split("_", 1)[1])
+            return self.modes[mode_id]
+        raise KeyError(key)
+
+    def keys(self) -> list[str]:
+        """Return available result file names."""
+        return sorted(self.files.keys())
+
+    def _format_csv_table(
+        self, name: str, rows: list[dict[str, str]], max_rows: int
+    ) -> str:
+        """Format one CSV table for terminal-friendly display."""
+        if not rows:
+            return f"{name}: <empty csv>"
+
+        columns = list(rows[0].keys())
+        widths = {col: len(col) for col in columns}
+        preview = rows[:max_rows]
+        for row in preview:
+            for col in columns:
+                widths[col] = max(widths[col], len(str(row.get(col, ""))))
+
+        header = " | ".join(col.ljust(widths[col]) for col in columns)
+        divider = "-+-".join("-" * widths[col] for col in columns)
+        lines = [f"{name} ({len(rows)} rows)", header, divider]
+        lines.extend(
+            " | ".join(str(row.get(col, "")).ljust(widths[col]) for col in columns)
+            for row in preview
+        )
+        if len(rows) > max_rows:
+            lines.append(f"... ({len(rows) - max_rows} more rows)")
+        return "\n".join(lines)
+
+    def _pretty_text(self, *, max_rows: int = 8, max_lines: int = 12) -> str:
+        """Build a compact mode summary matching BoundaryMode workflow needs."""
+        del max_rows
+        del max_lines
+        if not self.modes:
+            return "No mode data found in mode-kn.csv"
+
+        lines: list[str] = []
+        for mode_id in sorted(self.modes):
+            mode = self.modes[mode_id]
+            lines.append(
+                f"mode {mode_id}: "
+                f"k_n = {self._format_complex(mode['k_n'])}, "
+                f"n_eff = {self._format_complex(mode['n_eff'])}, "
+                f"eta_eff ~= {self._format_complex(mode['eta_eff'], sci=False)}"
+            )
+        return "\n".join(lines)
+
+    def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:
+        """Pretty-print text output summaries."""
+        builtins.print(  # noqa: T201
+            self._pretty_text(max_rows=max_rows, max_lines=max_lines)
+        )
+
+    def __repr__(self) -> str:
+        """Return concise object representation."""
+        return (
+            "PalaceTextResults("  # pragma: no cover - trivial repr
+            f"files={len(self.files)}, "
+            f"csv={len(self.csv_tables)}, "
+            f"json={len(self.json_data)}, "
+            f"text={len(self.text_data)})"
+        )
+
+    def __str__(self) -> str:
+        """Return pretty summary for notebook/terminal display."""
+        return self._pretty_text()
 
 
 # -----------------------------------------------------------------------
@@ -454,6 +661,77 @@ def load_sparams(
     return SParams(freq=freq, data=data, port_names=port_names, files=files)
 
 
+def load_text_results(source: str | Path | dict) -> PalaceTextResults:
+    """Load non-S-parameter Palace outputs from text files.
+
+    This parser targets result layouts such as BoundaryMode where Palace writes
+    summary CSV/TXT/JSON files under ``output/palace`` but no ``port-S.csv``.
+
+    Args:
+        source: Results dict from ``run_local()`` / ``run()``, simulation path,
+            or ``output/palace`` path.
+
+    Returns:
+        Parsed :class:`PalaceTextResults`.
+
+    Raises:
+        FileNotFoundError: If no parseable text output file is found.
+    """
+    # Reuse existing source normalization; for dict inputs preserve exact map.
+    if isinstance(source, dict):
+        files = {str(k): Path(v) for k, v in source.items()}
+    else:
+        _csv_path, base_dir = _resolve_source(source, require_csv=False)
+        roots = [
+            base_dir,
+            base_dir / "output" / "palace",
+        ]
+        files = {}
+        for root in roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for p in root.iterdir():
+                if p.is_file() and not p.name.startswith("."):
+                    files.setdefault(p.name, p)
+
+    parseable_suffixes = {".csv", ".txt", ".json", ".log"}
+    parseable = {
+        name: path
+        for name, path in files.items()
+        if path.suffix.lower() in parseable_suffixes
+    }
+    if not parseable:
+        raise FileNotFoundError("No parseable Palace text output files found")
+
+    csv_tables: dict[str, list[dict[str, str]]] = {}
+    json_data: dict[str, object] = {}
+    text_data: dict[str, list[str]] = {}
+
+    for name, path in sorted(parseable.items()):
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            with path.open(newline="") as f:
+                reader = csv.DictReader(f)
+                rows = [{k or "": v or "" for k, v in row.items()} for row in reader]
+            csv_tables[name] = rows
+            continue
+
+        if suffix == ".json":
+            with path.open() as f:
+                json_data[name] = json.load(f)
+            continue
+
+        with path.open(errors="replace") as f:
+            text_data[name] = [line.rstrip("\n") for line in f]
+
+    return PalaceTextResults(
+        files=files,
+        csv_tables=csv_tables,
+        json_data=json_data,
+        text_data=text_data,
+    )
+
+
 def get_port_map(source: str | Path | dict) -> dict[int, str]:
     """Return the ``{port_number: port_name}`` mapping.
 
@@ -652,22 +930,31 @@ def _find_paraview_dir(
     - Single-excitation (lumped ports): ``paraview/driven/CycleNNNNNN/`` (no subdir)
     Both are searched, with the explicit ``excitation_N`` folder taking priority.
     """
-    subdir = "driven_boundary" if boundary else "driven"
+    subdirs = (
+        ["driven_boundary", "boundarymode_boundary"]
+        if boundary
+        else ["driven", "boundarymode"]
+    )
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
     ]
     exc_dir: Path | None = None
     for root in search_roots:
-        # Layout 1: explicit excitation subfolder (wave ports / multi-excitation)
-        candidate = root / "paraview" / subdir / f"excitation_{excitation}"
-        if candidate.is_dir():
-            exc_dir = candidate
-            break
-        # Layout 2: flat — Cycle dirs sit directly under driven/ (lumped ports)
-        flat = root / "paraview" / subdir
-        if flat.is_dir() and any(flat.iterdir()):
-            exc_dir = flat
+        for subdir in subdirs:
+            # Layout 1: explicit excitation subfolder (wave ports / multi-excitation)
+            candidate = root / "paraview" / subdir / f"excitation_{excitation}"
+            if candidate.is_dir():
+                exc_dir = candidate
+                break
+
+            # Layout 2: flat — Cycle dirs sit directly under the solver folder
+            flat = root / "paraview" / subdir
+            if flat.is_dir() and any(flat.iterdir()):
+                exc_dir = flat
+                break
+
+        if exc_dir is not None:
             break
 
     if exc_dir is None:

@@ -474,21 +474,41 @@ def extract_layer_stack(
         return bool(props.dispersion_models)
 
     # Choose a PDK-defined dielectric material for the bulk background slab.
-    # Prefer non-passivation layers (e.g. oxide / IMD materials).
+    # Prefer oxide-like non-passivation dielectrics when available so the
+    # background resembles the 3D stack cladding used in RF examples.
     bulk_material = None
     for _zmin, _zmax, material, layer_name in sorted_dielectric_layers:
         if not _is_dielectric_material(material):
             continue
-        if not _looks_like_passivation(layer_name, material):
+        if _looks_like_passivation(layer_name, material):
+            continue
+        if _is_oxide_like(material):
             bulk_material = material
             break
+
+    if bulk_material is None:
+        for _zmin, _zmax, material, layer_name in sorted_dielectric_layers:
+            if not _is_dielectric_material(material):
+                continue
+            if not _looks_like_passivation(layer_name, material):
+                bulk_material = material
+                break
+
+    if bulk_material is None:
+        for _zmin, _zmax, material, _layer_name in sorted_dielectric_layers:
+            if _is_dielectric_material(material) and _is_oxide_like(material):
+                bulk_material = material
+                break
+
     if bulk_material is None and sorted_dielectric_layers:
         for _zmin, _zmax, material, _layer_name in sorted_dielectric_layers:
             if _is_dielectric_material(material):
                 bulk_material = material
                 break
+
     if bulk_material is None and sorted_dielectric_layers:
         bulk_material = sorted_dielectric_layers[0][2]
+
     if bulk_material is None:
         # Rare fallback when a PDK stack defines no dielectric layers.
         bulk_material = "SiO2"

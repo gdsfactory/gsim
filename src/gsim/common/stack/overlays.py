@@ -129,12 +129,15 @@ def merge_overlay(
         base = dict(MATERIALS_DB)
 
     merged = dict(base)
+    merged_lower = {k.lower(): k for k in merged}
     for name, props in overlay.items():
-        if name in merged:
-            existing = merged[name]
-            merged[name] = _merge_material(existing, props)
+        name_lower = name.lower()
+        if name_lower in merged_lower:
+            existing_key = merged_lower[name_lower]
+            merged[existing_key] = _merge_material(merged[existing_key], props)
         else:
             merged[name] = props
+            merged_lower[name_lower] = name
 
     return merged
 

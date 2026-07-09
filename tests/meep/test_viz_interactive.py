@@ -49,8 +49,7 @@ def _xz_sim_for_viz():
     sim.geometry.component = c
     sim.geometry.stack = stack
     sim.materials = {"si": 12.0, "SiO2": 2.1}
-    sim.solver.is_3d = False
-    sim.solver.plane = "xz"
+    sim.solver(mode="2d", y_cut="auto")
     sim.source_fiber(x=0.0, z=1.22, waist=5.4)
     return sim
 

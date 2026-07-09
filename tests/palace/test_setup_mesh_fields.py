@@ -59,6 +59,23 @@ def stub_gmsh_utils(monkeypatch):
     monkeypatch.setattr(
         mesh_generator.gmsh_utils, "finalize_mesh_fields", fake_finalize_mesh_fields
     )
+
+    # `_setup_mesh_fields` also calls a few helpers that query the LIVE gmsh
+    # model directly (not via gmsh_utils). In a clean environment they return
+    # "nothing" (the empty-model calls raise and are swallowed), but leftover
+    # global gmsh state from a prior integration test can make them return real
+    # curves — observed as flaky extra PEC lines on Windows CI under
+    # pytest-randomly. Neutralize them so these unit tests are truly gmsh-free
+    # and order-independent.
+    monkeypatch.setattr(
+        mesh_generator, "_collect_pec_surface_lines", lambda _groups: []
+    )
+    monkeypatch.setattr(
+        mesh_generator, "_get_domain_bbox", lambda: (0.0, 0.0, 0.0, 0.0)
+    )
+    monkeypatch.setattr(
+        mesh_generator, "_line_on_domain_boundary", lambda *_args, **_kwargs: False
+    )
     return record
 
 

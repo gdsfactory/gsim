@@ -7,7 +7,15 @@ from typing import Literal
 
 import pytest
 
-from gsim.common.cross_section import Rect2D, extract_xz_rectangles
+from gsim.common.cross_section import (
+    PolygonXY2D,
+    Rect2D,
+    RectYZ2D,
+    extract_plane_section,
+    extract_xy_polygons,
+    extract_xz_rectangles,
+    extract_yz_rectangles,
+)
 
 
 def _layer(
@@ -229,3 +237,73 @@ class TestEdgeCaseCut:
         assert len(core_rects) == 1
         assert core_rects[0].x0 == pytest.approx(-5.0)
         assert core_rects[0].x1 == pytest.approx(5.0)
+
+
+class TestGeneralizedPlaneExtraction:
+    """Tests for axis-generalized cross-section extraction helpers."""
+
+    def _build_stack(self):
+        return _stack(
+            [_layer("core", (1, 0), 0.0, 0.22, "si", layer_type="dielectric")]
+        )
+
+    def _build_rect_component(self):
+        import gdsfactory as gf
+
+        c = gf.Component()
+        c.add_polygon(
+            [(-5, -1), (5, -1), (5, 1), (-5, 1)],
+            layer=(1, 0),
+        )
+        return c
+
+    def test_extract_yz_rectangles(self):
+        c = self._build_rect_component()
+        stack = self._build_stack()
+
+        rects = extract_yz_rectangles(c, stack, x_cut=0.0)
+
+        assert len(rects) == 1
+        r = rects[0]
+        assert isinstance(r, RectYZ2D)
+        assert r.layer_name == "core"
+        assert r.material == "si"
+        assert r.y0 == pytest.approx(-1.0)
+        assert r.y1 == pytest.approx(1.0)
+        assert r.zmin == pytest.approx(0.0)
+        assert r.zmax == pytest.approx(0.22)
+
+    def test_extract_xy_polygons(self):
+        c = self._build_rect_component()
+        stack = self._build_stack()
+
+        polys = extract_xy_polygons(c, stack, z_cut=0.1)
+
+        assert len(polys) == 1
+        p = polys[0]
+        assert isinstance(p, PolygonXY2D)
+        assert p.layer_name == "core"
+        assert p.material == "si"
+        xs = [pt[0] for pt in p.exterior]
+        ys = [pt[1] for pt in p.exterior]
+        assert min(xs) == pytest.approx(-5.0)
+        assert max(xs) == pytest.approx(5.0)
+        assert min(ys) == pytest.approx(-1.0)
+        assert max(ys) == pytest.approx(1.0)
+
+    def test_extract_plane_section_dispatch(self):
+        c = self._build_rect_component()
+        stack = self._build_stack()
+
+        y_rects = extract_plane_section(c, stack, axis="y", value=0.0)
+        x_rects = extract_plane_section(c, stack, axis="x", value=0.0)
+        z_polys = extract_plane_section(c, stack, axis="z", value=0.1)
+
+        assert len(y_rects) == 1
+        assert isinstance(y_rects[0], Rect2D)
+
+        assert len(x_rects) == 1
+        assert isinstance(x_rects[0], RectYZ2D)
+
+        assert len(z_polys) == 1
+        assert isinstance(z_polys[0], PolygonXY2D)

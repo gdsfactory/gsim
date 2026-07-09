@@ -90,11 +90,11 @@ def extract_port_info(
     return ports
 
 
-def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
-    """Find the layer with the highest refractive index.
+def _highest_n_among(layers: Any) -> tuple[Any, float]:
+    """Highest-refractive-index layer among an iterable of Layer objects.
 
     Args:
-        layer_stack: LayerStack from gsim.common
+        layers: Iterable of layer objects (each with ``.material``).
 
     Returns:
         (best_layer, best_n) -- (None, 0.0) if no optical data.
@@ -104,7 +104,7 @@ def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
     best_layer = None
     best_eps = 0.0
 
-    for layer in layer_stack.layers.values():
+    for layer in layers:
         props = get_material_properties(layer.material)
         if (
             props is not None
@@ -116,6 +116,72 @@ def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
             best_layer = layer
 
     return best_layer, math.sqrt(best_eps) if best_eps > 0 else 0.0
+
+
+def _find_highest_n_layer(layer_stack: LayerStack) -> tuple[Any, float]:
+    """Find the layer with the highest refractive index.
+
+    Args:
+        layer_stack: LayerStack from gsim.common
+
+    Returns:
+        (best_layer, best_n) -- (None, 0.0) if no optical data.
+    """
+    return _highest_n_among(layer_stack.layers.values())
+
+
+def _component_draws_layer(component: Component, gds_layer: tuple[int, int]) -> bool:
+    """Whether the component has any polygon on the given GDS layer tuple.
+
+    Args:
+        component: gdsfactory Component to inspect.
+        gds_layer: GDS ``(layer, datatype)`` tuple.
+
+    Returns:
+        True if at least one polygon exists on that layer.
+    """
+    # merge=False so this works on locked @cell components (merge=True
+    # mutates and raises LockedError on cached cells).
+    raw = component.get_polygons(layers=(tuple(gds_layer),), merge=False)
+    if not isinstance(raw, dict) or not raw:
+        return False
+    return any(
+        (value if isinstance(value, list) else [value]) for value in raw.values()
+    )
+
+
+def _find_highest_n_layer_in_component(
+    component: Component,
+    layer_stack: LayerStack,
+) -> tuple[Any, float]:
+    """Highest-n stack layer among those the component actually draws.
+
+    This is the auto vertical-crop reference: the photonic core the
+    component defines (e.g. the Si ``core`` layer for a grating coupler),
+    not undrawn high-index layers (e.g. Ge) or the full BEOL stack.
+
+    Args:
+        component: gdsfactory Component with drawn geometry.
+        layer_stack: LayerStack from gsim.common.
+
+    Returns:
+        (best_layer, best_n). Falls back to the global highest-n layer with
+        a warning if no drawn layer has optical data.
+    """
+    candidates = [
+        layer
+        for layer in layer_stack.layers.values()
+        if _component_draws_layer(component, layer.gds_layer)
+    ]
+    best_layer, best_n = _highest_n_among(candidates)
+    if best_layer is not None:
+        return best_layer, best_n
+
+    logger.warning(
+        "No drawn layer with optical data found for auto z-crop reference; "
+        "falling back to the global highest-index layer."
+    )
+    return _find_highest_n_layer(layer_stack)
 
 
 def filter_ports_for_xz(

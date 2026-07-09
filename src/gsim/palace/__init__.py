@@ -54,9 +54,13 @@ from gsim.gcloud import RunResult, print_job_summary, register_result_parser
 from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
+from gsim.palace.boundarymode import BoundaryModeSim
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
+
+# 2D field visualization
+from gsim.palace.field_viz import extract_streamplot_inputs_2d, plot_fields_2d
 
 # Material resolution with dispersion
 from gsim.palace.materials import resolve_palace_materials_at_frequency
@@ -70,7 +74,9 @@ from gsim.palace.mesh import (
 
 # Models (new submodule)
 from gsim.palace.models import (
+    BoundaryModeConfig,
     CPWPortConfig,
+    CrossSectionPlaneConfig,
     DrivenConfig,
     EigenmodeConfig,
     ElectrostaticConfig,
@@ -137,7 +143,10 @@ from gsim.viz import plot_cross_section, plot_mesh
 
 __all__ = [
     "MATERIALS_DB",
+    "BoundaryModeConfig",
+    "BoundaryModeSim",
     "CPWPortConfig",
+    "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSim",
     "EigenmodeConfig",
@@ -174,6 +183,7 @@ __all__ = [
     "extract_from_pdk",
     "extract_layer_stack",
     "extract_ports",
+    "extract_streamplot_inputs_2d",
     "generate_mesh",
     "get_material_properties",
     "get_port_map",
@@ -183,6 +193,7 @@ __all__ = [
     "load_stack_yaml",
     "parse_layer_stack",
     "plot_cross_section",
+    "plot_fields_2d",
     "plot_mesh",
     "plot_stack",
     "plot_boundary_field",

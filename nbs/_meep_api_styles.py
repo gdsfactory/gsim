@@ -35,15 +35,15 @@ from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
-sim.geometry(component=c, z_crop="auto")
+sim.geometry(component=c)
 sim.materials = {
     "si": Material(refractive_index=3.47),
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 11
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5)
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver(resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0)
 
 # %% [markdown]
@@ -58,7 +58,6 @@ from gsim.meep.models.api import Material
 sim = meep.Simulation()
 
 sim.geometry.component = c
-sim.geometry.z_crop = "auto"
 
 sim.materials = {
     "si": Material(refractive_index=3.47),
@@ -68,12 +67,14 @@ sim.materials = {
 sim.source.port = "o1"
 sim.source.wavelength = 1.55
 sim.source.wavelength_span = 0.01
-sim.num_freqs = 11
+sim.num_freqs = 21
 
 sim.monitors = ["o1", "o2", "o3"]
 
 sim.domain.pml = 1.0
-sim.domain.margin = 0.5
+sim.domain.margin_x = 0.5
+sim.domain.margin_y = 0.5
+sim.domain.z_ref = "stack"
 
 sim.solver.resolution = 20
 sim.solver.simplify_tol = 0.01
@@ -91,15 +92,15 @@ from gsim.meep import FDTD, Domain, Geometry, Material, ModeSource
 
 sim = meep.Simulation()
 
-sim.geometry = Geometry(component=c, z_crop="auto")
+sim.geometry = Geometry(component=c)
 sim.materials = {
     "si": Material(refractive_index=3.47),
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source = ModeSource(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 11
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain = Domain(pml=1.0, margin=0.5)
+sim.domain = Domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver = FDTD(
     resolution=20, simplify_tol=0.01, save_animation=True, verbose_interval=5.0
 )
@@ -115,15 +116,15 @@ from gsim.meep.models.api import Material
 
 sim = meep.Simulation()
 
-sim.geometry(component=c, z_crop="auto")
+sim.geometry(component=c)
 sim.materials = {
     "si": Material(refractive_index=3.47),
     "SiO2": Material(refractive_index=1.44),
 }
 sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
-sim.num_freqs = 11
+sim.num_freqs = 21
 sim.monitors = ["o1", "o2", "o3"]
-sim.domain(pml=1.0, margin=0.5)
+sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_ref="stack")
 sim.solver(resolution=20, simplify_tol=0.01)
 
 # Conditional tweaks with attribute style

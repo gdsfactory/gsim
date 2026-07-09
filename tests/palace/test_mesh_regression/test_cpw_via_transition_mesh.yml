@@ -14,12 +14,12 @@ groups:
   - P2
   volumes:
   - air
-  - si
   - sin
+  - sio2
   - topvia1
   - topvia2
 mesh:
-  elements: 14367
+  elements: 14347
   invalid_elements: 0
-  nodes: 1840
-  tetrahedra: 9155
+  nodes: 1837
+  tetrahedra: 9135

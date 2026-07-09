@@ -37,11 +37,15 @@ test:
 cov:
   uv run pytest --cov=gsim --cov-report=term-missing:skip-covered --cov-report=xml
 
-docs:
-  uv run mkdocs build
+# Copy the root CHANGELOG into docs/ so zensical can build it (docs_dir is docs/)
+sync-changelog:
+  cp CHANGELOG.md docs/CHANGELOG.md
 
-serve:
-  uv run mkdocs serve -a localhost:8080
+docs: sync-changelog
+  uv run zensical build -f docs/zensical.toml
+
+serve: sync-changelog
+  uv run zensical serve -f docs/zensical.toml -a localhost:8080
 
 # Run a notebook normally (interactive plots): just nbrun nbs/foo.ipynb
 nbrun +notebooks: ipykernel
@@ -81,7 +85,7 @@ tree:
   @tree -a -I .git --gitignore
 
 clean: nbclean-all
-  rm -rf site
+  rm -rf site docs/site
   rm -rf .venv
   rm -f uv.lock
   rm -rf docs/nbs/*
