@@ -334,7 +334,9 @@ class TestActivateVectorComponent:
         from gsim.palace.fields import activate_vector_component
 
         mesh, field, _ = _make_triangle_mesh()
-        name = activate_vector_component(mesh, field, component="mag", output_name="magnitude")
+        name = activate_vector_component(
+            mesh, field, component="mag", output_name="magnitude"
+        )
         assert name == "magnitude"
         assert "magnitude" in mesh.point_data
 
@@ -430,7 +432,9 @@ class TestPlotBoundaryField:
             timestep=0.0,
             selected_attributes=(1, 2),
         )
-        pl = plot_boundary_field(bnd, vector_field=field, component="mag", off_screen=True)
+        pl = plot_boundary_field(
+            bnd, vector_field=field, component="mag", off_screen=True
+        )
         assert pl is not None
         pl.close()
 
@@ -463,13 +467,15 @@ class TestPlotBoundaryField:
             timestep=0.0,
             selected_attributes=(1, 2),
         )
-        pl = plot_boundary_field(bnd, vector_field=field, component="mag", log_scale=True, off_screen=True)
+        pl = plot_boundary_field(
+            bnd, vector_field=field, component="mag", log_scale=True, off_screen=True
+        )
         assert pl is not None
         pl.close()
 
     def test_no_nan_after_magnitude(self):
         """Core assertion: computed magnitude must have 0 NaN."""
-        from gsim.palace.fields import BoundaryFieldData, activate_vector_component
+        from gsim.palace.fields import activate_vector_component
 
         mesh, field, _ = _make_triangle_mesh()
         scalar_name = activate_vector_component(mesh, field, component="mag")
@@ -489,7 +495,9 @@ class TestPlotBoundaryField:
             timestep=0.0,
             selected_attributes=(1, 2),
         )
-        pl = plot_boundary_field(bnd, vector_field=field, component="mag", log_scale=True, off_screen=True)
+        pl = plot_boundary_field(
+            bnd, vector_field=field, component="mag", log_scale=True, off_screen=True
+        )
         pl.close()
 
     def test_auto_clim_percentile(self):
@@ -516,8 +524,9 @@ class TestPlotBoundaryField:
         from gsim.palace.fields import _auto_clim
 
         # E_y-like data: both polarities, peaks at edges
-        vals = np.concatenate([np.full(400, -100.0), np.full(400, 100.0),
-                               np.linspace(-500, 500, 200)])
+        vals = np.concatenate(
+            [np.full(400, -100.0), np.full(400, 100.0), np.linspace(-500, 500, 200)]
+        )
         vmin, vmax = _auto_clim(vals, signed=True)
         assert vmin < 0.0 < vmax
         assert vmin == pytest.approx(-vmax)  # symmetric
@@ -592,8 +601,12 @@ class TestPlotVolumeSlice:
         from gsim.palace.fields import VolumeFieldData, plot_volume_slice
 
         mesh, field, _ = _make_triangle_mesh()
-        vol = VolumeFieldData(mesh=mesh, dataset_name="test", step_index=0, timestep=0.0)
-        pl = plot_volume_slice(vol, vector_field=field, axis="z", value=0.0, off_screen=True)
+        vol = VolumeFieldData(
+            mesh=mesh, dataset_name="test", step_index=0, timestep=0.0
+        )
+        pl = plot_volume_slice(
+            vol, vector_field=field, axis="z", value=0.0, off_screen=True
+        )
         pl.close()
 
 
@@ -602,7 +615,9 @@ class TestExtractAxisSlice:
         from gsim.palace.fields import VolumeFieldData, extract_axis_slice
 
         mesh, _, _ = _make_triangle_mesh()
-        vol = VolumeFieldData(mesh=mesh, dataset_name="test", step_index=0, timestep=0.0)
+        vol = VolumeFieldData(
+            mesh=mesh, dataset_name="test", step_index=0, timestep=0.0
+        )
         sl = extract_axis_slice(vol, axis="z", value=0.0)
         assert sl.n_points > 0
 
@@ -610,7 +625,9 @@ class TestExtractAxisSlice:
         from gsim.palace.fields import VolumeFieldData, extract_axis_slice
 
         mesh, _, _ = _make_triangle_mesh()
-        vol = VolumeFieldData(mesh=mesh, dataset_name="test", step_index=0, timestep=0.0)
+        vol = VolumeFieldData(
+            mesh=mesh, dataset_name="test", step_index=0, timestep=0.0
+        )
         with pytest.raises(ValueError, match="axis must be one of"):
             extract_axis_slice(vol, axis="w", value=0.0)
 
@@ -637,7 +654,9 @@ class TestLoadFieldContext:
         )
 
         # Fake meshio.read returning an object with field_data
-        fake_mesh = SimpleNamespace(field_data={"topmetal2_xy": (5, 2), "ground": (6, 2)})
+        fake_mesh = SimpleNamespace(
+            field_data={"topmetal2_xy": (5, 2), "ground": (6, 2)}
+        )
         import meshio as _real_meshio
 
         monkeypatch.setattr(_real_meshio, "read", lambda _: fake_mesh)

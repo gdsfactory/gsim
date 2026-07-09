@@ -42,7 +42,7 @@ def resolve_palace_binary(
         binary (useful when the caller explicitly wants the bundled
         runtime).
 
-    Returns
+    Returns:
     -------
     Path | None
         Absolute path to a Palace executable, or ``None`` if no suitable
@@ -91,9 +91,7 @@ def resolve_palace_binary(
             "but no bundled binary was found"
         )
     else:
-        logger.debug(
-            "resolve_palace_binary: palace-toolkit not installed — skipping"
-        )
+        logger.debug("resolve_palace_binary: palace-toolkit not installed — skipping")
 
     return None
 
@@ -104,7 +102,7 @@ def resolve_palace_library_dir() -> Path | None:
     Only available when ``palace-toolkit`` is installed and provides a
     bundled ``lib/`` directory alongside its binary.
 
-    Returns
+    Returns:
     -------
     Path | None
     """
@@ -130,6 +128,7 @@ def _binary_is_runnable(binary: Path, timeout: float = 15.0) -> bool:
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
     except Exception:
         return False

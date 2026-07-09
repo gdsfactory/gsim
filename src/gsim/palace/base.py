@@ -1815,7 +1815,7 @@ class PalaceSimMixin:
                     "(pip install gsim[palace-toolkit])."
                 )
 
-            exe_path = Path(resolved_exe) if not isinstance(resolved_exe, str) else Path(resolved_exe)
+            exe_path = Path(resolved_exe)
 
             # Check if executable exists (resolve PATH if needed)
             if not exe_path.exists():

@@ -28,9 +28,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -46,12 +47,12 @@ logger = logging.getLogger(__name__)
 class SelectorContext:
     """Context used to resolve user selectors to boundary attribute tags.
 
-    Attributes
+    Attributes:
     ----------
     pg_map : dict[str, int]
-        Physical-group name → attribute-tag mapping (from the mesh).
+        Physical-group name -> attribute-tag mapping (from the mesh).
     boundaries_by_type : dict[str, tuple[int, ...]]
-        Palace boundary-type → attribute tags (from the config).
+        Palace boundary-type -> attribute tags (from the config).
     """
 
     pg_map: dict[str, int]
@@ -62,11 +63,11 @@ class SelectorContext:
 class BoundaryFieldData:
     """Loaded boundary mesh + metadata for a selected step / selector.
 
-    Attributes
+    Attributes:
     ----------
     mesh : pyvista.DataSet
         The extracted boundary mesh (only cells matching the selected
-        attributes).  Rendered directly — no resampling → no NaN.
+        attributes).  Rendered directly — no resampling -> no NaN.
     dataset_name : str
     step_index : int
     timestep : float
@@ -81,10 +82,12 @@ class BoundaryFieldData:
 
     @property
     def point_arrays(self) -> tuple[str, ...]:
+        """Names of point-data arrays available on the boundary mesh."""
         return tuple(self.mesh.point_data.keys())
 
     @property
     def cell_arrays(self) -> tuple[str, ...]:
+        """Names of cell-data arrays available on the boundary mesh."""
         return tuple(self.mesh.cell_data.keys())
 
 
@@ -92,7 +95,7 @@ class BoundaryFieldData:
 class VolumeFieldData:
     """Loaded volume mesh + metadata for a selected step.
 
-    Attributes
+    Attributes:
     ----------
     mesh : pyvista.DataSet
     dataset_name : str
@@ -107,10 +110,12 @@ class VolumeFieldData:
 
     @property
     def point_arrays(self) -> tuple[str, ...]:
+        """Names of point-data arrays available on the volume mesh."""
         return tuple(self.mesh.point_data.keys())
 
     @property
     def cell_arrays(self) -> tuple[str, ...]:
+        """Names of cell-data arrays available on the volume mesh."""
         return tuple(self.mesh.cell_data.keys())
 
 
@@ -120,6 +125,7 @@ class VolumeFieldData:
 
 
 def _coerce_config(config: str | Path | dict[str, Any]) -> dict[str, Any]:
+    """Return a config dict from a path, file-like object, or existing dict."""
     if isinstance(config, dict):
         return config
     cfg_path = Path(config)
@@ -128,18 +134,17 @@ def _coerce_config(config: str | Path | dict[str, Any]) -> dict[str, Any]:
 
 
 def _attrs_from_boundary_section(section: Any) -> list[int]:
-    attrs: list[int] = []
+    """Extract attribute-tag integers from a Palace config boundary section."""
     if isinstance(section, dict):
-        for a in section.get("Attributes", []):
-            attrs.append(int(a))
-        return attrs
+        return [int(a) for a in section.get("Attributes", [])]
 
     if isinstance(section, list):
+        attrs: list[int] = []
         for item in section:
             if isinstance(item, dict):
-                for a in item.get("Attributes", []):
-                    attrs.append(int(a))
-    return attrs
+                attrs.extend(int(a) for a in item.get("Attributes", []))
+        return attrs
+    return []
 
 
 def build_selector_context(
@@ -153,14 +158,15 @@ def build_selector_context(
     palace_config :
         Path to the Palace ``config.json`` (or ``.json`` dict).
     pg_map :
-        Physical-group name → attribute-tag mapping.  Usually obtained
+        Physical-group name -> attribute-tag mapping.  Usually obtained
         from the mesh::
 
             import meshio
+
             mio = meshio.read("palace.msh")
             pg_map = {name: tag for name, (tag, _dim) in mio.field_data.items()}
 
-    Returns
+    Returns:
     -------
     SelectorContext
     """
@@ -181,10 +187,7 @@ def resolve_entity_attributes(
     context: SelectorContext,
 ) -> tuple[int, ...]:
     """Resolve entity name(s) to physical attribute tags via ``pg_map``."""
-    if isinstance(entity_names, str):
-        names = [entity_names]
-    else:
-        names = list(entity_names)
+    names = [entity_names] if isinstance(entity_names, str) else list(entity_names)
 
     missing = [name for name in names if name not in context.pg_map]
     if missing:
@@ -236,26 +239,27 @@ def extract_boundary_cells(
     attribute_array :
         Name of the cell-data array holding the attribute tag.
 
-    Returns
+    Returns:
     -------
     pyvista.DataSet
         Subset containing only the matching cells.
     """
-    attrs = set(int(a) for a in attributes)
+    attrs = {int(a) for a in attributes}
     if not attrs:
         raise ValueError("No attributes provided for boundary extraction")
 
     if attribute_array not in mesh.cell_data:
         available = ", ".join(mesh.cell_data.keys())
         raise KeyError(
-            f"Cell array '{attribute_array}' not found. Available cell arrays: {available}"
+            f"Cell array '{attribute_array}' not found. Available: {available}"
         )
 
     values = np.asarray(mesh.cell_data[attribute_array]).astype(int)
     ids = np.where(np.isin(values, list(attrs)))[0]
     if ids.size == 0:
         raise ValueError(
-            f"No cells matched attributes {sorted(attrs)} in cell array '{attribute_array}'"
+            f"No cells matched attributes {sorted(attrs)} "
+            f"in cell array '{attribute_array}'"
         )
 
     return mesh.extract_cells(ids)
@@ -267,6 +271,7 @@ def extract_boundary_cells(
 
 
 def _require_pyvista() -> Any:
+    """Import pyvista or raise a clear error."""
     try:
         import pyvista as pv
     except Exception as exc:
@@ -307,7 +312,7 @@ def load_boundary_field_data(
     step_index :
         ParaView cycle index (0 = last available).
 
-    Returns
+    Returns:
     -------
     BoundaryFieldData
         The extracted boundary mesh with only the matching cells.
@@ -315,7 +320,12 @@ def load_boundary_field_data(
     """
     from gsim.palace.results import load_fields
 
-    full_mesh = load_fields(source, excitation=excitation, cycle=step_index if step_index else None, boundary=True)
+    full_mesh = load_fields(
+        source,
+        excitation=excitation,
+        cycle=step_index or None,
+        boundary=True,
+    )
 
     if attributes is not None:
         selected = tuple(sorted({int(a) for a in attributes}))
@@ -324,9 +334,13 @@ def load_boundary_field_data(
     elif boundary_type is not None:
         selected = resolve_boundary_type_attributes(boundary_type, selector_context)
     else:
-        raise ValueError("Provide one selector: attributes, entity_names, or boundary_type")
+        raise ValueError(
+            "Provide one selector: attributes, entity_names, or boundary_type"
+        )
 
-    boundary_mesh = extract_boundary_cells(full_mesh, selected, attribute_array="attribute")
+    boundary_mesh = extract_boundary_cells(
+        full_mesh, selected, attribute_array="attribute"
+    )
 
     return BoundaryFieldData(
         mesh=boundary_mesh,
@@ -354,13 +368,18 @@ def load_volume_field_data(
     step_index :
         ParaView cycle index (0 = last available).
 
-    Returns
+    Returns:
     -------
     VolumeFieldData
     """
     from gsim.palace.results import load_fields
 
-    mesh = load_fields(source, excitation=excitation, cycle=step_index if step_index else None, boundary=False)
+    mesh = load_fields(
+        source,
+        excitation=excitation,
+        cycle=step_index or None,
+        boundary=False,
+    )
 
     return VolumeFieldData(
         mesh=mesh,
@@ -405,7 +424,7 @@ def load_field_context(
     config_filename :
         Name of the Palace config file in the simulation directory.
 
-    Returns
+    Returns:
     -------
     tuple
         ``(volume_mesh, boundary_mesh, selector_context, pg_map)`` where
@@ -413,7 +432,7 @@ def load_field_context(
         objects, ``selector_context`` is a :class:`SelectorContext`, and
         ``pg_map`` is the physical-group name -> attribute-tag mapping.
 
-    Raises
+    Raises:
     ------
     FileNotFoundError
         If the mesh or config file cannot be located in the resolved
@@ -435,7 +454,7 @@ def load_field_context(
         msg = f"Palace config not found at {config_path}"
         raise FileNotFoundError(msg)
 
-    cycle = step_index if step_index else None
+    cycle = step_index or None
     vol = load_fields(source, excitation=excitation, cycle=cycle, boundary=False)
     bnd = load_fields(source, excitation=excitation, cycle=cycle, boundary=True)
 
@@ -517,7 +536,7 @@ def activate_vector_component(
     output_name :
         If ``None``, defaults to ``"{field_name}_{component}"``.
 
-    Returns
+    Returns:
     -------
     str
         Name of the new scalar array (added in-place to ``mesh.point_data``).
@@ -528,7 +547,9 @@ def activate_vector_component(
 
     vec = np.asarray(mesh.point_data[field_name])
     if vec.ndim != 2 or vec.shape[1] < 3:
-        raise ValueError(f"Field '{field_name}' is not a vector field with 3 components")
+        raise ValueError(
+            f"Field '{field_name}' is not a vector field with 3 components"
+        )
 
     if output_name is None:
         output_name = f"{field_name}_{component}"
@@ -568,7 +589,8 @@ def resolve_scalar_field(
         if scalar_field not in mesh.point_data:
             available = ", ".join(mesh.point_data.keys())
             raise KeyError(
-                f"Scalar field '{scalar_field}' not found. Available point arrays: {available}"
+                f"Scalar field '{scalar_field}' not found. "
+                f"Available point arrays: {available}"
             )
         return scalar_field
 
@@ -600,9 +622,9 @@ def _auto_clim(
 
     The old :func:`gsim.viz.plot_topview` used ``vmin=0`` / ``vmax=98th
     percentile`` for linear scales and a :class:`~matplotlib.colors.LogNorm`
-    spanning the 2nd–98th percentiles for log scales.  This compresses the
+    spanning the 2nd-98th percentiles for log scales.  This compresses the
     dynamic range so localized peaks (e.g. current crowding at conductor
-    edges) remain visible instead of being washed out by the full min–max
+    edges) remain visible instead of being washed out by the full min-max
     range, which is what PyVista's default ``clim=None`` would do.
 
     Parameters
@@ -685,7 +707,7 @@ def plot_boundary_field(
     clim :
         Explicit ``(vmin, vmax)`` color limits.  When ``None`` (default),
         percentile-based limits are computed automatically (``vmin=0``,
-        ``vmax=98th percentile`` for linear; 2nd–98th percentile for
+        ``vmax=98th percentile`` for linear; 2nd-98th percentile for
         ``log_scale``).  This matches the legacy ``plot_topview`` behavior
         so localized peaks such as current crowding at conductor edges
         remain clearly visible.
@@ -697,12 +719,12 @@ def plot_boundary_field(
     screenshot :
         If set, save a PNG to this path.
 
-    Returns
+    Returns:
     -------
     pyvista.Plotter
         The plotter (call ``.show()`` to display in a notebook).
 
-    Notes
+    Notes:
     -----
     When ``log_scale=True`` and the scalar contains non-positive values,
     they are clamped to ``min_positive * 1e-6`` so logarithmic coloring
@@ -720,26 +742,24 @@ def plot_boundary_field(
 
     scalar_name_for_plot = scalar_name
     vals = np.asarray(data.mesh.point_data[scalar_name], dtype=float)
-    if log_scale:
-        if np.any(vals <= 0.0):
-            pos = vals[vals > 0.0]
-            if pos.size == 0:
-                raise ValueError(
-                    f"Cannot use log scale for '{scalar_name}': no positive values found"
-                )
-            floor = float(np.min(pos)) * 1e-6
-            safe_name = f"{scalar_name}_logsafe"
-            data.mesh.point_data[safe_name] = np.where(vals > 0.0, vals, floor)
-            scalar_name_for_plot = safe_name
-            vals = np.asarray(data.mesh.point_data[safe_name], dtype=float)
+    if log_scale and np.any(vals <= 0.0):
+        pos = vals[vals > 0.0]
+        if pos.size == 0:
+            raise ValueError(
+                f"Cannot use log scale for '{scalar_name}': no positive values found"
+            )
+        floor = float(np.min(pos)) * 1e-6
+        safe_name = f"{scalar_name}_logsafe"
+        data.mesh.point_data[safe_name] = np.where(vals > 0.0, vals, floor)
+        scalar_name_for_plot = safe_name
+        vals = np.asarray(data.mesh.point_data[safe_name], dtype=float)
 
     if clim is None:
         # Signed data (vector components x/y/z, or scalar fields with
         # negative values) gets symmetric limits so diverging colormaps
         # are centered at zero and both polarities are visible.
-        is_signed = (
-            (vector_field is not None and component in ("x", "y", "z"))
-            or (scalar_field is not None and np.nanmin(vals) < 0.0)
+        is_signed = (vector_field is not None and component in ("x", "y", "z")) or (
+            scalar_field is not None and np.nanmin(vals) < 0.0
         )
         clim = _auto_clim(vals, log_scale=log_scale, signed=is_signed)
 
@@ -803,9 +823,8 @@ def plot_volume_slice(
 
     if clim is None:
         _slice_vals = np.asarray(slice_mesh.point_data[scalar_name], dtype=float)
-        _is_signed = (
-            (vector_field is not None and component in ("x", "y", "z"))
-            or (scalar_field is not None and np.nanmin(_slice_vals) < 0.0)
+        _is_signed = (vector_field is not None and component in ("x", "y", "z")) or (
+            scalar_field is not None and np.nanmin(_slice_vals) < 0.0
         )
         clim = _auto_clim(_slice_vals, signed=_is_signed)
 

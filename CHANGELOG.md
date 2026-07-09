@@ -2,8 +2,6 @@
 
 ## 0.1.0
 
-### New Features
-
 - Electrostatic simulation end-to-end for Palace ([#146](https://github.com/gdsfactory/gsim/pull/146))
 - 2D Palace BoundaryMode solver support ([#150](https://github.com/gdsfactory/gsim/pull/150))
 - Frequency-dependent material dispersion and API refactor ([#143](https://github.com/gdsfactory/gsim/pull/143))
