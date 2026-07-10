@@ -26,13 +26,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Palace binary resolution and field visualization via palace-toolkit.
-# Pin numba to a range with cross-platform wheels for Python 3.12: without this,
-# uv's cross-platform resolution backtracks to numba 0.53.1 on Windows (due to a
-# numpy<2.5 vs numpy 2.5.1 conflict with scipy), pulling llvmlite 0.36.0 which
-# cannot build on Python 3.12. This pin can be removed once palace-toolkit
-# upstream constrains its numba dependency.
-palace-toolkit = ["palace-toolkit", "numba>=0.62,<0.63"]
+# Prebuilt Palace CPU binary distribution (palacetoolkit-palace-cpu).
+# This is a pure binary wheel — no mfem build required — distributed via
+# GitHub Releases. Currently only Linux x86_64 wheels are available, so
+# the extra is platform-marked accordingly.
+palace-toolkit-cpu = [
+  "palacetoolkit-palace-cpu @ https://github.com/EpsilonForge/PalaceToolkit/releases/download/palace-cpu-v0.1.2/palacetoolkit_palace_cpu-0.1.0-py3-none-linux_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 
 [dependency-groups]
 dev = [
@@ -170,11 +170,11 @@ module = "plotly.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = "palacetoolkit"
+module = "palacetoolkit_palace_cpu"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = "palacetoolkit.*"
+module = "palacetoolkit_palace_cpu.*"
 
 [tool.pylsp-mypy]
 enabled = true

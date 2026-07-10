@@ -531,13 +531,12 @@ def _mock_gcloud(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _no_palacetoolkit(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Ensure palacetoolkit is unavailable during the test."""
-    if "palacetoolkit" in sys.modules:
-        old = sys.modules["palacetoolkit"]
-        monkeypatch.delitem(sys.modules, "palacetoolkit", raising=False)
-        monkeypatch.delitem(sys.modules, "palacetoolkit.palace_runtime", raising=False)
+    """Ensure palacetoolkit_palace_cpu is unavailable during the test."""
+    if "palacetoolkit_palace_cpu" in sys.modules:
+        old = sys.modules["palacetoolkit_palace_cpu"]
+        monkeypatch.delitem(sys.modules, "palacetoolkit_palace_cpu", raising=False)
         yield
-        sys.modules["palacetoolkit"] = old
+        sys.modules["palacetoolkit_palace_cpu"] = old
     else:
         yield
 
@@ -551,9 +550,7 @@ class TestResolvePalaceBinary:
             mp.delenv("PALACE_BIN", raising=False)
             mp.delenv("PALACE_EXECUTABLE", raising=False)
             with mp.context() as mp2:
-                mp2.setattr(
-                    "gsim.palace.runtime._palacetoolkit_available", lambda: False
-                )
+                mp2.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
                 result = resolve_palace_binary()
                 assert result is None
 
@@ -576,13 +573,15 @@ class TestResolvePalaceBinary:
 
         fake_ptk_bin = Path("/opt/palacetoolkit/bin/palace")
 
-        # Simulate palacetoolkit being available
+        # Simulate palacetoolkit_palace_cpu being available
         with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("gsim.palace.runtime._palacetoolkit_available", lambda: True)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
             mp.setattr(
-                "palacetoolkit.palace_runtime.resolve_palace_binary",
+                "palacetoolkit_palace_cpu.palace_binary_path",
                 lambda: fake_ptk_bin,
             )
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda _: True)
+            mp.setattr("pathlib.Path.is_file", lambda _: True)
             result = resolve_palace_binary()
             assert result is not None
 
@@ -592,7 +591,7 @@ class TestResolvePalaceBinary:
 
         with pytest.MonkeyPatch().context() as mp:
             mp.setenv("PALACE_BIN", "/usr/bin/palace")
-            mp.setattr("gsim.palace.runtime._palacetoolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
             result = resolve_palace_binary(prefer_bundled=True)
             assert result is None
 
@@ -603,7 +602,7 @@ class TestResolvePalaceLibraryDir:
         from gsim.palace.runtime import resolve_palace_library_dir
 
         with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("gsim.palace.runtime._palacetoolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
             assert resolve_palace_library_dir() is None
 
     @pytest.mark.usefixtures("_mock_gcloud")
@@ -613,11 +612,12 @@ class TestResolvePalaceLibraryDir:
         fake_lib = Path("/opt/palacetoolkit/lib")
 
         with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("gsim.palace.runtime._palacetoolkit_available", lambda: True)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
             mp.setattr(
-                "palacetoolkit.palace_runtime.resolve_palace_library_dir",
+                "palacetoolkit_palace_cpu.palace_library_path",
                 lambda: fake_lib,
             )
+            mp.setattr("pathlib.Path.is_dir", lambda _: True)
             result = resolve_palace_library_dir()
             assert result is not None
 
@@ -625,11 +625,11 @@ class TestResolvePalaceLibraryDir:
 class TestPalacetoolkitAvailable:
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_true_when_installed(self) -> None:
-        from gsim.palace.runtime import _palacetoolkit_available
+        from gsim.palace.runtime import _palace_cpu_available
 
-        # Since we mocked gcloud but not palacetoolkit, if it's actually
-        # installed on the system, this will be True. We can't force it
-        # to be True via mock here without patching importlib, which is
+        # Since we mocked gcloud but not palacetoolkit_palace_cpu, if it's
+        # actually installed on the system, this will be True. We can't force
+        # it to be True via mock here without patching importlib, which is
         # fragile.  Instead we just verify the function runs.
-        result = _palacetoolkit_available()
+        result = _palace_cpu_available()
         assert isinstance(result, bool)

@@ -1,14 +1,15 @@
 """Palace runtime/binary resolution.
 
 Provides a unified resolver for locating a Palace executable, with
-optional delegation to ``palacetoolkit`` when installed.
+optional delegation to the ``palacetoolkit_palace_cpu`` package (the
+``palace-toolkit-cpu`` distribution) when installed.
 
 Resolution order
 -----------------
 1. ``PALACE_BIN`` environment variable.
 2. ``PALACE_EXECUTABLE`` environment variable, or ``"palace"`` in ``PATH``.
-3. ``palacetoolkit.palace_runtime.resolve_palace_binary()`` (when the
-   optional ``palace-toolkit`` package is installed).
+3. ``palacetoolkit_palace_cpu`` packaged binary (when the optional
+   ``palace-toolkit-cpu`` extra is installed).
 4. ``None`` if nothing was found.
 """
 
@@ -23,9 +24,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _palacetoolkit_available() -> bool:
-    """Check whether the optional ``palacetoolkit`` package can be imported."""
-    return importlib.util.find_spec("palacetoolkit") is not None
+def _palace_cpu_available() -> bool:
+    """Check whether the optional ``palacetoolkit_palace_cpu`` package is installed."""
+    return importlib.util.find_spec("palacetoolkit_palace_cpu") is not None
 
 
 def resolve_palace_binary(
@@ -38,7 +39,7 @@ def resolve_palace_binary(
     ----------
     prefer_bundled:
         If ``True``, skip the ``PALACE_BIN`` / ``PALACE_EXECUTABLE`` /
-        ``PATH`` checks and go straight to the palace-toolkit bundled
+        ``PATH`` checks and go straight to the palace-toolkit-cpu bundled
         binary (useful when the caller explicitly wants the bundled
         runtime).
 
@@ -72,26 +73,25 @@ def resolve_palace_binary(
             )
             return Path(resolved).resolve()
 
-    # 3. Optional palace-toolkit bundled binary
-    if _palacetoolkit_available():
-        # Lazy import — only load when palace-toolkit is installed
-        from palacetoolkit.palace_runtime import (  # type: ignore[import-untyped,import-not-found]
-            resolve_palace_binary as ptk_resolve,
-        )
+    # 3. Optional palace-toolkit-cpu bundled binary
+    if _palace_cpu_available():
+        from palacetoolkit_palace_cpu import palace_binary_path
 
-        ptk_bin = ptk_resolve()
-        if ptk_bin is not None:
+        candidate = palace_binary_path()
+        if candidate.is_file() and _binary_is_runnable(candidate):
             logger.info(
-                "resolve_palace_binary: using palace-toolkit bundled binary %s",
-                ptk_bin,
+                "resolve_palace_binary: using palace-toolkit-cpu bundled binary %s",
+                candidate,
             )
-            return Path(ptk_bin).resolve()
+            return candidate.resolve()
         logger.info(
-            "resolve_palace_binary: palace-toolkit is installed "
+            "resolve_palace_binary: palace-toolkit-cpu is installed "
             "but no bundled binary was found"
         )
     else:
-        logger.debug("resolve_palace_binary: palace-toolkit not installed — skipping")
+        logger.debug(
+            "resolve_palace_binary: palace-toolkit-cpu not installed — skipping"
+        )
 
     return None
 
@@ -99,22 +99,20 @@ def resolve_palace_binary(
 def resolve_palace_library_dir() -> Path | None:
     """Return the Palace library directory (for ``LD_LIBRARY_PATH``).
 
-    Only available when ``palace-toolkit`` is installed and provides a
+    Only available when ``palace-toolkit-cpu`` is installed and provides a
     bundled ``lib/`` directory alongside its binary.
 
     Returns:
     -------
     Path | None
     """
-    if not _palacetoolkit_available():
+    if not _palace_cpu_available():
         return None
 
-    from palacetoolkit.palace_runtime import (  # type: ignore[import-untyped,import-not-found]
-        resolve_palace_library_dir as ptk_lib_dir,
-    )
+    from palacetoolkit_palace_cpu import palace_library_path
 
-    lib_dir = ptk_lib_dir()
-    return Path(lib_dir).resolve() if lib_dir is not None else None
+    lib_dir = palace_library_path()
+    return lib_dir.resolve() if lib_dir.is_dir() else None
 
 
 def _binary_is_runnable(binary: Path, timeout: float = 15.0) -> bool:

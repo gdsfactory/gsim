@@ -132,7 +132,7 @@ from gsim.palace.results import (
     load_sparams,
 )
 
-# Runtime / binary resolution (optional palace-toolkit dependency)
+# Runtime / binary resolution (optional palace-toolkit-cpu dependency)
 from gsim.palace.runtime import resolve_palace_binary, resolve_palace_library_dir
 
 # Visualization

@@ -1657,7 +1657,7 @@ class PalaceSimMixin:
         import shutil
         import subprocess
 
-        # Will hold the bundled library directory when using palace-toolkit
+        # Will hold the bundled library directory when using palace-toolkit-cpu
         _bundled_lib_dir: Path | None = None
 
         if self._output_dir is None:
@@ -1789,7 +1789,7 @@ class PalaceSimMixin:
                     resolved_exe = env_exe
                     lib_dir = None
                 else:
-                    # Try bundled resolver (palace-toolkit, PALACE_BIN, PATH)
+                    # Try bundled resolver (palace-toolkit-cpu, PALACE_BIN, PATH)
                     from gsim.palace.runtime import (
                         resolve_palace_binary,
                         resolve_palace_library_dir,
@@ -1811,8 +1811,8 @@ class PalaceSimMixin:
             if resolved_exe is None:
                 raise FileNotFoundError(
                     "Palace executable not found. Set PALACE_BIN, "
-                    "PALACE_EXECUTABLE, or install palace-toolkit "
-                    "(pip install gsim[palace-toolkit])."
+                    "PALACE_EXECUTABLE, or install palace-toolkit-cpu "
+                    "(pip install gsim[palace-toolkit-cpu])."
                 )
 
             exe_path = Path(resolved_exe)
@@ -1824,8 +1824,8 @@ class PalaceSimMixin:
                     raise FileNotFoundError(
                         f"Palace executable not found: {exe_path}. "
                         "Install Palace directly or provide correct path via "
-                        "palace_executable parameter, or install palace-toolkit: "
-                        "pip install gsim[palace-toolkit]"
+                        "palace_executable parameter, or install palace-toolkit-cpu: "
+                        "pip install gsim[palace-toolkit-cpu]"
                     )
                 exe_path = Path(resolved)
 
