@@ -573,13 +573,14 @@ class TestResolvePalaceBinary:
 
         fake_ptk_bin = Path("/opt/palacetoolkit/bin/palace")
 
-        # Simulate palacetoolkit_palace_cpu being available
+        class _FakePalaceCPU:
+            @staticmethod
+            def palace_binary_path() -> Path:
+                return fake_ptk_bin
+
         with pytest.MonkeyPatch().context() as mp:
+            mp.setitem(sys.modules, "palacetoolkit_palace_cpu", _FakePalaceCPU())
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
-            mp.setattr(
-                "palacetoolkit_palace_cpu.palace_binary_path",
-                lambda: fake_ptk_bin,
-            )
             mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda _: True)
             mp.setattr("pathlib.Path.is_file", lambda _: True)
             result = resolve_palace_binary()
@@ -611,12 +612,14 @@ class TestResolvePalaceLibraryDir:
 
         fake_lib = Path("/opt/palacetoolkit/lib")
 
+        class _FakePalaceCPU:
+            @staticmethod
+            def palace_library_path() -> Path:
+                return fake_lib
+
         with pytest.MonkeyPatch().context() as mp:
+            mp.setitem(sys.modules, "palacetoolkit_palace_cpu", _FakePalaceCPU())
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
-            mp.setattr(
-                "palacetoolkit_palace_cpu.palace_library_path",
-                lambda: fake_lib,
-            )
             mp.setattr("pathlib.Path.is_dir", lambda _: True)
             result = resolve_palace_library_dir()
             assert result is not None
