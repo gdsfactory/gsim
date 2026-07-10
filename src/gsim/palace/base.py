@@ -1780,8 +1780,8 @@ class PalaceSimMixin:
             lib_dir: Path | None = None
 
             if palace_executable is not None:
-                # Explicit parameter — use as-is
-                resolved_exe = Path(palace_executable).expanduser()
+                # Explicit parameter — resolve to absolute path
+                resolved_exe = Path(palace_executable).expanduser().resolve()
             else:
                 # Check PALACE_EXECUTABLE env var
                 env_exe = os.environ.get("PALACE_EXECUTABLE", "").strip()

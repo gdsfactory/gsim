@@ -280,10 +280,10 @@ def _make_triangle_mesh() -> tuple:
     # PyVista 0.46+ requires flat connectivity
     points = np.array(
         [
-            [0.0, 0.0, 0.0],  # 0
-            [1.0, 0.0, 0.0],  # 1
-            [1.0, 1.0, 0.0],  # 2
-            [0.0, 1.0, 0.0],  # 3
+            [0.0, 0.0, -0.5],  # 0
+            [1.0, 0.0, -0.5],  # 1
+            [1.0, 1.0, 0.5],  # 2
+            [0.0, 1.0, 0.5],  # 3
         ],
         dtype=float,
     )
@@ -505,7 +505,7 @@ class TestPlotBoundaryField:
         from gsim.palace.fields import _auto_clim
 
         # bulk ~1, a few peaks ~1000 (current crowding)
-        vals = np.concatenate([np.full(900, 1.0), np.full(100, 1000.0)])
+        vals = np.concatenate([np.full(990, 1.0), np.full(10, 1000.0)])
         vmin, vmax = _auto_clim(vals, log_scale=False)
         assert vmin == 0.0
         # 98th percentile of this distribution is 1.0 (peaks are top 2%)
@@ -665,7 +665,7 @@ class TestLoadFieldContext:
         fake_vol = SimpleNamespace(n_points=100, n_cells=10, _kind="vol")
         fake_bnd = SimpleNamespace(n_points=50, n_cells=5, _kind="bnd")
 
-        def fake_load_fields(_source, *, _excitation=1, _cycle=None, boundary=False):
+        def fake_load_fields(_source, *, boundary=False, **kwargs):  # noqa: ARG001
             return fake_bnd if boundary else fake_vol
 
         monkeypatch.setattr("gsim.palace.results.load_fields", fake_load_fields)
