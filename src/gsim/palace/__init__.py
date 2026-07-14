@@ -59,8 +59,27 @@ from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
 
-# 2D field visualization
-from gsim.palace.field_viz import extract_streamplot_inputs_2d, plot_fields_2d
+# Field-visualization (NaN-free direct mesh rendering)
+from gsim.palace.fields import (
+    BoundaryFieldData,
+    SelectorContext,
+    VolumeFieldData,
+    activate_vector_component,
+    build_selector_context,
+    extract_axis_slice,
+    extract_boundary_cells,
+    extract_plane_slice,
+    extract_slice_contours,
+    load_boundary_field_data,
+    load_field_context,
+    load_volume_field_data,
+    plot_boundary_field,
+    plot_volume_contours,
+    plot_volume_slice,
+    resolve_boundary_type_attributes,
+    resolve_entity_attributes,
+    resolve_scalar_field,
+)
 
 # Material resolution with dispersion
 from gsim.palace.materials import resolve_palace_materials_at_frequency
@@ -113,11 +132,15 @@ from gsim.palace.results import (
     load_sparams,
 )
 
+# Runtime / binary resolution (optional palace-toolkit-cpu dependency)
+from gsim.palace.runtime import resolve_palace_binary, resolve_palace_library_dir
+
 # Visualization
 from gsim.viz import plot_cross_section, plot_mesh
 
 __all__ = [
     "MATERIALS_DB",
+    "BoundaryFieldData",
     "BoundaryModeConfig",
     "BoundaryModeSim",
     "CPWPortConfig",
@@ -145,36 +168,55 @@ __all__ = [
     "PortType",
     "SParam",
     "SParams",
+    "SelectorContext",
     "SimulationResult",
     "Stack",
     "StackLayer",
     "TerminalConfig",
     "TransientConfig",
     "ValidationResult",
+    "VolumeFieldData",
     "WavePortConfig",
+    "activate_vector_component",
+    "build_selector_context",
     "configure_cpw_port",
     "configure_inplane_port",
     "configure_via_port",
+    "extract_axis_slice",
+    "extract_boundary_cells",
     "extract_from_pdk",
     "extract_layer_stack",
+    "extract_plane_slice",
     "extract_ports",
+    "extract_slice_contours",
     "extract_streamplot_inputs_2d",
     "generate_mesh",
     "get_material_properties",
     "get_port_map",
     "get_stack",
+    "load_boundary_field_data",
+    "load_field_context",
     "load_fields",
     "load_sparams",
     "load_stack_yaml",
+    "load_volume_field_data",
     "parse_layer_stack",
+    "plot_boundary_field",
     "plot_cross_section",
     "plot_fields_2d",
     "plot_mesh",
     "plot_stack",
+    "plot_volume_contours",
+    "plot_volume_slice",
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "resolve_boundary_type_attributes",
+    "resolve_entity_attributes",
+    "resolve_palace_binary",
+    "resolve_palace_library_dir",
     "resolve_palace_materials_at_frequency",
+    "resolve_scalar_field",
     "run_simulation",
 ]
 
