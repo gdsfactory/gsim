@@ -13,42 +13,32 @@
 # ---
 
 # %% [markdown]
-# # Standalone MEEP Eigenmode Solver — 1D Slab Modes
+# # MEEP Eigenmode Solver — 1D Slab Modes
 #
-# The `gsim.meep` module exposes a standalone eigenmode solver for
-# **1D slab modes**. This runs
-# MEEP locally - no cloud job required - and returns the effective index,
-# field profiles, and wavevectors.
+# Solve **1D slab modes** declaratively with the `Simulation` API.
+# Operations run locally via MEEP — no cloud required.
 #
 # **API overview:**
 #
-# | Function | What it does |
+# | API | What it does |
 # |---|---|
-# | `solve_slab_mode(stack, wavelength)` | 1D slab mode from a layer stack |
-# | `mode_z_grid(stack, n_points)` | Z-axis coordinates for field arrays |
-# | `refractive_index_profile(stack, z_grid, wavelength)` | n(z) from the layer stack |
-#
-# All solvers return a `ModeResult` with `.n_eff`, `.fields`, `.kdom`, `.n_group`, etc.
+# | `sim.mode_solver(wavelengths=[1.55])` | Configure eigenmode solver |
+# | `sim.solve_modes()` | Run solver, return `ModeSweepResult` |
+# | `sweep.results` | List of `ModeResult` (`.n_eff`, `.fields`, `.kdom`, `.n_group`, …) |
+# | `mode_z_grid(stack, ...)` | Z-axis coordinates for field arrays |
+# | `refractive_index_profile(stack, ...)` | n(z) from the layer stack |
 
 # %% [markdown]
-# ## Part 1 - Quick Start
-
-# %% [markdown]
-# ### Setup and imports
+# ## Part 1 — Quick Start
 
 # %%
 import gdsfactory as gf
 import matplotlib.pyplot as plt
 import numpy as np
 
+import gsim.meep as gm
 from gsim.common.stack import get_stack
-from gsim.meep import (
-    mode_z_grid,
-    refractive_index_profile,
-    solve_slab_mode,
-    solve_slab_modes,
-    solve_slab_wavelength_sweep,
-)
+from gsim.common.stack.extractor import LayerStack
 
 HAS_MEEP = False
 try:
@@ -62,45 +52,40 @@ except ImportError as err:
         "    conda install -c conda-forge pymeep"
     ) from err
 
-resolution = 64
-pml_thickness = 2
+RESOLUTION = 64
+PML = 2
+WL = 1.55
 
 gf.gpdk.PDK.activate()
 stack = get_stack()
 
-# %% [markdown]
-# ### Slab mode in 3 lines
-
 # %%
-result = solve_slab_mode(
-    stack=stack,
-    wavelength=1.55,
-    band_num=1,
-    parity="NO_PARITY",
-    resolution=resolution,
-    pml_thickness=pml_thickness,
-)
+sim = gm.Simulation()
+sim.geometry.stack = stack
+sim.solver.resolution = RESOLUTION
+sim.domain.pml = PML
+sim.mode_solver(wavelengths=[WL], num_bands=1, parity="NO_PARITY")
 
-print(f"n_eff   = {result.n_eff:.6f}")
-print(f"n_group = {result.n_group}")
-print(f"kdom    = {[f'{k:.6f}' for k in result.kdom]}")
-print(f"band    = {result.band_num}, parity = {result.parity}")
+sweep = sim.solve_modes()
+r = sweep.results[0]
 
-
-# %% [markdown]
-# ## Part 2 - Mode Results
+print(f"n_eff   = {r.n_eff:.6f}")
+print(f"n_group = {r.n_group}")
+print(f"kdom    = {[f'{k:.6f}' for k in r.kdom]}")
+print(f"band    = {r.band_num}, parity = {r.parity}")
 
 # %% [markdown]
-# ### Understanding ModeResult
+# ## Part 2 — Mode Results
+
+# %% [markdown]
+# ### ModeResult fields
 #
-# `ModeResult` is a Pydantic model containing everything the solver
-# extracted from MEEP:
+# `ModeResult` is a Pydantic model:
 #
 # | Attribute | Type | Description |
 # |---|---|---|
 # | `n_eff` | `float` | Effective index |
 # | `wavelength` | `float` | Free-space wavelength (um) |
-# | `frequency` | `float` | Frequency in MEEP units (1/um) |
 # | `fields` | `dict[str, np.ndarray]` | Complex field arrays keyed by component |
 # | `kdom` | `list[float]` | Dominant wavevector [kx, ky, kz] |
 # | `n_group` | `float \| None` | Group index (from `mode.group_velocity`) |
@@ -108,68 +93,45 @@ print(f"band    = {result.band_num}, parity = {result.parity}")
 # | `parity` | `str` | Parity constraint used |
 
 # %%
-z_quick = mode_z_grid(
-    stack, n_points=max(round(4.22 * resolution), 1), pml_thickness=pml_thickness
-)
-result_fields = solve_slab_mode(
-    stack=stack,
-    wavelength=1.55,
-    band_num=1,
-    parity="NO_PARITY",
-    resolution=resolution,
-    field_z_grid=z_quick,
-    pml_thickness=pml_thickness,
-)
-for comp, arr in result_fields.fields.items():
+sim.mode_solver(n_field_z=round(4.22 * RESOLUTION))
+sweep = sim.solve_modes()
+r = sweep.results[0]
+
+for comp, arr in r.fields.items():
     print(f"{comp}: shape={arr.shape}, |max|={np.abs(arr).max():.6f}")
 
 # %% [markdown]
 # ### Z-grid and refractive index profile
-#
-# Use the library functions `mode_z_grid()` and
-# `refractive_index_profile()` to reconstruct the coordinate system and
-# material profile. These replace the notebook's previous hardcoded
-# `eps_map`.
 
 # %%
-nz = max(round(2.22 * resolution), 1)  # span x resolution for default SOI stack
-z_um = mode_z_grid(stack, n_points=nz, pml_thickness=pml_thickness)
-n_profile = refractive_index_profile(stack, 1.55, z_grid=z_um)
+nz = max(round(2.22 * RESOLUTION), 1)
+z_um = gm.mode_z_grid(stack, n_points=nz, pml_thickness=PML)
+n_profile = gm.refractive_index_profile(stack, WL, z_grid=z_um)
 
 print(f"Z grid: {z_um[0]:.4f} ... {z_um[-1]:.4f} um  ({len(z_um)} points)")
 print(f"Index range: {n_profile.min():.4f} - {n_profile.max():.4f}")
 
 # %% [markdown]
 # ### Mode profile with index overlay
-#
-# Plot the dominant electric field component magnitude alongside the
-# refractive-index profile. The slab fundamental TE mode has its primary
-# field in `Ey`.
 
 # %%
-z_slab = mode_z_grid(
-    stack, n_points=max(round(4.22 * resolution), 1), pml_thickness=pml_thickness
-)
-result_slab = solve_slab_mode(
-    stack=stack,
-    wavelength=1.55,
-    resolution=resolution,
-    field_z_grid=z_slab,
-    pml_thickness=pml_thickness,
-)
-n_prof = refractive_index_profile(stack, 1.55, z_grid=z_slab)
+sim.mode_solver(n_field_z=max(round(4.22 * RESOLUTION), 1))
+sweep = sim.solve_modes()
+r = sweep.results[0]
 
-dom_comp = max(result_slab.fields, key=lambda k: np.abs(result_slab.fields[k]).max())
+z_slab = gm.mode_z_grid(
+    stack, n_points=max(round(4.22 * RESOLUTION), 1), pml_thickness=PML
+)
+n_prof = gm.refractive_index_profile(stack, WL, z_grid=z_slab)
+dom_comp = max(r.fields, key=lambda k: np.abs(r.fields[k]).max())
 
 fig, ax = plt.subplots(figsize=(7, 4))
-color_primary = "C0"
-
-field = result_slab.fields[dom_comp]
-ax.plot(z_slab, abs(field), color=color_primary, linewidth=1.5, label=f"|{dom_comp}|")
+field = r.fields[dom_comp]
+ax.plot(z_slab, abs(field), color="C0", linewidth=1.5, label=f"|{dom_comp}|")
 ax.plot(
     z_slab,
     field.real,
-    color=color_primary,
+    color="C0",
     alpha=0.35,
     linestyle="--",
     linewidth=1,
@@ -178,13 +140,12 @@ ax.plot(
 ax.plot(
     z_slab,
     field.imag,
-    color=color_primary,
+    color="C0",
     alpha=0.35,
     linestyle=":",
     linewidth=1,
     label=f"Im({dom_comp})",
 )
-
 ax.set_xlabel("z (um)")
 ax.set_ylabel("Field amplitude (arb. units)")
 
@@ -194,21 +155,17 @@ ax_idx.set_ylabel("Refractive index")
 ax_idx.set_ylim(bottom=0.8)
 
 ax.set_title(
-    f"Mode profile - {dom_comp}  (lambda={result_slab.wavelength:.2f} um, "
-    f"n_eff={result_slab.n_eff:.4f})"
+    f"Mode profile - {dom_comp}  (lambda={r.wavelength:.2f} um, n_eff={r.n_eff:.4f})"
 )
 ax.grid(True, alpha=0.2)
 fig.tight_layout()
 
-
 # %% [markdown]
 # ### Field component grid
-#
-# All six E- and H-field components in a subplot grid.
 
 # %%
 comps = sorted(
-    result_slab.fields.keys(),
+    r.fields.keys(),
     key=lambda c: "ExEyEzHxHyHz".index(c) if c in "ExEyEzHxHyHz" else 99,
 )
 n_cols = min(3, len(comps))
@@ -219,8 +176,7 @@ fig, axes = plt.subplots(
 )
 for idx, comp in enumerate(comps):
     ax = axes[idx // n_cols][idx % n_cols]
-    arr = result_slab.fields[comp]
-    ax.plot(z_slab, np.abs(arr), linewidth=1.2, label=f"|{comp}|")
+    ax.plot(z_slab, np.abs(r.fields[comp]), linewidth=1.2, label=f"|{comp}|")
     ax.set_title(comp)
     ax.set_xlabel("z (um)")
     ax.set_ylabel("Amplitude")
@@ -230,49 +186,33 @@ for idx in range(len(comps), n_rows * n_cols):
     axes[idx // n_cols][idx % n_cols].set_visible(False)
 
 fig.suptitle(
-    f"Field components - slab mode  lambda={result_slab.wavelength:.2f} um",
-    fontweight="bold",
+    f"Field components - slab mode  lambda={r.wavelength:.2f} um", fontweight="bold"
 )
 fig.tight_layout()
 
+# %% [markdown]
+# ## Part 3 — Advanced
 
 # %% [markdown]
-# ## Part 3 - Advanced
-
-# %% [markdown]
-# ### Simulation wrapper
+# ### Wavelength sweep & dispersion
 #
-# `Simulation.solve_modes()` resolves the stack and materials internally
-# from the `mode_solver` configuration, then delegates to the appropriate
-# solver.
+# `mode_solver.sweep_wavelength(start, stop, num)` populates the wavelength
+# list linearly.  Multiple wavelengths + single band dispatches to the
+# efficient shared-cell sweep internally.
 
 # %%
-from gsim import meep as meep_mod
+sim.mode_solver.sweep_wavelength(1.50, 1.60, 7)
+sweep = sim.solve_modes()
 
-sim = meep_mod.Simulation()
-sim.geometry.stack = stack
-sim.mode_solver(wavelengths=[1.55])
+# sweep.results are ordered by wavelength ascending
+wl_results = {r.wavelength: r for r in sweep.results}
+wavelengths = sorted(wl_results)
+n_effs = [wl_results[wl].n_eff for wl in wavelengths]
+n_groups = [wl_results[wl].n_group for wl in wavelengths]
 
-result = sim.solve_modes().results[0]
-print(f"n_eff = {result.n_eff:.6f}")
-
-# %% [markdown]
-# ### Wavelength sweep & dispersion curve
-
-# %%
-wavelengths = [1.50, 1.52, 1.54, 1.55, 1.56, 1.58, 1.60]
-results_sweep = solve_slab_wavelength_sweep(
-    stack=stack,
-    wavelengths=wavelengths,
-    band_num=1,
-    parity="NO_PARITY",
-    resolution=resolution,
-)
-n_effs = [results_sweep[wl].n_eff for wl in wavelengths]
-n_groups = [results_sweep[wl].n_group for wl in wavelengths]
 for wl in wavelengths:
     print(
-        f"  lambda = {wl:.2f} um -> n_eff = {results_sweep[wl].n_eff:.6f}, n_group = {results_sweep[wl].n_group}"
+        f"  lambda = {wl:.2f} um -> n_eff = {wl_results[wl].n_eff:.6f}, n_group = {wl_results[wl].n_group}"
     )
 
 fig, ax1 = plt.subplots()
@@ -294,22 +234,22 @@ else:
 ax1.set_title("Dispersion - fundamental TE mode")
 fig.tight_layout()
 
-
 # %% [markdown]
 # ### Multi-band modes
 #
 # The symmetric SOI slab (Si 220 nm core, SiO2 cladding) at lambda=1.55 um
-# has V-parameter approx 1.41 - it supports a single TE mode (TE0).
+# has V-parameter ~ 1.41 -- supports a single TE mode (TE0).
 # Bands beyond 1 are **leaky / radiation modes**: MEEP's MPB omega-solve
 # can converge to them because the finite PML-bounded cell discretises
 # the radiation continuum.  The library logs a warning for modes with
 # ``n_eff`` below the minimum cladding index.
 
 # %%
-from gsim.common.stack.extractor import Layer, LayerStack
+from gsim.common.stack.extractor import Layer
 
 
-def _soi_slab(t_si: float) -> LayerStack:
+def _make_soi_stack(t_si: float) -> LayerStack:
+    """Build a symmetric SOI slab stack: SiO2 / Si / SiO2."""
     return LayerStack(
         layers={
             "box": Layer(
@@ -343,7 +283,7 @@ def _soi_slab(t_si: float) -> LayerStack:
     )
 
 
-soi = _soi_slab(0.22)
+soi = _make_soi_stack(0.22)
 n_si = 3.4777
 n_sio2 = 1.4440
 V_param = (2 * np.pi / 1.55) * 0.22 / 2 * np.sqrt(n_si**2 - n_sio2**2)
@@ -351,44 +291,33 @@ print(
     f"V-parameter = {V_param:.3f}  ->  {max(1, int(2 * V_param / np.pi) + 1)} guided TE mode(s)"
 )
 
-band_results = solve_slab_modes(
-    stack=soi,
-    wavelength=1.55,
-    band_nums=list(range(1, 5)),
-    parity="NO_PARITY",
-    resolution=resolution,
-    pml_thickness=pml_thickness,
-)
+soi_sim = gm.Simulation()
+soi_sim.geometry.stack = soi
+soi_sim.solver.resolution = RESOLUTION
+soi_sim.domain.pml = PML
+soi_sim.mode_solver(wavelengths=[WL]).first(4)
+band_sweep = soi_sim.solve_modes()
+
+band_results = {r.band_num: r for r in band_sweep.results}
 for band, r in sorted(band_results.items()):
     tag = "GUIDED" if r.n_eff > n_sio2 else "LEAKY"
     print(
-        f"  band {band}: n_eff={r.n_eff:.6f}  ({tag})"
-        f"  n_group={r.n_group}"
-        f"  kdom={[f'{k:.4f}' for k in r.kdom[:2]]}..."
+        f"  band {band}: n_eff={r.n_eff:.6f}  ({tag})  n_group={r.n_group}  kdom={[f'{k:.4f}' for k in r.kdom[:2]]}..."
     )
 
 # %% [markdown]
 # ### Multi-band field profiles
-#
-# Plotting |Ey| for each available band on the SOI slab. Only TE0
-# (band 1) is physically guided; higher bands may be MPB artefacts.
 
 # %%
-nz_r = max(round(4.0 * resolution), 1)
-zz = mode_z_grid(soi, n_points=nz_r, pml_thickness=pml_thickness)
-band_fields = solve_slab_modes(
-    stack=soi,
-    wavelength=1.55,
-    band_nums=list(range(1, 5)),
-    parity="NO_PARITY",
-    resolution=resolution,
-    field_z_grid=zz,
-    pml_thickness=pml_thickness,
-)
+soi_sim.mode_solver(n_field_z=max(round(4.0 * RESOLUTION), 1))
+band_sweep = soi_sim.solve_modes()
+band_results = {r.band_num: r for r in band_sweep.results}
+
+zz = gm.mode_z_grid(soi, n_points=max(round(4.0 * RESOLUTION), 1), pml_thickness=PML)
 
 for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
     fig, ax = plt.subplots(figsize=(7, 4))
-    for band, r in sorted(band_fields.items()):
+    for band, r in sorted(band_results.items()):
         if comp in r.fields:
             tag = "guided" if r.n_eff > n_sio2 else "leaky"
             ax.plot(
@@ -404,55 +333,45 @@ for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
 
-
 # %% [markdown]
 # ### Parity modes
 #
 # MEEP's eigenmode solver supports parity constraints along Y and Z.
-# For the symmetric SOI slab stack, ``EVEN_Y`` selects the fundamental
-# TE0 mode.  ``ODD_Y`` selects the first odd-symmetry mode --
-# this may be a leaky/radiation mode if the waveguide is single-mode
-# (V < pi/2 approx 1.57).
+# For the symmetric SOI slab, ``EVEN_Y`` selects TE0.  ``ODD_Y`` selects
+# the first odd-symmetry mode -- leaky if V < pi/2 ~ 1.57.
 
 # %%
 parities = ["NO_PARITY", "EVEN_Y", "ODD_Y"]
 for parity in parities:
     try:
-        r = solve_slab_mode(
-            stack=soi,
-            wavelength=1.55,
-            band_num=1,
-            parity=parity,
-            resolution=resolution,
-            pml_thickness=pml_thickness,
-        )
+        p_sim = gm.Simulation()
+        p_sim.geometry.stack = soi
+        p_sim.solver.resolution = RESOLUTION
+        p_sim.domain.pml = PML
+        p_sim.mode_solver(wavelengths=[WL], band=1, parity=parity)
+        r = p_sim.solve_modes().results[0]
         tag = "guided" if r.n_eff > n_sio2 else "leaky"
         print(f"  {parity:10s}: n_eff={r.n_eff:.6f}  ({tag})")
     except RuntimeError as exc:
         print(f"  {parity:10s}: not found ({exc})")
 
 # %% [markdown]
-# ## Part 4 - Validation
+# ## Part 4 — Validation
 
 # %% [markdown]
 # ### Analytical SOI slab benchmark
 #
-# Validate the MEEP solver against the analytical transcendental equation
-# for a symmetric dielectric slab waveguide.
+# Validate against the analytical transcendental equation for a symmetric
+# dielectric slab waveguide.
 #
-# **Structure:** Si core (n=3.4777 @ 1.55 um) with thickness *t* = 220 nm,
-# SiO2 cladding (n=1.4440 @ 1.55 um).
+# **Structure:** Si core (n=3.4777), thickness 220 nm, SiO2 cladding (n=1.4440).
 #
-# **Transcendental equation for TE modes:**
+# **Even:**  $\tan(\kappa t/2) = \gamma / \kappa$
+# **Odd:**   $\tan(\kappa t/2) = -\kappa / \gamma$
 #
-# Even modes:  $$\tan(\kappa t/2) = \frac{\gamma}{\kappa}$$
-# Odd modes:   $$\tan(\kappa t/2) = -\frac{\kappa}{\gamma}$$
-#
-# where $$\kappa = \sqrt{n_\mathrm{core}^2 k_0^2 - \beta^2}, \quad
-# \gamma = \sqrt{\beta^2 - n_\mathrm{clad}^2 k_0^2}, \quad k_0 = 2\pi/\lambda$$
-
-# %% [markdown]
-# ### Analytical solver (inline)
+# where $\kappa = \sqrt{n_\mathrm{core}^2 k_0^2 - \beta^2}$,
+# $\gamma = \sqrt{\beta^2 - n_\mathrm{clad}^2 k_0^2}$,
+# $k_0 = 2\pi/\lambda$
 
 
 # %%
@@ -494,7 +413,7 @@ def solve_slab_analytical(
     if polarization == "TE":
         fns = [_te_even, _te_odd]
     else:
-        # TM: scale by (n_core/n_clad)^2 at the interface
+
         def _tm_even(beta: float) -> float:
             kappa = np.sqrt(max(n_core**2 * k0**2 - beta**2, 0))
             gamma = np.sqrt(max(beta**2 - n_clad**2 * k0**2, 0))
@@ -517,7 +436,6 @@ def solve_slab_analytical(
     results: dict[int, float] = {}
     mode_idx = 0
     for fn in fns:
-        # Scan beta range for sign changes
         betas = np.linspace(beta_min + 1e-4, beta_max - 1e-4, 10000)
         vals = np.array([fn(b) for b in betas])
         sign_changes = np.where(np.diff(np.signbit(vals)))[0]
@@ -530,22 +448,11 @@ def solve_slab_analytical(
                 beta_root = bisect(fn, b_lo, b_hi, xtol=1e-12)
                 n_eff = beta_root / k0
 
-                # Reject spurious "roots" caused by tan(kappa*t/2) -> +/-inf
-                # (pole crossing, not a genuine zero crossing)
-                kappa = np.sqrt(max(n_core**2 * k0**2 - beta_root**2, 0))
-                gamma = np.sqrt(max(beta_root**2 - n_clad**2 * k0**2, 0))
-                if gamma <= 0 or kappa <= 0:
-                    continue
-                # Reject spurious "roots" where tan(kappa*t/2) -> +/-inf (pole crossing).
-                # A genuine root gives fn(root) ~= 0; a pole crossing gives
-                # |fn(root)| >> 0 because the sign change occurs through +/-inf,
-                # not through zero.
                 kappa = np.sqrt(max(n_core**2 * k0**2 - beta_root**2, 0))
                 gamma = np.sqrt(max(beta_root**2 - n_clad**2 * k0**2, 0))
                 if gamma <= 0 or kappa <= 0:
                     continue
                 kt2 = kappa * t_core / 2.0
-                # tan poles at odd multiples of pi/2: |tan| -> inf
                 if abs(np.tan(kt2)) > 1e4:
                     continue
 
@@ -558,19 +465,8 @@ def solve_slab_analytical(
     return results
 
 
-# %%
-# Analytical benchmark parameters
-lambda_bench = 1.55
-n_si = 3.4777
-n_sio2 = 1.4440
-t_si = 0.22
-
 analytical = solve_slab_analytical(
-    wavelength=lambda_bench,
-    n_core=n_si,
-    n_clad=n_sio2,
-    t_core=t_si,
-    polarization="TE",
+    wavelength=WL, n_core=n_si, n_clad=n_sio2, t_core=0.22, polarization="TE"
 )
 print("Analytical TE slab modes (Si 220nm / SiO2):")
 for mode, n_eff in sorted(analytical.items()):
@@ -580,54 +476,13 @@ for mode, n_eff in sorted(analytical.items()):
 # ### Compare MEEP with analytical
 
 # %%
-from gsim.common.stack.extractor import LayerStack
-
-
-def _make_soi_stack(t_si: float) -> LayerStack:
-    """Build a symmetric SOI slab stack: SiO2 / Si / SiO2."""
-    layers = {
-        "box": Layer(
-            name="box",
-            gds_layer=(0, 0),
-            zmin=-2.0,
-            zmax=0.0,
-            thickness=2.0,
-            material="sio2",
-            layer_type="dielectric",
-        ),
-        "core": Layer(
-            name="core",
-            gds_layer=(1, 0),
-            zmin=0.0,
-            zmax=t_si,
-            thickness=t_si,
-            material="si",
-            layer_type="dielectric",
-        ),
-        "clad": Layer(
-            name="clad",
-            gds_layer=(2, 0),
-            zmin=t_si,
-            zmax=t_si + 2.0,
-            thickness=2.0,
-            material="sio2",
-            layer_type="dielectric",
-        ),
-    }
-    return LayerStack(layers=layers)
-
-
-soi_stack = _make_soi_stack(t_si)
-
-# MEEP fundamental TE0
-r_meep = solve_slab_mode(
-    stack=soi_stack,
-    wavelength=lambda_bench,
-    band_num=1,
-    parity="EVEN_Y",
-    resolution=resolution,
-    pml_thickness=pml_thickness,
-)
+# MEEP fundamental TE0 via Simulation API
+meep_sim = gm.Simulation()
+meep_sim.geometry.stack = soi
+meep_sim.solver.resolution = RESOLUTION
+meep_sim.domain.pml = PML
+meep_sim.mode_solver(wavelengths=[WL], band=1, parity="EVEN_Y")
+r_meep = meep_sim.solve_modes().results[0]
 
 if 0 in analytical:
     n_analytical = analytical[0]
@@ -638,21 +493,15 @@ if 0 in analytical:
 else:
     print("No analytical TE0 mode found.")
 
-# Compare higher-order modes if available (single sim, reused across bands)
-higher_modes = solve_slab_modes(
-    stack=soi_stack,
-    wavelength=lambda_bench,
-    band_nums=[2, 3, 4],
-    parity="NO_PARITY",
-    resolution=resolution,
-    pml_thickness=pml_thickness,
-)
-for band, r_meep_b in sorted(higher_modes.items()):
-    print(f"\nMEEP  band {band}: n_eff = {r_meep_b.n_eff:.6f}")
-
+# Higher-order modes
+meep_sim.mode_solver(wavelengths=[WL]).first(4).at_slab()
+higher = meep_sim.solve_modes()
+for r in higher.results:
+    if r.band_num > 1:
+        print(f"\nMEEP  band {r.band_num}: n_eff = {r.n_eff:.6f}")
 
 # %% [markdown]
-# ## Part 5 - Parameter Studies
+# ## Part 5 — Parameter Studies
 
 # %% [markdown]
 # ### Core thickness sweep
@@ -664,18 +513,16 @@ for band, r_meep_b in sorted(higher_modes.items()):
 thicknesses = [0.15, 0.18, 0.22, 0.25, 0.30, 0.35, 0.40]
 n_eff_thick: list[float] = []
 
-for t_si in thicknesses:
-    wg_stack = _make_soi_stack(t_si)
-    r = solve_slab_mode(
-        stack=wg_stack,
-        wavelength=1.55,
-        band_num=1,
-        parity="NO_PARITY",
-        resolution=resolution,
-        pml_thickness=pml_thickness,
-    )
+for t in thicknesses:
+    wg = _make_soi_stack(t)
+    ts = gm.Simulation()
+    ts.geometry.stack = wg
+    ts.solver.resolution = RESOLUTION
+    ts.domain.pml = PML
+    ts.mode_solver(wavelengths=[WL], band=1, parity="NO_PARITY")
+    r = ts.solve_modes().results[0]
     n_eff_thick.append(r.n_eff)
-    print(f"  t_Si = {t_si:.2f} um -> n_eff = {r.n_eff:.6f}")
+    print(f"  t_Si = {t:.2f} um -> n_eff = {r.n_eff:.6f}")
 
 fig, ax = plt.subplots()
 ax.plot(thicknesses, n_eff_thick, "s-", linewidth=1.5)
@@ -685,27 +532,24 @@ ax.set_title("n_eff vs core thickness  (lambda = 1.55 um, slab mode)")
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
 
-
 # %% [markdown]
 # ### Summary
 #
 # | Feature | API |
 # |---|---|
-# | Slab modes (1D) | `solve_slab_mode(stack, wavelength=...)` |
-# | Simulation wrapper | `sim.mode_solver(wavelengths=[1.55]); sim.solve_modes()` |
-# | Z-grid utility | `mode_z_grid(stack, n_points)` |
-# | Index profile | `refractive_index_profile(stack, z_grid, wavelength)` |
-# | Field profiles | `result.fields["Ey"]` — 1D complex array along *z* |
-# | Dispersion sweep | Loop over wavelengths -> n_eff(lambda) |
-# | Group index | `result.n_group` — direct from `mode.group_velocity` |
-# | Multi-band | `band_num=1, 2, 3, ...` |
-# | Parity modes | `parity="EVEN_Y"` etc. |
-# | Core thickness sweep | Vary `layer.thickness` on a copy of the stack -> n_eff(t) |
+# | Slab modes (1D) | `sim.mode_solver(wavelengths=[1.55]); sim.solve_modes()` |
+# | Field profiles | `sim.mode_solver(n_field_z=...); r.fields["Ey"]` |
+# | Z-grid utility | `gm.mode_z_grid(stack, n_points)` |
+# | Index profile | `gm.refractive_index_profile(stack, z_grid, wavelength)` |
+# | Dispersion sweep | `sim.mode_solver.sweep_wavelength(start, stop, n)` |
+# | Group index | `r.n_group` — direct from `mode.group_velocity` |
+# | Multi-band | `sim.mode_solver.first(4)` or `num_bands=4` |
+# | Parity modes | `sim.mode_solver(parity="EVEN_Y", …)` |
+# | Core thickness sweep | Vary `layer.thickness` -> new sim -> `n_eff(t)` |
 # | Analytical validation | Transcendental equation benchmark for SOI slab |
 #
 # **Next steps:**
 #
-# - Use the slab effective index as input to the variational 2D
-#   approximation (issue #156)
+# - Use the slab effective index as input to the variational 2D approximation
 # - Compare mode-solver n_eff with full FDTD frequency-domain results
 # - Run the same sweeps with `palace` (finite-element) for cross-validation
