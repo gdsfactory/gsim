@@ -148,7 +148,7 @@ sim = gm.Simulation(
     geometry=gm.Geometry(component=c, stack=stack),
     domain=gm.Domain(
         pml=PML_THICKNESS,
-        margin_z_above=0.5,
+        margin_z=(0.0, 0.5),
     ),
 )
 sim.mode_solver.wavelengths = [WAVELENGTH]
