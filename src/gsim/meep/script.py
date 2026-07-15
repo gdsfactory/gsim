@@ -617,12 +617,18 @@ def _estimate_source_x_size(config):
 
     Target length is ``6 * waist`` so the Gaussian envelope is captured
     well. If the cell is too narrow for that, cap and log a warning —
-    the user should increase ``domain.margin_xy`` or move the fiber.
+    the user should increase ``domain.margin_x``/``domain.margin_y`` or
+    move the fiber.
     """
     bbox = config.get("component_bbox")
     domain = config["domain"]
     dpml = domain["dpml"]
-    margin_xy = domain["margin_xy"]
+    margin_xy = max(
+        domain["margin_x_low"],
+        domain["margin_x_high"],
+        domain["margin_y_low"],
+        domain["margin_y_high"],
+    )
     fiber = config.get("fiber_source")
 
     if bbox is not None:
@@ -647,7 +653,7 @@ def _estimate_source_x_size(config):
         logger.warning(
             "Fiber x=%.2f is outside or at the cell interior edge "
             "(interior [%.2f, %.2f]); using minimum source size. "
-            "Increase domain.margin_xy or move the fiber.",
+            "Increase domain.margin_x/margin_y or move the fiber.",
             fx, interior_left, interior_right,
         )
         return 2.0
@@ -657,7 +663,7 @@ def _estimate_source_x_size(config):
         logger.warning(
             "Fiber source line capped at %.2f um (target %.2f = 6*waist); "
             "cell is too narrow on one side of fiber x=%.2f. "
-            "Increase domain.margin_xy so the Gaussian envelope fits.",
+            "Increase domain.margin_x/margin_y so the Gaussian envelope fits.",
             2.0 * max_half, target, fx,
         )
         return 2.0 * max_half
@@ -1570,11 +1576,16 @@ def main():
 
     domain = config["domain"]
     dpml = domain["dpml"]
-    margin_xy = domain["margin_xy"]
+    mx_lo = domain["margin_x_low"]
+    mx_hi = domain["margin_x_high"]
+    my_lo = domain["margin_y_low"]
+    my_hi = domain["margin_y_high"]
 
-    # XY: margin_xy is gap between geometry bbox and PML
-    cell_x = (bbox_right - bbox_left) + 2 * (margin_xy + dpml)
-    cell_y = (bbox_top - bbox_bottom) + 2 * (margin_xy + dpml)
+    # XY: per-side margins are the gap between geometry bbox and PML.
+    cell_x = (bbox_right - bbox_left) + mx_lo + mx_hi + 2 * dpml
+    cell_y = (bbox_top - bbox_bottom) + my_lo + my_hi + 2 * dpml
+    center_x = (bbox_right + bbox_left) / 2 + (mx_hi - mx_lo) / 2
+    center_y = (bbox_top + bbox_bottom) / 2 + (my_hi - my_lo) / 2
 
     # Z range for 3D and XZ 2D. Include both layers and dielectrics
     # so PDKs without explicit box/clad layers still have headroom.
@@ -1589,15 +1600,15 @@ def main():
     else:
         z_min, z_max = 0.0, 0.0
 
-    margin_z_above = domain.get("margin_z_above", 0.0)
-    margin_z_below = domain.get("margin_z_below", 0.0)
+    margin_z_below = domain["margin_z_low"]
+    margin_z_above = domain["margin_z_high"]
 
     if is_3d:
         # 3D: z-margins are already baked via z_crop; just add dpml.
         cell_z = (z_max - z_min) + 2 * dpml
         cell_center = mp.Vector3(
-            (bbox_right + bbox_left) / 2,
-            (bbox_top + bbox_bottom) / 2,
+            center_x,
+            center_y,
             (z_max + z_min) / 2,
         )
     elif is_xz:
@@ -1608,7 +1619,7 @@ def main():
         z_hi = z_max + margin_z_above
         cell_z = (z_hi - z_lo) + 2 * dpml
         cell_center = mp.Vector3(
-            (bbox_right + bbox_left) / 2,
+            center_x,
             0.0,
             (z_hi + z_lo) / 2,
         )
@@ -1616,8 +1627,8 @@ def main():
         # XY 2D: collapse z-dimension entirely.
         cell_z = 0
         cell_center = mp.Vector3(
-            (bbox_right + bbox_left) / 2,
-            (bbox_top + bbox_bottom) / 2,
+            center_x,
+            center_y,
             0,
         )
 
@@ -1625,7 +1636,10 @@ def main():
         "Cell size: %.2f x %.2f x %.2f um (%s)",
         cell_x, cell_y, cell_z, "3D" if is_3d else "2D",
     )
-    logger.info("PML: %.2f um, margin_xy: %.2f", dpml, margin_xy)
+    logger.info(
+        "PML: %.2f um, margin xy=(%.2f,%.2f)/(%.2f,%.2f)",
+        dpml, mx_lo, mx_hi, my_lo, my_hi,
+    )
     logger.info("Resolution: %s pixels/um", resolution)
 
     accuracy = config["accuracy"]

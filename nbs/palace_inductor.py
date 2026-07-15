@@ -183,21 +183,29 @@ f_sim = f
 #
 # The total impedance is:
 #
-# $$Z(f) = \frac{1}{j2\pi f C + \frac{1}{R + j2\pi f L}}$$
+# $$
+# Z(f) = \frac{1}{j2\pi f C + \frac{1}{R + j2\pi f L}}
+# $$
 #
 # We define the RLC impedance as a function of frequency. The total admittance (inverse of impedance) is the sum of the admittance of the series RL branch and the parasitic capacitance:
 #
-# $$\frac{1}{Z(f)} = \frac{1}{R + j2\pi f L} + j2\pi f C$$
+# $$
+# \frac{1}{Z(f)} = \frac{1}{R + j2\pi f L} + j2\pi f C
+# $$
 #
 # We rewrite the RLC impedance in normalized form. Defining $\tilde\omega = \omega/\omega_0$, the dimensionless impedance is:
 #
-# $$z(\tilde\omega, Q) = \frac{1 + j\tilde\omega Q}{1 - \tilde\omega^2 + j\tilde\omega/Q}$$
+# $$
+# z(\tilde\omega, Q) = \frac{1 + j\tilde\omega Q}{1 - \tilde\omega^2 + j\tilde\omega/Q}
+# $$
 #
 # so that $Z(f) = R \cdot z(f/f_0, Q)$.
 #
 # The loss function measures the total squared error between the model and the simulated data across all frequencies:
 #
-# $$\mathcal{L}(f_0, Q, R) = \sum_k \left| Z_\text{sim}(f_k) - R \cdot z(f_k/f_0, Q) \right|^2$$
+# $$
+# \mathcal{L}(f_0, Q, R) = \sum_k \left| Z_\text{sim}(f_k) - R \cdot z(f_k/f_0, Q) \right|^2
+# $$
 #
 # This is a real-valued scalar that JAX will differentiate with respect to $f_0$, $Q$, and $R$ to drive the optimization.
 
@@ -250,7 +258,9 @@ print(f"f0 = {f0_ini / 1e9:.3f} GHz | Q = {Q_ini:.3f} | R = {R_ini:.4f} Ohm")
 #
 # At each step, Adam computes the gradient $\nabla_\theta \mathcal{L}$ automatically via JAX autodiff and updates the parameters:
 #
-# $$\theta_{n+1} = \theta_n - \alpha \cdot \text{Adam}(\nabla_\theta \mathcal{L}(\theta_n))$$
+# $$
+# \theta_{n+1} = \theta_n - \alpha \cdot \text{Adam}(\nabla_\theta \mathcal{L}(\theta_n))
+# $$
 
 # %%
 import optax
@@ -277,7 +287,9 @@ f0_fit, Q_fit, R_fit = float(par[0]), float(par[1]), float(par[2])
 #
 # Once converged, $L$ and $C$ are recovered analytically from the fitted $(f_0, Q, R)$ using the RLC resonance relations:
 #
-# $$L = \frac{Q \cdot R}{\omega_0}, \quad C = \frac{1}{L\omega_0^2}$$
+# $$
+# L = \frac{Q \cdot R}{\omega_0}, \quad C = \frac{1}{L\omega_0^2}
+# $$
 #
 # where $\omega_0 = 2\pi f_0$.
 
@@ -337,7 +349,9 @@ plt.show()
 #
 # The admittance matrix for a symmetric two-port is:
 #
-# $$Y = \begin{pmatrix} Y_\text{tot} & -Y_\text{tot} \\ -Y_\text{tot} & Y_\text{tot} \end{pmatrix}, \quad Y_\text{tot} = \frac{1}{R + j2\pi f L} + j2\pi f C$$
+# $$
+# Y = \begin{pmatrix} Y_\text{tot} & -Y_\text{tot} \\ -Y_\text{tot} & Y_\text{tot} \end{pmatrix}, \quad Y_\text{tot} = \frac{1}{R + j2\pi f L} + j2\pi f C
+# $$
 #
 # The netlist connects the inductor directly between `IN` and `GND` — a single-port measurement configuration, consistent with how $Z_\text{diff}$ was extracted from the simulation.
 

@@ -69,6 +69,7 @@ dist/
 docs/_build/
 docs/nbs/
 docs/site/
+docs/CHANGELOG.md
 downloads/
 eggs/
 env.bak/

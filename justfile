@@ -37,10 +37,14 @@ test:
 cov:
   uv run pytest --cov=gsim --cov-report=term-missing:skip-covered --cov-report=xml
 
-docs:
+# Copy the root CHANGELOG into docs/ so zensical can build it (docs_dir is docs/)
+sync-changelog:
+  cp CHANGELOG.md docs/CHANGELOG.md
+
+docs: sync-changelog
   uv run zensical build -f docs/zensical.toml
 
-serve:
+serve: sync-changelog
   uv run zensical serve -f docs/zensical.toml -a localhost:8080
 
 # Run a notebook normally (interactive plots): just nbrun nbs/foo.ipynb

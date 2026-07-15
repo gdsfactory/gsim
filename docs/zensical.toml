@@ -8,7 +8,8 @@ nav = [
     { "Directional Coupler" = "nbs/meep_dc.md" },
     { "Crossing" = "nbs/meep_crossing.md" },
     { "2D FDTD" = "nbs/meep_2d.md" },
-    { "2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" }
+    { "2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" },
+    { "2D Grating Coupler: Wavelength Sweep" = "nbs/meep_2d_xz_gc_wavelength_sweep.md" }
   ] },
   { "FEM for RF" = [
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
@@ -21,6 +22,7 @@ nav = [
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
+  { "Changelog" = "CHANGELOG.md" },
   { "API Reference" = [
     { "Palace" = "api/palace.md" },
     { "Meep" = "api/meep.md" },
@@ -31,6 +33,8 @@ nav = [
 site_dir = "site"
 site_name = "gsim"
 site_url = "https://gdsfactory.com/gsim"
+repo_url = "https://gdsfactory.com/"
+repo_name = "gdsfactory.com"
 
 [project.plugins.search]
 
@@ -62,3 +66,20 @@ summary = true
 
 [project.theme]
 name = "material"
+custom_dir = "overrides"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-7"
+name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+
+[project.theme.palette.toggle]
+icon = "material/brightness-4"
+name = "Switch to light mode"
