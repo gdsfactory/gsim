@@ -638,10 +638,6 @@ class Simulation(BaseModel):
         if stack is None:
             raise ValueError("Stack resolution failed.")
 
-        # Apply z-crop if configured (idempotent — z_crop clears itself).
-        if self.geometry.z_crop is not None:
-            self._apply_z_crop()
-
         # Collect material names from stack layers and dielectrics.
         used_materials: set[str] = set()
         for layer in stack.layers.values():
