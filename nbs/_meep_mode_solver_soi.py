@@ -32,13 +32,11 @@
 # ## Part 1 — Quick Start
 
 # %%
-import gdsfactory as gf
 import matplotlib.pyplot as plt
 import numpy as np
 
 import gsim.meep as gm
-from gsim.common.stack import get_stack
-from gsim.common.stack.extractor import LayerStack
+from gsim.common.stack.extractor import Layer, LayerStack
 
 HAS_MEEP = False
 try:
@@ -52,12 +50,64 @@ except ImportError as err:
         "    conda install -c conda-forge pymeep"
     ) from err
 
-RESOLUTION = 64
-PML = 2
+RESOLUTION = 128
 WL = 1.55
+PML = 1.6
+n_points = 1000
 
-gf.gpdk.PDK.activate()
-stack = get_stack()
+import math
+
+from gsim.common.stack.materials import resolve_material_at_wavelength
+
+
+def _n_si(wl_um: float) -> float:
+    """Si refractive index from gsim Sellmeier model (Salzberg & Villa 1957)."""
+    return math.sqrt(resolve_material_at_wavelength("si", wl_um).permittivity_scalar)
+
+
+def _n_sio2(wl_um: float) -> float:
+    """SiO2 refractive index from gsim Sellmeier model (Malitson 1965)."""
+    return math.sqrt(resolve_material_at_wavelength("sio2", wl_um).permittivity_scalar)
+
+
+def _make_soi_stack(t_si: float) -> LayerStack:
+    """Build a symmetric SOI slab stack: SiO2 / Si / SiO2."""
+    t_sio2 = 1.6
+    return LayerStack(
+        layers={
+            "box": Layer(
+                name="box",
+                gds_layer=(0, 0),
+                zmin=-t_sio2,
+                zmax=0.0,
+                thickness=t_sio2,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+            "core": Layer(
+                name="core",
+                gds_layer=(1, 0),
+                zmin=0.0,
+                zmax=t_si,
+                thickness=t_si,
+                material="si",
+                layer_type="dielectric",
+            ),
+            "clad": Layer(
+                name="clad",
+                gds_layer=(2, 0),
+                zmin=t_si,
+                zmax=t_si + t_sio2,
+                thickness=t_sio2,
+                material="sio2",
+                layer_type="dielectric",
+            ),
+        }
+    )
+
+
+soi = _make_soi_stack(0.22)
+stack = soi
 
 # %%
 sim = gm.Simulation()
@@ -93,7 +143,7 @@ print(f"band    = {r.band_num}, parity = {r.parity}")
 # | `parity` | `str` | Parity constraint used |
 
 # %%
-sim.mode_solver(n_field_z=round(4.22 * RESOLUTION))
+sim.mode_solver(n_field_z=n_points)
 sweep = sim.solve_modes()
 r = sweep.results[0]
 
@@ -104,8 +154,7 @@ for comp, arr in r.fields.items():
 # ### Z-grid and refractive index profile
 
 # %%
-nz = max(round(2.22 * RESOLUTION), 1)
-z_um = gm.mode_z_grid(stack, n_points=nz, pml_thickness=PML)
+z_um = gm.mode_z_grid(stack, n_points=n_points, pml_thickness=PML)
 n_profile = gm.refractive_index_profile(stack, WL, z_grid=z_um)
 
 print(f"Z grid: {z_um[0]:.4f} ... {z_um[-1]:.4f} um  ({len(z_um)} points)")
@@ -115,13 +164,11 @@ print(f"Index range: {n_profile.min():.4f} - {n_profile.max():.4f}")
 # ### Mode profile with index overlay
 
 # %%
-sim.mode_solver(n_field_z=max(round(4.22 * RESOLUTION), 1))
+sim.mode_solver(n_field_z=n_points)
 sweep = sim.solve_modes()
 r = sweep.results[0]
 
-z_slab = gm.mode_z_grid(
-    stack, n_points=max(round(4.22 * RESOLUTION), 1), pml_thickness=PML
-)
+z_slab = gm.mode_z_grid(stack, n_points=n_points, pml_thickness=PML)
 n_prof = gm.refractive_index_profile(stack, WL, z_grid=z_slab)
 dom_comp = max(r.fields, key=lambda k: np.abs(r.fields[k]).max())
 
@@ -215,24 +262,6 @@ for wl in wavelengths:
         f"  lambda = {wl:.2f} um -> n_eff = {wl_results[wl].n_eff:.6f}, n_group = {wl_results[wl].n_group}"
     )
 
-fig, ax1 = plt.subplots()
-(line1,) = ax1.plot(wavelengths, n_effs, "o-", label="n_eff")
-ax1.set_xlabel("Wavelength (um)")
-ax1.set_ylabel("n_eff")
-ax1.grid(True, alpha=0.3)
-
-ax2 = ax1.twinx()
-group_vals = [g for g in n_groups if g is not None]
-if group_vals:
-    (line2,) = ax2.plot(wavelengths, n_groups, "s--", color="C1", label="n_group")
-    ax2.set_ylabel("n_group")
-    lines = [line1, line2]
-    ax1.legend(lines, [l.get_label() for l in lines], loc="upper right")
-else:
-    ax1.legend(loc="upper right")
-
-ax1.set_title("Dispersion - fundamental TE mode")
-fig.tight_layout()
 
 # %% [markdown]
 # ### Multi-band modes
@@ -245,48 +274,7 @@ fig.tight_layout()
 # ``n_eff`` below the minimum cladding index.
 
 # %%
-from gsim.common.stack.extractor import Layer
-
-
-def _make_soi_stack(t_si: float) -> LayerStack:
-    """Build a symmetric SOI slab stack: SiO2 / Si / SiO2."""
-    return LayerStack(
-        layers={
-            "box": Layer(
-                name="box",
-                gds_layer=(0, 0),
-                zmin=-2.0,
-                zmax=0.0,
-                thickness=2.0,
-                material="sio2",
-                layer_type="dielectric",
-            ),
-            "core": Layer(
-                name="core",
-                gds_layer=(1, 0),
-                zmin=0.0,
-                zmax=t_si,
-                thickness=t_si,
-                material="si",
-                layer_type="dielectric",
-            ),
-            "clad": Layer(
-                name="clad",
-                gds_layer=(2, 0),
-                zmin=t_si,
-                zmax=t_si + 2.0,
-                thickness=2.0,
-                material="sio2",
-                layer_type="dielectric",
-            ),
-        }
-    )
-
-
-soi = _make_soi_stack(0.22)
-n_si = 3.4777
-n_sio2 = 1.4440
-V_param = (2 * np.pi / 1.55) * 0.22 / 2 * np.sqrt(n_si**2 - n_sio2**2)
+V_param = (2 * np.pi / WL) * 0.22 / 2 * np.sqrt(_n_si(WL) ** 2 - _n_sio2(WL) ** 2)
 print(
     f"V-parameter = {V_param:.3f}  ->  {max(1, int(2 * V_param / np.pi) + 1)} guided TE mode(s)"
 )
@@ -300,7 +288,7 @@ band_sweep = soi_sim.solve_modes()
 
 band_results = {r.band_num: r for r in band_sweep.results}
 for band, r in sorted(band_results.items()):
-    tag = "GUIDED" if r.n_eff > n_sio2 else "LEAKY"
+    tag = "GUIDED" if r.n_eff > _n_sio2(WL) else "LEAKY"
     print(
         f"  band {band}: n_eff={r.n_eff:.6f}  ({tag})  n_group={r.n_group}  kdom={[f'{k:.4f}' for k in r.kdom[:2]]}..."
     )
@@ -309,17 +297,17 @@ for band, r in sorted(band_results.items()):
 # ### Multi-band field profiles
 
 # %%
-soi_sim.mode_solver(n_field_z=max(round(4.0 * RESOLUTION), 1))
+soi_sim.mode_solver(n_field_z=n_points)
 band_sweep = soi_sim.solve_modes()
 band_results = {r.band_num: r for r in band_sweep.results}
 
-zz = gm.mode_z_grid(soi, n_points=max(round(4.0 * RESOLUTION), 1), pml_thickness=PML)
+zz = gm.mode_z_grid(soi, n_points=n_points, pml_thickness=PML)
 
 for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
     fig, ax = plt.subplots(figsize=(7, 4))
     for band, r in sorted(band_results.items()):
         if comp in r.fields:
-            tag = "guided" if r.n_eff > n_sio2 else "leaky"
+            tag = "guided" if r.n_eff > _n_sio2(WL) else "leaky"
             ax.plot(
                 zz,
                 abs(r.fields[comp]),
@@ -350,7 +338,7 @@ for parity in parities:
         p_sim.domain.pml = PML
         p_sim.mode_solver(wavelengths=[WL], band=1, parity=parity)
         r = p_sim.solve_modes().results[0]
-        tag = "guided" if r.n_eff > n_sio2 else "leaky"
+        tag = "guided" if r.n_eff > _n_sio2(WL) else "leaky"
         print(f"  {parity:10s}: n_eff={r.n_eff:.6f}  ({tag})")
     except RuntimeError as exc:
         print(f"  {parity:10s}: not found ({exc})")
@@ -465,8 +453,99 @@ def solve_slab_analytical(
     return results
 
 
+def _analytical_ngroup(
+    wavelength: float,
+    n_core: float,
+    n_clad: float,
+    t_core: float,
+    polarization: str = "TE",
+) -> dict[int, float]:
+    """Group index from analytic derivative of the characteristic equation.
+
+    Uses implicit differentiation: n_g = dbeta/dk0 = -dF/dk0 / dF/dbeta.
+    """
+    k0 = 2.0 * np.pi / wavelength
+    n1, n2 = n_core, n_clad
+    t = t_core
+
+    if polarization == "TE":
+
+        def _even_fn(beta: float) -> float:
+            kappa = np.sqrt(max(n1**2 * k0**2 - beta**2, 0))
+            gamma = np.sqrt(max(beta**2 - n2**2 * k0**2, 0))
+            if kappa == 0:
+                return -1e6
+            return kappa * np.tan(kappa * t / 2) - gamma
+
+        def _odd_fn(beta: float) -> float:
+            kappa = np.sqrt(max(n1**2 * k0**2 - beta**2, 0))
+            gamma = np.sqrt(max(beta**2 - n2**2 * k0**2, 0))
+            if gamma == 0:
+                return -1e6
+            return gamma * np.tan(kappa * t / 2) + kappa
+
+        def _te_even_n_g(n_eff: float, kappa: float, gamma: float) -> float:
+            k2 = kappa**2
+            g2 = gamma**2
+            com = gamma / k2 + (t / 2) * (1 + g2 / k2) + 1 / gamma
+            num = n1**2 * gamma / k2 + n1**2 * (t / 2) * (1 + g2 / k2) + n2**2 / gamma
+            return num / (n_eff * com)
+
+        def _te_odd_n_g(n_eff: float, kappa: float, gamma: float) -> float:
+            k2 = kappa**2
+            g2 = gamma**2
+            com = kappa / g2 + gamma * t / (2 * kappa) * (1 + k2 / g2) + 1 / kappa
+            num = (
+                n2**2 * kappa / g2
+                + n1**2 * gamma * t / (2 * kappa) * (1 + k2 / g2)
+                + n1**2 / kappa
+            )
+            return num / (n_eff * com)
+
+        fns = [(_even_fn, _te_even_n_g), (_odd_fn, _te_odd_n_g)]
+    else:
+        # TM modes not implemented for analytic group index
+        return {}
+
+    beta_min = n2 * k0
+    beta_max = n1 * k0
+
+    results: dict[int, float] = {}
+    seen_neff: set[float] = set()
+    mode_idx = 0
+    for fn, ng_fn in fns:
+        betas = np.linspace(beta_min + 1e-4, beta_max - 1e-4, 10000)
+        vals = np.array([fn(b) for b in betas])
+        sign_changes = np.where(np.diff(np.signbit(vals)))[0]
+        for si in sign_changes:
+            b_lo = betas[si]
+            b_hi = betas[min(si + 1, len(betas) - 1)]
+            try:
+                from scipy.optimize import bisect
+
+                beta_root = bisect(fn, b_lo, b_hi, xtol=1e-12)
+                n_eff = beta_root / k0
+                kappa = np.sqrt(max(n1**2 * k0**2 - beta_root**2, 0))
+                gamma = np.sqrt(max(beta_root**2 - n2**2 * k0**2, 0))
+                if gamma <= 0 or kappa <= 0:
+                    continue
+                kt2 = kappa * t / 2.0
+                if abs(np.tan(kt2)) > 1e4:
+                    continue
+                n_eff_rounded = round(n_eff, 10)
+                if n_eff_rounded in seen_neff:
+                    continue
+                seen_neff.add(n_eff_rounded)
+                results[mode_idx] = ng_fn(n_eff, kappa, gamma)
+                mode_idx += 1
+            except Exception:
+                pass
+
+    return results
+
+
 analytical = solve_slab_analytical(
-    wavelength=WL, n_core=n_si, n_clad=n_sio2, t_core=0.22, polarization="TE"
+    wavelength=WL, n_core=_n_si(WL), n_clad=_n_sio2(WL), t_core=0.22, polarization="TE"
 )
 print("Analytical TE slab modes (Si 220nm / SiO2):")
 for mode, n_eff in sorted(analytical.items()):
@@ -501,9 +580,57 @@ for r in higher.results:
         print(f"\nMEEP  band {r.band_num}: n_eff = {r.n_eff:.6f}")
 
 # %% [markdown]
-# ## Part 5 — Parameter Studies
+# ### Wavelength sweep — Meep vs Analytical
 
+# %%
+wl_analytical_neff = [
+    solve_slab_analytical(wl, _n_si(wl), _n_sio2(wl), 0.22, "TE").get(0)
+    for wl in wavelengths
+]
+wl_analytical_ngroup = [
+    _analytical_ngroup(wl, _n_si(wl), _n_sio2(wl), 0.22, "TE").get(0)
+    for wl in wavelengths
+]
+
+fig, (ax_neff, ax_ng) = plt.subplots(1, 2, figsize=(12, 4.5))
+
+ax_neff.plot(wavelengths, n_effs, "o-", label="Meep", linewidth=1.5)
+ax_neff.plot(wavelengths, wl_analytical_neff, "s--", label="Analytical", linewidth=1.5)
+ax_neff.set_xlabel("Wavelength (um)")
+ax_neff.set_ylabel("n_eff")
+ax_neff.set_title("n_eff — Meep vs Analytical")
+ax_neff.legend()
+ax_neff.grid(True, alpha=0.3)
+
+ax_ng.plot(wavelengths, n_groups, "o-", label="Meep", linewidth=1.5)
+ax_ng.plot(wavelengths, wl_analytical_ngroup, "s--", label="Analytical", linewidth=1.5)
+ax_ng.set_xlabel("Wavelength (um)")
+ax_ng.set_ylabel("n_group")
+ax_ng.set_title("n_group — Meep vs Analytical")
+ax_ng.legend()
+ax_ng.grid(True, alpha=0.3)
+
+fig.suptitle("SOI slab — wavelength sweep validation", fontweight="bold")
+fig.tight_layout()
+
+for wl, m_n, m_g, a_n, a_g in zip(
+    wavelengths, n_effs, n_groups, wl_analytical_neff, wl_analytical_ngroup
+):
+    err_n = abs(m_n - a_n) / a_n if a_n else float("nan")
+    err_g = abs(m_g - a_g) / a_g if a_g else float("nan")
+    print(
+        f"  lambda={wl:.2f} um  "
+        f" n_eff: M={m_n:.6f} A={a_n:.6f} err={err_n:.2e}  "
+        f" n_group: M={m_g} A={a_g} err={err_g:.2e}"
+        if a_g
+        else f" n_group: M={m_g} A=None"
+    )
+
+
+# %%
 # %% [markdown]
+# ## Part 5 — Parameter Studies
+#
 # ### Core thickness sweep
 #
 # Vary the silicon core thickness and re-solve the slab mode. Thicker
@@ -511,7 +638,31 @@ for r in higher.results:
 
 # %%
 thicknesses = [0.15, 0.18, 0.22, 0.25, 0.30, 0.35, 0.40]
+
 n_eff_thick: list[float] = []
+n_group_thick: list[float | None] = []
+analytical_thick = [
+    solve_slab_analytical(WL, _n_si(WL), _n_sio2(WL), t, "TE").get(0)
+    for t in thicknesses
+]
+analytical_ng_thick = [
+    _analytical_ngroup(WL, _n_si(WL), _n_sio2(WL), t, "TE").get(0) for t in thicknesses
+]
+
+
+for t, m_n, a_n, m_g, a_g in zip(
+    thicknesses, n_eff_thick, analytical_thick, n_group_thick, analytical_ng_thick
+):
+    err_n = abs(m_n - a_n) / a_n if a_n else float("nan")
+    err_g = abs(m_g - a_g) / a_g if a_g else float("nan")
+    print(
+        f"  t_Si={t:.2f} um  "
+        f" n_eff: M={m_n:.6f} A={a_n:.6f} err={err_n:.2e}  "
+        f" n_group: M={m_g} A={a_g:.6f} err={err_g:.2e}"
+        if a_g
+        else f" n_group: M={m_g} A=None"
+    )
+
 
 for t in thicknesses:
     wg = _make_soi_stack(t)
@@ -522,14 +673,29 @@ for t in thicknesses:
     ts.mode_solver(wavelengths=[WL], band=1, parity="NO_PARITY")
     r = ts.solve_modes().results[0]
     n_eff_thick.append(r.n_eff)
-    print(f"  t_Si = {t:.2f} um -> n_eff = {r.n_eff:.6f}")
+    n_group_thick.append(r.n_group)
+    print(f"  t_Si = {t:.2f} um -> n_eff = {r.n_eff:.6f}, n_group = {r.n_group}")
 
-fig, ax = plt.subplots()
-ax.plot(thicknesses, n_eff_thick, "s-", linewidth=1.5)
-ax.set_xlabel("Si core thickness (um)")
-ax.set_ylabel("n_eff")
-ax.set_title("n_eff vs core thickness  (lambda = 1.55 um, slab mode)")
-ax.grid(True, alpha=0.3)
+
+fig, (ax_neff, ax_ng) = plt.subplots(1, 2, figsize=(12, 4.5))
+
+ax_neff.plot(thicknesses, n_eff_thick, "o-", label="Meep", linewidth=1.5)
+ax_neff.plot(thicknesses, analytical_thick, "s--", label="Analytical", linewidth=1.5)
+ax_neff.set_xlabel("Si core thickness (um)")
+ax_neff.set_ylabel("n_eff")
+ax_neff.set_title("n_eff — Meep vs Analytical")
+ax_neff.legend()
+ax_neff.grid(True, alpha=0.3)
+
+ax_ng.plot(thicknesses, n_group_thick, "o-", label="Meep", linewidth=1.5)
+ax_ng.plot(thicknesses, analytical_ng_thick, "s--", label="Analytical", linewidth=1.5)
+ax_ng.set_xlabel("Si core thickness (um)")
+ax_ng.set_ylabel("n_group")
+ax_ng.set_title("n_group — Meep vs Analytical")
+ax_ng.legend()
+ax_ng.grid(True, alpha=0.3)
+
+fig.suptitle("SOI slab — thickness sweep validation", fontweight="bold")
 fig.tight_layout()
 
 # %% [markdown]
@@ -543,13 +709,11 @@ fig.tight_layout()
 # | Index profile | `gm.refractive_index_profile(stack, z_grid, wavelength)` |
 # | Dispersion sweep | `sim.mode_solver.sweep_wavelength(start, stop, n)` |
 # | Group index | `r.n_group` — direct from `mode.group_velocity` |
+# | Analytical group index | `_analytical_ngroup(wl, n_core, n_clad, t, pol)` — implicit diff |
 # | Multi-band | `sim.mode_solver.first(4)` or `num_bands=4` |
 # | Parity modes | `sim.mode_solver(parity="EVEN_Y", …)` |
 # | Core thickness sweep | Vary `layer.thickness` -> new sim -> `n_eff(t)` |
-# | Analytical validation | Transcendental equation benchmark for SOI slab |
+# | Analytical validation | Transcendental eq + dispersive n(lambda) from gsim Sellmeier models |
+# | Wavelength sweep validation | Meep vs analytical — n_eff + n_group over wavelength |
+# | Thickness sweep validation | Meep vs analytical — n_eff + n_group over core thickness |
 #
-# **Next steps:**
-#
-# - Use the slab effective index as input to the variational 2D approximation
-# - Compare mode-solver n_eff with full FDTD frequency-domain results
-# - Run the same sweeps with `palace` (finite-element) for cross-validation

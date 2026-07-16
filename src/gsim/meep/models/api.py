@@ -634,9 +634,9 @@ class ModeSolver(BaseModel):
     wavelengths: list[float] = Field(default_factory=list)
     num_bands: int = Field(default=1, ge=1)
     band: int | None = Field(default=None, ge=1)
-    parity: Literal["NO_PARITY", "EVEN_Y", "ODD_Z", "EVEN_Y+ODD_Z"] = Field(
-        default="NO_PARITY"
-    )
+    parity: Literal[
+        "NO_PARITY", "EVEN_Y", "ODD_Y", "EVEN_Z", "ODD_Z", "EVEN_Y+ODD_Z"
+    ] = Field(default="NO_PARITY")
     eigensolver_tol: float = Field(default=1e-6, gt=0)
     port: str | None = Field(default=None)
     position: tuple[float, float] | None = Field(default=None)
