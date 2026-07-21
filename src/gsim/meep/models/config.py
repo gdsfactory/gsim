@@ -371,6 +371,60 @@ class FiberSourceConfig(BaseModel):
     )
 
 
+class DielectricEntry(BaseModel):
+    """One dielectric slab entry for the mode solver config.
+
+    Describes a uniform horizontal layer (infinite in x, y) with a
+    material name and vertical extent.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    name: str
+    zmin: float
+    zmax: float
+    material: str
+
+
+class ModeSolverConfig(BaseModel):
+    """Serializable config for cloud slab eigenmode solving.
+
+    Wraps all parameters the cloud runner needs to build a 1D slab
+    MEEP cell and call ``get_eigenmode()`` per wavelength/band.
+    Resolved material data is baked in so the runner does not need
+    access to the PDK material database.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    wavelengths: list[float]
+    bands: list[int]
+    parity: str = "NO_PARITY"
+    resolution: float = 32
+    pml_thickness: float = 0.0
+    z_margin: float | tuple[float, float] = 0.0
+    background_material: str = "air"
+    eigensolver_tol: float = 1e-6
+    n_field_z: int = 0
+    layer_stack: list[DielectricEntry]
+    materials: dict[str, MaterialData]
+
+    def to_json(self, path: str | Path) -> Path:
+        """Write config to JSON file.
+
+        Args:
+            path: Output file path
+
+        Returns:
+            Path to the written file
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = self.model_dump()
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return path
+
+
 class SimConfig(BaseModel):
     """Complete serializable simulation config written as JSON.
 

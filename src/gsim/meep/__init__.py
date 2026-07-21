@@ -53,8 +53,17 @@ from gsim.meep.results import ModeSweepResult
 from gsim.meep.simulation import BuildResult, Simulation
 
 
-def _parse_meep_result(run_result: RunResult) -> SParameterResult:
-    """Parse MEEP cloud results into an SParameterResult."""
+def _parse_meep_result(run_result: RunResult) -> SParameterResult | ModeSweepResult:
+    """Parse MEEP cloud results.
+
+    If ``mode_results.json`` is present, returns a :class:`ModeSweepResult`
+    with reconstructed field arrays.  Otherwise falls through to
+    :class:`SParameterResult` from ``s_parameters.csv``.
+    """
+    mode_json_path = run_result.files.get("mode_results.json")
+    if mode_json_path is not None:
+        return ModeSweepResult.from_directory(mode_json_path.parent)
+
     csv_path = run_result.files.get("s_parameters.csv")
     if csv_path is not None:
         return SParameterResult.from_csv(csv_path)

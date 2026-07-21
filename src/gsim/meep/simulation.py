@@ -1156,6 +1156,80 @@ class Simulation(BaseModel):
         logger.info("Config written to %s", output_dir)
         return output_dir
 
+    def write_mode_solver_config(self, output_dir: str | Path) -> Path:
+        """Serialize mode solver config for cloud slab eigenmode solving.
+
+        Resolves materials and writes ``mode_solver_config.json`` alongside
+        the mode-solver variant of ``run_meep.py``.  No GDS is written
+        because slab modes are 1D and do not need layout geometry.
+
+        Args:
+            output_dir: Directory to write mode_solver_config.json and run_meep.py.
+
+        Returns:
+            Path to the output directory.
+
+        Raises:
+            ValueError: If mode_solver has no wavelengths, or stack resolution fails.
+        """
+        from gsim.meep.models.config import DielectricEntry, ModeSolverConfig
+        from gsim.meep.script import generate_meep_mode_solver_script
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        ms = self.mode_solver
+        if not ms.wavelengths:
+            raise ValueError("mode_solver.wavelengths must not be empty")
+
+        bands = [ms.band] if ms.band is not None else list(range(1, ms.num_bands + 1))
+
+        resolution = self.solver.resolution
+        pml_thickness = self.domain.pml
+        z_margin = self.domain.resolved_margin_z()
+
+        first_wavelength = ms.wavelengths[0]
+        _stack, material_data = self._resolve_stack_and_materials(
+            wavelength=first_wavelength
+        )
+        stack = self.geometry.stack
+        if stack is None:
+            raise ValueError(
+                "Stack resolution failed — set a geometry with stack first"
+            )
+
+        dielectrics = [
+            DielectricEntry(
+                name=diel["name"],
+                zmin=diel["zmin"],
+                zmax=diel["zmax"],
+                material=diel["material"],
+            )
+            for diel in stack.dielectrics
+        ]
+
+        config = ModeSolverConfig(
+            wavelengths=ms.wavelengths,
+            bands=bands,
+            parity=ms.parity,
+            resolution=resolution,
+            pml_thickness=pml_thickness,
+            z_margin=z_margin,
+            background_material=ms.background_material,
+            eigensolver_tol=ms.eigensolver_tol,
+            n_field_z=ms.n_field_z,
+            layer_stack=dielectrics,
+            materials=material_data,
+        )
+
+        config.to_json(output_dir / "mode_solver_config.json")
+
+        script_path = output_dir / "run_meep.py"
+        script_path.write_text(generate_meep_mode_solver_script(), encoding="utf-8")
+
+        logger.info("Mode solver config written to %s", output_dir)
+        return output_dir
+
     # -------------------------------------------------------------------------
     # Cloud: fine-grained control
     # -------------------------------------------------------------------------

@@ -1906,3 +1906,299 @@ def generate_meep_script(config_filename: str = "sim_config.json") -> str:
         Python script as a string
     """
     return _MEEP_RUNNER_TEMPLATE.replace("%%CONFIG_FILENAME%%", config_filename)
+
+
+_MEEP_MODE_SOLVER_TEMPLATE = """\
+#!/usr/bin/env python3
+\"""Auto-generated MEEP mode solver runner script.
+
+Reads mode_solver_config.json, builds a 1D slab MEEP cell,
+solves eigenmodes per wavelength/band, and saves results as
+mode_results.json + .npy field arrays.
+
+Cloud dependencies: meep, numpy
+\"""
+
+import json
+import logging
+import sys
+from pathlib import Path
+
+import meep as mp
+import numpy as np
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+mp.verbosity(0)
+
+PARITY_MAP = {
+    "NO_PARITY": 0,
+    "EVEN_Y": 1,
+    "ODD_Y": 2,
+    "EVEN_Z": 3,
+    "ODD_Z": 4,
+}
+
+FIELD_COMPONENTS = ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz")
+
+
+def _make_medium(mat_data):
+    \"""Build a MEEP Medium from resolved material data.\"""
+    eps = mat_data.get("epsilon_diag")
+    if isinstance(eps, list):
+        eps = eps[0]
+    if eps is None:
+        eps = 1.0
+    return mp.Medium(epsilon=eps)
+
+
+def build_slab_cell(config):
+    \"""Build a 2D XZ MEEP cell for 1D slab eigenmode solving.\"""
+    z_margin = config.get("z_margin", 0.0)
+    if isinstance(z_margin, list):
+        zm_bottom, zm_top = z_margin
+    else:
+        zm_bottom = zm_top = z_margin
+
+    pml = config.get("pml_thickness", 0.0)
+    resolution = config.get("resolution", 32)
+    layer_stack = config["layer_stack"]
+    materials = config["materials"]
+    bg_mat = config.get("background_material", "air")
+
+    z_min = min(entry["zmin"] for entry in layer_stack)
+    z_max = max(entry["zmax"] for entry in layer_stack)
+    z_center = (z_min + z_max) / 2.0 + (zm_top - zm_bottom) / 2.0
+
+    x_span = 2.0 / resolution
+    z_span = (z_max - z_min) + zm_bottom + zm_top
+    if pml > 0:
+        x_span += 2 * pml
+        z_span += 2 * pml
+    x_span = round(x_span * resolution) / resolution
+    z_span = round(z_span * resolution) / resolution
+    cell_size = mp.Vector3(x_span, 0.0, z_span)
+
+    geometry = []
+    for entry in layer_stack:
+        if entry["material"] == "air":
+            continue
+        mat_data = materials.get(entry["material"])
+        if mat_data is None:
+            continue
+        medium = _make_medium(mat_data)
+        z_lo = entry["zmin"] - z_center
+        z_hi = entry["zmax"] - z_center
+        if abs(entry["zmin"] - z_min) < 1e-12:
+            z_lo = -z_span / 2.0
+        z_size = z_hi - z_lo
+        if z_size <= 0:
+            continue
+        block_z_center = (z_lo + z_hi) / 2.0
+        geometry.append(
+            mp.Block(
+                size=mp.Vector3(x_span, mp.inf, z_size),
+                center=mp.Vector3(0.0, 0.0, block_z_center),
+                material=medium,
+            )
+        )
+
+    bg = materials.get(bg_mat)
+    default_medium = _make_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
+    sim_kwargs = dict(
+        cell_size=cell_size,
+        geometry=geometry,
+        resolution=resolution,
+        default_material=default_medium,
+    )
+    if pml > 0:
+        sim_kwargs["boundary_layers"] = [
+            mp.PML(thickness=pml, direction=mp.X),
+            mp.PML(thickness=pml, direction=mp.Z),
+        ]
+    sim = mp.Simulation(**sim_kwargs)
+    return sim, cell_size
+
+
+def extract_fields(mode, field_z_grid, field_x_grid=None):
+    \"""Sample eigenmode fields on a (z, x) grid.\"""
+    fields = {}
+    if field_x_grid is None:
+        field_x_grid = np.array([0.0])
+    for comp_name in FIELD_COMPONENTS:
+        try:
+            comp = getattr(mp, comp_name)
+            arr = np.zeros(
+                (len(field_z_grid), len(field_x_grid)),
+                dtype=np.complex128,
+            )
+            for iz, z in enumerate(field_z_grid):
+                for ix, x in enumerate(field_x_grid):
+                    pt = mp.Vector3(float(x), 0.0, float(z))
+                    arr[iz, ix] = mode.amplitude(pt, comp)
+            if np.any(arr != 0):
+                fields[comp_name] = arr
+        except Exception:
+            pass
+    return fields
+
+
+def solve_one_mode(sim, cell_size, wavelength, band_num, parity, eigensolver_tol,
+                   field_z_grid, field_x_grid):
+    \"""Call get_eigenmode and return a result dict.\"""
+    frequency = 1.0 / wavelength
+    parity_int = PARITY_MAP.get(parity, 0)
+
+    where = mp.Volume(
+        center=mp.Vector3(0.0, 0.0, 0.0),
+        size=mp.Vector3(0.0, cell_size.y, cell_size.z),
+    )
+
+    mode = sim.get_eigenmode(
+        frequency,
+        mp.X,
+        where,
+        band_num=band_num,
+        kpoint=mp.Vector3(),
+        parity=parity_int,
+        resolution=0,
+        eigensolver_tol=eigensolver_tol,
+    )
+
+    if mode is None:
+        logger.info(
+            "get_eigenmode returned None for band %d at wl %.4f",
+            band_num, wavelength,
+        )
+        return None
+
+    kdom_vec = mode.kdom
+    kdom_list = [float(kdom_vec.x), float(kdom_vec.y), float(kdom_vec.z)]
+    kdom_mag = float(np.linalg.norm(kdom_list))
+    n_eff = kdom_mag / frequency if frequency > 0 else 0.0
+
+    n_group = None
+    try:
+        vg = mode.group_velocity
+        if vg is not None and vg != 0:
+            n_group = 1.0 / float(vg)
+    except Exception:
+        pass
+
+    fields = {}
+    if field_z_grid is not None:
+        fields = extract_fields(mode, field_z_grid, field_x_grid)
+
+    return {
+        "n_eff": n_eff,
+        "wavelength": wavelength,
+        "frequency": frequency,
+        "band_num": band_num,
+        "parity": parity,
+        "kdom": kdom_list,
+        "n_group": n_group,
+        "fields": fields,
+        "field_shapes": {
+            k: list(v.shape) for k, v in fields.items()
+        },
+    }
+
+
+def main():
+    config_path = Path("mode_solver_config.json")
+    if not config_path.exists():
+        logger.error("mode_solver_config.json not found")
+        sys.exit(1)
+
+    config = json.loads(config_path.read_text())
+
+    wavelengths = config["wavelengths"]
+    bands = config["bands"]
+    parity = config.get("parity", "NO_PARITY")
+    eigensolver_tol = config.get("eigensolver_tol", 1e-6)
+    n_field_z = config.get("n_field_z", 0)
+    pml_thickness = config.get("pml_thickness", 0.0)
+
+    sim, cell_size = build_slab_cell(config)
+    sim.init_sim()
+
+    if n_field_z > 0:
+        z_margin = config.get("z_margin", 0.0)
+        if isinstance(z_margin, list):
+            zm_bottom, zm_top = z_margin
+        else:
+            zm_bottom = zm_top = z_margin
+        layer_stack = config["layer_stack"]
+        z_min = min(entry["zmin"] for entry in layer_stack)
+        z_max = max(entry["zmax"] for entry in layer_stack)
+        z_center = (z_min + z_max) / 2.0 + (zm_top - zm_bottom) / 2.0
+        z_span = (z_max - z_min) + zm_bottom + zm_top
+        if pml_thickness > 0:
+            z_span += 2 * pml_thickness
+        resolution = config.get("resolution", 32)
+        field_z_grid_abs = np.linspace(
+            z_center - z_span / 2.0,
+            z_center + z_span / 2.0,
+            n_field_z,
+        )
+        field_z_grid = field_z_grid_abs - z_center
+    else:
+        field_z_grid = None
+        field_z_grid_abs = None
+
+    field_x_grid = np.array([0.0])
+
+    results = []
+    for wl_idx, wl in enumerate(wavelengths):
+        for bn in bands:
+            logger.info("Solving band %d at wavelength %.4f um", bn, wl)
+            result = solve_one_mode(
+                sim, cell_size, wl, bn, parity, eigensolver_tol,
+                field_z_grid, field_x_grid,
+            )
+            if result is None:
+                continue
+
+            if result["fields"]:
+                for comp_name, arr in result["fields"].items():
+                    fname = f"mode_f_band{bn}_wl{wl_idx}_{comp_name}.npy"
+                    np.save(str(Path(fname)), arr)
+
+            result.pop("fields", None)
+            result.pop("field_shapes", None)
+            result["wl_idx"] = wl_idx
+            results.append(result)
+
+    sim.reset_meep()
+
+    output = {
+        "wavelengths": wavelengths,
+        "bands": bands,
+        "n_field_z": n_field_z,
+        "results": results,
+    }
+    if field_z_grid_abs is not None:
+        np.save("mode_z_grid.npy", field_z_grid_abs)
+
+    Path("mode_results.json").write_text(json.dumps(output, indent=2))
+    logger.info("Done! Saved %d mode results.", len(results))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def generate_meep_mode_solver_script() -> str:
+    """Generate the Python script that runs slab eigenmode solves on the cloud.
+
+    The script is self-contained and reads ``mode_solver_config.json`` to:
+    1. Build a 1D slab MEEP cell from layer_stack + materials
+    2. For each wavelength/band, call ``get_eigenmode()``
+    3. Save ``mode_results.json`` (metadata) and per-mode ``.npy`` field arrays
+
+    Returns:
+        Python script as a string
+    """
+    return _MEEP_MODE_SOLVER_TEMPLATE
