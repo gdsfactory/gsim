@@ -13,31 +13,19 @@
 # ---
 
 # %% [markdown]
-# # MEEP Mode Solver - TFLN Ridge Waveguide
+# # MEEP Mode Solver — TFLN Ridge Waveguide
 #
-# Compute the fundamental TE mode of a **thin-film lithium niobate (TFLN)**
-# ridge waveguide at lambda = 1.55 um.
+# Fundamental TE mode of thin-film lithium niobate ridge waveguide at λ=1.55 µm.
+# Reference: Ying Li et al., ACS Omega 2023, 8(10), 9644–9651.
 #
-# **Reference design** (*Ying Li et al.*, ACS Omega 2023, 8(10), 9644--9651):
-#  - SiO2 cladding everywhere (no Si substrate)
-#  - LiNbO3 slab: 220 nm thick, extends laterally
-#  - LiNbO3 ridge: 180 nm on top of slab -> total 400 nm
-#  - Ridge width w0 = 1.1 um
-#  - Sidewall angle 17deg -> **supported via ``mp.Prism``**
-#    with native ``sidewall_angle`` parameter (in radians).
-#    The n_eff difference vs. vertical sidewalls is ~0.0045
-#    (1.8533 vs 1.8578).
+# **Design:** SiO2 cladding / LiNbO3 slab 220 nm / LiNbO3 ridge 180 nm (total 400 nm),
+# ridge width 1.1 µm, sidewall angle 17°.
 #
-# **Key concept** --- ``background_material="sio2"`` sets the MEEP
-# ``default_material`` to SiO2.  Any
-# space not covered by an explicit layer is filled with SiO2 instead of air.
-#
-# **Expected results**:
-#  - n_eff ~ 1.85 (fundamental TE-like mode, mode_index=0)
-#  - n_group ~ 2.20
+# **Expected:** n_eff ~ 1.85, n_group ~ 2.20.
+# ``background_material="sio2"`` fills unpatterned space with SiO2.
 
 # %% [markdown]
-# ### Imports & MEEP check
+# ### Imports
 
 # %%
 import gdsfactory as gf
@@ -47,22 +35,12 @@ import numpy as np
 import gsim.meep as gm
 from gsim.common.stack.extractor import Layer, LayerStack
 
-try:
-    import meep as mp
-
-    print(f"MEEP {mp.__version__} ready")
-except ImportError as err:
-    raise SystemExit(
-        "MEEP not found. Install it via conda-forge:\n"
-        "    conda install -c conda-forge pymeep"
-    ) from err
-
 plt.close()
 
 gf.gpdk.PDK.activate()
 
 # %% [markdown]
-# ### LiNbO3 material (Zelmon 1997)
+# ### LiNbO₃ material (Zelmon 1997)
 #
 # LiNbO3 is birefringent and is now registered as a uniaxial material
 # in ``gsim.common.stack.materials.MATERIALS_DB`` (notebook no longer
@@ -83,18 +61,6 @@ gf.gpdk.PDK.activate()
 
 # %% [markdown]
 # ### Build the GDS component
-#
-# Two LiNbO3 layers:
-#  - **Slab** (layer 1,0): wide rectangle (thin-film slab)
-#  - **Ridge** (layer 2,0): narrow rectangle (core on top of slab)
-#
-# The SiO2 BOX is provided by ``background_material="sio2"`` --- no
-# separate GDS layer needed.  Layers without GDS polygons are treated
-# as full-width backgrounds (``mode_solver.py:434--435``).
-#
-# **Sidewall angle note**: set ``sidewall_angle=17.0`` on the ridge
-# :class:`Layer` to create a trapezoidal ridge cross-section via
-# ``mp.Prism`` with native ``sidewall_angle``.
 
 # %%
 SLAB_WIDTH = 5.0  # um --- wide slab
@@ -137,14 +103,7 @@ print(f"  Layers: {list(c.layers)}")
 # %% [markdown]
 # ### Layer stack
 #
-# Vertical material profile.  SiO2 fills all background space via
-# ``background_material="sio2"``.
-#
-# | Region  | Material | Z-range (um)   | GDS layer |
-# |---------|----------|----------------|-----------|
-# | Ridge   | LiNbO3   | 0.22 ... 0.40    | (2,0) |
-# | Slab    | LiNbO3   | 0.00 ... 0.22    | (1,0) |
-# | BOX     | SiO2     | -2.0 ... 0.0     | (0,0) --- no polygons |
+# SiO2 fills background via ``background_material="sio2"``.
 
 # %%
 SLAB_THICKNESS = 0.22  # um  (h3)
@@ -191,11 +150,7 @@ for name, l in stack.layers.items():
     )
 
 # %% [markdown]
-# ### Solve the fundamental TE-like mode
-#
-# Use the declarative :class:`Simulation` + :class:`ModeSolver` API.
-# Grids are auto-constructed from ``y_span``, ``n_field_y``, and
-# ``n_field_z`` settings on the mode solver.
+# ### Solve
 
 # %%
 WAVELENGTH = 1.55  # um
@@ -228,19 +183,13 @@ for comp, arr in mode.fields.items():
     print(f"  {comp}: shape={arr.shape}  |max|={np.abs(arr).max():.6f}")
 
 # %% [markdown]
-# ### Refractive index profile
-#
-# Use ``ModeResult.plot_index()`` which auto-computes ``n`` from the
-# stored :class:`LayerStack` and grid arrays.
+# ### Index profile
 
 # %%
 mode.plot_index(show=True)
 
 # %% [markdown]
-# ### 2D mode profile — all field components
-#
-# Use ``ModeResult.plot_mode()`` with ``components="all"`` and
-# ``geometry=True`` to overlay structural geometry boundaries.
+# ### Mode profile
 
 # %%
 mode.plot_mode(

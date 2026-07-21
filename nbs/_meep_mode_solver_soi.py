@@ -15,49 +15,26 @@
 # %% [markdown]
 # # MEEP Eigenmode Solver — 1D Slab Modes
 #
-# Solve **1D slab modes** declaratively with the `Simulation` API.
-# Operations run locally via MEEP — no cloud required.
-#
-# **API overview:**
-#
-# | API | What it does |
-# |---|---|
-# | `sim.mode_solver(wavelengths=[1.55])` | Configure eigenmode solver |
-# | `sim.solve_modes()` | Run solver, return `ModeSweepResult` |
-# | `sweep.results` | List of `ModeResult` (`.n_eff`, `.fields`, `.kdom`, `.n_group`, …) |
-# | `mode_z_grid(stack, ...)` | Z-axis coordinates for field arrays |
-# | `refractive_index_profile(stack, ...)` | n(z) from the layer stack |
+# Solve 1D slab modes with ``sim.mode_solver()`` + ``sim.solve_modes()``.
+# Runs on GDSFactory+ cloud by default; ``sim.solve_modes_local()`` for local MEEP.
 
 # %% [markdown]
 # ## Part 1 — Quick Start
 
 # %%
+import math
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 import gsim.meep as gm
 from gsim.common.stack.extractor import Layer, LayerStack
-
-HAS_MEEP = False
-try:
-    import meep as mp
-
-    HAS_MEEP = True
-    print(f"MEEP {mp.__version__} ready")
-except ImportError as err:
-    raise SystemExit(
-        "MEEP not found. Install it via conda-forge:\n"
-        "    conda install -c conda-forge pymeep"
-    ) from err
+from gsim.common.stack.materials import resolve_material_at_wavelength
 
 RESOLUTION = 128
 WL = 1.55
 PML = 1.6
 n_points = 1000
-
-import math
-
-from gsim.common.stack.materials import resolve_material_at_wavelength
 
 
 def _n_si(wl_um: float) -> float:
@@ -698,22 +675,4 @@ ax_ng.grid(True, alpha=0.3)
 fig.suptitle("SOI slab — thickness sweep validation", fontweight="bold")
 fig.tight_layout()
 
-# %% [markdown]
-# ### Summary
-#
-# | Feature | API |
-# |---|---|
-# | Slab modes (1D) | `sim.mode_solver(wavelengths=[1.55]); sim.solve_modes()` |
-# | Field profiles | `sim.mode_solver(n_field_z=...); r.fields["Ey"]` |
-# | Z-grid utility | `gm.mode_z_grid(stack, n_points)` |
-# | Index profile | `gm.refractive_index_profile(stack, z_grid, wavelength)` |
-# | Dispersion sweep | `sim.mode_solver.sweep_wavelength(start, stop, n)` |
-# | Group index | `r.n_group` — direct from `mode.group_velocity` |
-# | Analytical group index | `_analytical_ngroup(wl, n_core, n_clad, t, pol)` — implicit diff |
-# | Multi-band | `sim.mode_solver.first(4)` or `num_bands=4` |
-# | Parity modes | `sim.mode_solver(parity="EVEN_Y", …)` |
-# | Core thickness sweep | Vary `layer.thickness` -> new sim -> `n_eff(t)` |
-# | Analytical validation | Transcendental eq + dispersive n(lambda) from gsim Sellmeier models |
-# | Wavelength sweep validation | Meep vs analytical — n_eff + n_group over wavelength |
-# | Thickness sweep validation | Meep vs analytical — n_eff + n_group over core thickness |
 #

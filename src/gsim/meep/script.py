@@ -2272,6 +2272,8 @@ def main():
     }
     if field_z_grid_abs is not None:
         np.save("mode_z_grid.npy", field_z_grid_abs)
+    if is_cross_section and field_h_grid is not None and len(field_h_grid) > 1:
+        np.save("mode_h_grid.npy", field_h_grid)
 
     Path("mode_results.json").write_text(json.dumps(output, indent=2))
     logger.info("Done! Saved %d mode results.", len(results))

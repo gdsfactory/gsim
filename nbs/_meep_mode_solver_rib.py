@@ -13,22 +13,15 @@
 # ---
 
 # %% [markdown]
-# # MEEP Mode Solver - Rib Waveguide
+# # MEEP Mode Solver — Rib Waveguide
 #
-# Compute the fundamental TE mode of a **silicon rib waveguide** at a
-# single wavelength, returning `n_eff` and the full 2D (Y, Z) mode
-# profile.
+# Fundamental TE mode of a silicon rib waveguide: ``n_eff`` + 2D (Y, Z) field profile.
 #
-# **Rib cross-section:**
-#  - SiO2 box (2 um)
-#  - Si slab (70 nm, partially etched)
-#  - Si rib (150 nm on top of slab -> total 220 nm)
-#
-# The rib provides lateral confinement via effective-index contrast
-# between the ridge and the thinner side slabs.
+# **Cross-section:** SiO2 box / Si slab 70 nm / Si rib 150 nm (total 220 nm).
+# Lateral confinement via effective-index contrast.
 
 # %% [markdown]
-# ### Imports & MEEP check
+# ### Imports
 
 # %%
 import gdsfactory as gf
@@ -38,26 +31,12 @@ import numpy as np
 import gsim.meep as gm
 from gsim.common.stack.extractor import Layer, LayerStack
 
-try:
-    import meep as mp
-
-    print(f"MEEP {mp.__version__} ready")
-except ImportError as err:
-    raise SystemExit(
-        "MEEP not found. Install it via conda-forge:\n"
-        "    conda install -c conda-forge pymeep"
-    ) from err
-
 plt.close()
 
 gf.gpdk.PDK.activate()
 
 # %% [markdown]
 # ### Build the GDS component
-#
-# We manually create a component with **two Si layers** - a wide slab and
-# a narrow rib on top.  The mode solver later slices through both layers
-# at the port Y-position to reconstruct the 2D (X,Z) geometry.
 
 # %%
 SLAB_WIDTH = 3.0  # um
@@ -91,9 +70,6 @@ print(f"  Layers: {list(c.layers)}")
 
 # %% [markdown]
 # ### Layer stack
-#
-# Define the vertical material profile.  Each non-air layer maps a GDS
-# layer to a Z-range.
 
 # %%
 layers = {
@@ -134,13 +110,11 @@ for name, l in stack.layers.items():
     )
 
 # %% [markdown]
-# ### Solve the fundamental mode
-#
-# Use the declarative :class:`Simulation` + :class:`ModeSolver` API.
+# ### Solve
 
 # %%
 WAVELENGTH = 1.55  # um
-RESOLUTION = 32
+RESOLUTION = 64
 PML_THICKNESS = 1 * WAVELENGTH
 
 
@@ -154,8 +128,8 @@ sim = gm.Simulation(
 sim.mode_solver.wavelengths = [WAVELENGTH]
 sim.mode_solver.fundamental().at_port("o1")
 sim.mode_solver.y_span = SLAB_WIDTH
-sim.mode_solver.n_field_y = 100
-sim.mode_solver.n_field_z = 100
+sim.mode_solver.n_field_y = 300
+sim.mode_solver.n_field_z = 300
 
 sweep = sim.solve_modes()
 mode = sweep.at(WAVELENGTH).band(1)
@@ -169,20 +143,14 @@ for comp, arr in mode.fields.items():
     print(f"  {comp}: shape={arr.shape}  |max|={np.abs(arr).max():.6f}")
 
 # %% [markdown]
-# ### Refractive index profile
-#
-# Use ``ModeResult.plot_index()`` which auto-computes ``n`` from the
-# stored :class:`LayerStack` and grid arrays.
+# ### Index profile
 
 # %%
 mode.plot_index(show=True)
 
 
 # %% [markdown]
-# ### 2D mode profile — all field components
-#
-# Use ``ModeResult.plot_mode()`` with ``components="all"`` and
-# ``geometry=True`` to overlay structural geometry boundaries.
+# ### Mode profile
 
 # %%
 mode.plot_mode(

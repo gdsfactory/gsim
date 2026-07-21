@@ -58,6 +58,12 @@ class ModeSweepResult:
             with contextlib.suppress(OSError, ValueError):
                 z_grid = np.load(z_grid_path)
 
+        h_grid = None
+        h_grid_path = directory / "mode_h_grid.npy"
+        if h_grid_path.exists():
+            with contextlib.suppress(OSError, ValueError):
+                h_grid = np.load(h_grid_path)
+
         results: list[ModeResult] = []
         for entry in data.get("results", []):
             wl_idx = entry.get("wl_idx", 0)
@@ -71,6 +77,14 @@ class ModeSweepResult:
                     with contextlib.suppress(OSError, ValueError):
                         fields[comp] = np.load(fpath)
 
+            plane = entry.get("cross_section_plane")
+            if plane == "yz":
+                x_grid, y_grid = None, h_grid
+            elif plane == "xz":
+                x_grid, y_grid = h_grid, None
+            else:
+                x_grid, y_grid = None, None
+
             results.append(
                 ModeResult(
                     n_eff=entry["n_eff"],
@@ -82,7 +96,9 @@ class ModeSweepResult:
                     band_num=band_num,
                     parity=entry.get("parity", "NO_PARITY"),
                     z_grid=z_grid,
-                    cross_section_plane=entry.get("cross_section_plane"),
+                    x_grid=x_grid,
+                    y_grid=y_grid,
+                    cross_section_plane=plane,
                 )
             )
 

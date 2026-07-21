@@ -889,11 +889,36 @@ class Simulation(BaseModel):
             self.write_mode_solver_config(tmp)
             job_id = gcloud.upload(tmp, "meep", verbose=False)
             gcloud.start(job_id, verbose=verbose != "quiet")
-            return gcloud.wait_for_results(job_id, verbose=verbose)
+            result = gcloud.wait_for_results(job_id, verbose=verbose)
+            self._enrich_mode_results(result)
+            return result
         finally:
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def _enrich_mode_results(self, sweep: Any) -> None:
+        """Attach stack, component, port, and domain context to cloud-parsed results."""
+        from gsim.meep.results import ModeSweepResult
+
+        if not isinstance(sweep, ModeSweepResult):
+            return
+
+        stack = self.geometry.stack
+        component = self.geometry.component
+        domain_cfg = self._domain_config()
+        port = self.mode_solver.port
+        position = self.mode_solver.position
+        port_or_pos = port if port is not None else position
+
+        for r in sweep.results:
+            if r.stack is None:
+                r.stack = stack
+            if r.component is None:
+                r.component = component
+            if r.port_or_position is None:
+                r.port_or_position = port_or_pos
+            r.domain_config = domain_cfg
 
     def solve_modes_local(self) -> Any:
         """Solve eigenmodes locally from ``self.mode_solver`` configuration.
