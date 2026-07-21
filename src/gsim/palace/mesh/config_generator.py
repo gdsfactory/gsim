@@ -238,6 +238,15 @@ def generate_palace_config(
             else:
                 mat_entry["LossTan"] = 0.0
 
+            # Finite-conductivity shaped dielectrics (e.g. doped silicon)
+            # need a Conductivity entry so Palace treats them as lossy
+            # semiconductors rather than ideal dielectrics.
+            sigma = mat_props.get("conductivity", 0.0)
+            if (isinstance(sigma, (int, float)) and sigma > 0) or isinstance(
+                sigma, list
+            ):
+                mat_entry["Conductivity"] = sigma
+
             if "permeability" in mat_props:
                 mat_entry["Permeability"] = mat_props["permeability"]
 
