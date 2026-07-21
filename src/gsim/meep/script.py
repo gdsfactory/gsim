@@ -1912,8 +1912,8 @@ _MEEP_MODE_SOLVER_TEMPLATE = """\
 #!/usr/bin/env python3
 \"""Auto-generated MEEP mode solver runner script.
 
-Reads mode_solver_config.json, builds a 1D slab MEEP cell,
-solves eigenmodes per wavelength/band, and saves results as
+Reads mode_solver_config.json, builds a 1D slab or 2D cross-section
+MEEP cell, solves eigenmodes per wavelength/band, and saves results as
 mode_results.json + .npy field arrays.
 
 Cloud dependencies: meep, numpy
@@ -2021,22 +2021,85 @@ def build_slab_cell(config):
     return sim, cell_size
 
 
-def extract_fields(mode, field_z_grid, field_x_grid=None):
-    \"""Sample eigenmode fields on a (z, x) grid.\"""
+def build_cross_section_cell(config):
+    \"""Build a 2D cross-section MEEP cell from pre-computed geometry blocks.\"""
+    geom = config["cross_section_geometry"]
+    plane = geom["plane"]
+    resolution = config.get("resolution", 32)
+    pml = config.get("pml_thickness", 0.0)
+    materials = config["materials"]
+    bg_mat = config.get("background_material", "air")
+
+    h_span = geom["cell_horizontal_span"]
+    z_span = geom["cell_z_span"]
+    z_center = geom["z_center"]
+
+    if plane == "yz":
+        cell_size = mp.Vector3(0.0, h_span, z_span)
+    else:
+        cell_size = mp.Vector3(h_span, 0.0, z_span)
+
+    geometry = []
+    for blk in geom["blocks"]:
+        mat_data = materials.get(blk["material"])
+        if mat_data is None:
+            continue
+        medium = _make_medium(mat_data)
+        hc = blk["horizontal_center"]
+        hs = blk["horizontal_size"]
+        zc = blk["z_center"]
+        zs = blk["z_size"]
+        if plane == "yz":
+            block = mp.Block(
+                size=mp.Vector3(mp.inf, hs, zs),
+                center=mp.Vector3(0.0, hc, zc),
+                material=medium,
+            )
+        else:
+            block = mp.Block(
+                size=mp.Vector3(hs, mp.inf, zs),
+                center=mp.Vector3(hc, 0.0, zc),
+                material=medium,
+            )
+        geometry.append(block)
+
+    bg = materials.get(bg_mat)
+    default_medium = _make_medium(bg) if bg is not None else mp.Medium(epsilon=1.0)
+
+    sim_kwargs = dict(
+        cell_size=cell_size,
+        geometry=geometry,
+        resolution=resolution,
+        default_material=default_medium,
+    )
+    if pml > 0:
+        pml_dirs = [mp.Y, mp.Z] if plane == "yz" else [mp.X, mp.Z]
+        sim_kwargs["boundary_layers"] = [
+            mp.PML(thickness=pml, direction=d) for d in pml_dirs
+        ]
+    sim = mp.Simulation(**sim_kwargs)
+    return sim, cell_size, plane
+
+
+def extract_fields_2d(mode, field_z_grid, field_h_grid, plane):
+    \"""Sample eigenmode fields on a (z, horizontal) 2D grid.\"""
+    if field_h_grid is None:
+        field_h_grid = np.array([0.0])
     fields = {}
-    if field_x_grid is None:
-        field_x_grid = np.array([0.0])
     for comp_name in FIELD_COMPONENTS:
         try:
             comp = getattr(mp, comp_name)
             arr = np.zeros(
-                (len(field_z_grid), len(field_x_grid)),
+                (len(field_z_grid), len(field_h_grid)),
                 dtype=np.complex128,
             )
             for iz, z in enumerate(field_z_grid):
-                for ix, x in enumerate(field_x_grid):
-                    pt = mp.Vector3(float(x), 0.0, float(z))
-                    arr[iz, ix] = mode.amplitude(pt, comp)
+                for ih, h in enumerate(field_h_grid):
+                    if plane == "yz":
+                        pt = mp.Vector3(0.0, float(h), float(z))
+                    else:
+                        pt = mp.Vector3(float(h), 0.0, float(z))
+                    arr[iz, ih] = mode.amplitude(pt, comp)
             if np.any(arr != 0):
                 fields[comp_name] = arr
         except Exception:
@@ -2044,9 +2107,18 @@ def extract_fields(mode, field_z_grid, field_x_grid=None):
     return fields
 
 
+def extract_fields(mode, field_z_grid, field_x_grid=None):
+    \"""Sample eigenmode fields on a (z, x) grid (slab backward compat).\"""
+    return extract_fields_2d(mode, field_z_grid, field_x_grid, "xz")
+
+
 def solve_one_mode(sim, cell_size, wavelength, band_num, parity, eigensolver_tol,
-                   field_z_grid, field_x_grid):
-    \"""Call get_eigenmode and return a result dict.\"""
+                   field_z_grid, field_h_grid, plane="xz"):
+    \"""Call get_eigenmode and return a result dict.
+
+    For slab works on XZ plane; for cross-section passes the actual plane
+    so field sampling uses the correct horizontal axis.
+    \"""
     frequency = 1.0 / wavelength
     parity_int = PARITY_MAP.get(parity, 0)
 
@@ -2088,7 +2160,7 @@ def solve_one_mode(sim, cell_size, wavelength, band_num, parity, eigensolver_tol
 
     fields = {}
     if field_z_grid is not None:
-        fields = extract_fields(mode, field_z_grid, field_x_grid)
+        fields = extract_fields_2d(mode, field_z_grid, field_h_grid, plane)
 
     return {
         "n_eff": n_eff,
@@ -2118,12 +2190,23 @@ def main():
     parity = config.get("parity", "NO_PARITY")
     eigensolver_tol = config.get("eigensolver_tol", 1e-6)
     n_field_z = config.get("n_field_z", 0)
+    n_field_x = config.get("n_field_x", 0)
+    n_field_y = config.get("n_field_y", 0)
     pml_thickness = config.get("pml_thickness", 0.0)
+    resolution = config.get("resolution", 32)
 
-    sim, cell_size = build_slab_cell(config)
-    sim.init_sim()
+    cross_section_geom = config.get("cross_section_geometry")
+    is_cross_section = cross_section_geom is not None
 
-    if n_field_z > 0:
+    if is_cross_section:
+        plane = cross_section_geom["plane"]
+        sim, cell_size, plane = build_cross_section_cell(config)
+        z_center = cross_section_geom["z_center"]
+        z_span = cross_section_geom["cell_z_span"]
+        h_span = cross_section_geom["cell_horizontal_span"]
+    else:
+        plane = "xz"
+        sim, cell_size = build_slab_cell(config)
         z_margin = config.get("z_margin", 0.0)
         if isinstance(z_margin, list):
             zm_bottom, zm_top = z_margin
@@ -2136,7 +2219,10 @@ def main():
         z_span = (z_max - z_min) + zm_bottom + zm_top
         if pml_thickness > 0:
             z_span += 2 * pml_thickness
-        resolution = config.get("resolution", 32)
+
+    sim.init_sim()
+
+    if n_field_z > 0:
         field_z_grid_abs = np.linspace(
             z_center - z_span / 2.0,
             z_center + z_span / 2.0,
@@ -2147,7 +2233,12 @@ def main():
         field_z_grid = None
         field_z_grid_abs = None
 
-    field_x_grid = np.array([0.0])
+    field_h_grid = np.array([0.0])
+    if is_cross_section:
+        if plane == "yz" and n_field_y > 0:
+            field_h_grid = np.linspace(-h_span / 2.0, h_span / 2.0, n_field_y)
+        elif plane == "xz" and n_field_x > 0:
+            field_h_grid = np.linspace(-h_span / 2.0, h_span / 2.0, n_field_x)
 
     results = []
     for wl_idx, wl in enumerate(wavelengths):
@@ -2155,7 +2246,7 @@ def main():
             logger.info("Solving band %d at wavelength %.4f um", bn, wl)
             result = solve_one_mode(
                 sim, cell_size, wl, bn, parity, eigensolver_tol,
-                field_z_grid, field_x_grid,
+                field_z_grid, field_h_grid, plane,
             )
             if result is None:
                 continue
@@ -2168,6 +2259,7 @@ def main():
             result.pop("fields", None)
             result.pop("field_shapes", None)
             result["wl_idx"] = wl_idx
+            result["cross_section_plane"] = plane if is_cross_section else None
             results.append(result)
 
     sim.reset_meep()

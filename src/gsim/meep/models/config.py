@@ -386,13 +386,41 @@ class DielectricEntry(BaseModel):
     material: str
 
 
-class ModeSolverConfig(BaseModel):
-    """Serializable config for cloud slab eigenmode solving.
+class CrossSectionBlock(BaseModel):
+    """One rectangular block in a 2D cross-section MEEP cell."""
 
-    Wraps all parameters the cloud runner needs to build a 1D slab
-    MEEP cell and call ``get_eigenmode()`` per wavelength/band.
-    Resolved material data is baked in so the runner does not need
-    access to the PDK material database.
+    model_config = ConfigDict(validate_assignment=True)
+
+    horizontal_center: float
+    horizontal_size: float
+    z_center: float
+    z_size: float
+    material: str
+
+
+class CrossSectionGeometry(BaseModel):
+    """Pre-computed 2D cross-section cell geometry.
+
+    Serialised so the cloud runner can build the MEEP cell from simple
+    blocks without needing gdsfactory or KLayout installed.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    plane: str  # "xz" or "yz"
+    blocks: list[CrossSectionBlock]
+    cell_horizontal_span: float
+    cell_z_span: float
+    z_center: float
+
+
+class ModeSolverConfig(BaseModel):
+    """Serializable config for cloud eigenmode solving.
+
+    Slab mode: the runner builds a 1D cell from ``layer_stack``.
+    Cross-section mode: ``cross_section_geometry`` is pre-computed
+    by the client so the runner can build the 2D cell from blocks
+    without GDS processing.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -408,6 +436,10 @@ class ModeSolverConfig(BaseModel):
     n_field_z: int = 0
     layer_stack: list[DielectricEntry]
     materials: dict[str, MaterialData]
+
+    cross_section_geometry: CrossSectionGeometry | None = None
+    n_field_x: int = 0
+    n_field_y: int = 0
 
     def to_json(self, path: str | Path) -> Path:
         """Write config to JSON file.

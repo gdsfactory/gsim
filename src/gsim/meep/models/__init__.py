@@ -11,6 +11,8 @@ from gsim.meep.models.api import (
 )
 from gsim.meep.models.config import (
     AccuracyConfig,
+    CrossSectionBlock,
+    CrossSectionGeometry,
     DiagnosticsConfig,
     DielectricEntry,
     DomainConfig,
@@ -33,6 +35,8 @@ FDTDConfig = WavelengthConfig
 __all__ = [
     "FDTD",
     "AccuracyConfig",
+    "CrossSectionBlock",
+    "CrossSectionGeometry",
     "DiagnosticsConfig",
     "DielectricEntry",
     "Domain",

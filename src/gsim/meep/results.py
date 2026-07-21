@@ -82,6 +82,7 @@ class ModeSweepResult:
                     band_num=band_num,
                     parity=entry.get("parity", "NO_PARITY"),
                     z_grid=z_grid,
+                    cross_section_plane=entry.get("cross_section_plane"),
                 )
             )
 

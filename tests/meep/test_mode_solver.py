@@ -904,7 +904,7 @@ class TestSimulationModeSolverField:
 
 
 class TestSimulationSolveModes:
-    """Simulation.solve_modes() tests — no meep required for error paths."""
+    """Simulation.solve_modes_local() tests — no meep required for error paths."""
 
     def test_solve_modes_exists(self):
         """sim.solve_modes exists and is callable."""
@@ -922,7 +922,7 @@ class TestSimulationSolveModes:
         sim.mode_solver.wavelengths = []
 
         with pytest.raises(ValueError, match="wavelengths"):
-            sim.solve_modes()
+            sim.solve_modes_local()
 
     def test_solve_modes_cross_section_no_component(self):
         """sim.solve_modes raises ValueError when cross_section but no component."""
@@ -932,7 +932,7 @@ class TestSimulationSolveModes:
         sim.mode_solver(wavelengths=[1.55], where="cross_section", port="o1")
 
         with pytest.raises(ValueError, match="component"):
-            sim.solve_modes()
+            sim.solve_modes_local()
 
     def test_solve_modes_cross_section_no_port_or_position(self):
         """solve_modes raises ValueError for cross_section without port/position."""
@@ -946,7 +946,7 @@ class TestSimulationSolveModes:
         sim.mode_solver(wavelengths=[1.55], where="cross_section")
 
         with pytest.raises(ValueError, match="port"):
-            sim.solve_modes()
+            sim.solve_modes_local()
 
     def test_band_overrides_num_bands(self):
         """band field overrides num_bands — correct band_nums computed."""
@@ -964,7 +964,7 @@ class TestSimulationSolveModes:
 
 
 class TestSimulationSolveModesIntegration:
-    """Simulation.solve_modes() integration tests (meep_local)."""
+    """Simulation.solve_modes_local() integration tests (meep_local)."""
 
     @pytest.mark.meep_local
     def test_solve_modes_slab_single(self):
@@ -978,7 +978,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55])
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
@@ -995,7 +995,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55], num_bands=3)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) == 3
         for r in result.results:
@@ -1013,7 +1013,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.50, 1.55])
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) == 2
         n_effs = [r.n_eff for r in result.results]
@@ -1035,7 +1035,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55], port="o1", y_span=2.5)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
@@ -1056,7 +1056,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55], position=(5.0, 0.0), x_span=4.0)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
 
@@ -1072,7 +1072,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55], n_field_z=200)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
@@ -1095,7 +1095,7 @@ class TestSimulationSolveModesIntegration:
         sim.mode_solver.first(3).at_port("o1")
         sim.mode_solver(wavelengths=[1.55], y_span=2.5)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) == 3
 
@@ -1112,7 +1112,7 @@ class TestSimulationSolveModesIntegration:
         sim.solver.resolution = 16
         sim.mode_solver(wavelengths=[1.55])
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
@@ -1129,7 +1129,7 @@ class TestSimulationSolveModesIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.50, 1.55], num_bands=2)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) == 4
 
@@ -1260,7 +1260,7 @@ class TestModeSolverIntegration:
 
     @pytest.mark.meep_local
     def test_simulation_solve_modes_slab(self):
-        """Simulation.solve_modes() slab mode without port."""
+        """Simulation.solve_modes_local() slab mode without port."""
         from gsim.common.stack import get_stack
         from gsim.meep import Simulation
         from gsim.meep.results import ModeSweepResult
@@ -1270,14 +1270,14 @@ class TestModeSolverIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55])
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
 
     @pytest.mark.meep_local
     def test_simulation_solve_modes_cross_section(self):
-        """Simulation.solve_modes() with port -> cross-section mode."""
+        """Simulation.solve_modes_local() with port -> cross-section mode."""
         import gdsfactory as gf
 
         from gsim.common.stack import get_stack
@@ -1292,7 +1292,7 @@ class TestModeSolverIntegration:
         sim.geometry.stack = stack
         sim.mode_solver(wavelengths=[1.55], port="o1", y_span=2.5)
 
-        result = sim.solve_modes()
+        result = sim.solve_modes_local()
         assert isinstance(result, ModeSweepResult)
         assert len(result.results) >= 1
         assert result.results[0].n_eff > 1.0
