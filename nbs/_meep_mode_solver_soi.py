@@ -1,6 +1,7 @@
 # ---
 # jupyter:
 #   jupytext:
+#     jupytext_version: 1.19.2
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -676,3 +677,5 @@ fig.suptitle("SOI slab — thickness sweep validation", fontweight="bold")
 fig.tight_layout()
 
 #
+
+# %%
