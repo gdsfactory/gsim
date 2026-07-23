@@ -1296,8 +1296,33 @@ def refractive_index_profile(
         if h_mask is None:
             continue
         z_mask = (z_grid >= layer.zmin) & (z_grid < layer.zmax)
-        n_profile[np.ix_(z_mask, h_mask)] = np.sqrt(eps)
-        set_by_layer[np.ix_(z_mask, h_mask)] = True
+        sw_deg = float(getattr(layer, "sidewall_angle", 0.0) or 0.0)
+        z_idx = np.where(z_mask)[0]
+        if sw_deg and len(z_idx) > 0:
+            sw_rad = math.radians(sw_deg)
+            tan_sw = math.tan(sw_rad)
+            intervals = interval_func(component, layer, cut_coord)
+            if not intervals and not _layer_has_any_polygon(component, layer):
+                intervals = [(-np.inf, np.inf)]
+            z_active = z_grid[z_idx]
+            dz = z_active - layer.zmin
+            nh_local = len(horizontal_grid)
+            combined = np.zeros((len(z_idx), nh_local), dtype=bool)
+            for lo, hi in intervals:
+                if lo == -np.inf or hi == np.inf:
+                    combined[:] = True
+                    break
+                lo_arr = lo + tan_sw * dz
+                hi_arr = hi - tan_sw * dz
+                h_2d = horizontal_grid[None, :]
+                combined |= (h_2d >= lo_arr[:, None]) & (h_2d <= hi_arr[:, None])
+            n_profile[np.ix_(z_idx, np.arange(nh_local))] = np.where(
+                combined, np.sqrt(eps), n_profile[np.ix_(z_idx, np.arange(nh_local))]
+            )
+            set_by_layer[np.ix_(z_idx, np.arange(nh_local))] |= combined
+        else:
+            n_profile[np.ix_(z_mask, h_mask)] = np.sqrt(eps)
+            set_by_layer[np.ix_(z_mask, h_mask)] = True
 
     for ih in range(nh):
         col = n_profile[:, ih]

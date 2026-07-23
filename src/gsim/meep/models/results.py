@@ -930,7 +930,7 @@ class ModeResult(BaseModel):
         """
         import math
 
-        from matplotlib.patches import Rectangle
+        from matplotlib.patches import Polygon, Rectangle
 
         import gsim.meep.viz as meep_viz
 
@@ -1021,6 +1021,7 @@ class ModeResult(BaseModel):
             z_min = rect["z_min"]
             z_max = rect["z_max"]
             layer_name = rect["layer_name"]
+            sw_deg = float(rect.get("sidewall_angle", 0.0) or 0.0)
 
             if math.isinf(h_min) or math.isinf(h_max):
                 ax_h_min, ax_h_max = ax.get_xlim()
@@ -1033,15 +1034,33 @@ class ModeResult(BaseModel):
             label = layer_name if layer_name not in layer_drawn else None
             layer_drawn.add(layer_name)
 
-            ax.add_patch(
-                Rectangle(
+            if sw_deg and not math.isinf(z_min) and not math.isinf(z_max):
+                sw_rad = math.radians(sw_deg)
+                dx = math.tan(sw_rad) * (z_max - z_min)
+                xy_vertices = [
                     (h_min, z_min),
-                    h_max - h_min,
-                    z_max - z_min,
-                    label=label,
-                    **rect_kwargs,
+                    (h_max, z_min),
+                    (h_max - dx, z_max),
+                    (h_min + dx, z_max),
+                ]
+                ax.add_patch(
+                    Polygon(
+                        xy_vertices,
+                        closed=True,
+                        label=label,
+                        **rect_kwargs,
+                    )
                 )
-            )
+            else:
+                ax.add_patch(
+                    Rectangle(
+                        (h_min, z_min),
+                        h_max - h_min,
+                        z_max - z_min,
+                        label=label,
+                        **rect_kwargs,
+                    )
+                )
             h_min_geom = min(h_min_geom, h_min)
             h_max_geom = max(h_max_geom, h_max)
             z_min_geom = min(z_min_geom, z_min)

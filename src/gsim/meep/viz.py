@@ -337,6 +337,9 @@ def build_cross_section_rectangles(
                     "z_max": layer.zmax,
                     "layer_name": layer.name,
                     "material": layer.material,
+                    "sidewall_angle": float(
+                        getattr(layer, "sidewall_angle", 0.0) or 0.0
+                    ),
                 }
             )
             continue
@@ -400,6 +403,9 @@ def build_cross_section_rectangles(
                         "z_max": layer.zmax,
                         "layer_name": layer.name,
                         "material": layer.material,
+                        "sidewall_angle": float(
+                            getattr(layer, "sidewall_angle", 0.0) or 0.0
+                        ),
                     }
                 )
 
