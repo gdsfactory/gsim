@@ -50,6 +50,7 @@ pip-log.txt
 .DS_Store
 
 # folders
+.kilo/
 .cursor/
 .eggs/
 .hypothesis/

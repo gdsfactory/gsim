@@ -133,7 +133,10 @@ def _write_minimal_msh(
             ]
         )
         cells = [("tetra", np.array([[0, 1, 2, 3]]))]
-        cell_data: dict[str, list[np.ndarray]] = {"gmsh:physical": [np.array([1])]}
+        cell_data: dict[str, list[np.ndarray]] = {
+            "gmsh:physical": [np.array([1])],
+            "gmsh:geometrical": [np.array([1])],
+        }
         field_data = {"bulk": np.array([1, 3])}
     else:
         pts = np.array(
@@ -150,7 +153,13 @@ def _write_minimal_msh(
             # Add an unsupported cell block to exercise the skip-path.
             cells.append(("line", np.array([[0, 1]])))
             phys.append(np.array([99]))
-        cell_data = {"gmsh:physical": phys}
+        geom: list[np.ndarray] = [np.array([1, 1])]
+        if extra_cells:
+            geom.append(np.array([1]))
+        cell_data = {
+            "gmsh:physical": phys,
+            "gmsh:geometrical": geom,
+        }
         field_data = {
             "metal": np.array([1, 2]),
             "air_boundary": np.array([2, 2]),

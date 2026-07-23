@@ -19,6 +19,7 @@ from gsim.meep.models.api import (
     FiberSource,
     Geometry,
     Material,
+    ModeSolver,
     ModeSource,
 )
 
@@ -48,6 +49,208 @@ class BuildResult:
 # ---------------------------------------------------------------------------
 # Utility
 # ---------------------------------------------------------------------------
+
+
+def _precompute_cross_section_geometry(
+    component: Any,
+    stack: Any,
+    *,
+    port: str | None = None,
+    position: tuple[float, float] | None = None,
+    x_span: float | None = None,
+    y_span: float | None = None,
+    z_margin: float | tuple[float, float] = 0.0,
+    pml_thickness: float = 0.0,
+    resolution: float = 32,
+    material_data: dict[str, Any] | None = None,
+    background_material: str = "air",  # noqa: ARG001
+) -> Any:
+    """Pre-compute 2D cross-section cell geometry for cloud serialization.
+
+    Reuses the same GDS-polygon interval logic as the local MEEP cell
+    builders but produces a :class:`CrossSectionGeometry` without
+    importing MEEP, so it can run on a client that has gdsfactory but
+    not MEEP installed.
+    """
+    from gsim.meep.mode_solver import (
+        _layer_has_any_polygon,
+        _layer_x_intervals_at_y,
+        _layer_y_intervals_at_x,
+        _subtract_intervals,
+    )
+    from gsim.meep.models.config import CrossSectionBlock, CrossSectionGeometry
+
+    if component is None:
+        raise ValueError("component is required for cross-section mode")
+    if stack is None:
+        raise ValueError("stack is required for cross-section mode")
+
+    _use_yz: bool
+    _span: float
+
+    if port is not None:
+        port_info = None
+        for p in component.ports:
+            if p.name == port:
+                port_info = p
+                break
+        if port_info is None:
+            available = [p.name for p in component.ports]
+            raise ValueError(
+                f"Port '{port}' not found in component. Available: {available}"
+            )
+        port_ori = float(getattr(port_info, "orientation", 0))
+        _use_yz = port_ori % 180 == 0
+        if _use_yz:
+            x_cut = float(port_info.center[0])
+            if y_span is None:
+                raise ValueError("y_span required for YZ cross-section with port")
+            _span = y_span
+        else:
+            y_cut = float(port_info.center[1])
+            if x_span is None:
+                raise ValueError("x_span required for XZ cross-section with port")
+            _span = x_span
+    elif position is not None:
+        _use_yz = False
+        if _use_yz:
+            if y_span is None:
+                raise ValueError("y_span required for YZ cross-section with position")
+            x_cut = float(position[0])
+            _span = y_span
+        else:
+            if x_span is None:
+                raise ValueError("x_span required for XZ cross-section with position")
+            y_cut = float(position[1])
+            _span = x_span
+    else:
+        raise ValueError("Either port or position must be specified")
+
+    z_min = min(layer.zmin for layer in stack.layers.values())
+    z_max = max(layer.zmax for layer in stack.layers.values())
+    if isinstance(z_margin, (tuple, list)):
+        z_margin_bottom, z_margin_top = z_margin
+    else:
+        z_margin_bottom = z_margin_top = z_margin
+    z_center = (z_min + z_max) / 2.0 + (z_margin_top - z_margin_bottom) / 2.0
+
+    horizontal_span = _span
+    if pml_thickness > 0:
+        horizontal_span += 2 * pml_thickness
+    horizontal_span = round(horizontal_span * resolution) / resolution
+
+    z_span = (z_max - z_min) + z_margin_bottom + z_margin_top
+    if pml_thickness > 0:
+        z_span += 2 * pml_thickness
+    z_span = round(z_span * resolution) / resolution
+
+    blocks: list[Any] = []
+
+    layer_data: list[dict] = []
+    for layer in stack.layers.values():
+        if layer.material == "air":
+            continue
+        if material_data and layer.material not in material_data:
+            continue
+        layer_thickness = layer.zmax - layer.zmin
+        if layer_thickness <= 0:
+            continue
+        if _use_yz:
+            intervals = _layer_y_intervals_at_x(component, layer, x_cut)
+            if not intervals and not _layer_has_any_polygon(component, layer):
+                intervals = [(-horizontal_span / 2, horizontal_span / 2)]
+        else:
+            intervals = _layer_x_intervals_at_y(component, layer, y_cut)
+            if not intervals and not _layer_has_any_polygon(component, layer):
+                intervals = [(-horizontal_span / 2, horizontal_span / 2)]
+        layer_data.append(
+            {
+                "z_lo": layer.zmin - z_center,
+                "z_hi": layer.zmax - z_center,
+                "intervals": intervals,
+                "material": layer.material,
+            }
+        )
+
+    for ld in layer_data:
+        below_intervals: list[tuple[float, float]] = []
+        for od in layer_data:
+            if od is ld:
+                continue
+            if od["z_hi"] <= ld["z_lo"] + 1e-12:
+                below_intervals.extend(od["intervals"])
+
+        for h0, h1 in ld["intervals"]:
+            h_center = (h0 + h1) / 2.0
+            h_size = h1 - h0
+            if h_size <= 0:
+                continue
+            z_lo = ld["z_lo"]
+            z_hi = ld["z_hi"]
+            block_z_size = z_hi - z_lo
+            if block_z_size > 0:
+                block_z_center = (z_lo + z_hi) / 2.0
+                blocks.append(
+                    CrossSectionBlock(
+                        horizontal_center=h_center,
+                        horizontal_size=h_size,
+                        z_center=block_z_center,
+                        z_size=block_z_size,
+                        material=ld["material"],
+                    )
+                )
+
+            bottom_free = _subtract_intervals((h0, h1), below_intervals)
+            for bh0, bh1 in bottom_free:
+                bh_center = (bh0 + bh1) / 2.0
+                bh_size = bh1 - bh0
+                if bh_size <= 0:
+                    continue
+                ext_z_lo = -z_span / 2.0
+                ext_z_hi = ld["z_lo"]
+                ext_z_size = ext_z_hi - ext_z_lo
+                if ext_z_size <= 0:
+                    continue
+                blocks.append(
+                    CrossSectionBlock(
+                        horizontal_center=bh_center,
+                        horizontal_size=bh_size,
+                        z_center=(ext_z_lo + ext_z_hi) / 2.0,
+                        z_size=ext_z_size,
+                        material=ld["material"],
+                    )
+                )
+
+    # Add dielectric slabs (uniform horizontal layers)
+    for diel in stack.dielectrics:
+        if diel["material"] == "air":
+            continue
+        z_lo = diel["zmin"] - z_center
+        z_hi = diel["zmax"] - z_center
+        z_size = z_hi - z_lo
+        if z_size <= 0:
+            continue
+        if abs(diel["zmin"] - z_min) < 1e-12:
+            z_lo = -z_span / 2.0
+        z_size = z_hi - z_lo
+        block_z_center = (z_lo + z_hi) / 2.0
+        blocks.append(
+            CrossSectionBlock(
+                horizontal_center=0.0,
+                horizontal_size=horizontal_span,
+                z_center=block_z_center,
+                z_size=z_size,
+                material=diel["material"],
+            )
+        )
+
+    return CrossSectionGeometry(
+        plane="yz" if _use_yz else "xz",
+        blocks=blocks,
+        cell_horizontal_span=horizontal_span,
+        cell_z_span=z_span,
+        z_center=z_center,
+    )
 
 
 class Simulation(BaseModel):
@@ -101,6 +304,7 @@ class Simulation(BaseModel):
     )
     domain: Domain = Field(default_factory=Domain)
     solver: FDTD = Field(default_factory=FDTD)
+    mode_solver: ModeSolver = Field(default_factory=ModeSolver)
 
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -610,6 +814,284 @@ class Simulation(BaseModel):
             )
         return overrides
 
+    def _resolve_stack_and_materials(
+        self, *, wavelength: float
+    ) -> tuple[Any, dict[str, Any]]:
+        """Resolve layer stack and material data for mode solving.
+
+        Lighter than :meth:`build_config` — no port extension, no domain
+        config, no FDTD source/monitor setup. Resolves the layer stack,
+        applies z-crop if configured, and resolves material optical
+        properties at the given wavelength via the three-tier pipeline
+        (user override > PDK overlay > built-in database).
+
+        Args:
+            wavelength: Free-space wavelength in µm for material evaluation.
+
+        Returns:
+            ``(stack, materials_dict)`` where ``stack`` is the resolved
+            ``LayerStack`` and ``materials_dict`` maps material name to
+            ``MaterialData``.
+        """
+        from gsim.meep.materials import resolve_materials
+
+        self._ensure_stack()
+        stack = self.geometry.stack
+        if stack is None:
+            raise ValueError("Stack resolution failed.")
+
+        # Collect material names from stack layers and dielectrics.
+        used_materials: set[str] = set()
+        for layer in stack.layers.values():
+            used_materials.add(layer.material)
+        for diel in stack.dielectrics:
+            used_materials.add(diel["material"])
+
+        material_data = resolve_materials(
+            used_materials,
+            overrides=self._material_overrides(),
+            wavelength_um=wavelength,
+            overlay=self._pdk_overlay,
+        )
+
+        return stack, material_data
+
+    # -------------------------------------------------------------------------
+    # solve_modes — eigenmode solving from mode_solver configuration
+    # -------------------------------------------------------------------------
+
+    def solve_modes(
+        self, *, verbose: Literal["quiet", "status", "full"] = "status"
+    ) -> Any:
+        """Solve eigenmodes on the cloud from ``self.mode_solver`` configuration.
+
+        Writes the mode-solver config to a temporary directory, uploads
+        it to the cloud, waits for the job to finish, and returns a
+        :class:`ModeSweepResult` with reconstructed field arrays.
+
+        For local execution (requires MEEP installed), use
+        :meth:`solve_modes_local`.
+
+        Args:
+            verbose: ``"quiet"`` no output, ``"status"`` status line,
+                ``"full"`` stream solver logs.
+
+        Returns:
+            :class:`ModeSweepResult` wrapping all solved :class:`ModeResult`
+            objects.
+        """
+        import tempfile
+
+        from gsim import gcloud
+
+        tmp = Path(tempfile.mkdtemp(prefix="meep_mode_solver_"))
+        try:
+            self.write_mode_solver_config(tmp)
+            job_id = gcloud.upload(tmp, "meep", verbose=False)
+            gcloud.start(job_id, verbose=verbose != "quiet")
+            result = gcloud.wait_for_results(job_id, verbose=verbose)
+            self._enrich_mode_results(result)
+            return result
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _enrich_mode_results(self, sweep: Any) -> None:
+        """Attach stack, component, port, and domain context to cloud-parsed results."""
+        from gsim.meep.results import ModeSweepResult
+
+        if not isinstance(sweep, ModeSweepResult):
+            return
+
+        stack = self.geometry.stack
+        component = self.geometry.component
+        domain_cfg = self._domain_config()
+        port = self.mode_solver.port
+        position = self.mode_solver.position
+        port_or_pos = port if port is not None else position
+
+        for r in sweep.results:
+            if r.stack is None:
+                r.stack = stack
+            if r.component is None:
+                r.component = component
+            if r.port_or_position is None:
+                r.port_or_position = port_or_pos
+            r.domain_config = domain_cfg
+
+    def solve_modes_local(self) -> Any:
+        """Solve eigenmodes locally from ``self.mode_solver`` configuration.
+
+        Requires a local MEEP installation.  Reads wavelengths, band count,
+        and geometry context from the :class:`ModeSolver` model and dispatches
+        to the appropriate low-level solvers with shared-cell optimizations
+        where applicable.
+
+        Returns:
+            :class:`ModeSweepResult` wrapping all solved :class:`ModeResult`
+            objects.
+
+        Raises:
+            ValueError: If ``wavelengths`` is empty, or if cross-section
+                mode is requested without a component, port, or position.
+        """
+        from gsim.meep.mode_solver import (
+            mode_x_grid,
+            mode_y_grid,
+            mode_z_grid,
+            solve_cross_section_mode,
+            solve_slab_mode,
+            solve_slab_modes,
+            solve_slab_wavelength_sweep,
+        )
+        from gsim.meep.models.results import ModeResult
+        from gsim.meep.results import ModeSweepResult
+
+        ms = self.mode_solver
+
+        if not ms.wavelengths:
+            raise ValueError("mode_solver.wavelengths must not be empty")
+
+        resolution = self.solver.resolution
+        pml_thickness = self.domain.pml
+        z_margin = self.domain.resolved_margin_z()
+
+        component = self.geometry.component
+        where = ms.where
+
+        if where == "auto":
+            has_port_or_pos = ms.port is not None or ms.position is not None
+            if component is not None and has_port_or_pos:
+                where_effective = "cross_section"
+            else:
+                where_effective = "slab"
+        else:
+            where_effective = where
+
+        if where_effective == "cross_section":
+            if component is None:
+                raise ValueError(
+                    "cross_section mode requires a component — "
+                    "set sim.geometry.component first."
+                )
+            if ms.port is None and ms.position is None:
+                raise ValueError(
+                    "cross_section mode requires port or position — "
+                    "set mode_solver.port or mode_solver.position."
+                )
+
+        if ms.band is not None:
+            band_nums = [ms.band]
+        else:
+            band_nums = list(range(1, ms.num_bands + 1))
+
+        first_wavelength = ms.wavelengths[0]
+        _stack, _materials = self._resolve_stack_and_materials(
+            wavelength=first_wavelength
+        )
+        stack = self.geometry.stack
+        if stack is None:
+            raise ValueError("Stack resolution failed.")
+
+        background_material = ms.background_material
+
+        n_field_x = ms.n_field_x
+        n_field_y = ms.n_field_y
+        n_field_z = ms.n_field_z
+        field_x_grid = (
+            mode_x_grid(n_field_x, ms.x_span or 0.0, pml_thickness)
+            if n_field_x > 0 and ms.x_span is not None
+            else None
+        )
+        field_y_grid = (
+            mode_y_grid(n_field_y, ms.y_span or 0.0, pml_thickness)
+            if n_field_y > 0 and ms.y_span is not None
+            else None
+        )
+        field_z_grid = (
+            mode_z_grid(stack, n_field_z, z_margin, pml_thickness)
+            if n_field_z > 0
+            else None
+        )
+
+        results: list[ModeResult] = []
+
+        if where_effective == "slab":
+            if len(ms.wavelengths) > 1 and len(band_nums) == 1:
+                sweep_results = solve_slab_wavelength_sweep(
+                    stack=stack,
+                    wavelengths=ms.wavelengths,
+                    band_num=band_nums[0],
+                    parity=ms.parity,
+                    resolution=resolution,
+                    z_margin=z_margin,
+                    pml_thickness=pml_thickness,
+                    eigensolver_tol=ms.eigensolver_tol,
+                    field_z_grid=field_z_grid,
+                    background_material=background_material,
+                )
+                results.extend(sweep_results.values())
+            elif len(ms.wavelengths) == 1 and len(band_nums) > 1:
+                band_results = solve_slab_modes(
+                    stack=stack,
+                    wavelength=ms.wavelengths[0],
+                    band_nums=band_nums,
+                    parity=ms.parity,
+                    resolution=resolution,
+                    z_margin=z_margin,
+                    pml_thickness=pml_thickness,
+                    eigensolver_tol=ms.eigensolver_tol,
+                    field_z_grid=field_z_grid,
+                    background_material=background_material,
+                )
+                results.extend(band_results.values())
+            else:
+                for wl in ms.wavelengths:
+                    for bn in band_nums:
+                        mode_result = solve_slab_mode(
+                            stack=stack,
+                            wavelength=wl,
+                            band_num=bn,
+                            parity=ms.parity,
+                            resolution=resolution,
+                            z_margin=z_margin,
+                            pml_thickness=pml_thickness,
+                            eigensolver_tol=ms.eigensolver_tol,
+                            field_z_grid=field_z_grid,
+                            background_material=background_material,
+                        )
+                        results.append(mode_result)
+        else:
+            for wl in ms.wavelengths:
+                for bn in band_nums:
+                    mode_result = solve_cross_section_mode(
+                        component=component,
+                        stack=stack,
+                        port=ms.port,
+                        position=ms.position,
+                        x_span=ms.x_span,
+                        y_span=ms.y_span,
+                        wavelength=wl,
+                        band_num=bn,
+                        parity=ms.parity,
+                        resolution=resolution,
+                        z_margin=z_margin,
+                        pml_thickness=pml_thickness,
+                        eigensolver_tol=ms.eigensolver_tol,
+                        field_x_grid=field_x_grid,
+                        field_y_grid=field_y_grid,
+                        field_z_grid=field_z_grid,
+                        background_material=background_material,
+                    )
+                    results.append(mode_result)
+
+        domain_cfg = self._domain_config()
+        for r in results:
+            r.domain_config = domain_cfg
+
+        return ModeSweepResult(results)
+
     # -------------------------------------------------------------------------
     # build_config — single source of truth
     # -------------------------------------------------------------------------
@@ -847,6 +1329,20 @@ class Simulation(BaseModel):
         else:
             monitor_z_span = None
 
+        # Compute meep verbosity from `meep.native` logger level, with
+        # `run(verbose="full")` override.
+        _run_verbose = getattr(self, "_run_verbose", None)
+        if _run_verbose == "full":
+            meep_verbosity = 2
+        else:
+            _level = logging.getLogger("meep.native").getEffectiveLevel()
+            if _level == logging.NOTSET or _level >= logging.WARNING:
+                meep_verbosity = 0
+            elif _level >= logging.INFO:
+                meep_verbosity = 1
+            else:
+                meep_verbosity = 2
+
         # Build SimConfig
         sim_config = SimConfig(
             is_3d=is_3d,
@@ -870,6 +1366,7 @@ class Simulation(BaseModel):
             accuracy=accuracy_cfg,
             diagnostics=diagnostics_cfg,
             verbose_interval=diagnostics_cfg.verbose_interval,
+            meep_verbosity=meep_verbosity,
             symmetries=symmetry_entries,
         )
         # Forward any private hints into the config
@@ -920,6 +1417,131 @@ class Simulation(BaseModel):
         script_path.write_text(script_content, encoding="utf-8")
 
         logger.info("Config written to %s", output_dir)
+        return output_dir
+
+    def write_mode_solver_config(self, output_dir: str | Path) -> Path:
+        """Serialize mode solver config for cloud eigenmode solving.
+
+        For slab modes (1D) the runner builds the cell from
+        ``layer_stack`` alone.  For cross-section modes the geometry is
+        pre-computed client-side into ``cross_section_geometry`` so the
+        runner does not need gdsfactory / KLayout.
+
+        Args:
+            output_dir: Directory to write ``mode_solver_config.json``
+                and ``run_meep.py``.
+
+        Returns:
+            Path to the output directory.
+
+        Raises:
+            ValueError: If ``mode_solver`` has no wavelengths, stack
+                resolution fails, or cross-section prerequisites are
+                missing (component, port, etc.).
+        """
+        from gsim.meep.models.config import (
+            CrossSectionGeometry,
+            DielectricEntry,
+            ModeSolverConfig,
+        )
+        from gsim.meep.script import generate_meep_mode_solver_script
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        ms = self.mode_solver
+        if not ms.wavelengths:
+            raise ValueError("mode_solver.wavelengths must not be empty")
+
+        bands = [ms.band] if ms.band is not None else list(range(1, ms.num_bands + 1))
+
+        resolution = self.solver.resolution
+        pml_thickness = self.domain.pml
+        z_margin = self.domain.resolved_margin_z()
+
+        first_wavelength = ms.wavelengths[0]
+        _stack, material_data = self._resolve_stack_and_materials(
+            wavelength=first_wavelength
+        )
+        stack = self.geometry.stack
+        if stack is None:
+            raise ValueError(
+                "Stack resolution failed — set a geometry with stack first"
+            )
+
+        if stack.dielectrics:
+            dielectrics = [
+                DielectricEntry(
+                    name=diel["name"],
+                    zmin=diel["zmin"],
+                    zmax=diel["zmax"],
+                    material=diel["material"],
+                )
+                for diel in stack.dielectrics
+            ]
+        else:
+            dielectrics = [
+                DielectricEntry(
+                    name=layer.name,
+                    zmin=layer.zmin,
+                    zmax=layer.zmax,
+                    material=layer.material,
+                )
+                for layer in stack.layers.values()
+            ]
+
+        component = self.geometry.component
+        where = ms.where
+        if where == "auto":
+            has_port_or_pos = ms.port is not None or ms.position is not None
+            where_effective = (
+                "cross_section" if component is not None and has_port_or_pos else "slab"
+            )
+        else:
+            where_effective = where
+
+        cross_section_geometry: CrossSectionGeometry | None = None
+        n_field_x = ms.n_field_x
+        n_field_y = ms.n_field_y
+
+        if where_effective == "cross_section":
+            cross_section_geometry = _precompute_cross_section_geometry(
+                component=component,
+                stack=stack,
+                port=ms.port,
+                position=ms.position,
+                x_span=ms.x_span,
+                y_span=ms.y_span,
+                z_margin=z_margin,
+                pml_thickness=pml_thickness,
+                resolution=resolution,
+                material_data=material_data,
+                background_material=ms.background_material,
+            )
+
+        config = ModeSolverConfig(
+            wavelengths=ms.wavelengths,
+            bands=bands,
+            parity=ms.parity,
+            resolution=resolution,
+            pml_thickness=pml_thickness,
+            z_margin=z_margin,
+            background_material=ms.background_material,
+            eigensolver_tol=ms.eigensolver_tol,
+            n_field_z=ms.n_field_z,
+            layer_stack=dielectrics,
+            materials=material_data,
+            cross_section_geometry=cross_section_geometry,
+            n_field_x=n_field_x,
+            n_field_y=n_field_y,
+        )
+
+        config.to_json(output_dir / "mode_solver_config.json")
+
+        script_path = output_dir / "run_meep.py"
+        script_path.write_text(generate_meep_mode_solver_script(), encoding="utf-8")
+
+        logger.info("Mode solver config written to %s", output_dir)
         return output_dir
 
     # -------------------------------------------------------------------------
@@ -1026,6 +1648,7 @@ class Simulation(BaseModel):
             ``SParameterResult`` when ``wait=True``, or ``job_id`` string
             when ``wait=False``.
         """
+        self._run_verbose = verbose
         self.upload(verbose=False)
         self.start(verbose=verbose != "quiet")
         if not wait:
@@ -1070,6 +1693,7 @@ class Simulation(BaseModel):
         from gsim.meep.models.results import SParameterResult
 
         # Always regenerate config to reflect current settings
+        self._run_verbose = "quiet" if not verbose else "status"
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="meep_local_"))
         output_dir = Path(output_dir)

@@ -523,8 +523,9 @@ class TestPECBlockMesh:
 class TestShapedDielectric:
     """Test mesh generation with shaped dielectric volumes."""
 
+    @classmethod
     @pytest.fixture(scope="class")
-    def shaped_dielectric_sim(self, tmp_path_factory):
+    def shaped_dielectric_sim(cls, tmp_path_factory):
         """Create and mesh a component with a shaped dielectric core."""
         from gsim.common.stack.materials import MATERIALS_DB
 

@@ -189,10 +189,11 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short -m 'not cloud'"
+addopts = "--tb=short -m 'not cloud and not meep_local'"
 markers = [
   "cloud: tests that submit jobs to GDSFactory+ cloud servers (deselected by default; run with `pytest -m cloud`)",
   "sim_smoke_test: smallest cloud sims (one per solver) run automatically per-PR; run with `pytest -m sim_smoke_test`",
+  "meep_local: tests requiring a local MEEP installation (deselected by default; run with `pytest -m meep_local`)",
 ]
 norecursedirs = ["scripts"]
 testpaths = ["tests"]
@@ -319,6 +320,7 @@ include = ["tests/**"]
 
 [tool.ty.overrides.rules]
 possibly-missing-attribute = "ignore"
+invalid-argument-type = "ignore"
 
 [tool.ty.rules]
 missing-argument = "ignore"

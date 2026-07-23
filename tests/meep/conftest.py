@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import gdsfactory as gf
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def activate_generic_pdk():
-    """Activate the generic PDK before each test to prevent IHP PDK bleed-through."""
-    gf.gpdk.PDK.activate()
+    """Ensure the generic PDK is active before each test."""
+    with contextlib.suppress(AttributeError):
+        gf.gpdk.PDK.activate()

@@ -608,3 +608,112 @@ class FDTD(BaseModel):
         if self.x_cut is not None:
             return self.x_cut
         return None
+
+
+# ---------------------------------------------------------------------------
+# ModeSolver
+# ---------------------------------------------------------------------------
+
+
+class ModeSolver(BaseModel):
+    """Eigenmode solver configuration for waveguide cross-section analysis.
+
+    Configure mode-solving parameters declaratively, then solve via
+    ``sim.solve_modes()``.
+
+    Example::
+
+        sim.mode_solver(wavelengths=[1.55], num_bands=3)
+        sim.mode_solver.first(3).at_port("o1")
+        results = sim.solve_modes()
+    """
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    where: Literal["auto", "slab", "cross_section"] = Field(default="auto")
+    wavelengths: list[float] = Field(default_factory=list)
+    num_bands: int = Field(default=1, ge=1)
+    band: int | None = Field(default=None, ge=1)
+    parity: Literal[
+        "NO_PARITY", "EVEN_Y", "ODD_Y", "EVEN_Z", "ODD_Z", "EVEN_Y+ODD_Z"
+    ] = Field(default="NO_PARITY")
+    eigensolver_tol: float = Field(default=1e-6, gt=0)
+    port: str | None = Field(default=None)
+    position: tuple[float, float] | None = Field(default=None)
+    x_span: float | None = Field(default=None)
+    y_span: float | None = Field(default=None)
+    n_field_x: int = Field(default=0, ge=0)
+    n_field_y: int = Field(default=0, ge=0)
+    n_field_z: int = Field(default=0, ge=0)
+    background_material: str = Field(
+        default="air",
+        description="MEEP default_material (e.g. 'sio2' for oxide-clad waveguides).",
+    )
+
+    @model_validator(mode="after")
+    def _validate_where_constraints(self) -> ModeSolver:
+        """Enforce cross-field constraints between where and spatial params."""
+        if self.where == "slab":
+            if self.port is not None:
+                raise ValueError(
+                    "port must be None when where='slab' — slab mode does "
+                    "not use a component port."
+                )
+            if self.position is not None:
+                raise ValueError(
+                    "position must be None when where='slab' — slab mode "
+                    "does not use a spatial position."
+                )
+            if self.x_span is not None:
+                raise ValueError(
+                    "x_span must be None when where='slab' — slab mode "
+                    "spans the full x-extent automatically."
+                )
+            if self.y_span is not None:
+                raise ValueError(
+                    "y_span must be None when where='slab' — slab mode "
+                    "spans the full y-extent automatically."
+                )
+        if self.port is not None and self.position is not None:
+            raise ValueError("Cannot set both port and position — use exactly one.")
+        return self
+
+    def fundamental(self) -> ModeSolver:
+        """Solve only the fundamental mode (num_bands=1, band=None)."""
+        self.num_bands = 1
+        self.band = None
+        return self
+
+    def first(self, n: int) -> ModeSolver:
+        """Solve the first *n* bands (num_bands=n, band=None)."""
+        self.num_bands = n
+        self.band = None
+        return self
+
+    def at_port(self, name: str) -> ModeSolver:
+        """Set the port name for cross-section mode solving."""
+        self.port = name
+        return self
+
+    def at_slab(self) -> ModeSolver:
+        """Set solver mode to slab (1D vertical)."""
+        self.where = "slab"
+        return self
+
+    def at_cross_section(self) -> ModeSolver:
+        """Set solver mode to cross-section (2D transverse)."""
+        self.where = "cross_section"
+        return self
+
+    def sweep_wavelength(self, start: float, stop: float, num: int) -> ModeSolver:
+        """Populate wavelengths from a linear sweep (start, stop, num)."""
+        import numpy as np
+
+        self.wavelengths = list(np.linspace(start, stop, num))
+        return self
+
+    def __call__(self, **kwargs: Any) -> ModeSolver:
+        """Update fields in place, return self for fluent chaining."""
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self

@@ -5,15 +5,20 @@ from gsim.meep.models.api import (
     Domain,
     Geometry,
     Material,
+    ModeSolver,
     ModeSource,
     Symmetry,
 )
 from gsim.meep.models.config import (
     AccuracyConfig,
+    CrossSectionBlock,
+    CrossSectionGeometry,
     DiagnosticsConfig,
+    DielectricEntry,
     DomainConfig,
     LayerStackEntry,
     MaterialData,
+    ModeSolverConfig,
     PortData,
     ResolutionConfig,
     SimConfig,
@@ -22,7 +27,7 @@ from gsim.meep.models.config import (
     SymmetryEntry,
     WavelengthConfig,
 )
-from gsim.meep.models.results import SParameterResult
+from gsim.meep.models.results import ModeResult, SParameterResult
 
 # Backward compatibility alias
 FDTDConfig = WavelengthConfig
@@ -30,7 +35,10 @@ FDTDConfig = WavelengthConfig
 __all__ = [
     "FDTD",
     "AccuracyConfig",
+    "CrossSectionBlock",
+    "CrossSectionGeometry",
     "DiagnosticsConfig",
+    "DielectricEntry",
     "Domain",
     "DomainConfig",
     "FDTDConfig",
@@ -38,6 +46,9 @@ __all__ = [
     "LayerStackEntry",
     "Material",
     "MaterialData",
+    "ModeResult",
+    "ModeSolver",
+    "ModeSolverConfig",
     "ModeSource",
     "PortData",
     "ResolutionConfig",

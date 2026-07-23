@@ -371,6 +371,92 @@ class FiberSourceConfig(BaseModel):
     )
 
 
+class DielectricEntry(BaseModel):
+    """One dielectric slab entry for the mode solver config.
+
+    Describes a uniform horizontal layer (infinite in x, y) with a
+    material name and vertical extent.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    name: str
+    zmin: float
+    zmax: float
+    material: str
+
+
+class CrossSectionBlock(BaseModel):
+    """One rectangular block in a 2D cross-section MEEP cell."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    horizontal_center: float
+    horizontal_size: float
+    z_center: float
+    z_size: float
+    material: str
+
+
+class CrossSectionGeometry(BaseModel):
+    """Pre-computed 2D cross-section cell geometry.
+
+    Serialised so the cloud runner can build the MEEP cell from simple
+    blocks without needing gdsfactory or KLayout installed.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    plane: str  # "xz" or "yz"
+    blocks: list[CrossSectionBlock]
+    cell_horizontal_span: float
+    cell_z_span: float
+    z_center: float
+
+
+class ModeSolverConfig(BaseModel):
+    """Serializable config for cloud eigenmode solving.
+
+    Slab mode: the runner builds a 1D cell from ``layer_stack``.
+    Cross-section mode: ``cross_section_geometry`` is pre-computed
+    by the client so the runner can build the 2D cell from blocks
+    without GDS processing.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    wavelengths: list[float]
+    bands: list[int]
+    parity: str = "NO_PARITY"
+    resolution: float = 32
+    pml_thickness: float = 0.0
+    z_margin: float | tuple[float, float] = 0.0
+    background_material: str = "air"
+    eigensolver_tol: float = 1e-6
+    n_field_z: int = 0
+    layer_stack: list[DielectricEntry]
+    materials: dict[str, MaterialData]
+
+    cross_section_geometry: CrossSectionGeometry | None = None
+    n_field_x: int = 0
+    n_field_y: int = 0
+
+    def to_json(self, path: str | Path) -> Path:
+        """Write config to JSON file.
+
+        Args:
+            path: Output file path
+
+        Returns:
+            Path to the written file
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = self.model_dump()
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return path
+
+
 class SimConfig(BaseModel):
     """Complete serializable simulation config written as JSON.
 
@@ -439,6 +525,15 @@ class SimConfig(BaseModel):
     accuracy: AccuracyConfig
     verbose_interval: float = Field(
         ge=0, description="MEEP time units between progress prints (0=off)"
+    )
+    meep_verbosity: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description=(
+            "Meep C++ verbosity level (0=minimal, 3=debugging). "
+            "Set via `meep.native` logger level or `run(verbose='full')`."
+        ),
     )
     diagnostics: DiagnosticsConfig
     symmetries: list[SymmetryEntry]
