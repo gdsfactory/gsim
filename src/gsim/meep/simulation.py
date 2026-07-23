@@ -1469,15 +1469,26 @@ class Simulation(BaseModel):
                 "Stack resolution failed — set a geometry with stack first"
             )
 
-        dielectrics = [
-            DielectricEntry(
-                name=diel["name"],
-                zmin=diel["zmin"],
-                zmax=diel["zmax"],
-                material=diel["material"],
-            )
-            for diel in stack.dielectrics
-        ]
+        if stack.dielectrics:
+            dielectrics = [
+                DielectricEntry(
+                    name=diel["name"],
+                    zmin=diel["zmin"],
+                    zmax=diel["zmax"],
+                    material=diel["material"],
+                )
+                for diel in stack.dielectrics
+            ]
+        else:
+            dielectrics = [
+                DielectricEntry(
+                    name=layer.name,
+                    zmin=layer.zmin,
+                    zmax=layer.zmax,
+                    material=layer.material,
+                )
+                for layer in stack.layers.values()
+            ]
 
         component = self.geometry.component
         where = ms.where
