@@ -621,7 +621,7 @@ class TestModeSolver:
         from gsim.meep.models.api import ModeSolver
 
         with pytest.raises(ValidationError):
-            ModeSolver(wavelengths=[1.55], parity="EVEN_Z")  # ty: ignore[invalid-argument-type]
+            ModeSolver(wavelengths=[1.55], parity="EVEN_X")  # ty: ignore[invalid-argument-type]
 
     def test_fundamental_sets_bands(self):
         """fundamental() sets num_bands=1, band=None."""
