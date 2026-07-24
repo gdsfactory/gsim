@@ -9,7 +9,10 @@ nav = [
     { "Crossing" = "nbs/meep_crossing.md" },
     { "2D FDTD" = "nbs/meep_2d.md" },
     { "2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" },
-    { "2D Grating Coupler: Wavelength Sweep" = "nbs/meep_2d_xz_gc_wavelength_sweep.md" }
+    { "2D Grating Coupler: Wavelength Sweep" = "nbs/meep_2d_xz_gc_wavelength_sweep.md" },
+    { "Mode Solver: Rib Waveguide" = "nbs/meep_mode_solver_rib.md" },
+    { "Mode Solver: SOI Slab" = "nbs/meep_mode_solver_soi.md" },
+    { "Mode Solver: TFLN Ridge" = "nbs/meep_mode_solver_tfln.md" }
   ] },
   { "FEM for RF" = [
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },

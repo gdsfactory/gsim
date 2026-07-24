@@ -13,16 +13,16 @@
 #     name: python3
 # ---
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.002263, "end_time": "2026-07-24T09:46:47.879125", "exception": false, "start_time": "2026-07-24T09:46:47.876862", "status": "completed"}
 # # MEEP Eigenmode Solver — 1D Slab Modes
 #
 # Solve 1D slab modes with ``sim.mode_solver()`` + ``sim.solve_modes()``.
 # Runs on GDSFactory+ cloud by default; ``sim.solve_modes_local()`` for local MEEP.
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.003497, "end_time": "2026-07-24T09:46:47.885254", "exception": false, "start_time": "2026-07-24T09:46:47.881757", "status": "completed"}
 # ## Part 1 — Quick Start
 
-# %%
+# %% papermill={"duration": 1.129129, "end_time": "2026-07-24T09:46:49.015793", "exception": false, "start_time": "2026-07-24T09:46:47.886664", "status": "completed"}
 import math
 
 import matplotlib.pyplot as plt
@@ -87,7 +87,7 @@ def _make_soi_stack(t_si: float) -> LayerStack:
 soi = _make_soi_stack(0.22)
 stack = soi
 
-# %%
+# %% papermill={"duration": 100.018492, "end_time": "2026-07-24T09:48:29.035927", "exception": false, "start_time": "2026-07-24T09:46:49.017435", "status": "completed"}
 sim = gm.Simulation()
 sim.geometry.stack = stack
 sim.solver.resolution = RESOLUTION
@@ -102,10 +102,10 @@ print(f"n_group = {r.n_group}")
 print(f"kdom    = {[f'{k:.6f}' for k in r.kdom]}")
 print(f"band    = {r.band_num}, parity = {r.parity}")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001573, "end_time": "2026-07-24T09:48:29.039643", "exception": false, "start_time": "2026-07-24T09:48:29.038070", "status": "completed"}
 # ## Part 2 — Mode Results
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001256, "end_time": "2026-07-24T09:48:29.042199", "exception": false, "start_time": "2026-07-24T09:48:29.040943", "status": "completed"}
 # ### ModeResult fields
 #
 # `ModeResult` is a Pydantic model:
@@ -120,7 +120,7 @@ print(f"band    = {r.band_num}, parity = {r.parity}")
 # | `band_num` | `int` | Mode band index (1 = fundamental) |
 # | `parity` | `str` | Parity constraint used |
 
-# %%
+# %% papermill={"duration": 61.220357, "end_time": "2026-07-24T09:49:30.263738", "exception": false, "start_time": "2026-07-24T09:48:29.043381", "status": "completed"}
 sim.mode_solver(n_field_z=n_points)
 sweep = sim.solve_modes()
 r = sweep.results[0]
@@ -128,20 +128,20 @@ r = sweep.results[0]
 for comp, arr in r.fields.items():
     print(f"{comp}: shape={arr.shape}, |max|={np.abs(arr).max():.6f}")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001789, "end_time": "2026-07-24T09:49:30.267332", "exception": false, "start_time": "2026-07-24T09:49:30.265543", "status": "completed"}
 # ### Z-grid and refractive index profile
 
-# %%
+# %% papermill={"duration": 0.006572, "end_time": "2026-07-24T09:49:30.275622", "exception": false, "start_time": "2026-07-24T09:49:30.269050", "status": "completed"}
 z_um = gm.mode_z_grid(stack, n_points=n_points, pml_thickness=PML)
 n_profile = gm.refractive_index_profile(stack, WL, z_grid=z_um)
 
 print(f"Z grid: {z_um[0]:.4f} ... {z_um[-1]:.4f} um  ({len(z_um)} points)")
 print(f"Index range: {n_profile.min():.4f} - {n_profile.max():.4f}")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001711, "end_time": "2026-07-24T09:49:30.279448", "exception": false, "start_time": "2026-07-24T09:49:30.277737", "status": "completed"}
 # ### Mode profile with index overlay
 
-# %%
+# %% papermill={"duration": 33.068149, "end_time": "2026-07-24T09:50:03.349665", "exception": false, "start_time": "2026-07-24T09:49:30.281516", "status": "completed"}
 sim.mode_solver(n_field_z=n_points)
 sweep = sim.solve_modes()
 r = sweep.results[0]
@@ -185,10 +185,10 @@ ax.set_title(
 ax.grid(True, alpha=0.2)
 fig.tight_layout()
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001577, "end_time": "2026-07-24T09:50:03.353220", "exception": false, "start_time": "2026-07-24T09:50:03.351643", "status": "completed"}
 # ### Field component grid
 
-# %%
+# %% papermill={"duration": 0.257315, "end_time": "2026-07-24T09:50:03.612280", "exception": false, "start_time": "2026-07-24T09:50:03.354965", "status": "completed"}
 comps = sorted(
     r.fields.keys(),
     key=lambda c: "ExEyEzHxHyHz".index(c) if c in "ExEyEzHxHyHz" else 99,
@@ -215,17 +215,17 @@ fig.suptitle(
 )
 fig.tight_layout()
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001743, "end_time": "2026-07-24T09:50:03.616366", "exception": false, "start_time": "2026-07-24T09:50:03.614623", "status": "completed"}
 # ## Part 3 — Advanced
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.002308, "end_time": "2026-07-24T09:50:03.620442", "exception": false, "start_time": "2026-07-24T09:50:03.618134", "status": "completed"}
 # ### Wavelength sweep & dispersion
 #
 # `mode_solver.sweep_wavelength(start, stop, num)` populates the wavelength
 # list linearly.  Multiple wavelengths + single band dispatches to the
 # efficient shared-cell sweep internally.
 
-# %%
+# %% papermill={"duration": 33.02967, "end_time": "2026-07-24T09:50:36.652091", "exception": false, "start_time": "2026-07-24T09:50:03.622421", "status": "completed"}
 sim.mode_solver.sweep_wavelength(1.50, 1.60, 7)
 sweep = sim.solve_modes()
 
@@ -241,7 +241,7 @@ for wl in wavelengths:
     )
 
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.001922, "end_time": "2026-07-24T09:50:36.657215", "exception": false, "start_time": "2026-07-24T09:50:36.655293", "status": "completed"}
 # ### Multi-band modes
 #
 # The symmetric SOI slab (Si 220 nm core, SiO2 cladding) at lambda=1.55 um
@@ -251,7 +251,7 @@ for wl in wavelengths:
 # the radiation continuum.  The library logs a warning for modes with
 # ``n_eff`` below the minimum cladding index.
 
-# %%
+# %% papermill={"duration": 43.791555, "end_time": "2026-07-24T09:51:20.450663", "exception": false, "start_time": "2026-07-24T09:50:36.659108", "status": "completed"}
 V_param = (2 * np.pi / WL) * 0.22 / 2 * np.sqrt(_n_si(WL) ** 2 - _n_sio2(WL) ** 2)
 print(
     f"V-parameter = {V_param:.3f}  ->  {max(1, int(2 * V_param / np.pi) + 1)} guided TE mode(s)"
@@ -271,10 +271,10 @@ for band, r in sorted(band_results.items()):
         f"  band {band}: n_eff={r.n_eff:.6f}  ({tag})  n_group={r.n_group}  kdom={[f'{k:.4f}' for k in r.kdom[:2]]}..."
     )
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.002329, "end_time": "2026-07-24T09:51:20.458467", "exception": false, "start_time": "2026-07-24T09:51:20.456138", "status": "completed"}
 # ### Multi-band field profiles
 
-# %%
+# %% papermill={"duration": 39.388115, "end_time": "2026-07-24T09:51:59.848424", "exception": false, "start_time": "2026-07-24T09:51:20.460309", "status": "completed"}
 soi_sim.mode_solver(n_field_z=n_points)
 band_sweep = soi_sim.solve_modes()
 band_results = {r.band_num: r for r in band_sweep.results}
@@ -299,14 +299,14 @@ for comp in ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz"):
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.002785, "end_time": "2026-07-24T09:51:59.854717", "exception": false, "start_time": "2026-07-24T09:51:59.851932", "status": "completed"}
 # ### Parity modes
 #
 # MEEP's eigenmode solver supports parity constraints along Y and Z.
 # For the symmetric SOI slab, ``EVEN_Y`` selects TE0.  ``ODD_Y`` selects
 # the first odd-symmetry mode -- leaky if V < pi/2 ~ 1.57.
 
-# %%
+# %% papermill={"duration": 92.34329, "end_time": "2026-07-24T09:53:32.200787", "exception": false, "start_time": "2026-07-24T09:51:59.857497", "status": "completed"}
 parities = ["NO_PARITY", "EVEN_Y", "ODD_Y"]
 for parity in parities:
     try:
@@ -321,10 +321,10 @@ for parity in parities:
     except RuntimeError as exc:
         print(f"  {parity:10s}: not found ({exc})")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.005566, "end_time": "2026-07-24T09:53:32.211385", "exception": false, "start_time": "2026-07-24T09:53:32.205819", "status": "completed"}
 # ## Part 4 — Validation
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.004027, "end_time": "2026-07-24T09:53:32.218668", "exception": false, "start_time": "2026-07-24T09:53:32.214641", "status": "completed"}
 # ### Analytical SOI slab benchmark
 #
 # Validate against the analytical transcendental equation for a symmetric
@@ -340,7 +340,7 @@ for parity in parities:
 # $k_0 = 2\pi/\lambda$
 
 
-# %%
+# %% papermill={"duration": 0.049003, "end_time": "2026-07-24T09:53:32.270803", "exception": false, "start_time": "2026-07-24T09:53:32.221800", "status": "completed"}
 def solve_slab_analytical(
     wavelength: float,
     n_core: float,
@@ -529,10 +529,10 @@ print("Analytical TE slab modes (Si 220nm / SiO2):")
 for mode, n_eff in sorted(analytical.items()):
     print(f"  TE{mode}: n_eff = {n_eff:.6f}")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.003328, "end_time": "2026-07-24T09:53:32.277680", "exception": false, "start_time": "2026-07-24T09:53:32.274352", "status": "completed"}
 # ### Compare MEEP with analytical
 
-# %%
+# %% papermill={"duration": 81.633161, "end_time": "2026-07-24T09:54:53.913786", "exception": false, "start_time": "2026-07-24T09:53:32.280625", "status": "completed"}
 # MEEP fundamental TE0 via Simulation API
 meep_sim = gm.Simulation()
 meep_sim.geometry.stack = soi
@@ -557,10 +557,10 @@ for r in higher.results:
     if r.band_num > 1:
         print(f"\nMEEP  band {r.band_num}: n_eff = {r.n_eff:.6f}")
 
-# %% [markdown]
+# %% [markdown] papermill={"duration": 0.006372, "end_time": "2026-07-24T09:54:53.926803", "exception": false, "start_time": "2026-07-24T09:54:53.920431", "status": "completed"}
 # ### Wavelength sweep — Meep vs Analytical
 
-# %%
+# %% papermill={"duration": 0.518173, "end_time": "2026-07-24T09:54:54.448618", "exception": false, "start_time": "2026-07-24T09:54:53.930445", "status": "completed"}
 wl_analytical_neff = [
     solve_slab_analytical(wl, _n_si(wl), _n_sio2(wl), 0.22, "TE").get(0)
     for wl in wavelengths
@@ -605,8 +605,8 @@ for wl, m_n, m_g, a_n, a_g in zip(
     )
 
 
-# %%
-# %% [markdown]
+# %% papermill={"duration": 0.00325, "end_time": "2026-07-24T09:54:54.457001", "exception": false, "start_time": "2026-07-24T09:54:54.453751", "status": "completed"}
+# %% [markdown] papermill={"duration": 0.003769, "end_time": "2026-07-24T09:54:54.464369", "exception": false, "start_time": "2026-07-24T09:54:54.460600", "status": "completed"}
 # ## Part 5 — Parameter Studies
 #
 # ### Core thickness sweep
@@ -614,7 +614,7 @@ for wl, m_n, m_g, a_n, a_g in zip(
 # Vary the silicon core thickness and re-solve the slab mode. Thicker
 # cores -> higher confinement -> larger n_eff.
 
-# %%
+# %% papermill={"duration": 221.234786, "end_time": "2026-07-24T09:58:35.702297", "exception": false, "start_time": "2026-07-24T09:54:54.467511", "status": "completed"}
 thicknesses = [0.15, 0.18, 0.22, 0.25, 0.30, 0.35, 0.40]
 
 n_eff_thick: list[float] = []
@@ -678,4 +678,4 @@ fig.tight_layout()
 
 #
 
-# %%
+# %% papermill={"duration": 0.004039, "end_time": "2026-07-24T09:58:35.711040", "exception": false, "start_time": "2026-07-24T09:58:35.707001", "status": "completed"}
