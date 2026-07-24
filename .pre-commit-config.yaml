@@ -56,7 +56,6 @@ repos:
     entry: python scripts/check_cp1252.py
     language: system
     types: [python]
-    exclude: ^nbs/_meep_mode_solver_(rib|tfln)\.py$
 - repo: https://github.com/mwouts/jupytext
   rev: v1.19.2
   hooks:
