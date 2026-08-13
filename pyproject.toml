@@ -18,6 +18,7 @@ dependencies = [
   "meshio>=5.0.0",
   "nbformat>=4.2.0",
   "nest_asyncio2",
+  "pdk-schema==0.0.2",
   "plotly",
   "pyvista>=0.43.0",
   "trame",
