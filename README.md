@@ -14,6 +14,7 @@ with minimal boilerplate.
 
 | Module        | Solver                                      | Method | Use Case                                               |
 | ------------- | ------------------------------------------- | ------ | ------------------------------------------------------ |
+| `gsim.fdtd`   | ZapFDTD                                     | FDTD   | PDK-native mesh and runtime configuration generation   |
 | `gsim.palace` | [Palace](https://awslabs.github.io/palace/) | FEM    | RF/microwave, impedance extraction, driven simulations |
 | `gsim.meep`   | [Meep](https://meep.readthedocs.io/)        | FDTD   | Photonic components, S-parameters, mode propagation    |
 
