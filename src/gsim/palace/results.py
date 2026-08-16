@@ -59,12 +59,23 @@ class PalaceTextResults:
         csv_tables: dict[str, list[dict[str, str]]],
         json_data: dict[str, object],
         text_data: dict[str, list[str]],
+        freq: float | None = None,
     ) -> None:
-        """Create parsed text results."""
+        """Create parsed text results.
+
+        Args:
+            files: Mapping of filenames to paths.
+            csv_tables: Parsed CSV tables.
+            json_data: Parsed JSON data.
+            text_data: Raw text file lines.
+            freq: Simulation frequency in Hz (optional, enables phase
+                velocity columns in pretty-print).
+        """
         self.files = files
         self.csv_tables = csv_tables
         self.json_data = json_data
         self.text_data = text_data
+        self.freq_hz = freq
         self.modes = self._parse_modes()
 
     @staticmethod
@@ -202,20 +213,41 @@ class PalaceTextResults:
 
     def _pretty_text(self, *, max_rows: int = 8, max_lines: int = 12) -> str:
         """Build a compact mode summary matching BoundaryMode workflow needs."""
-        del max_rows
-        del max_lines
+        del max_rows, max_lines
         if not self.modes:
             return "No mode data found in mode-kn.csv"
 
+        c0 = 299_792_458
+        freq_hz: float | None = getattr(self, "freq_hz", None)
+        has_freq = freq_hz is not None and freq_hz > 0
+
+        header = f"{'Mode':<8} {'Re(k_n) [1/m]':<20} {'Im(k_n) [1/m]':<20}"
+        if has_freq:
+            header += f" {'v_p [m/s]':<18} {'v_p / c0':<12} {'n_eff':<12}"
+        else:
+            header += f" {'n_eff':<12}"
+        sep = "-" * len(header)
+
         lines: list[str] = []
+        if has_freq:
+            lines.append(f"Frequency: {freq_hz / 1e9:.1f} GHz\n")  # type: ignore[operator]
+        lines.append(header)
+        lines.append(sep)
+
         for mode_id in sorted(self.modes):
             mode = self.modes[mode_id]
-            lines.append(
-                f"mode {mode_id}: "
-                f"k_n = {self._format_complex(mode['k_n'])}, "
-                f"n_eff = {self._format_complex(mode['n_eff'])}, "
-                f"eta_eff ~= {self._format_complex(mode['eta_eff'], sci=False)}"
-            )
+            k_n = mode["k_n"]
+            n_eff = mode["n_eff"]
+
+            row = f"{mode_id:<8} {k_n.real:<20.6e} {k_n.imag:<20.6e}"
+            if has_freq and k_n.real > 0:
+                vp = 2 * np.pi * freq_hz / k_n.real  # type: ignore[operator]
+                vp_over_c0 = vp / c0
+                row += f" {vp:<18.6e} {vp_over_c0:<12.6f} {n_eff.real:<12.6f}"
+            else:
+                row += f" {n_eff.real:<12.6f}"
+            lines.append(row)
+
         return "\n".join(lines)
 
     def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:
@@ -225,14 +257,8 @@ class PalaceTextResults:
         )
 
     def __repr__(self) -> str:
-        """Return concise object representation."""
-        return (
-            "PalaceTextResults("  # pragma: no cover - trivial repr
-            f"files={len(self.files)}, "
-            f"csv={len(self.csv_tables)}, "
-            f"json={len(self.json_data)}, "
-            f"text={len(self.text_data)})"
-        )
+        """Return pretty table for automatic notebook/terminal display."""
+        return self._pretty_text()
 
     def __str__(self) -> str:
         """Return pretty summary for notebook/terminal display."""
@@ -661,7 +687,11 @@ def load_sparams(
     return SParams(freq=freq, data=data, port_names=port_names, files=files)
 
 
-def load_text_results(source: str | Path | dict) -> PalaceTextResults:
+def load_text_results(
+    source: str | Path | dict,
+    *,
+    freq: float | None = None,
+) -> PalaceTextResults:
     """Load non-S-parameter Palace outputs from text files.
 
     This parser targets result layouts such as BoundaryMode where Palace writes
@@ -670,6 +700,8 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
     Args:
         source: Results dict from ``run_local()`` / ``run()``, simulation path,
             or ``output/palace`` path.
+        freq: Simulation frequency in Hz (optional, enables phase velocity
+            columns in pretty-print).
 
     Returns:
         Parsed :class:`PalaceTextResults`.
@@ -729,6 +761,7 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
         csv_tables=csv_tables,
         json_data=json_data,
         text_data=text_data,
+        freq=freq,
     )
 
 
