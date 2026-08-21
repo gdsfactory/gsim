@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       notebooks: ${{ steps.notebooks.outputs.notebooks }}
+      run_all: ${{ steps.changed-notebooks.outputs.run_all }}
+      changed_notebooks: ${{ steps.changed-notebooks.outputs.notebooks }}
     steps:
     - name: Checkout repo
       uses: actions/checkout@v6
@@ -25,6 +27,22 @@ jobs:
     - name: List published notebooks
       id: notebooks
       run: echo "notebooks=$(uv run python scripts/list_docs_notebooks.py --json)" >> "$GITHUB_OUTPUT"
+    - name: Detect changed notebooks
+      if: github.event_name == 'pull_request'
+      id: changed-notebooks
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        changed_files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
+        run_all=false
+        if grep -qxE 'pyproject\.toml|uv\.lock|src/.+|scripts/.+' <<< "$changed_files"; then
+          run_all=true
+          echo "Project code or dependencies changed; all notebooks will be executed"
+        fi
+        echo "run_all=${run_all}" >> "$GITHUB_OUTPUT"
+        changed=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | tr '\n' ' ')
+        echo "notebooks=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | jq -Rsc 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+        echo "Changed notebooks: ${changed:-none}"
   execute-notebooks:
     name: Execute ${{ matrix.notebook }}
     needs: discover-notebooks
@@ -61,6 +79,8 @@ jobs:
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
     - name: Execute notebook
+      if: >-
+        github.event_name == 'push' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
       env:
         GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
         NOTEBOOK: ${{ matrix.notebook }}
