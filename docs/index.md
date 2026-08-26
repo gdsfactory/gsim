@@ -24,7 +24,7 @@ gf.gpdk.PDK.activate()
 component = gf.get_component("mmi1x2")
 
 simulation = fdtd.Simulation()
-simulation.materials(background="SiO2", overrides={"si": 3.4757})
+simulation.materials(background="SiO2")
 simulation.geometry(component)
 simulation.source(port="o1", wavelength_span_um=0.1)
 
@@ -38,7 +38,6 @@ result.plot_plotly()
 
 Over the next six months, we plan to add:
 
-- Material dispersion
 - Anisotropic materials
 - Periodic boundary conditions
 - Gradients for inverse design

@@ -51,6 +51,35 @@ hole, or edge topology, meshing safely falls back to vertical slices bounded by
 Use `write(path)` to generate `mesh.msh` and `config.json` without submitting.
 The original flat constructor keywords remain accepted for compatibility.
 
+## Material cards and dispersion
+
+Every material referenced by the component stack or selected as the background
+must resolve to a `pdk_schema.MaterialCard`. Project PDK cards take precedence;
+gsim supplies fallback cards for common `Si`, `SiO2`, and `SiN` spellings.
+`gsim.fdtd` translates the card's optical model directly into the material entry
+expected by ZapFDTD:
+
+| MaterialCard optical model | ZapFDTD material entry |
+| --- | --- |
+| Scalar refractive index or permittivity | `refractive_index` |
+| Tabulated refractive index or permittivity | `dispersion.table` |
+| Sellmeier | `dispersion.sellmeier` |
+| Single-term Drude or Lorentz | `dispersion.drude_lorentz` |
+
+The source band must lie inside the card's validity and tabulated wavelength
+range. ZapFDTD performs the authoritative fit, passivity, stability, and
+accuracy checks when it builds the simulation. Consequently, a coarse table can
+still fail backend validation even when its JSON structure is valid.
+
+Continuous-wave and zero-span port sources do not provide the nonzero fitting
+band currently required by ZapFDTD, so they cannot be combined with a
+dispersive card. Unsupported card models, anisotropy, conductivity, and magnetic
+permeability fail explicitly rather than being reduced silently to a scalar.
+
+The legacy `materials(overrides={"si": 3.47})` shorthand remains supported. It
+creates a temporary constant-index `MaterialCard`; the serialization path still
+consumes the card rather than bypassing material resolution.
+
 Optional `x_bounds`, `y_bounds`, and `z_bounds` tuples set the non-PML physical
 domain in micrometers. Omitted axes remain automatically sized from the
 component, PDK stack, and padding. Explicit bounds must contain the geometry,

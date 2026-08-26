@@ -79,13 +79,13 @@ class Geometry(BaseModel):
 
 
 class Material(_MutableModel):
-    """Lossless scalar material override at the source wavelength."""
+    """Compatibility shorthand for a constant-index MaterialCard override."""
 
     refractive_index: float = Field(gt=0)
 
 
 class Materials(_MutableModel):
-    """Background material and optional refractive-index overrides."""
+    """Background card selection and optional constant-card overrides."""
 
     background: str = Field(default="SiO2", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)

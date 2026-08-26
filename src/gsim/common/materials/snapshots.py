@@ -5,10 +5,21 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from math import isfinite, sqrt
+from math import hypot, isfinite, pi, sqrt
 from typing import Any
 
-from pdk_schema import Index, MaterialCard, ScalarValue, Sellmeier, TabulatedValue
+from pdk_schema import (
+    Drude,
+    Index,
+    Lorentz,
+    MaterialCard,
+    Permittivity,
+    ScalarValue,
+    Sellmeier,
+    SellmeierPoleSquared,
+    TabulatedValue,
+)
+from scipy.constants import c as C0  # noqa: N812
 
 from gsim.common.materials.registry import MaterialSource, find_material_card
 
@@ -158,6 +169,21 @@ def _evaluate_permittivity(
                 f"Material {card.name!r} produced non-positive index squared."
             )
         return sqrt(index_squared), 0.0
+    if isinstance(model, SellmeierPoleSquared):
+        wavelength_squared = wavelength_um**2
+        index_squared = (
+            1.0
+            + model.offset
+            + sum(
+                term.b * wavelength_squared / (wavelength_squared - term.c_um2)
+                for term in model.terms
+            )
+        )
+        if index_squared <= 0:
+            raise MaterialModelError(
+                f"Material {card.name!r} produced non-positive index squared."
+            )
+        return sqrt(index_squared), 0.0
     if isinstance(model, Index):
         if isinstance(model.n, list):
             raise MaterialModelError(
@@ -171,9 +197,52 @@ def _evaluate_permittivity(
                 "Tensor extinction coefficients are not supported for passive FDTD."
             )
         return refractive_index, _evaluate_value(model.k, wavelength_um)
+    if isinstance(model, Permittivity):
+        if isinstance(model.eps_real, list) or isinstance(model.eps_imag, list):
+            raise MaterialModelError(
+                "Tensor permittivities are not supported for passive FDTD."
+            )
+        eps_real = _evaluate_value(model.eps_real, wavelength_um)
+        eps_imag = (
+            0.0
+            if model.eps_imag is None
+            else _evaluate_value(model.eps_imag, wavelength_um)
+        )
+        return _complex_index(eps_real, eps_imag)
+    angular_frequency = 2 * pi * C0 / (wavelength_um * 1e-6)
+    if isinstance(model, Drude):
+        permittivity = complex(model.eps_inf, 0.0)
+        for term in model.terms:
+            permittivity -= term.omega_p**2 / complex(
+                angular_frequency**2,
+                term.gamma * angular_frequency,
+            )
+        return _complex_index(permittivity.real, permittivity.imag)
+    if isinstance(model, Lorentz):
+        permittivity = complex(model.eps_inf, 0.0)
+        for term in model.terms:
+            permittivity += (
+                term.delta_eps
+                * term.omega_0**2
+                / complex(
+                    term.omega_0**2 - angular_frequency**2,
+                    -term.gamma * angular_frequency,
+                )
+            )
+        return _complex_index(permittivity.real, permittivity.imag)
     raise MaterialModelError(
         f"Unsupported optical model {type(model).__name__} for material {card.name!r}."
     )
+
+
+def _complex_index(eps_real: float, eps_imag: float) -> tuple[float, float]:
+    """Return the passive square root of one complex relative permittivity."""
+    magnitude = hypot(eps_real, eps_imag)
+    refractive_index = sqrt(max(0.0, (magnitude + eps_real) / 2))
+    extinction_coefficient = sqrt(max(0.0, (magnitude - eps_real) / 2))
+    if eps_imag < 0:
+        extinction_coefficient = -extinction_coefficient
+    return refractive_index, extinction_coefficient
 
 
 def resolve_material_snapshot(

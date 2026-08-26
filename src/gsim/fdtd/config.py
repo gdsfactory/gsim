@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gsim.common.materials import MaterialSnapshot
+from gsim.fdtd.material_config import MaterialConfig, material_config_from_snapshot
 from gsim.fdtd.models import FDTDConfigError, MeshManifest
 
 
@@ -15,12 +16,6 @@ class _StrictModel(BaseModel):
     """Base model that rejects fields GDSFactory FDTD does not understand."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-
-class MaterialConfig(_StrictModel):
-    """Scalar real optical material supported by GDSFactory FDTD schema v1."""
-
-    refractive_index: float = Field(gt=0)
 
 
 class RegionConfig(_StrictModel):
@@ -191,6 +186,28 @@ class ExcitationConfig(_StrictModel):
         return self
 
 
+def _source_wavelength_range_nm(
+    excitation: ExcitationConfig,
+) -> tuple[float, float] | None:
+    """Return the nonzero wavelength band ZapFDTD derives from the source."""
+    if excitation.waveform == "continuous_wave":
+        return None
+    center = excitation.center_wavelength
+    halfspan = excitation.wavelength_halfspan
+    if excitation.type == "eigenmode":
+        return (center - halfspan, center + halfspan) if halfspan > 0 else None
+    frequency_center = 1.0 / center
+    frequency_width = (
+        0.5 * (1.0 / (center - halfspan) - 1.0 / (center + halfspan))
+        if halfspan > 0
+        else frequency_center * 0.1
+    )
+    return (
+        1.0 / (frequency_center + frequency_width),
+        1.0 / (frequency_center - frequency_width),
+    )
+
+
 class GridConfig(_StrictModel):
     """Yee-grid and PML settings."""
 
@@ -252,18 +269,6 @@ class FDTDConfig(_StrictModel):
         return self
 
 
-def _material_config(snapshot: MaterialSnapshot) -> MaterialConfig:
-    """Convert one lossless scalar snapshot to the GDSFactory FDTD schema."""
-    if snapshot.extinction_coefficient != 0:
-        raise FDTDConfigError(
-            f"Material {snapshot.material_name!r} has extinction coefficient "
-            f"{snapshot.extinction_coefficient}; GDSFactory FDTD schema v1 "
-            "supports only "
-            "lossless real refractive indices."
-        )
-    return MaterialConfig(refractive_index=snapshot.refractive_index)
-
-
 def build_fdtd_config(
     manifest: MeshManifest,
     material_snapshots: Mapping[str, MaterialSnapshot],
@@ -287,12 +292,23 @@ def build_fdtd_config(
         raise FDTDConfigError(
             f"Background material {background_material!r} has no snapshot."
         )
+    resolved_excitation = excitation or ExcitationConfig(
+        type="gaussian_beam" if gaussian_beam is not None else "eigenmode",
+        center_wavelength=center_wavelength_nm,
+        wavelength_halfspan=wavelength_halfspan_nm,
+        num_wavelengths=num_wavelengths,
+        default_port=default_port,
+        gaussian_beam=gaussian_beam,
+    )
+    source_wavelength_range_nm = _source_wavelength_range_nm(resolved_excitation)
     materials = {
-        name: _material_config(snapshot)
+        name: material_config_from_snapshot(snapshot, source_wavelength_range_nm)
         for name, snapshot in material_snapshots.items()
     }
     return FDTDConfig(
-        background_refractive_index=materials[background_material].refractive_index,
+        background_refractive_index=material_snapshots[
+            background_material
+        ].refractive_index,
         materials=materials,
         geometry=GeometryConfig(
             volumes={
@@ -320,15 +336,7 @@ def build_fdtd_config(
                 for name, group in manifest.ports.items()
             },
         ),
-        excitation=excitation
-        or ExcitationConfig(
-            type="gaussian_beam" if gaussian_beam is not None else "eigenmode",
-            center_wavelength=center_wavelength_nm,
-            wavelength_halfspan=wavelength_halfspan_nm,
-            num_wavelengths=num_wavelengths,
-            default_port=default_port,
-            gaussian_beam=gaussian_beam,
-        ),
+        excitation=resolved_excitation,
         monitors=monitors or [],
         grid=GridConfig(
             nanometers_per_cell=nanometers_per_cell,

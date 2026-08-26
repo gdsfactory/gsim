@@ -2,11 +2,10 @@
 
 from pdk_schema import (
     Band,
-    Index,
+    DispersionModel,
     MaterialCard,
     Provenance,
     Regime,
-    Sellmeier,
     Validity,
 )
 
@@ -29,7 +28,7 @@ def wavelength_validity(minimum_um: float, maximum_um: float) -> Validity:
 
 def material_card(
     name: str,
-    permittivity: Index | Sellmeier,
+    permittivity: DispersionModel,
     temperature_ref: float | None,
 ) -> MaterialCard:
     """Build a compact optical material card."""

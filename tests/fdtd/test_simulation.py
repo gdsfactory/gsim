@@ -76,10 +76,14 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert document["schema_version"] == 1
     assert document["mesh_file"] == "mesh.msh"
     assert document["length_scale_meters"] == 1e-9
-    assert document["materials"]["Si"]["refractive_index"] == pytest.approx(3.4757)
-    assert document["materials"]["SiO2"]["refractive_index"] == pytest.approx(
-        1.4440236217
-    )
+    silicon_table = document["materials"]["Si"]["dispersion"]["table"]
+    silicon_index = silicon_table["wavelength_nm"].index(1550.0)
+    assert silicon_table["n"][silicon_index] == pytest.approx(3.4757)
+    assert set(silicon_table["k"]) == {0.0}
+    silica = document["materials"]["SiO2"]["dispersion"]
+    assert silica["wavelength_range_nm"] == [1500.0, 1600.0]
+    assert silica["sellmeier"]["b"] == [0.6961663, 0.4079426, 0.8974794]
+    assert document["background_refractive_index"] == pytest.approx(1.4440236217)
     assert document["geometry"]["ports"]["o1"]["normal"] == [-1, 0, 0]
     assert document["geometry"]["ports"]["o2"]["normal"] == [1, 0, 0]
 
