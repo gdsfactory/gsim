@@ -24,7 +24,13 @@ from pdk_schema import (
 )
 from scipy.constants import c as C0  # noqa: N812
 
-from gsim.common.materials import SI_LI_293K, SI_SALZBERG, SIO2_MALITSON
+from gsim.common.materials import (
+    SI_LI_293K,
+    SI_SALZBERG,
+    SIO2_MALITSON,
+    SIO2_PALIK,
+    SIO2_PALIK_LOSSLESS,
+)
 from gsim.common.materials._helpers import material_card
 from gsim.meep.material_cards import (
     MeepMaterialCompatibilityError,
@@ -51,6 +57,23 @@ def _index_card(name: str = "constant", *, k: float | None = None):
 def test_builtin_si_and_sio2_cards_are_meep_compatible() -> None:
     validate_meep_material_card(SI_SALZBERG, (1.5, 1.6))
     validate_meep_material_card(SIO2_MALITSON, (1.5, 1.6))
+    validate_meep_material_card(SIO2_PALIK_LOSSLESS, (1.5, 1.6))
+
+
+def test_palik_lossless_maps_to_two_lorentz_terms() -> None:
+    material = material_data_from_card(SIO2_PALIK_LOSSLESS, (1.5, 1.6))
+
+    terms = material.epsilon_susceptibilities or []
+    assert material.epsilon_diag == [1.5385442336875639] * 3
+    assert [term.kind for term in terms] == ["lorentzian", "lorentzian"]
+    assert [term.sigma for term in terms] == pytest.approx(
+        [0.5686340834157791, 1.1574659369080176]
+    )
+
+
+def test_palik_is_not_meep_compatible() -> None:
+    with pytest.raises(MeepMaterialCompatibilityError, match="unsupported optical"):
+        validate_meep_material_card(SIO2_PALIK, (4.0, 5.0))
 
 
 def test_scalar_index_card_becomes_nondispersive_epsilon() -> None:

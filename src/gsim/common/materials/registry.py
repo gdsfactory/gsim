@@ -10,6 +10,10 @@ from gsim.common.materials.si_li_293k import SI_LI_293K
 from gsim.common.materials.si_salzberg import SI_SALZBERG
 from gsim.common.materials.sin_luke import SIN_LUKE
 from gsim.common.materials.sio2_malitson import SIO2_MALITSON
+from gsim.common.materials.sio2_palik import (
+    SIO2_PALIK,
+    SIO2_PALIK_LOSSLESS,
+)
 
 MaterialSource = Literal["project", "gsim"]
 
@@ -24,6 +28,8 @@ GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
     "SiO2": SIO2_MALITSON.model_copy(update={"name": "SiO2"}),
     "sio2": SIO2_MALITSON.model_copy(update={"name": "sio2"}),
     "SiO2-Malitson": SIO2_MALITSON,
+    "SiO2-Palik": SIO2_PALIK,
+    "SiO2-Palik-Lossless": SIO2_PALIK_LOSSLESS,
 }
 
 

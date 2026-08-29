@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from cmath import sqrt as complex_sqrt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from math import hypot, isfinite, pi, sqrt
+from math import isfinite, pi, sqrt
 from typing import Any
 
 from pdk_schema import (
@@ -14,6 +15,7 @@ from pdk_schema import (
     Lorentz,
     MaterialCard,
     Permittivity,
+    PoleResidue,
     ScalarValue,
     Sellmeier,
     SellmeierPoleSquared,
@@ -230,6 +232,17 @@ def _evaluate_permittivity(
                 )
             )
         return _complex_index(permittivity.real, permittivity.imag)
+    if isinstance(model, PoleResidue):
+        permittivity = complex(model.eps_inf, 0.0)
+        for pole in model.poles:
+            pole_frequency = complex(*pole.a)
+            residue = complex(*pole.c)
+            permittivity -= residue / (
+                1j * angular_frequency + pole_frequency
+            ) + residue.conjugate() / (
+                1j * angular_frequency + pole_frequency.conjugate()
+            )
+        return _complex_index(permittivity.real, permittivity.imag)
     raise MaterialModelError(
         f"Unsupported optical model {type(model).__name__} for material {card.name!r}."
     )
@@ -237,12 +250,8 @@ def _evaluate_permittivity(
 
 def _complex_index(eps_real: float, eps_imag: float) -> tuple[float, float]:
     """Return the passive square root of one complex relative permittivity."""
-    magnitude = hypot(eps_real, eps_imag)
-    refractive_index = sqrt(max(0.0, (magnitude + eps_real) / 2))
-    extinction_coefficient = sqrt(max(0.0, (magnitude - eps_real) / 2))
-    if eps_imag < 0:
-        extinction_coefficient = -extinction_coefficient
-    return refractive_index, extinction_coefficient
+    refractive_index = complex_sqrt(complex(eps_real, eps_imag))
+    return float(refractive_index.real), float(refractive_index.imag)
 
 
 def resolve_material_snapshot(

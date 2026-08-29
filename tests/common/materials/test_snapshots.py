@@ -5,9 +5,11 @@ from pdk_schema import MaterialCard
 
 from gsim.common.materials import (
     GSIM_MATERIAL_CARDS,
+    SIO2_MALITSON,
     MaterialModelError,
     MaterialNotFoundError,
     WavelengthOutOfRangeError,
+    get_material_card,
     resolve_material_snapshot,
 )
 
@@ -55,6 +57,31 @@ def test_project_card_overrides_fallback_and_missing_card_uses_fallback() -> Non
     assert silicon.refractive_index == pytest.approx(3.4757)
     assert silica.source == "gsim"
     assert silica.refractive_index == pytest.approx(1.444023622)
+
+
+def test_default_sio2_card_remains_malitson() -> None:
+    card = get_material_card("SiO2", {})
+    expected_optical = SIO2_MALITSON.optical
+
+    assert card.optical is not None
+    assert expected_optical is not None
+    assert card.optical.permittivity == expected_optical.permittivity
+
+
+def test_palik_lossless_snapshot_at_telecom_wavelength() -> None:
+    snapshot = resolve_material_snapshot("SiO2-Palik-Lossless", 1.55, {})
+
+    assert snapshot.refractive_index == pytest.approx(1.4445618291988784)
+    assert snapshot.extinction_coefficient == pytest.approx(2.5321522971101062e-11)
+
+
+def test_palik_snapshot_and_validity() -> None:
+    snapshot = resolve_material_snapshot("SiO2-Palik", 10.0, {})
+
+    assert snapshot.refractive_index == pytest.approx(2.6514563349890574)
+    assert snapshot.extinction_coefficient == pytest.approx(0.5003827104608677)
+    with pytest.raises(WavelengthOutOfRangeError, match="valid from 4 to 250 um"):
+        resolve_material_snapshot("SiO2-Palik", 1.55, {})
 
 
 def test_invalid_project_card_does_not_silently_fallback() -> None:
