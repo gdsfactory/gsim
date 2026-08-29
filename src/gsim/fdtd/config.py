@@ -189,7 +189,7 @@ class ExcitationConfig(_StrictModel):
 def _source_wavelength_range_nm(
     excitation: ExcitationConfig,
 ) -> tuple[float, float] | None:
-    """Return the nonzero wavelength band ZapFDTD derives from the source."""
+    """Return the nonzero wavelength band GDSFactory FDTD derives from the source."""
     if excitation.waveform == "continuous_wave":
         return None
     center = excitation.center_wavelength

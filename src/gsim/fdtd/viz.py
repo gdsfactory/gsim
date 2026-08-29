@@ -1,4 +1,4 @@
-"""Interactive Three.js views of ZapFDTD Gmsh simulation meshes."""
+"""Interactive Three.js views of GDSFactory FDTD Gmsh simulation meshes."""
 
 from __future__ import annotations
 
@@ -51,11 +51,11 @@ def plot_mesh(
     pml_cells: int | None = None,
     height: int = 600,
 ) -> MeshViewer:
-    """Build an interactive ZapFDTD-style viewer for a Gmsh mesh.
+    """Build an interactive GDSFactory FDTD-style viewer for a Gmsh mesh.
 
     The mesh is embedded in the returned HTML, so the source ``.msh`` file is
     no longer needed once this function returns. Three.js is loaded from the
-    same public CDN used by the original ZapFDTD viewer.
+    same public CDN used by the original GDSFactory FDTD viewer.
     """
     path = Path(mesh_path)
     if not path.is_file():

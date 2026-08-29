@@ -1,4 +1,4 @@
-"""Tests for typed ZapFDTD results, tables, and monitor plots."""
+"""Tests for typed GDSFactory FDTD results, tables, and monitor plots."""
 
 from __future__ import annotations
 

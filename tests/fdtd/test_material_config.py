@@ -1,4 +1,4 @@
-"""Tests for the MaterialCard-to-ZapFDTD material adapter."""
+"""Tests for the MaterialCard-to-GDSFactory FDTD material adapter."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def test_scalar_index_card_stays_nondispersive() -> None:
     assert config.model_dump(exclude_none=True) == {"refractive_index": 2.0}
 
 
-def test_sellmeier_card_maps_to_zap_coefficients() -> None:
+def test_sellmeier_card_maps_to_fdtd_coefficients() -> None:
     snapshot = resolve_material_snapshot("SiO2", 1.55, {})
 
     config = material_config_from_snapshot(snapshot, (1500.0, 1600.0))
@@ -152,7 +152,7 @@ def test_dispersive_card_requires_a_source_band() -> None:
         material_config_from_snapshot(snapshot, None)
 
 
-def test_zap_material_config_requires_exactly_one_shape() -> None:
+def test_fdtd_material_config_requires_exactly_one_shape() -> None:
     with pytest.raises(ValidationError, match="exactly one"):
         MaterialConfig()
 
