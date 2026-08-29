@@ -332,26 +332,9 @@ class Simulation(BaseModel):
     _config_dir: Path | None = PrivateAttr(default=None)
     _input_hash: str | None = PrivateAttr(default=None)
 
-    # PDK overlay (foundry-specific material values, loaded from YAML)
-    _pdk_overlay: dict[str, Any] | None = PrivateAttr(default=None)
-
     # -------------------------------------------------------------------------
     # Validators
     # -------------------------------------------------------------------------
-
-    def load_pdk_overlay(self, path: str | Path) -> None:
-        """Load a PDK overlay YAML file for foundry-specific material values.
-
-        PDK overlays augment the built-in MATERIALS_DB with foundry measurements.
-        They take priority over the built-in DB but lower priority than
-        user overrides set via ``sim.materials``.
-
-        Args:
-            path: Path to a YAML overlay file (see :func:`load_overlay` for format).
-        """
-        from gsim.common.stack.overlays import load_overlay
-
-        self._pdk_overlay = load_overlay(path)
 
     @field_validator("materials", mode="before")
     @classmethod
@@ -409,8 +392,9 @@ class Simulation(BaseModel):
                 "fiber source requires solver.mode='2d' (with y_cut set for "
                 "the XZ plane) — currently mode='3d'"
             )
-        self.fiber_source = FiberSource(**kwargs)
-        return self.fiber_source
+        fiber_source = FiberSource(**kwargs)
+        self.fiber_source = fiber_source
+        return fiber_source
 
     # -------------------------------------------------------------------------
     # Validation
@@ -989,10 +973,22 @@ class Simulation(BaseModel):
         if stack is None:
             raise ValueError("Stack resolution failed.")
 
-        # Collect material names from stack layers and dielectrics.
+        # Collect only populated physical layers. PDK stacks commonly include
+        # metal levels that are absent from a passive photonic component.
         used_materials: set[str] = set()
-        for layer in stack.layers.values():
-            used_materials.add(layer.material)
+        component = self.geometry.component
+        if component is not None:
+            from gsim.meep.physical_layers import materialize_physical_layers
+
+            physical_export = materialize_physical_layers(component, stack)
+            populated_layers = {
+                tuple(layer) for layer in physical_export.component.layers
+            }
+            for layer in physical_export.stack.layers.values():
+                if tuple(layer.gds_layer) in populated_layers:
+                    used_materials.add(layer.material)
+        else:
+            used_materials.update(layer.material for layer in stack.layers.values())
         for diel in stack.dielectrics:
             used_materials.add(diel["material"])
 
@@ -1000,7 +996,6 @@ class Simulation(BaseModel):
             used_materials,
             overrides=self._material_overrides(),
             wavelength_um=wavelength,
-            overlay=self._pdk_overlay,
         )
 
         return stack, material_data
@@ -1278,7 +1273,6 @@ class Simulation(BaseModel):
         """
         import math
 
-        from gsim.meep.materials import resolve_materials
         from gsim.meep.models.config import (
             FiberSourceConfig,
             LayerStackEntry,
@@ -1415,6 +1409,7 @@ class Simulation(BaseModel):
         # Build layer stack entries
         layer_stack_entries = []
         used_materials: set[str] = set()
+        populated_layers = {tuple(layer) for layer in component.layers}
         for layer_name, layer in stack.layers.items():
             layer_stack_entries.append(
                 LayerStackEntry(
@@ -1426,7 +1421,8 @@ class Simulation(BaseModel):
                     sidewall_angle=layer.sidewall_angle,
                 )
             )
-            used_materials.add(layer.material)
+            if tuple(layer.gds_layer) in populated_layers:
+                used_materials.add(layer.material)
 
         # Build dielectric entries
         dielectric_entries = []
@@ -1489,29 +1485,20 @@ class Simulation(BaseModel):
                 "or call sim.source_fiber(...)."
             )
 
-        # Resolve materials (three-tier: user override > PDK overlay > built-in DB)
+        # Resolve materials. Explicit per-simulation constants take priority;
+        # otherwise project-first MaterialCards are authoritative.
         active_source = (
             self.fiber_source if self.fiber_source is not None else self.source
         )
-        if self.solver.dispersion != "false":
-            from gsim.meep.materials import resolve_materials_with_dispersion
+        from gsim.meep.materials import resolve_fdtd_materials
 
-            material_data = resolve_materials_with_dispersion(
-                used_materials,
-                overrides=self._material_overrides(),
-                wavelength_um=active_source.wavelength,
-                bandwidth_um=active_source.wavelength_span,
-                dispersion=self.solver.dispersion,
-                overlay=self._pdk_overlay,
-                threshold=self.solver.dispersion_threshold,
-            )
-        else:
-            material_data = resolve_materials(
-                used_materials,
-                overrides=self._material_overrides(),
-                wavelength_um=active_source.wavelength,
-                overlay=self._pdk_overlay,
-            )
+        material_data = resolve_fdtd_materials(
+            used_materials,
+            overrides=self._material_overrides(),
+            wavelength_um=active_source.wavelength,
+            wavelength_span_um=active_source.wavelength_span,
+            resolution=resolution_cfg.pixels_per_um,
+        )
 
         fwidth = source_cfg.compute_fwidth(wl_cfg.fcen, wl_cfg.df)
         source_for_config = source_cfg.model_copy(update={"fwidth": fwidth})
@@ -2054,7 +2041,6 @@ class Simulation(BaseModel):
             used_materials,
             overrides=self._material_overrides(),
             wavelength_um=result.config.wavelength.wavelength,
-            overlay=self._pdk_overlay,
         )
         kwargs["wavelength"] = result.config.wavelength.wavelength
         kwargs["is_3d"] = result.config.is_3d

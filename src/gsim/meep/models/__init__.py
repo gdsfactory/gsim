@@ -24,6 +24,7 @@ from gsim.meep.models.config import (
     SimConfig,
     SourceConfig,
     StoppingConfig,
+    SusceptibilityConfig,
     SymmetryEntry,
     WavelengthConfig,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "SimConfig",
     "SourceConfig",
     "StoppingConfig",
+    "SusceptibilityConfig",
     "Symmetry",
     "SymmetryEntry",
     "WavelengthConfig",
