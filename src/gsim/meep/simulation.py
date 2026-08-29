@@ -987,7 +987,9 @@ class Simulation(BaseModel):
             for layer in physical_export.stack.layers.values():
                 if tuple(layer.gds_layer) in populated_layers:
                     used_materials.add(layer.material)
-        else:
+        elif not stack.dielectrics:
+            # Slab-mode configs serialize declared dielectrics when available;
+            # only stacks without them fall back to every physical layer.
             used_materials.update(layer.material for layer in stack.layers.values())
         for diel in stack.dielectrics:
             used_materials.add(diel["material"])
