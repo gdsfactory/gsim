@@ -240,20 +240,20 @@ class TestResolveStackAndMaterials:
         sim.materials = {}
 
         _stack, mats_1550 = sim._resolve_stack_and_materials(wavelength=1.55)
-        _stack, mats_1310 = sim._resolve_stack_and_materials(wavelength=1.31)
+        _stack, mats_1400 = sim._resolve_stack_and_materials(wavelength=1.4)
 
         # si should be present in both (from default PDK stack)
-        if "si" in mats_1550 and "si" in mats_1310:
+        if "si" in mats_1550 and "si" in mats_1400:
             eps_1550 = mats_1550["si"].epsilon_diag
-            eps_1310 = mats_1310["si"].epsilon_diag
-            # si has material dispersion — eps at 1.31 != eps at 1.55
+            eps_1400 = mats_1400["si"].epsilon_diag
+            # Salzberg silicon is valid above 1.357 um and is dispersive.
             if isinstance(eps_1550, list):
                 eps_1550 = eps_1550[0]
-            if isinstance(eps_1310, list):
-                eps_1310 = eps_1310[0]
-            assert eps_1550 != eps_1310, (
+            if isinstance(eps_1400, list):
+                eps_1400 = eps_1400[0]
+            assert eps_1550 != eps_1400, (
                 f"Expected different epsilon at different wavelengths, "
-                f"got {eps_1550} at 1.55 and {eps_1310} at 1.31"
+                f"got {eps_1550} at 1.55 and {eps_1400} at 1.4"
             )
 
 

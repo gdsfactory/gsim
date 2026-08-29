@@ -50,17 +50,29 @@ _MAX_MATERIAL_CACHE = 64
 def _resolve_materials_cached(
     used_materials: set[str],
     overrides: dict | None = None,
-    wavelength_um: float | None = None,
-    overlay: dict | None = None,
+    wavelength_um: float = 1.55,
 ) -> dict[str, MaterialData]:
     """:func:`resolve_materials` with a process-local LRU cache."""
+    from gsim.common.materials import get_project_material_cards
     from gsim.meep.materials import resolve_materials
 
-    key = (frozenset(used_materials), wavelength_um)
+    project_material_cards = get_project_material_cards()
+    card_signature = tuple(
+        sorted(
+            (name, card.model_dump_json())
+            for name, card in project_material_cards.items()
+        )
+    )
+    key = (frozenset(used_materials), wavelength_um, card_signature)
     cached = _MATERIAL_CACHE.get(key)
     if cached is not None:
         return cached
-    result = resolve_materials(used_materials, overrides, wavelength_um, overlay)
+    result = resolve_materials(
+        used_materials,
+        overrides,
+        wavelength_um,
+        project_material_cards,
+    )
     if len(_MATERIAL_CACHE) >= _MAX_MATERIAL_CACHE:
         _MATERIAL_CACHE.pop(next(iter(_MATERIAL_CACHE)))
     _MATERIAL_CACHE[key] = result

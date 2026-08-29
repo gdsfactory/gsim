@@ -591,23 +591,6 @@ class FDTD(BaseModel):
             object.__setattr__(self, name, getattr(validated, name))
         return self
 
-    # Dispersion control
-    dispersion: Literal["auto", "true", "false"] = Field(
-        default="auto",
-        description=(
-            "Dispersion mode: 'auto' evaluates deps/eps across the source "
-            "bandwidth and enables dispersion per material when >0.5%; 'true' "
-            "forces full dispersion for all materials; 'false' forces "
-            "constant-epsilon for speed."
-        ),
-    )
-    dispersion_threshold: float = Field(
-        default=0.005,
-        gt=0,
-        lt=1,
-        description="deps/eps threshold for auto-dispersion (default 0.5%).",
-    )
-
     # Diagnostics — output control for plots, fields, animations
     save_geometry: bool = Field(default=True)
     save_fields: bool = Field(default=True)

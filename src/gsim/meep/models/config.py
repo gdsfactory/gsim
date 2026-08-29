@@ -338,14 +338,15 @@ class LayerStackEntry(BaseModel):
     sidewall_angle: float = Field(default=0.0, description="Sidewall angle in degrees")
 
 
-class LorentzianPoleConfig(BaseModel):
-    """One Lorentzian susceptibility pole for the config JSON."""
+class SusceptibilityConfig(BaseModel):
+    """One MEEP electric susceptibility for the config JSON."""
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, allow_inf_nan=False)
 
+    kind: Literal["lorentzian", "drude"] = "lorentzian"
     frequency: float = Field(gt=0, description="Resonance frequency (1/um)")
     gamma: float = Field(ge=0, description="Damping rate (1/um)")
-    sigma: float = Field(gt=0, description="Oscillator strength")
+    sigma: float = Field(description="Oscillator strength")
     sigma_diagonal: list[float] | None = Field(
         default=None, description="Anisotropic strength [sx, sy, sz]"
     )
@@ -376,8 +377,8 @@ class MaterialData(BaseModel):
     D_conductivity_diag: list[float] | None = Field(
         default=None, description="Anisotropic conductivity diagonal"
     )
-    epsilon_susceptibilities: list[LorentzianPoleConfig] | None = Field(
-        default=None, description="Lorentzian susceptibility poles for dispersion"
+    epsilon_susceptibilities: list[SusceptibilityConfig] | None = Field(
+        default=None, description="Lorentzian or Drude susceptibility terms"
     )
     valid_freq_range: list[float] | None = Field(
         default=None, description="Validity range [f_min, f_max] in 1/um"
