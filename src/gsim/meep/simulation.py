@@ -2034,9 +2034,10 @@ class Simulation(BaseModel):
         """Add center-wavelength material and simulation context to a plot."""
         from gsim.meep.materials import resolve_materials
 
-        used_materials = {entry.material for entry in result.config.layer_stack} | {
-            dielectric["material"] for dielectric in result.config.dielectrics
-        }
+        # ``layer_stack`` contains every layer declared by the PDK, including
+        # unpopulated metal layers.  The built material map is already limited
+        # to materials that occur in the simulation geometry.
+        used_materials = set(result.config.materials)
         kwargs["material_data"] = resolve_materials(
             used_materials,
             overrides=self._material_overrides(),
