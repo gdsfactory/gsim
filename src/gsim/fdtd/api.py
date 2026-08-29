@@ -159,7 +159,7 @@ class Source(_MutableModel):
 
     @property
     def wavelength_halfspan_um(self) -> float:
-        """Return the half-span expected by the ZapFDTD runtime schema."""
+        """Return the half-span expected by the GDSFactory FDTD runtime schema."""
         return self.wavelength_span_um / 2
 
 

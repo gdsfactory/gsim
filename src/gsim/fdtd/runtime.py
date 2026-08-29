@@ -1,4 +1,4 @@
-"""Translation from public FDTD concerns to the ZapFDTD runtime schema."""
+"""Translation from public FDTD concerns to the GDSFactory FDTD runtime schema."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _vector_bounds(center: Vector3, half_size: Vector3) -> tuple[Vector3, Vector
 
 
 class RuntimeConfigMixin:
-    """Serialize sources, monitors, and solver controls for ZapFDTD."""
+    """Serialize sources, monitors, and solver controls for GDSFactory FDTD."""
 
     source: SourceType
     resolved: ResolvedPassivePcell

@@ -1,4 +1,4 @@
-"""Strict ZapFDTD material wire-schema models."""
+"""Strict GDSFactory FDTD material wire-schema models."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _StrictModel(BaseModel):
-    """Reject unknown fields and non-finite values at the Zap boundary."""
+    """Reject unknown fields and non-finite values at the GDSFactory FDTD boundary."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class IndexTableConfig(_StrictModel):
-    """ZapFDTD tabulated complex refractive index."""
+    """GDSFactory FDTD tabulated complex refractive index."""
 
     wavelength_nm: list[float] = Field(min_length=1)
     n: list[float] = Field(min_length=1)
@@ -37,7 +37,7 @@ class IndexTableConfig(_StrictModel):
 
 
 class SellmeierConfig(_StrictModel):
-    """ZapFDTD Sellmeier coefficients."""
+    """GDSFactory FDTD Sellmeier coefficients."""
 
     b: list[float] = Field(min_length=1)
     c_um2: list[float] = Field(min_length=1)
@@ -51,14 +51,14 @@ class SellmeierConfig(_StrictModel):
 
 
 class DrudeConfig(_StrictModel):
-    """ZapFDTD free-carrier term, with energies in electron-volts."""
+    """GDSFactory FDTD free-carrier term, with energies in electron-volts."""
 
     plasma_energy_ev: float = Field(gt=0)
     damping_ev: float = Field(ge=0)
 
 
 class LorentzConfig(_StrictModel):
-    """ZapFDTD bound-resonance term, with energies in electron-volts."""
+    """GDSFactory FDTD bound-resonance term, with energies in electron-volts."""
 
     delta_eps: float
     resonance_ev: float = Field(gt=0)
@@ -66,7 +66,7 @@ class LorentzConfig(_StrictModel):
 
 
 class DrudeLorentzConfig(_StrictModel):
-    """ZapFDTD combined Drude-Lorentz parameterization."""
+    """GDSFactory FDTD combined Drude-Lorentz parameterization."""
 
     eps_inf: float = 1.0
     drude: DrudeConfig | None = None
@@ -81,7 +81,7 @@ class DrudeLorentzConfig(_StrictModel):
 
 
 class DispersionConfig(_StrictModel):
-    """One of the three dispersion shapes accepted by ZapFDTD."""
+    """One of the three dispersion shapes accepted by GDSFactory FDTD."""
 
     wavelength_range_nm: tuple[float, float] | None = None
     table: IndexTableConfig | None = None
@@ -90,7 +90,7 @@ class DispersionConfig(_StrictModel):
 
     @model_validator(mode="after")
     def validate_shape(self) -> Self:
-        """Enforce ZapFDTD's exact-one shape and range rules."""
+        """Enforce GDSFactory FDTD's exact-one shape and range rules."""
         shapes = (self.table, self.sellmeier, self.drude_lorentz)
         if sum(shape is not None for shape in shapes) != 1:
             raise ValueError(
@@ -110,7 +110,7 @@ class DispersionConfig(_StrictModel):
 
 
 class MaterialConfig(_StrictModel):
-    """One scalar or dispersive material entry accepted by ZapFDTD."""
+    """One scalar or dispersive material entry accepted by GDSFactory FDTD."""
 
     refractive_index: float | None = Field(default=None, gt=0)
     dispersion: DispersionConfig | None = None

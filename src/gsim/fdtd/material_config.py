@@ -1,4 +1,4 @@
-"""Translate optical MaterialCards into ZapFDTD material configuration."""
+"""Translate optical MaterialCards into GDSFactory FDTD material configuration."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def _table_samples(
     if table.interp != "linear":
         raise _config_error(
             material_name,
-            f"{field} uses {table.interp!r} interpolation; ZapFDTD requires "
+            f"{field} uses {table.interp!r} interpolation; GDSFactory FDTD requires "
             "linear table semantics.",
         )
     wavelengths = _wavelengths_nm(coordinate.values, coordinate.unit, material_name)
@@ -106,7 +106,7 @@ def _require_fit_band(
         raise _config_error(
             material_name,
             "is dispersive, but the excitation does not provide the nonzero "
-            "frequency band required by ZapFDTD.",
+            "frequency band required by GDSFactory FDTD.",
         )
     return wavelength_range_nm
 
@@ -156,10 +156,11 @@ def _index_config(
     wavelength_range_nm: tuple[float, float] | None,
     material_name: str,
 ) -> MaterialConfig:
-    """Translate an index-authored card model to ZapFDTD."""
+    """Translate an index-authored card model to GDSFactory FDTD."""
     if model.conductivity is not None:
         raise _config_error(
-            material_name, "has Index conductivity, which ZapFDTD cannot encode."
+            material_name,
+            "has Index conductivity, which GDSFactory FDTD cannot encode.",
         )
     n_table = (
         _table_samples(model.n, material_name, "n")
@@ -234,11 +235,11 @@ def _permittivity_config(
     wavelength_range_nm: tuple[float, float] | None,
     material_name: str,
 ) -> MaterialConfig:
-    """Translate a permittivity-authored card model to ZapFDTD."""
+    """Translate a permittivity-authored card model to GDSFactory FDTD."""
     if model.conductivity is not None:
         raise _config_error(
             material_name,
-            "has Permittivity conductivity, which ZapFDTD cannot encode.",
+            "has Permittivity conductivity, which GDSFactory FDTD cannot encode.",
         )
     real_table = (
         _table_samples(model.eps_real, material_name, "eps_real")
@@ -316,16 +317,16 @@ def _sellmeier_config(
     wavelength_range_nm: tuple[float, float] | None,
     material_name: str,
 ) -> MaterialConfig:
-    """Translate either MaterialCard Sellmeier convention to ZapFDTD."""
+    """Translate either MaterialCard Sellmeier convention to GDSFactory FDTD."""
     if model.offset != 0:
         raise _config_error(
             material_name,
-            f"has Sellmeier offset {model.offset}; ZapFDTD requires offset 0.",
+            f"has Sellmeier offset {model.offset}; GDSFactory FDTD requires offset 0.",
         )
     if model.conductivity is not None:
         raise _config_error(
             material_name,
-            "has Sellmeier conductivity, which ZapFDTD cannot encode.",
+            "has Sellmeier conductivity, which GDSFactory FDTD cannot encode.",
         )
     fit_band = _require_fit_band(wavelength_range_nm, material_name)
     _validate_model_range(model, fit_band, material_name)
@@ -354,14 +355,14 @@ def _drude_lorentz_config(
     wavelength_range_nm: tuple[float, float] | None,
     material_name: str,
 ) -> MaterialConfig:
-    """Translate one MaterialCard Drude or Lorentz model to ZapFDTD."""
+    """Translate one MaterialCard Drude or Lorentz model to GDSFactory FDTD."""
     fit_band = _require_fit_band(wavelength_range_nm, material_name)
     _validate_model_range(model, fit_band, material_name)
     if isinstance(model, Drude):
         if len(model.terms) != 1:
             raise _config_error(
                 material_name,
-                "has multiple Drude terms; ZapFDTD accepts exactly one.",
+                "has multiple Drude terms; GDSFactory FDTD accepts exactly one.",
             )
         term = model.terms[0]
         drude = DrudeConfig(
@@ -395,18 +396,20 @@ def material_config_from_snapshot(
     snapshot: MaterialSnapshot,
     wavelength_range_nm: tuple[float, float] | None,
 ) -> MaterialConfig:
-    """Convert one resolved MaterialCard to ZapFDTD's material schema."""
+    """Convert one resolved MaterialCard to GDSFactory FDTD's material schema."""
     material_name = snapshot.material_name
     card: MaterialCard = snapshot.card
     if card.optical is None or card.optical.permittivity is None:
         raise _config_error(material_name, "has no optical permittivity model.")
     if card.optical.conductivity is not None:
         raise _config_error(
-            material_name, "has regime conductivity, which ZapFDTD cannot encode."
+            material_name,
+            "has regime conductivity, which GDSFactory FDTD cannot encode.",
         )
     if card.optical.permeability is not None:
         raise _config_error(
-            material_name, "has optical permeability, which ZapFDTD cannot encode."
+            material_name,
+            "has optical permeability, which GDSFactory FDTD cannot encode.",
         )
     model = card.optical.permittivity
     if isinstance(model, Index):
@@ -419,7 +422,7 @@ def material_config_from_snapshot(
         return _drude_lorentz_config(model, wavelength_range_nm, material_name)
     raise _config_error(
         material_name,
-        f"uses unsupported optical model {type(model).__name__} for ZapFDTD.",
+        f"uses unsupported optical model {type(model).__name__} for GDSFactory FDTD.",
     )
 
 

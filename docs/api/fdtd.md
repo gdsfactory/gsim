@@ -57,9 +57,9 @@ Every material referenced by the component stack or selected as the background
 must resolve to a `pdk_schema.MaterialCard`. Project PDK cards take precedence;
 gsim supplies fallback cards for common `Si`, `SiO2`, and `SiN` spellings.
 `gsim.fdtd` translates the card's optical model directly into the material entry
-expected by ZapFDTD:
+expected by GDSFactory FDTD:
 
-| MaterialCard optical model | ZapFDTD material entry |
+| MaterialCard optical model | GDSFactory FDTD material entry |
 | --- | --- |
 | Scalar refractive index or permittivity | `refractive_index` |
 | Tabulated refractive index or permittivity | `dispersion.table` |
@@ -67,12 +67,12 @@ expected by ZapFDTD:
 | Single-term Drude or Lorentz | `dispersion.drude_lorentz` |
 
 The source band must lie inside the card's validity and tabulated wavelength
-range. ZapFDTD performs the authoritative fit, passivity, stability, and
+range. GDSFactory FDTD performs the authoritative fit, passivity, stability, and
 accuracy checks when it builds the simulation. Consequently, a coarse table can
 still fail backend validation even when its JSON structure is valid.
 
 Continuous-wave and zero-span port sources do not provide the nonzero fitting
-band currently required by ZapFDTD, so they cannot be combined with a
+band currently required by GDSFactory FDTD, so they cannot be combined with a
 dispersive card. Unsupported card models, anisotropy, conductivity, and magnetic
 permeability fail explicitly rather than being reduced silently to a scalar.
 
@@ -96,7 +96,7 @@ sim.domain(
 
 ## Setup visualization
 
-FDTD setup views use the ported ZapFDTD Three.js viewer and do not depend on
+FDTD setup views use the ported GDSFactory FDTD Three.js viewer and do not depend on
 PyVista. All physical groups are shown by default. Smaller material groups are
 listed first, followed by the largest volumetric group and then the ports.
 
