@@ -227,6 +227,22 @@ class TestResolveStackAndMaterials:
         for name, mat in materials.items():
             assert mat.epsilon_diag is not None, f"{name} missing epsilon_diag"
 
+    def test_slab_without_component_resolves_declared_dielectrics_only(self):
+        from gdsfactory import gpdk
+
+        from gsim.meep import Simulation
+
+        gpdk.PDK.activate()
+        sim = Simulation()
+        sim.materials = {"si": 12.0, "SiO2": 2.1}
+
+        stack, materials = sim._resolve_stack_and_materials(wavelength=1.55)
+
+        assert stack.dielectrics
+        assert set(materials) == {
+            dielectric["material"] for dielectric in stack.dielectrics
+        }
+
     def test_wavelength_affects_dispersive_materials(self):
         """Different wavelengths produce different epsilon for dispersive materials."""
         import gdsfactory as gf
