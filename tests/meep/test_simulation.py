@@ -572,7 +572,7 @@ class Test2DMode:
         silicon = result.config.materials["si"]
         silica = result.config.materials["sio2"]
         assert len(silicon.epsilon_susceptibilities or []) == 3
-        assert len(silica.epsilon_susceptibilities or []) == 3
+        assert len(silica.epsilon_susceptibilities or []) == 2
 
     def test_solver_callable_mode_2d(self):
         sim = Simulation()

@@ -44,17 +44,23 @@ def test_scalar_index_card_stays_nondispersive() -> None:
     assert config.model_dump(exclude_none=True) == {"refractive_index": 2.0}
 
 
-def test_sellmeier_card_maps_to_fdtd_coefficients() -> None:
+def test_default_sio2_card_maps_to_fdtd_lorentz_coefficients() -> None:
     snapshot = resolve_material_snapshot("SiO2", 1.55, {})
 
     config = material_config_from_snapshot(snapshot, (1500.0, 1600.0))
 
     assert config.dispersion is not None
     assert config.dispersion.wavelength_range_nm == (1500.0, 1600.0)
-    sellmeier = config.dispersion.sellmeier
-    assert sellmeier is not None
-    assert sellmeier.b == [0.6961663, 0.4079426, 0.8974794]
-    assert sellmeier.c_um2 == pytest.approx([0.0684043**2, 0.1162414**2, 9.896161**2])
+    drude_lorentz = config.dispersion.drude_lorentz
+    assert drude_lorentz is not None
+    assert drude_lorentz.eps_inf == pytest.approx(1.5385442336875639)
+    assert drude_lorentz.lorentz is not None
+    assert [term.delta_eps for term in drude_lorentz.lorentz] == pytest.approx(
+        [0.5686340834157791, 1.1574659369080176]
+    )
+    assert [term.resonance_ev for term in drude_lorentz.lorentz] == pytest.approx(
+        [10.499775684729967, 0.11339724205983712]
+    )
 
 
 def test_tabulated_index_card_maps_wavelengths_and_loss() -> None:

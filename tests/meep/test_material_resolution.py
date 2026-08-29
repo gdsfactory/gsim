@@ -62,11 +62,11 @@ def test_center_wavelength_resolution_uses_builtin_cards() -> None:
     materials = resolve_materials({"Si", "SiO2"}, wavelength_um=1.55)
 
     assert materials["Si"].epsilon_diag == pytest.approx([12.0945625246] * 3)
-    assert materials["SiO2"].epsilon_diag == pytest.approx([1.4440236217**2] * 3)
+    assert materials["SiO2"].epsilon_diag == pytest.approx([1.4445618291988784**2] * 3)
     assert materials["Si"].epsilon_susceptibilities is None
 
 
-def test_fdtd_resolution_preserves_sellmeier_poles() -> None:
+def test_fdtd_resolution_preserves_default_sio2_lorentz_poles() -> None:
     materials = resolve_fdtd_materials(
         {"Si", "SiO2"},
         wavelength_um=1.55,
@@ -77,18 +77,18 @@ def test_fdtd_resolution_preserves_sellmeier_poles() -> None:
     silicon = materials["Si"]
     silica = materials["SiO2"]
     assert silicon.epsilon_diag == [1.0, 1.0, 1.0]
-    assert silica.epsilon_diag == [1.0, 1.0, 1.0]
+    assert silica.epsilon_diag == pytest.approx([1.5385442336875639] * 3)
     assert len(silicon.epsilon_susceptibilities or []) == 3
-    assert len(silica.epsilon_susceptibilities or []) == 3
+    assert len(silica.epsilon_susceptibilities or []) == 2
     assert {term.kind for term in silica.epsilon_susceptibilities or []} == {
         "lorentzian"
     }
 
 
-def test_low_resolution_warns_for_high_sellmeier_pole() -> None:
+def test_low_resolution_warns_for_explicit_high_sellmeier_pole() -> None:
     with pytest.warns(RuntimeWarning, match="resolution >= 23"):
         resolve_fdtd_materials(
-            {"SiO2"},
+            {"SiO2-Malitson"},
             wavelength_um=1.55,
             wavelength_span_um=0.1,
             resolution=20,

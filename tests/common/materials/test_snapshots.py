@@ -5,7 +5,7 @@ from pdk_schema import MaterialCard
 
 from gsim.common.materials import (
     GSIM_MATERIAL_CARDS,
-    SIO2_MALITSON,
+    SIO2_PALIK_LOSSLESS,
     MaterialModelError,
     MaterialNotFoundError,
     WavelengthOutOfRangeError,
@@ -56,12 +56,12 @@ def test_project_card_overrides_fallback_and_missing_card_uses_fallback() -> Non
     assert silicon.source == "project"
     assert silicon.refractive_index == pytest.approx(3.4757)
     assert silica.source == "gsim"
-    assert silica.refractive_index == pytest.approx(1.444023622)
+    assert silica.refractive_index == pytest.approx(1.4445618291988784)
 
 
-def test_default_sio2_card_remains_malitson() -> None:
+def test_default_sio2_card_uses_lossless_palik() -> None:
     card = get_material_card("SiO2", {})
-    expected_optical = SIO2_MALITSON.optical
+    expected_optical = SIO2_PALIK_LOSSLESS.optical
 
     assert card.optical is not None
     assert expected_optical is not None

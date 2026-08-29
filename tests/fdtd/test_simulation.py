@@ -82,8 +82,9 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert set(silicon_table["k"]) == {0.0}
     silica = document["materials"]["SiO2"]["dispersion"]
     assert silica["wavelength_range_nm"] == [1500.0, 1600.0]
-    assert silica["sellmeier"]["b"] == [0.6961663, 0.4079426, 0.8974794]
-    assert document["background_refractive_index"] == pytest.approx(1.4440236217)
+    assert silica["drude_lorentz"]["eps_inf"] == pytest.approx(1.5385442336875639)
+    assert len(silica["drude_lorentz"]["lorentz"]) == 2
+    assert document["background_refractive_index"] == pytest.approx(1.4445618291988784)
     assert document["geometry"]["ports"]["o1"]["normal"] == [-1, 0, 0]
     assert document["geometry"]["ports"]["o2"]["normal"] == [1, 0, 0]
 
