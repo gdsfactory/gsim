@@ -59,14 +59,51 @@ def build_materials(config):
     """Build MEEP material objects from config."""
     materials = {}
     for name, props in config["materials"].items():
-        eps_diag = props.get("epsilon_diag")
-        if eps_diag is not None:
-            if len(set(eps_diag)) == 1:
-                materials[name] = mp.Medium(epsilon=eps_diag[0])
+        medium_args = {}
+        for config_name, meep_name in (
+            ("epsilon_diag", "epsilon_diag"),
+            ("epsilon_offdiag", "epsilon_offdiag"),
+            ("mu_diag", "mu_diag"),
+            ("D_conductivity_diag", "D_conductivity_diag"),
+        ):
+            values = props.get(config_name)
+            if values is not None:
+                medium_args[meep_name] = mp.Vector3(*values)
+
+        conductivity = props.get("D_conductivity")
+        if conductivity is not None:
+            medium_args["D_conductivity"] = conductivity
+
+        susceptibilities = []
+        for term in props.get("epsilon_susceptibilities") or []:
+            susceptibility_args = {
+                "frequency": term["frequency"],
+                "gamma": term["gamma"],
+            }
+            sigma_diagonal = term.get("sigma_diagonal")
+            if sigma_diagonal is None:
+                susceptibility_args["sigma"] = term["sigma"]
             else:
-                materials[name] = mp.Medium(epsilon_diag=eps_diag)
-        else:
-            materials[name] = mp.Medium(epsilon=1.0)
+                susceptibility_args["sigma_diag"] = mp.Vector3(*sigma_diagonal)
+            susceptibility_type = (
+                mp.DrudeSusceptibility
+                if term.get("kind", "lorentzian") == "drude"
+                else mp.LorentzianSusceptibility
+            )
+            susceptibilities.append(susceptibility_type(**susceptibility_args))
+        if susceptibilities:
+            medium_args["E_susceptibilities"] = susceptibilities
+
+        valid_frequency_range = props.get("valid_freq_range")
+        if valid_frequency_range is not None:
+            medium_args["valid_freq_range"] = mp.FreqRange(
+                min=valid_frequency_range[0],
+                max=valid_frequency_range[1],
+            )
+
+        if not medium_args:
+            medium_args["epsilon"] = 1.0
+        materials[name] = mp.Medium(**medium_args)
     return materials
 
 

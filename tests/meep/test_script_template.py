@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from types import SimpleNamespace
 
 from gsim.meep.script import _MEEP_RUNNER_TEMPLATE
 
@@ -30,6 +31,67 @@ def test_runner_has_fiber_source_path():
     assert "GaussianBeamSource" in _MEEP_RUNNER_TEMPLATE
 
 
+def test_runner_builds_lorentz_and_drude_materials():
+    """Serialized card terms must reach the corresponding MEEP classes."""
+
+    class FakeObject:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeVector3:
+        __slots__ = ("values",)
+
+        def __init__(self, *values):
+            self.values = values
+
+    class FakeLorentzian(FakeObject):
+        pass
+
+    class FakeDrude(FakeObject):
+        pass
+
+    fake_meep = SimpleNamespace(
+        Vector3=FakeVector3,
+        Medium=FakeObject,
+        FreqRange=FakeObject,
+        LorentzianSusceptibility=FakeLorentzian,
+        DrudeSusceptibility=FakeDrude,
+    )
+    build_materials = _extract_runner_func("build_materials", mp=fake_meep)
+    config = {
+        "materials": {
+            "mixed": {
+                "epsilon_diag": [2.0, 2.0, 2.0],
+                "epsilon_susceptibilities": [
+                    {
+                        "kind": "lorentzian",
+                        "frequency": 1.0,
+                        "gamma": 0.1,
+                        "sigma": 2.0,
+                    },
+                    {
+                        "kind": "drude",
+                        "frequency": 3.0,
+                        "gamma": 0.2,
+                        "sigma": 1.0,
+                    },
+                ],
+                "valid_freq_range": [0.5, 2.0],
+            }
+        }
+    }
+
+    medium = build_materials(config)["mixed"]
+
+    terms = medium.kwargs["E_susceptibilities"]
+    assert medium.kwargs["epsilon_diag"].values == (2.0, 2.0, 2.0)
+    assert isinstance(terms[0], FakeLorentzian)
+    assert isinstance(terms[1], FakeDrude)
+    assert terms[0].kwargs["sigma"] == 2.0
+    assert terms[1].kwargs["frequency"] == 3.0
+    assert medium.kwargs["valid_freq_range"].kwargs == {"min": 0.5, "max": 2.0}
+
+
 def test_resolved_z_bounds_are_identical_in_3d_and_xz():
     """Canonical bounds must bypass the legacy XZ margin path."""
     resolve_z_cell = _extract_runner_func("resolve_z_cell")
@@ -54,7 +116,7 @@ def test_legacy_xz_margins_are_applied_once():
     assert resolve_z_cell(domain, -0.5, 2.0, False, True) == (6.0, 1.0)
 
 
-def _extract_runner_func(name: str):
+def _extract_runner_func(name: str, **namespace):
     """Exec a single pure-Python helper from the runner template in isolation.
 
     The runner template can't be imported wholesale (it imports meep), so we
@@ -68,7 +130,7 @@ def _extract_runner_func(name: str):
         None,
     )
     assert func_node is not None, f"{name} not found in runner template"
-    ns: dict = {"np": np}
+    ns: dict = {"np": np, **namespace}
     exec(compile(ast.Module([func_node], []), "<runner>", "exec"), ns)  # noqa: S102
     return ns[name]
 

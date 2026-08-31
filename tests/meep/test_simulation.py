@@ -33,6 +33,10 @@ class TestMaterial:
 class TestStoppingFields:
     """Tests for the FDTD stopping criteria."""
 
+    def test_dispersion_mode_is_no_longer_a_solver_option(self):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            FDTD(dispersion="auto")  # ty: ignore[unknown-argument]
+
     def test_fixed_mode(self):
         f = FDTD(stopping="fixed", max_time=100)
         assert f.stopping == "fixed"
@@ -553,6 +557,22 @@ class Test2DMode:
         f = FDTD(mode="2d", z_cut="auto")
         assert f.mode == "2d"
         assert f.resolved_is_3d() is False
+
+    def test_build_config_uses_authored_material_card_dispersion(self):
+        import gdsfactory as gf
+
+        simulation = Simulation()
+        simulation.geometry.component = gf.components.straight(length=10, width=0.5)
+        simulation.source.port = "o1"
+        simulation.monitors = ["o1", "o2"]
+        simulation.solver(mode="2d", z_cut="auto")
+
+        result = simulation.build_config()
+
+        silicon = result.config.materials["si"]
+        silica = result.config.materials["sio2"]
+        assert len(silicon.epsilon_susceptibilities or []) == 3
+        assert len(silica.epsilon_susceptibilities or []) == 2
 
     def test_solver_callable_mode_2d(self):
         sim = Simulation()

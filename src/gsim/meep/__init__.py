@@ -10,10 +10,6 @@ Example::
 
     sim = meep.Simulation()
     sim.geometry(component=ybranch)
-    sim.materials = {
-        "si": Material(permittivity=12.0),
-        "SiO2": Material(permittivity=2.1),
-    }
     sim.source(port="o1", wavelength=1.55, wavelength_span=0.01)
     sim.num_freqs = 11
     sim.monitors = ["o1", "o2"]
@@ -23,6 +19,11 @@ Example::
 """
 
 from gsim.gcloud import RunResult, register_result_parser
+from gsim.meep.material_cards import (
+    MeepMaterialCompatibilityError,
+    material_data_from_card,
+    validate_meep_material_card,
+)
 from gsim.meep.mode_solver import (
     mode_x_grid,
     mode_y_grid,
@@ -79,6 +80,7 @@ __all__ = [
     "DomainConfig",
     "Geometry",
     "Material",
+    "MeepMaterialCompatibilityError",
     "ModeResult",
     "ModeSolver",
     "ModeSource",
@@ -90,6 +92,7 @@ __all__ = [
     "SourceConfig",
     "Symmetry",
     "WavelengthConfig",
+    "material_data_from_card",
     "mode_x_grid",
     "mode_y_grid",
     "mode_z_grid",
@@ -98,4 +101,5 @@ __all__ = [
     "solve_slab_mode",
     "solve_slab_modes",
     "solve_slab_wavelength_sweep",
+    "validate_meep_material_card",
 ]

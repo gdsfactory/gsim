@@ -5,6 +5,7 @@ from pdk_schema import MaterialCard
 
 from gsim.common.materials import (
     GSIM_MATERIAL_CARDS,
+    SIO2_MALITSON_2POLE,
     MaterialModelError,
     MaterialNotFoundError,
     WavelengthOutOfRangeError,
@@ -18,7 +19,9 @@ from gsim.common.materials import (
         ("Si-Salzberg", 3.477723756),
         ("Si-Li-293K", 3.4757),
         ("SiN-Luke", 1.996279731714),
+        ("SiO2-Arosa", 1.443988881535),
         ("SiO2-Malitson", 1.444023622),
+        ("SiO2-Malitson-2Pole", 1.444023534167),
     ],
 )
 def test_material_snapshots_at_telecom_wavelength(
@@ -54,7 +57,28 @@ def test_project_card_overrides_fallback_and_missing_card_uses_fallback() -> Non
     assert silicon.source == "project"
     assert silicon.refractive_index == pytest.approx(3.4757)
     assert silica.source == "gsim"
-    assert silica.refractive_index == pytest.approx(1.444023622)
+    assert silica.refractive_index == pytest.approx(1.444023534167)
+
+
+def test_default_sio2_card_uses_two_pole_malitson() -> None:
+    assert GSIM_MATERIAL_CARDS["SiO2"].optical == SIO2_MALITSON_2POLE.optical
+
+
+def test_two_pole_malitson_matches_reference_over_fit_band() -> None:
+    wavelengths_um = [0.4 * 5 ** (index / 800) for index in range(801)]
+    index_errors = [
+        abs(
+            resolve_material_snapshot(
+                "SiO2-Malitson-2Pole", wavelength_um, {}
+            ).refractive_index
+            - resolve_material_snapshot(
+                "SiO2-Malitson", wavelength_um, {}
+            ).refractive_index
+        )
+        for wavelength_um in wavelengths_um
+    ]
+
+    assert max(index_errors) == pytest.approx(5.418048441008239e-7)
 
 
 def test_invalid_project_card_does_not_silently_fallback() -> None:

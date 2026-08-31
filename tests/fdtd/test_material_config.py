@@ -45,7 +45,7 @@ def test_scalar_index_card_stays_nondispersive() -> None:
 
 
 def test_sellmeier_card_maps_to_fdtd_coefficients() -> None:
-    snapshot = resolve_material_snapshot("SiO2", 1.55, {})
+    snapshot = resolve_material_snapshot("SiO2-Malitson", 1.55, {})
 
     config = material_config_from_snapshot(snapshot, (1500.0, 1600.0))
 

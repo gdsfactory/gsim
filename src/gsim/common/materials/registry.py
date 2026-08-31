@@ -9,7 +9,11 @@ from pdk_schema import MaterialCard
 from gsim.common.materials.si_li_293k import SI_LI_293K
 from gsim.common.materials.si_salzberg import SI_SALZBERG
 from gsim.common.materials.sin_luke import SIN_LUKE
-from gsim.common.materials.sio2_malitson import SIO2_MALITSON
+from gsim.common.materials.sio2_arosa import SIO2_AROSA
+from gsim.common.materials.sio2_malitson import (
+    SIO2_MALITSON,
+    SIO2_MALITSON_2POLE,
+)
 
 MaterialSource = Literal["project", "gsim"]
 
@@ -21,9 +25,11 @@ GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
     "SiN": SIN_LUKE.model_copy(update={"name": "SiN"}),
     "sin": SIN_LUKE.model_copy(update={"name": "sin"}),
     "SiN-Luke": SIN_LUKE,
-    "SiO2": SIO2_MALITSON.model_copy(update={"name": "SiO2"}),
-    "sio2": SIO2_MALITSON.model_copy(update={"name": "sio2"}),
+    "SiO2": SIO2_MALITSON_2POLE.model_copy(update={"name": "SiO2"}),
+    "sio2": SIO2_MALITSON_2POLE.model_copy(update={"name": "sio2"}),
+    "SiO2-Arosa": SIO2_AROSA,
     "SiO2-Malitson": SIO2_MALITSON,
+    "SiO2-Malitson-2Pole": SIO2_MALITSON_2POLE,
 }
 
 

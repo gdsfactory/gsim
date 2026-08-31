@@ -230,6 +230,29 @@ def test_xy_2d_index_plot_uses_resolved_background_material():
     plt.close(figure)
 
 
+def test_index_plot_ignores_unpopulated_stack_materials():
+    from gsim.common.stack import Layer
+
+    simulation = _xy_sim_for_index_plot()
+    assert simulation.geometry.stack is not None
+    simulation.geometry.stack.layers["unused_metal"] = Layer(
+        name="unused_metal",
+        gds_layer=(99, 0),
+        zmin=1.0,
+        zmax=2.0,
+        thickness=1.0,
+        material="Aluminum",
+        layer_type="conductor",
+    )
+    figure, ax = plt.subplots()
+
+    simulation.plot_2d(ax=ax)
+
+    material_ids = {patch.get_gid() for patch in ax.patches if patch.get_gid()}
+    assert "material:Aluminum" not in material_ids
+    plt.close(figure)
+
+
 def test_multi_slice_index_plot_uses_separate_figures(monkeypatch):
     simulation = _xz_sim_for_index_plot()
     existing_figure_numbers = set(plt.get_fignums())
