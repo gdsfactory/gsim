@@ -24,7 +24,13 @@ from pdk_schema import (
 )
 from scipy.constants import c as C0  # noqa: N812
 
-from gsim.common.materials import SI_LI_293K, SI_SALZBERG, SIO2_MALITSON
+from gsim.common.materials import (
+    SI_LI_293K,
+    SI_SALZBERG,
+    SIO2_AROSA,
+    SIO2_MALITSON,
+    SIO2_MALITSON_2POLE,
+)
 from gsim.common.materials._helpers import material_card
 from gsim.meep.material_cards import (
     MeepMaterialCompatibilityError,
@@ -51,6 +57,8 @@ def _index_card(name: str = "constant", *, k: float | None = None):
 def test_builtin_si_and_sio2_cards_are_meep_compatible() -> None:
     validate_meep_material_card(SI_SALZBERG, (1.5, 1.6))
     validate_meep_material_card(SIO2_MALITSON, (1.5, 1.6))
+    validate_meep_material_card(SIO2_MALITSON_2POLE, (1.5, 1.6))
+    validate_meep_material_card(SIO2_AROSA, (1.5, 1.6))
 
 
 def test_scalar_index_card_becomes_nondispersive_epsilon() -> None:
@@ -90,6 +98,14 @@ def test_sellmeier_maps_exactly_to_lorentz_terms() -> None:
         [0.6961663, 0.4079426, 0.8974794]
     )
     assert {term.gamma for term in terms} == {0.0}
+
+
+def test_reduced_malitson_maps_to_two_lorentz_terms() -> None:
+    material = material_data_from_card(SIO2_MALITSON_2POLE, (1.5, 1.6))
+
+    assert material.epsilon_diag == pytest.approx([1.2648942846816222] * 3)
+    assert material.epsilon_susceptibilities is not None
+    assert len(material.epsilon_susceptibilities) == 2
 
 
 def test_squared_sellmeier_poles_are_not_squared_twice() -> None:
