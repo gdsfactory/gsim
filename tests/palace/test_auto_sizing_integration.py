@@ -1,3 +1,4 @@
+# Copyright 2026 GDSFactory
 """Integration tests for mesh auto-sizing gating in ``_build_mesh_config``.
 
 These tests exercise the pure-config path only — no gmsh invocation, so
@@ -308,5 +309,28 @@ def test_no_warning_when_feature_is_large_enough(caplog):
         for record in caplog.records
         if record.levelno == logging.WARNING
         and "Small conductor feature" in record.getMessage()
+    ]
+    assert not warnings
+
+
+def test_no_warning_when_explicit_mesh_size_resolves_feature(caplog):
+    """The warning should evaluate an explicit override, not the preset size."""
+    sim = _make_sim(_small_feature_component(width=3.0), _conductor_stack())
+    with caplog.at_level(logging.WARNING, logger="gsim.palace.base"):
+        sim._build_mesh_config(
+            preset="coarse",
+            refined_mesh_size=2.0,
+            max_mesh_size=None,
+            margin=None,
+            airbox_margin=None,
+            fmax=None,
+            planar_conductors=None,
+            show_gui=False,
+        )
+
+    warnings = [
+        record
+        for record in caplog.records
+        if "Small conductor feature" in record.getMessage()
     ]
     assert not warnings

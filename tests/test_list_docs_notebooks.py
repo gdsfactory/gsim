@@ -1,3 +1,4 @@
+# Copyright 2026 GDSFactory
 """Tests for deriving documentation notebooks from Zensical navigation."""
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_width_sweep.ipynb",
     "nbs/palace_qpdk_resonator.ipynb",
     "nbs/palace_inductor.ipynb",
+    "nbs/palace_eic_ihp_hfss.ipynb",
+    "nbs/palace_eic_nist_cpw.ipynb",
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
 ]

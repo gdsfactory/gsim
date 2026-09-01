@@ -1,3 +1,4 @@
+# Copyright 2026 GDSFactory
 """Base mixin for Palace simulation classes.
 
 Provides common methods shared across all simulation types:
@@ -663,17 +664,22 @@ class PalaceSimMixin:
 
                 stack = self._resolve_stack()
                 feature = min_conductor_feature_size(component, stack)
+                effective_refined_size = (
+                    refined_mesh_size
+                    if refined_mesh_size is not None
+                    else mesh_config.refined_mesh_size
+                )
                 if (
                     feature is not None
                     and math.isfinite(feature)
-                    and feature < mesh_config.refined_mesh_size / 2
+                    and feature < effective_refined_size / 2
                 ):
                     logger.warning(
                         "Small conductor feature detected (%.3f um) may be "
                         "under-resolved by refined_mesh_size=%.3f um. "
                         "Pass auto_size=True to scale the mesh down.",
                         feature,
-                        mesh_config.refined_mesh_size,
+                        effective_refined_size,
                     )
 
         existing_config = getattr(self, "mesh_config", None)
@@ -1110,8 +1116,10 @@ class PalaceSimMixin:
             logger.info("Generating mesh in %s", output_dir)
 
         airbox_cfg = getattr(self, "_airbox_config", {})
-        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
-        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
+        # Explicit airbox margins are forwarded separately below. Applying them
+        # here as legacy domain margins as well would expand every XY side twice.
+        domain_margin_x = 0.0 if airbox_cfg else mesh_config.effective_margin_x
+        domain_margin_y = 0.0 if airbox_cfg else mesh_config.effective_margin_y
 
         mesh_result = generate_mesh(
             component=component,

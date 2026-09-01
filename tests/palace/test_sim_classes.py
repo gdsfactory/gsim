@@ -1,3 +1,4 @@
+# Copyright 2026 GDSFactory
 """Tests for Palace simulation classes and the Palace binary resolver.
 
 Covers DrivenSim/EigenmodeSim/ElectrostaticSim validation and config, plus
@@ -403,12 +404,14 @@ class TestMixinMethods:
     def test_set_airbox_margin_y_zero_reaches_generate_mesh(
         self, monkeypatch, tmp_path
     ):
-        """set_airbox(margin_y=0) must propagate to meshing domain extents."""
-        captured: dict[str, float] = {}
+        """Explicit airbox margins must not also become legacy domain margins."""
+        captured: dict[str, float | None] = {}
 
         def _fake_generate_mesh(**kwargs):
             captured["margin_x"] = kwargs["margin_x"]
             captured["margin_y"] = kwargs["margin_y"]
+            captured["airbox_margin_x"] = kwargs["airbox_margin_x"]
+            captured["airbox_margin_y"] = kwargs["airbox_margin_y"]
             return SimpleNamespace(
                 mesh_path=tmp_path / "palace.msh",
                 config_path=None,
@@ -445,8 +448,10 @@ class TestMixinMethods:
             write_config=False,
         )
 
-        assert captured["margin_x"] == 50.0
+        assert captured["margin_x"] == 0.0
         assert captured["margin_y"] == 0.0
+        assert captured["airbox_margin_x"] == 50.0
+        assert captured["airbox_margin_y"] == 0.0
 
     def test_curved_mesh_options_reach_generate_mesh(self, monkeypatch, tmp_path):
         """Curve-fit, decimation, and verbosity options must be forwarded."""

@@ -1,3 +1,4 @@
+# Copyright 2026 GDSFactory
 """Geometry extraction and creation for Palace mesh generation.
 
 This module handles extracting polygons from gdsfactory components
@@ -102,6 +103,45 @@ class DielectricRegion:
     zmax: float
 
 
+def _matching_volume_tags(
+    target_bbox: tuple[float, ...],
+    volume_bboxes: dict[int, tuple[float, ...]],
+    *,
+    tolerance: float = 0.01,
+) -> list[int]:
+    """Find a volume or its post-dedup fragments from a pre-dedup bbox.
+
+    ``removeAllDuplicates`` can split a long conductor wherever a shaped
+    dielectric boundary crosses it. Exact bbox recovery then fails even though
+    all conductor fragments remain. Fragments must retain the target z-span and
+    be contained by its XY footprint.
+    """
+    exact_matches = [
+        tag
+        for tag, bbox in volume_bboxes.items()
+        if all(
+            abs(candidate - target) < tolerance
+            for candidate, target in zip(bbox, target_bbox, strict=True)
+        )
+    ]
+    if exact_matches:
+        return exact_matches
+
+    target_xmin, target_ymin, target_zmin, target_xmax, target_ymax, target_zmax = (
+        target_bbox
+    )
+    return [
+        tag
+        for tag, bbox in volume_bboxes.items()
+        if abs(bbox[2] - target_zmin) < tolerance
+        and abs(bbox[5] - target_zmax) < tolerance
+        and bbox[0] >= target_xmin - tolerance
+        and bbox[1] >= target_ymin - tolerance
+        and bbox[3] <= target_xmax + tolerance
+        and bbox[4] <= target_ymax + tolerance
+    ]
+
+
 def resolve_dielectric_regions(
     geometry: GeometryData,
     stack: LayerStack,
@@ -187,10 +227,12 @@ def resolve_dielectric_regions(
             )
         )
 
-    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-        for layer in stack.layers.values():
-            z_min_all = min(z_min_all, layer.zmin)
-            z_max_all = max(z_max_all, layer.zmax)
+    # Patterned layers can extend beyond every blanket dielectric (for example,
+    # a PDMS block above a substrate). The explicit airbox and max-size ports
+    # must use the same complete stack envelope.
+    for layer in stack.layers.values():
+        z_min_all = min(z_min_all, layer.zmin)
+        z_max_all = max(z_max_all, layer.zmax)
 
     if use_airbox:
         if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
@@ -841,31 +883,27 @@ def add_metals(
     for layer_name, bboxes in _via_bboxes.items():
         metal_tags[layer_name]["volumes"] = []
         for target_bbox in bboxes:
-            for vtag, bbox in all_vol_bboxes.items():
-                if all(
-                    abs(a - b) < 0.01 for a, b in zip(bbox, target_bbox, strict=True)
-                ):
-                    metal_tags[layer_name]["volumes"].append(vtag)
-                    break
+            matching_tags = _matching_volume_tags(target_bbox, all_vol_bboxes)
+            metal_tags[layer_name]["volumes"].extend(matching_tags)
+        metal_tags[layer_name]["volumes"] = sorted(
+            set(metal_tags[layer_name]["volumes"])
+        )
 
     # Re-identify conductor volumes by bbox and update _conductor_volumes.
     # Without this, removeAllDuplicates()'s global renumbering makes every
     # original tag appear missing, so all conductors are silently dropped.
     for layer_name, bboxes in _conductor_bboxes.items():
-        new_vol_tags = []
+        new_vol_tags: list[int] = []
         for target_bbox in bboxes:
-            for vtag, bbox in all_vol_bboxes.items():
-                if all(
-                    abs(a - b) < 0.01 for a, b in zip(bbox, target_bbox, strict=True)
-                ):
-                    new_vol_tags.append(vtag)
-                    break
+            matching_tags = _matching_volume_tags(target_bbox, all_vol_bboxes)
+            if matching_tags:
+                new_vol_tags.extend(matching_tags)
             else:
                 logger.warning(
                     "Conductor volume on %s lost during dedup (no bbox match)",
                     layer_name,
                 )
-        _conductor_volumes[layer_name] = new_vol_tags
+        _conductor_volumes[layer_name] = sorted(set(new_vol_tags))
 
     # Extract shell surfaces from conductor volumes (now with correct post-dedup tags).
     current_vols = {t for _, t in all_vols}

@@ -89,7 +89,7 @@ requires = ["build", "setuptools>=61", "uv", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.codespell]
-ignore-words-list = "doubleclick,euclidian,te"
+ignore-words-list = "doubleclick,euclidian,sie,te"
 
 [tool.interrogate]
 docstring-style = "google"

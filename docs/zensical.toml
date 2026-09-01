@@ -20,6 +20,8 @@ nav = [
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },
     { "QPDK Resonator" = "nbs/palace_qpdk_resonator.md" },
     { "Inductor" = "nbs/palace_inductor.md" },
+    { "IHP HFSS Inductor Benchmark" = "nbs/palace_eic_ihp_hfss.md" },
+    { "NIST Parylene-C CPW Benchmark" = "nbs/palace_eic_nist_cpw.md" },
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },

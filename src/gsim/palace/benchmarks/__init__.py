@@ -1,0 +1,60 @@
+# Copyright 2026 GDSFactory
+"""Reproducible public benchmark definitions for Palace."""
+
+from gsim.palace.benchmarks.eic_ihp import (
+    IHP_GDS_ARTIFACT,
+    IHP_HFSS_REFERENCE_ARTIFACT,
+    build_ihp_stack,
+    load_ihp_component,
+    make_ihp_simulation,
+)
+from gsim.palace.benchmarks.eic_nist import (
+    NistAirReference,
+    build_nist_component,
+    build_nist_stack,
+    cascade_nist_rlcg,
+    load_nist_air_reference,
+    make_nist_simulation,
+)
+from gsim.palace.benchmarks.reference import (
+    RemoteArtifact,
+    SParameterData,
+    differential_inductance_quality,
+    download_artifact,
+    from_palace_sparams,
+    interpolate_sparameters,
+    load_touchstone_2port,
+    maximum_singular_value,
+    power_loss_fraction,
+    reciprocity_error,
+    s_to_z,
+    sha256_file,
+    sparameter_error_summary,
+)
+
+__all__ = [
+    "IHP_GDS_ARTIFACT",
+    "IHP_HFSS_REFERENCE_ARTIFACT",
+    "NistAirReference",
+    "RemoteArtifact",
+    "SParameterData",
+    "build_ihp_stack",
+    "build_nist_component",
+    "build_nist_stack",
+    "cascade_nist_rlcg",
+    "differential_inductance_quality",
+    "download_artifact",
+    "from_palace_sparams",
+    "interpolate_sparameters",
+    "load_ihp_component",
+    "load_nist_air_reference",
+    "load_touchstone_2port",
+    "make_ihp_simulation",
+    "make_nist_simulation",
+    "maximum_singular_value",
+    "power_loss_fraction",
+    "reciprocity_error",
+    "s_to_z",
+    "sha256_file",
+    "sparameter_error_summary",
+]
