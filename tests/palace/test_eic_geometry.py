@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,6 +13,9 @@ import pytest
 from gsim.palace.benchmarks.eic_ihp import IHP_PORT_SPECS, build_ihp_stack
 from gsim.palace.benchmarks.eic_nist import (
     AIR_CHANNEL_LAYER,
+    GAP_PARTITION_SUBSTRATE_LAYER,
+    GAP_WIDTH_UM,
+    NIST_MAX_TETRAHEDRA,
     PARYLENE_LAYER,
     PDMS_LAYER,
     PLATINUM_LAYER,
@@ -20,6 +24,7 @@ from gsim.palace.benchmarks.eic_nist import (
     build_nist_stack,
     make_nist_simulation,
     nist_section_edges_um,
+    require_nist_tetrahedron_budget,
 )
 from gsim.palace.mesh.config_generator import generate_palace_config
 from gsim.palace.mesh.geometry import (
@@ -95,15 +100,46 @@ def test_nist_stack_separates_ansys_and_measured_platinum_thicknesses() -> None:
     assert ansys_stack.layers["air_channel"].zmax == pytest.approx(219.67)
 
 
-def test_nist_simulation_uses_two_full_boundary_wave_ports(tmp_path: Path) -> None:
-    """Both physical end planes are excited for a full complex S matrix."""
+def test_nist_simulation_uses_two_cpw_lumped_ports(tmp_path: Path) -> None:
+    """The capped 3D model has explicit 50-ohm CPW terminations."""
     simulation = make_nist_simulation(tmp_path / "nist")
 
     assert simulation.validate_config().valid
+    assert simulation.wave_ports == []
+    assert [port.name for port in simulation.cpw_ports] == ["left", "right"]
+    assert all(port.impedance == 50.0 for port in simulation.cpw_ports)
+    assert all(port.gap_width == GAP_WIDTH_UM for port in simulation.cpw_ports)
+    assert all(port.excited for port in simulation.cpw_ports)
+    component = simulation.component
+    stack = simulation.stack
+    assert component is not None
+    assert stack is not None
+    polygons = component.get_polygons(by="tuple")
+    assert len(polygons[GAP_PARTITION_SUBSTRATE_LAYER]) == 2
+    assert stack.materials["fused_silica_partition"] == stack.materials["fused_silica"]
+    assert simulation._airbox_config["margin_x"] == pytest.approx(50.0)
+    assert simulation.driven.reference_impedance == pytest.approx(50.0)
+    assert simulation.numerical.order == 1
+
+
+def test_nist_numeric_wave_ports_remain_available(tmp_path: Path) -> None:
+    """Numeric wave ports remain an explicit convergence-study option."""
+    simulation = make_nist_simulation(tmp_path / "nist-wave", port_type="wave")
+
+    assert simulation.cpw_ports == []
     assert [port.name for port in simulation.wave_ports] == ["left", "right"]
     assert all(port.max_size and port.excited for port in simulation.wave_ports)
-    assert simulation.mesh_config.margin_x == pytest.approx(0.0)
-    assert simulation.driven.reference_impedance == pytest.approx(50.0)
+    assert simulation._airbox_config["margin_x"] == pytest.approx(0.0)
+
+
+def test_nist_tetrahedron_budget_blocks_solver_runs_above_limit() -> None:
+    """The benchmark refuses any Palace execution above the hard cap."""
+    accepted = SimpleNamespace(mesh_stats={"tetrahedra": NIST_MAX_TETRAHEDRA})
+    rejected = SimpleNamespace(mesh_stats={"tetrahedra": NIST_MAX_TETRAHEDRA + 1})
+
+    assert require_nist_tetrahedron_budget(accepted) == NIST_MAX_TETRAHEDRA
+    with pytest.raises(RuntimeError, match="Palace execution is blocked"):
+        require_nist_tetrahedron_budget(rejected)
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -30,6 +31,7 @@ SUBSTRATE_LAYER = (2, 0)
 PARYLENE_LAYER = (3, 0)
 PDMS_LAYER = (4, 0)
 AIR_CHANNEL_LAYER = (5, 0)
+GAP_PARTITION_SUBSTRATE_LAYER = (6, 0)
 
 SIGNAL_WIDTH_UM = 50.0
 GAP_WIDTH_UM = 2.5
@@ -38,6 +40,10 @@ SUBSTRATE_WIDTH_UM = 1365.0
 PARYLENE_THICKNESS_UM = 6.67
 PDMS_HEIGHT_UM = 500.0
 CHANNEL_WIDTH_UM = 213.0
+NIST_MAX_TETRAHEDRA = 110_000
+NIST_CAPPED_MESH_SIZE_UM = 150.0
+NIST_CPW_PORT_LENGTH_UM = 5.0
+NIST_CPW_LONGITUDINAL_MARGIN_UM = 50.0
 SECTION_LENGTHS_UM = {
     "NP": 60.0,
     "YP": 690.0,
@@ -74,8 +80,14 @@ def nist_section_edges_um() -> NDArray[np.float64]:
     )
 
 
-def build_nist_component():
-    """Build the complete 6.5005 mm air-filled H2O-chip CPW layout."""
+def build_nist_component(*, include_gap_partitions: bool = False):
+    """Build the complete 6.5005 mm air-filled H2O-chip CPW layout.
+
+    ``include_gap_partitions`` adds same-material dielectric strips at the
+    midpoint of each 2.5 um gap. They introduce no material contrast, but force
+    two 1.25 um transverse mesh spans at the metal plane without imposing a
+    1.25 um isotropic size along the complete 6.5 mm line.
+    """
     import gdsfactory as gf
 
     gf.gpdk.PDK.activate()
@@ -147,6 +159,9 @@ def build_nist_component():
         -ground_inner_edge,
         PLATINUM_LAYER,
     )
+    if include_gap_partitions:
+        _add_gap_partition_polygons(component, edges)
+        component.info["gap_mesh_partitions"] = True
     component.add_port(
         name="left",
         center=(xmin, 0.0),
@@ -166,7 +181,11 @@ def build_nist_component():
     return component
 
 
-def build_nist_stack(*, platinum_thickness_um: float = 0.2) -> LayerStack:
+def build_nist_stack(
+    *,
+    platinum_thickness_um: float = 0.2,
+    include_gap_partitions: bool = False,
+) -> LayerStack:
     """Build the Q2D-parity material stack with finite Pt conductivity."""
     materials = {
         "fused_silica": {
@@ -239,6 +258,18 @@ def build_nist_stack(*, platinum_thickness_um: float = 0.2) -> LayerStack:
             mesh_resolution=10.0,
         ),
     }
+    if include_gap_partitions:
+        materials["fused_silica_partition"] = dict(materials["fused_silica"])
+        layers["gap_partition_substrate"] = Layer(
+            name="gap_partition_substrate",
+            gds_layer=GAP_PARTITION_SUBSTRATE_LAYER,
+            zmin=-5.0,
+            zmax=0.0,
+            thickness=5.0,
+            material="fused_silica_partition",
+            layer_type="dielectric",
+            mesh_resolution=NIST_CAPPED_MESH_SIZE_UM,
+        )
     dielectrics = [
         {
             "name": "substrate",
@@ -270,26 +301,55 @@ def make_nist_simulation(
     num_points: int = 81,
     adaptive_tol: float = 1e-3,
     adaptive_max_samples: int = 20,
+    port_type: Literal["cpw_lumped", "wave"] = "cpw_lumped",
+    include_gap_partitions: bool = True,
 ) -> DrivenSim:
-    """Create the complete NIST CPW Palace driven simulation."""
+    """Create the complete NIST CPW Palace driven simulation.
+
+    The default is a genuine full-wave 3D model with two 50-ohm CPW lumped
+    ports. Numeric wave ports remain available for convergence studies, but
+    their boundary eigensolve is not used by the capped screening setup.
+    """
+    if port_type not in {"cpw_lumped", "wave"}:
+        raise ValueError("port_type must be 'cpw_lumped' or 'wave'")
     simulation = DrivenSim()
     simulation.set_output_dir(output_dir)
-    simulation.set_geometry(build_nist_component())
-    simulation.set_stack(build_nist_stack(platinum_thickness_um=platinum_thickness_um))
+    simulation.set_geometry(
+        build_nist_component(include_gap_partitions=include_gap_partitions)
+    )
+    simulation.set_stack(
+        build_nist_stack(
+            platinum_thickness_um=platinum_thickness_um,
+            include_gap_partitions=include_gap_partitions,
+        )
+    )
     simulation.set_airbox(
-        margin_x=0.0,
+        margin_x=(
+            NIST_CPW_LONGITUDINAL_MARGIN_UM if port_type == "cpw_lumped" else 0.0
+        ),
         margin_y=0.0,
         z_above=250.0,
         z_below=0.0,
     )
     for port_name in ("left", "right"):
-        simulation.add_wave_port(
-            port_name,
-            layer="platinum",
-            max_size=True,
-            mode=1,
-            excited=True,
-        )
+        if port_type == "cpw_lumped":
+            simulation.add_cpw_port(
+                port_name,
+                layer="platinum",
+                s_width=SIGNAL_WIDTH_UM,
+                gap_width=GAP_WIDTH_UM,
+                length=NIST_CPW_PORT_LENGTH_UM,
+                impedance=50.0,
+                excited=True,
+            )
+        else:
+            simulation.add_wave_port(
+                port_name,
+                layer="platinum",
+                max_size=True,
+                mode=1,
+                excited=True,
+            )
     simulation.set_driven(
         fmin=fmin_hz,
         fmax=fmax_hz,
@@ -298,7 +358,29 @@ def make_nist_simulation(
         adaptive_max_samples=adaptive_max_samples,
         reference_impedance=50.0,
     )
+    simulation.set_numerical(order=1)
     return simulation
+
+
+def require_nist_tetrahedron_budget(
+    mesh_result: Any,
+    *,
+    maximum: int = NIST_MAX_TETRAHEDRA,
+) -> int:
+    """Return the tetrahedron count or reject a NIST solver submission.
+
+    This gate is intentionally evaluated after writing the finalized mesh and
+    before either a local Palace run or a cloud submission.
+    """
+    tetrahedra = (getattr(mesh_result, "mesh_stats", None) or {}).get("tetrahedra")
+    if not isinstance(tetrahedra, int) or tetrahedra < 1:
+        raise ValueError("Finalized NIST mesh has no positive tetrahedron count")
+    if tetrahedra > maximum:
+        raise RuntimeError(
+            f"NIST mesh has {tetrahedra:,} tetrahedra; hard limit is "
+            f"{maximum:,}. Palace execution is blocked."
+        )
+    return tetrahedra
 
 
 def load_nist_air_reference(path: str | Path) -> NistAirReference:
@@ -387,6 +469,29 @@ def _add_rectangle(
     component.add_polygon(
         [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)], layer=layer
     )
+
+
+def _add_gap_partition_polygons(component, edges: NDArray[np.float64]) -> None:
+    """Add same-material strips occupying one half of each CPW gap."""
+    signal_half_width = SIGNAL_WIDTH_UM / 2
+    ground_inner_edge = signal_half_width + GAP_WIDTH_UM
+    gap_midpoint = signal_half_width + GAP_WIDTH_UM / 2
+    gap_half_ranges = (
+        (-gap_midpoint, -signal_half_width),
+        (signal_half_width, gap_midpoint),
+    )
+    xmin, xmax = float(edges[0]), float(edges[-1])
+    for ymin, ymax in gap_half_ranges:
+        _add_rectangle(
+            component,
+            xmin,
+            ymin,
+            xmax,
+            ymax,
+            GAP_PARTITION_SUBSTRATE_LAYER,
+        )
+    if ground_inner_edge - gap_midpoint != GAP_WIDTH_UM / 2:
+        raise AssertionError("Gap partition does not bisect the CPW gap")
 
 
 def _load_rlcg(

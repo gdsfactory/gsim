@@ -9,12 +9,15 @@ from gsim.palace.benchmarks.eic_ihp import (
     make_ihp_simulation,
 )
 from gsim.palace.benchmarks.eic_nist import (
+    NIST_CAPPED_MESH_SIZE_UM,
+    NIST_MAX_TETRAHEDRA,
     NistAirReference,
     build_nist_component,
     build_nist_stack,
     cascade_nist_rlcg,
     load_nist_air_reference,
     make_nist_simulation,
+    require_nist_tetrahedron_budget,
 )
 from gsim.palace.benchmarks.reference import (
     RemoteArtifact,
@@ -35,6 +38,8 @@ from gsim.palace.benchmarks.reference import (
 __all__ = [
     "IHP_GDS_ARTIFACT",
     "IHP_HFSS_REFERENCE_ARTIFACT",
+    "NIST_CAPPED_MESH_SIZE_UM",
+    "NIST_MAX_TETRAHEDRA",
     "NistAirReference",
     "RemoteArtifact",
     "SParameterData",
@@ -54,6 +59,7 @@ __all__ = [
     "maximum_singular_value",
     "power_loss_fraction",
     "reciprocity_error",
+    "require_nist_tetrahedron_budget",
     "s_to_z",
     "sha256_file",
     "sparameter_error_summary",
