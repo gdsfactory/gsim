@@ -606,6 +606,7 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal[1, 3, 4, 7, 9, 10] | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides.
 
@@ -686,6 +687,7 @@ class PalaceSimMixin:
 
         # Preserve curve-fit settings from sim.mesh_config unless overridden.
         if existing_config is not None:
+            mesh_config.algorithm_3d = existing_config.algorithm_3d
             mesh_config.curve_fit_mode = existing_config.curve_fit_mode
             mesh_config.curve_fit_layers = list(existing_config.curve_fit_layers)
             mesh_config.curve_fit_tolerance_um = existing_config.curve_fit_tolerance_um
@@ -710,6 +712,8 @@ class PalaceSimMixin:
             mesh_config.refined_mesh_size = refined_mesh_size
         if max_mesh_size is not None:
             mesh_config.max_mesh_size = max_mesh_size
+        if algorithm_3d is not None:
+            mesh_config.algorithm_3d = algorithm_3d
         if margin is not None:
             mesh_config.margin = margin
         if margin_x is not None:
@@ -1148,6 +1152,7 @@ class PalaceSimMixin:
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
+            absorbing_order=getattr(self, "absorbing_order", 2),
             periodic_axis=periodic_axis,
             merge_via_distance=mesh_config.merge_via_distance,
             curve_fit_mode=mesh_config.curve_fit_mode,
@@ -1158,6 +1163,7 @@ class PalaceSimMixin:
             high_order_elements=mesh_config.high_order_elements,
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
+            algorithm_3d=mesh_config.algorithm_3d,
             verbosity=gmsh_verbosity,
             decimate_tolerance=decimate_tolerance,
         )
@@ -1237,6 +1243,7 @@ class PalaceSimMixin:
         preset: Literal["coarse", "default", "fine"] | None = None,
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
+        algorithm_3d: Literal[1, 3, 4, 7, 9, 10] | None = None,
         margin: float | None = None,
         margin_x: float | None = None,
         margin_y: float | None = None,
@@ -1266,6 +1273,7 @@ class PalaceSimMixin:
             preset: Mesh quality preset ("coarse", "default", "fine")
             refined_mesh_size: Mesh size near conductors (um)
             max_mesh_size: Max mesh size in air/dielectric (um)
+            algorithm_3d: Optional Gmsh tetrahedral meshing algorithm.
             margin: XY margin around design (um)
             margin_x: X-axis margin (um). Overrides margin for X.
             margin_y: Y-axis margin (um). Overrides margin for Y.
@@ -1315,6 +1323,7 @@ class PalaceSimMixin:
             preset=preset,
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
+            algorithm_3d=algorithm_3d,
             margin=margin,
             margin_x=margin_x,
             margin_y=margin_y,
@@ -1374,6 +1383,7 @@ class PalaceSimMixin:
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
+                absorbing_order=getattr(self, "absorbing_order", 2),
                 merge_via_distance=mesh_config.merge_via_distance,
                 curve_fit_mode=mesh_config.curve_fit_mode,
                 curve_fit_layers=mesh_config.curve_fit_layers,
@@ -1383,6 +1393,7 @@ class PalaceSimMixin:
                 high_order_elements=mesh_config.high_order_elements,
                 high_order_order=mesh_config.high_order_order,
                 high_order_optimize=mesh_config.high_order_optimize,
+                algorithm_3d=mesh_config.algorithm_3d,
                 decimate_tolerance=decimate_tolerance,
             )
 
@@ -1396,6 +1407,7 @@ class PalaceSimMixin:
         preset: Literal["coarse", "default", "fine"] | None = None,
         refined_mesh_size: float | None = None,
         max_mesh_size: float | None = None,
+        algorithm_3d: Literal[1, 3, 4, 7, 9, 10] | None = None,
         margin: float | None = None,
         margin_x: float | None = None,
         margin_y: float | None = None,
@@ -1433,6 +1445,7 @@ class PalaceSimMixin:
             preset: Mesh quality preset ("coarse", "default", "fine")
             refined_mesh_size: Mesh size near conductors (um), overrides preset
             max_mesh_size: Max mesh size in air/dielectric (um), overrides preset
+            algorithm_3d: Optional Gmsh tetrahedral meshing algorithm.
             margin: XY margin around design (um), overrides preset
             margin_x: X-axis margin (um). Overrides margin for X.
             margin_y: Y-axis margin (um). Overrides margin for Y.
@@ -1499,6 +1512,7 @@ class PalaceSimMixin:
             preset=preset,
             refined_mesh_size=refined_mesh_size,
             max_mesh_size=max_mesh_size,
+            algorithm_3d=algorithm_3d,
             margin=margin,
             margin_x=margin_x,
             margin_y=margin_y,
@@ -1662,6 +1676,7 @@ class PalaceSimMixin:
             numerical_config=self.numerical,
             boundary_mode_config=getattr(self, "boundary_mode", None),
             absorbing_boundary=self.absorbing_boundary,
+            absorbing_order=getattr(self, "absorbing_order", 2),
             hints=hints,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],

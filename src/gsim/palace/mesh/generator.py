@@ -1011,6 +1011,7 @@ def generate_mesh(
     planar_conductors: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
     absorbing_boundary: bool = True,
+    absorbing_order: Literal[1, 2] = 2,
     periodic_axis: str | None = None,
     merge_via_distance: float = 2.0,
     curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
@@ -1021,6 +1022,7 @@ def generate_mesh(
     high_order_elements: bool = False,
     high_order_order: int = 2,
     high_order_optimize: bool = True,
+    algorithm_3d: Literal[1, 3, 4, 7, 9, 10] | None = None,
     verbosity: int = 3,
     decimate_tolerance: float | None = None,
 ) -> MeshResult:
@@ -1056,6 +1058,7 @@ def generate_mesh(
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
+        absorbing_order: Order of the absorbing boundary condition.
         periodic_axis: ("x" or "y") for meshing constraints on opposite domain sides
         merge_via_distance: Max gap between vias to merge (um)
         curve_fit_mode: Patterned dielectric boundary mode: line/spline/bspline
@@ -1067,6 +1070,7 @@ def generate_mesh(
         high_order_elements: Enable high-order geometric mesh elements
         high_order_order: Polynomial order for high-order elements
         high_order_optimize: Run gmsh high-order optimization after meshing
+        algorithm_3d: Optional Gmsh tetrahedral meshing algorithm.
         decimate_tolerance: Relative tolerance for polygon decimation
             (None = no decimation; typical 0.001-0.01)
         verbosity: Sets gmsh verbosity level
@@ -1191,6 +1195,7 @@ def generate_mesh(
                     numerical_config,
                     boundary_mode_config,
                     absorbing_boundary,
+                    absorbing_order,
                     periodic_axis,
                 )
 
@@ -1396,6 +1401,9 @@ def generate_mesh(
                 "Mesh.HighOrderOptimize", 1 if high_order_optimize else 0
             )
 
+        if algorithm_3d is not None:
+            gmsh.option.setNumber("Mesh.Algorithm3D", algorithm_3d)
+
         logger.info("Generating mesh...")
         gmsh.model.mesh.generate(3)
 
@@ -1440,6 +1448,7 @@ def generate_mesh(
                 numerical_config,
                 boundary_mode_config,
                 absorbing_boundary,
+                absorbing_order,
                 periodic_axis,
             )
 

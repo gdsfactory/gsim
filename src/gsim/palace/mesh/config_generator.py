@@ -131,6 +131,7 @@ def generate_palace_config(
     numerical_config: NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
+    absorbing_order: Literal[1, 2] = 2,
     periodic_axis: str | None = None,
     hints: dict[str, Any] | None = None,
     electrostatic_config: ElectrostaticConfig | None = None,
@@ -151,6 +152,7 @@ def generate_palace_config(
             frequency ``(fmin + fmax) / 2`` of the sweep band.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add absorbing (PML) boundary
+        absorbing_order: Order of the absorbing boundary condition.
         periodic_axis: Optional periodic axis identifier
         hints: Additional config hints merged into the JSON
 
@@ -625,7 +627,7 @@ def generate_palace_config(
         attrs = absorbing_pg if isinstance(absorbing_pg, list) else [absorbing_pg]
         boundaries["Absorbing"] = {
             "Attributes": attrs,
-            "Order": 2,
+            "Order": absorbing_order,
         }
 
     if (
@@ -822,6 +824,7 @@ def write_config(
     numerical_config: NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
+    absorbing_order: Literal[1, 2] = 2,
     hints: dict[str, Any] | None = None,
     electrostatic_config: ElectrostaticConfig | None = None,
     terminals: list[TerminalConfig] | None = None,
@@ -839,6 +842,7 @@ def write_config(
             frequency of the sweep band.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add absorbing (PML) boundary
+        absorbing_order: Order of the absorbing boundary condition.
         hints: Additional config hints merged into the JSON
 
     Returns:
@@ -870,6 +874,7 @@ def write_config(
         numerical_config=numerical_config,
         boundary_mode_config=boundary_mode_config,
         absorbing_boundary=absorbing_boundary,
+        absorbing_order=absorbing_order,
         periodic_axis=mesh_result.periodic_axis,
         hints=hints,
         electrostatic_config=electrostatic_config,

@@ -32,6 +32,11 @@ PARYLENE_LAYER = (3, 0)
 PDMS_LAYER = (4, 0)
 AIR_CHANNEL_LAYER = (5, 0)
 GAP_PARTITION_SUBSTRATE_LAYER = (6, 0)
+BOTTOM_CONDUCTOR_LAYER = (7, 0)
+GAP_PARTITION_SUBSTRATE_LAYERS = (
+    GAP_PARTITION_SUBSTRATE_LAYER,
+    (8, 0),
+)
 
 SIGNAL_WIDTH_UM = 50.0
 GAP_WIDTH_UM = 2.5
@@ -40,10 +45,14 @@ SUBSTRATE_WIDTH_UM = 1365.0
 PARYLENE_THICKNESS_UM = 6.67
 PDMS_HEIGHT_UM = 500.0
 CHANNEL_WIDTH_UM = 213.0
+BOTTOM_CONDUCTOR_THICKNESS_UM = 50.0
 NIST_MAX_TETRAHEDRA = 110_000
 NIST_CAPPED_MESH_SIZE_UM = 150.0
+NIST_BULK_MESH_SIZE_UM = 200.0
+NIST_MESH_ALGORITHM_3D = 10
 NIST_CPW_PORT_LENGTH_UM = 5.0
 NIST_CPW_LONGITUDINAL_MARGIN_UM = 50.0
+NIST_CPW_LATERAL_MARGIN_UM = 100.0
 SECTION_LENGTHS_UM = {
     "NP": 60.0,
     "YP": 690.0,
@@ -83,10 +92,10 @@ def nist_section_edges_um() -> NDArray[np.float64]:
 def build_nist_component(*, include_gap_partitions: bool = False):
     """Build the complete 6.5005 mm air-filled H2O-chip CPW layout.
 
-    ``include_gap_partitions`` adds same-material dielectric strips at the
-    midpoint of each 2.5 um gap. They introduce no material contrast, but force
-    two 1.25 um transverse mesh spans at the metal plane without imposing a
-    1.25 um isotropic size along the complete 6.5 mm line.
+    ``include_gap_partitions`` adds same-material dielectric strips inside each
+    2.5 um gap. They introduce no material contrast, but force four 0.625 um
+    transverse mesh spans at the metal plane without imposing that size along
+    the complete 6.5 mm line.
     """
     import gdsfactory as gf
 
@@ -104,6 +113,14 @@ def build_nist_component(*, include_gap_partitions: bool = False):
         xmax,
         substrate_half_width,
         SUBSTRATE_LAYER,
+    )
+    _add_rectangle(
+        component,
+        xmin,
+        -substrate_half_width,
+        xmax,
+        substrate_half_width,
+        BOTTOM_CONDUCTOR_LAYER,
     )
     _add_rectangle(
         component,
@@ -257,20 +274,41 @@ def build_nist_stack(
             layer_type="conductor",
             mesh_resolution=10.0,
         ),
+        "bottom_conductor": Layer(
+            name="bottom_conductor",
+            gds_layer=BOTTOM_CONDUCTOR_LAYER,
+            zmin=-500.0 - BOTTOM_CONDUCTOR_THICKNESS_UM,
+            zmax=-500.0,
+            thickness=BOTTOM_CONDUCTOR_THICKNESS_UM,
+            material="platinum",
+            layer_type="conductor",
+            mesh_resolution=80.0,
+        ),
     }
     if include_gap_partitions:
-        materials["fused_silica_partition"] = dict(materials["fused_silica"])
-        layers["gap_partition_substrate"] = Layer(
-            name="gap_partition_substrate",
-            gds_layer=GAP_PARTITION_SUBSTRATE_LAYER,
-            zmin=-5.0,
-            zmax=0.0,
-            thickness=5.0,
-            material="fused_silica_partition",
-            layer_type="dielectric",
-            mesh_resolution=NIST_CAPPED_MESH_SIZE_UM,
-        )
+        for partition_index, gds_layer in enumerate(
+            GAP_PARTITION_SUBSTRATE_LAYERS, start=1
+        ):
+            material_name = f"fused_silica_partition_{partition_index}"
+            layer_name = f"gap_partition_substrate_{partition_index}"
+            materials[material_name] = dict(materials["fused_silica"])
+            layers[layer_name] = Layer(
+                name=layer_name,
+                gds_layer=gds_layer,
+                zmin=-5.0,
+                zmax=0.0,
+                thickness=5.0,
+                material=material_name,
+                layer_type="dielectric",
+                mesh_resolution=NIST_CAPPED_MESH_SIZE_UM,
+            )
     dielectrics = [
+        {
+            "name": "bottom_ambient",
+            "zmin": -500.0 - BOTTOM_CONDUCTOR_THICKNESS_UM,
+            "zmax": -500.0,
+            "material": "air",
+        },
         {
             "name": "substrate",
             "zmin": -500.0,
@@ -301,6 +339,7 @@ def make_nist_simulation(
     num_points: int = 81,
     adaptive_tol: float = 1e-3,
     adaptive_max_samples: int = 20,
+    numerical_order: int = 2,
     port_type: Literal["cpw_lumped", "wave"] = "cpw_lumped",
     include_gap_partitions: bool = True,
 ) -> DrivenSim:
@@ -327,7 +366,7 @@ def make_nist_simulation(
         margin_x=(
             NIST_CPW_LONGITUDINAL_MARGIN_UM if port_type == "cpw_lumped" else 0.0
         ),
-        margin_y=0.0,
+        margin_y=NIST_CPW_LATERAL_MARGIN_UM,
         z_above=250.0,
         z_below=0.0,
     )
@@ -358,7 +397,8 @@ def make_nist_simulation(
         adaptive_max_samples=adaptive_max_samples,
         reference_impedance=50.0,
     )
-    simulation.set_numerical(order=1)
+    simulation.absorbing_order = 1
+    simulation.set_numerical(order=numerical_order, tolerance=1e-8)
     return simulation
 
 
@@ -472,26 +512,20 @@ def _add_rectangle(
 
 
 def _add_gap_partition_polygons(component, edges: NDArray[np.float64]) -> None:
-    """Add same-material strips occupying one half of each CPW gap."""
+    """Add same-material strips that divide each CPW gap into four spans."""
     signal_half_width = SIGNAL_WIDTH_UM / 2
-    ground_inner_edge = signal_half_width + GAP_WIDTH_UM
-    gap_midpoint = signal_half_width + GAP_WIDTH_UM / 2
-    gap_half_ranges = (
-        (-gap_midpoint, -signal_half_width),
-        (signal_half_width, gap_midpoint),
-    )
     xmin, xmax = float(edges[0]), float(edges[-1])
-    for ymin, ymax in gap_half_ranges:
-        _add_rectangle(
-            component,
-            xmin,
-            ymin,
-            xmax,
-            ymax,
-            GAP_PARTITION_SUBSTRATE_LAYER,
-        )
-    if ground_inner_edge - gap_midpoint != GAP_WIDTH_UM / 2:
-        raise AssertionError("Gap partition does not bisect the CPW gap")
+    span_width = GAP_WIDTH_UM / 4
+    for span_index, gds_layer in zip(
+        (0, 2), GAP_PARTITION_SUBSTRATE_LAYERS, strict=True
+    ):
+        inner_edge = signal_half_width + span_index * span_width
+        outer_edge = inner_edge + span_width
+        for ymin, ymax in (
+            (-outer_edge, -inner_edge),
+            (inner_edge, outer_edge),
+        ):
+            _add_rectangle(component, xmin, ymin, xmax, ymax, gds_layer)
 
 
 def _load_rlcg(

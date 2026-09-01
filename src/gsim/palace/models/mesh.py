@@ -16,6 +16,7 @@ class MeshConfig(BaseModel):
     Attributes:
         refined_mesh_size: Mesh size near conductors (um)
         max_mesh_size: Maximum mesh size in air/dielectric (um)
+        algorithm_3d: Optional Gmsh tetrahedral meshing algorithm.
         cells_per_wavelength: Number of mesh cells per wavelength
         margin: XY margin around design (um)
         margin_x: X-axis margin override (um). Falls back to margin.
@@ -32,6 +33,7 @@ class MeshConfig(BaseModel):
 
     refined_mesh_size: float = Field(default=5.0, gt=0)
     max_mesh_size: float = Field(default=300.0, gt=0)
+    algorithm_3d: Literal[1, 3, 4, 7, 9, 10] | None = None
     cells_per_wavelength: int = Field(default=10, ge=1)
     margin: float = Field(default=0.0, ge=0)
     margin_x: float | None = Field(

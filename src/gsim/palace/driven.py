@@ -80,6 +80,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
     eigenmode: None = None
     absorbing_boundary: bool = True
+    absorbing_order: Literal[1, 2] = 2
 
     # Mesh config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)

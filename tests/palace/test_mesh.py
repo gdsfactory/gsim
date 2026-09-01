@@ -28,6 +28,7 @@ class TestMeshConfig:
         config = MeshConfig()
         assert config.refined_mesh_size == 5.0
         assert config.max_mesh_size == 300.0
+        assert config.algorithm_3d is None
         assert config.margin == 0.0
         assert config.fmax == 100e9
         assert config.show_gui is False
@@ -106,6 +107,12 @@ class TestMeshConfig:
         assert config.high_order_elements is True
         assert config.high_order_order == 3
         assert config.high_order_optimize is False
+
+    def test_algorithm_3d_override(self):
+        """A supported Gmsh tetrahedral algorithm can be selected."""
+        config = MeshConfig(algorithm_3d=10)
+
+        assert config.algorithm_3d == 10
 
 
 def test_add_dielectrics_margin_applies_only_to_airlike(monkeypatch) -> None:

@@ -13,7 +13,9 @@ import pytest
 from gsim.palace.benchmarks.eic_ihp import IHP_PORT_SPECS, build_ihp_stack
 from gsim.palace.benchmarks.eic_nist import (
     AIR_CHANNEL_LAYER,
-    GAP_PARTITION_SUBSTRATE_LAYER,
+    BOTTOM_CONDUCTOR_LAYER,
+    BOTTOM_CONDUCTOR_THICKNESS_UM,
+    GAP_PARTITION_SUBSTRATE_LAYERS,
     GAP_WIDTH_UM,
     NIST_MAX_TETRAHEDRA,
     PARYLENE_LAYER,
@@ -75,6 +77,7 @@ def test_nist_geometry_has_full_section_sequence_and_expected_layers() -> None:
         component.bbox_np(), [[-3250.25, -682.5], [3250.25, 682.5]]
     )
     assert len(polygons[PLATINUM_LAYER]) == 3
+    assert len(polygons[BOTTOM_CONDUCTOR_LAYER]) == 1
     assert len(polygons[SUBSTRATE_LAYER]) == 1
     assert len(polygons[PARYLENE_LAYER]) == 1
     assert len(polygons[PDMS_LAYER]) == 1
@@ -96,6 +99,10 @@ def test_nist_stack_separates_ansys_and_measured_platinum_thicknesses() -> None:
     assert measured_stack.validate_stack().valid
     assert ansys_stack.layers["platinum"].thickness == pytest.approx(0.2)
     assert measured_stack.layers["platinum"].thickness == pytest.approx(0.405)
+    assert ansys_stack.layers["bottom_conductor"].thickness == pytest.approx(
+        BOTTOM_CONDUCTOR_THICKNESS_UM
+    )
+    assert ansys_stack.layers["bottom_conductor"].zmax == pytest.approx(-500.0)
     assert ansys_stack.materials["platinum"]["conductivity"] == pytest.approx(9.04e6)
     assert ansys_stack.layers["air_channel"].zmax == pytest.approx(219.67)
 
@@ -115,11 +122,18 @@ def test_nist_simulation_uses_two_cpw_lumped_ports(tmp_path: Path) -> None:
     assert component is not None
     assert stack is not None
     polygons = component.get_polygons(by="tuple")
-    assert len(polygons[GAP_PARTITION_SUBSTRATE_LAYER]) == 2
-    assert stack.materials["fused_silica_partition"] == stack.materials["fused_silica"]
+    assert all(len(polygons[layer]) == 2 for layer in GAP_PARTITION_SUBSTRATE_LAYERS)
+    assert all(
+        stack.materials[f"fused_silica_partition_{index}"]
+        == stack.materials["fused_silica"]
+        for index in range(1, 3)
+    )
     assert simulation._airbox_config["margin_x"] == pytest.approx(50.0)
+    assert simulation._airbox_config["margin_y"] == pytest.approx(100.0)
     assert simulation.driven.reference_impedance == pytest.approx(50.0)
-    assert simulation.numerical.order == 1
+    assert simulation.numerical.order == 2
+    assert simulation.numerical.tolerance == pytest.approx(1e-8)
+    assert simulation.absorbing_order == 1
 
 
 def test_nist_numeric_wave_ports_remain_available(tmp_path: Path) -> None:
@@ -130,6 +144,16 @@ def test_nist_numeric_wave_ports_remain_available(tmp_path: Path) -> None:
     assert [port.name for port in simulation.wave_ports] == ["left", "right"]
     assert all(port.max_size and port.excited for port in simulation.wave_ports)
     assert simulation._airbox_config["margin_x"] == pytest.approx(0.0)
+    assert simulation._airbox_config["margin_y"] == pytest.approx(100.0)
+
+
+def test_nist_numerical_order_can_be_raised_without_changing_geometry(
+    tmp_path: Path,
+) -> None:
+    """Polynomial-order studies reuse the tetrahedron-capped geometry."""
+    simulation = make_nist_simulation(tmp_path / "nist-order-one", numerical_order=1)
+
+    assert simulation.numerical.order == 1
 
 
 def test_nist_tetrahedron_budget_blocks_solver_runs_above_limit() -> None:
@@ -165,7 +189,7 @@ def test_generated_palace_config_uses_conductivity_boundary(
         },
         "pec_surfaces": {},
         "port_surfaces": {},
-        "boundary_surfaces": {},
+        "boundary_surfaces": {"absorbing": {"phys_group": 3}},
     }
     config_path = generate_palace_config(
         groups=groups,
@@ -176,6 +200,7 @@ def test_generated_palace_config_uses_conductivity_boundary(
         model_name="eic_config",
         fmax=20e9,
         driven_config=DrivenConfig(fmin=1e9, fmax=20e9, num_points=3),
+        absorbing_order=1,
     )
     config = json.loads(config_path.read_text())
 
@@ -183,6 +208,10 @@ def test_generated_palace_config_uses_conductivity_boundary(
     assert len(boundaries) == 1
     assert boundaries[0]["Conductivity"] == pytest.approx(conductivity)
     assert boundaries[0]["Thickness"] == pytest.approx(thickness_um)
+    assert config["Boundaries"]["Absorbing"] == {
+        "Attributes": [3],
+        "Order": 1,
+    }
 
 
 def test_nist_section_edges_are_strictly_increasing() -> None:
@@ -223,5 +252,5 @@ def test_airbox_encloses_tallest_patterned_dielectric() -> None:
     )
     airbox = next(region for region in regions if region.name == "airbox")
 
-    assert airbox.zmin == pytest.approx(-500.0)
+    assert airbox.zmin == pytest.approx(-550.0)
     assert airbox.zmax == pytest.approx(756.67)
