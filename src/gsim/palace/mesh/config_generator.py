@@ -680,6 +680,27 @@ def generate_palace_config(
     if impedance_entries:
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
 
+    # Numeric wave ports: force every boundary that Palace would translate
+    # into a Robin term on the 2D port cross-section (absorbing walls,
+    # finite-conductivity conductors, impedance sheets) to act as PEC in
+    # the port eigenproblem only.  Without this the port pencil picks up a
+    # large imaginary part, which weakens Palace's real-valued
+    # preconditioner (orders of magnitude slower port solves) and can make
+    # the eigensolver select a spurious mode at low frequency.  The 3D
+    # model is unaffected: the box still absorbs and the metal keeps its
+    # finite conductivity.
+    if boundaries.get("WavePort"):
+        waveport_pec_attrs: set[int] = set()
+        absorbing_entry = boundaries.get("Absorbing")
+        if absorbing_entry:
+            waveport_pec_attrs.update(absorbing_entry.get("Attributes", []))
+        for cond_entry in boundaries.get("Conductivity", []):
+            waveport_pec_attrs.update(cond_entry.get("Attributes", []))
+        for imp_entry in boundaries.get("Impedance", []):
+            waveport_pec_attrs.update(imp_entry.get("Attributes", []))
+        if waveport_pec_attrs:
+            boundaries["WavePortPEC"] = {"Attributes": sorted(waveport_pec_attrs)}
+
     config["Boundaries"] = boundaries
 
     # Merge any extra hints into the config (strip internal keys first)
