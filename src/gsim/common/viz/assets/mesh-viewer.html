@@ -614,7 +614,13 @@
 
       function surfaceGroups(mesh) {
         const explicitKeys = new Set(
-          mesh.triangles.map((item) => faceKey(...item.nodes)),
+          mesh.triangles
+            .filter(
+              (item) =>
+                shouldInclude(mesh, item.group) &&
+                !isInternalGroup(mesh, item.group),
+            )
+            .map((item) => faceKey(...item.nodes)),
         );
         const faces = new Map();
         const tetFaces = [
@@ -624,6 +630,7 @@
           [1, 2, 3, 0],
         ];
         for (const tet of mesh.tetrahedra) {
+          if (!shouldInclude(mesh, tet.group)) continue;
           for (const indices of tetFaces) {
             const nodes = orientedTetFace(tet, indices, mesh.nodes);
             const key = faceKey(...nodes);
@@ -644,8 +651,10 @@
             }
           }
         }
-        for (const triangle of mesh.triangles)
-          addFace(groups, triangle.group, triangle.nodes);
+        for (const triangle of mesh.triangles) {
+          if (shouldInclude(mesh, triangle.group))
+            addFace(groups, triangle.group, triangle.nodes);
+        }
         return groups;
       }
 
@@ -705,6 +714,7 @@
       function slicedGroups(mesh, position) {
         const groups = new Map();
         for (const tet of mesh.tetrahedra) {
+          if (!shouldInclude(mesh, tet.group)) continue;
           const polygon = slicePolygon(tet, mesh.nodes, axisIndex, position);
           if (!polygon.length) continue;
           if (!groups.has(tet.group))
@@ -753,12 +763,46 @@
         return mesh.names.get(group) ?? `Group ${group}`;
       }
 
+      function isOuterBoundaryGroup(mesh, group) {
+        return (
+          group.startsWith("2_") && groupName(mesh, group).endsWith("__None")
+        );
+      }
+
+      function isInternalGroup(mesh, group) {
+        const name = groupName(mesh, group);
+        const lowerName = name.toLowerCase();
+        const isMaterialInterface =
+          group.startsWith("2_") &&
+          name.includes("__") &&
+          !isOuterBoundaryGroup(mesh, group);
+        const isMeshHelper =
+          lowerName.includes("gap_partition") ||
+          lowerName.includes("mesh_helper") ||
+          lowerName.includes("mesh_debug") ||
+          lowerName.startsWith("refinement") ||
+          lowerName.startsWith("debug");
+        return isMaterialInterface || isMeshHelper;
+      }
+
+      function shouldInclude(mesh, group) {
+        return options.includeInternalGroups || !isInternalGroup(mesh, group);
+      }
+
       function shouldShow(mesh, group) {
         const name = groupName(mesh, group);
         if (
           options.showGroups &&
           !options.showGroups.includes(name) &&
           !options.showGroups.includes(group)
+        )
+          return false;
+        if (!options.showGroups && isOuterBoundaryGroup(mesh, group))
+          return false;
+        if (
+          !options.showGroups &&
+          options.includeInternalGroups &&
+          isInternalGroup(mesh, group)
         )
           return false;
         return (

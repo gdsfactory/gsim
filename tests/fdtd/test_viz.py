@@ -60,6 +60,7 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert '"meshUnitUm":0.001' in viewer.html
     assert '"pmlCells":8' in viewer.html
     assert '"portGroupPrefixes":["port_"]' in viewer.html
+    assert '"includeInternalGroups":false' in viewer.html
     assert '"title":"GDSFactory FDTD"' in viewer.html
     assert "$MeshFormat\\n2.2" in viewer.html
     assert "__GSIM_" not in viewer.html
@@ -141,6 +142,10 @@ def test_simulation_view_methods_reuse_last_mesh(tmp_path: Path) -> None:
     assert '"footerTitle":"Cell estimate"' in custom_footer
     assert '"cellCountLabel":"Approximate cells"' in custom_footer
     assert '"zoomToCursor":false' in simulation.plot_3d(zoom_to_cursor=False).html
+    assert (
+        '"includeInternalGroups":true'
+        in simulation.plot_3d(include_internal_groups=True).html
+    )
     slice_html = simulation.plot_2d().html
     assert '"mode":"slice"' in slice_html
     assert '"positionUm":0.2' in slice_html

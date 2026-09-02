@@ -51,7 +51,11 @@ def test_plot_3d_uses_palace_units_and_footer(tmp_path: Path) -> None:
     assert '"footerTitle":"Element statistics"' in viewer.html
     assert '"cellCountLabel":"Palace cells"' in viewer.html
     assert '"portGroupPrefixes":["P"]' in viewer.html
+    assert '"includeInternalGroups":false' in viewer.html
     assert 'height="420"' in viewer._repr_html_()
+
+    internal_viewer = simulation.plot_3d(include_internal_groups=True)
+    assert '"includeInternalGroups":true' in internal_viewer.html
 
 
 def test_plot_3d_requires_generated_mesh(tmp_path: Path) -> None:

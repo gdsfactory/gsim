@@ -51,7 +51,19 @@ def test_common_viewer_embeds_solver_configuration(tmp_path: Path) -> None:
     assert '"cellCountLabel":"Custom cells"' in viewer.html
     assert '"footerTooltip":"Custom explanation"' in viewer.html
     assert '"portGroupPrefixes":["P"]' in viewer.html
+    assert '"includeInternalGroups":false' in viewer.html
+    assert "function isInternalGroup" in viewer.html
+    assert "function isOuterBoundaryGroup" in viewer.html
     assert "mesh.tetrahedra.length || mesh.triangles.length" in viewer.html
+
+
+def test_common_viewer_can_include_internal_groups(tmp_path: Path) -> None:
+    viewer = plot_mesh_interactive(
+        _write_mesh(tmp_path / "mesh.msh"),
+        include_internal_groups=True,
+    )
+
+    assert '"includeInternalGroups":true' in viewer.html
 
 
 def test_common_viewer_rejects_invalid_unit_scale(tmp_path: Path) -> None:
