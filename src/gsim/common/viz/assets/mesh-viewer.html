@@ -101,10 +101,25 @@
       button.group-button {
         background: var(--group-color);
         color: var(--group-text-color);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
       }
       button.group-button.off {
         background: #343a46;
         color: #9aa5b5;
+      }
+      .group-name {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .group-type {
+        flex: 0 0 auto;
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
       }
       #panel-toggle {
         width: 100%;
@@ -763,6 +778,10 @@
         return mesh.names.get(group) ?? `Group ${group}`;
       }
 
+      function groupType(group) {
+        return group.startsWith("3_") ? "volume" : "surface";
+      }
+
       function textColorFor(color) {
         const hex = color.getHex();
         const red = (hex >> 16) & 0xff;
@@ -1057,7 +1076,13 @@
         for (const [group, root] of groupRoots) {
           const button = document.createElement("button");
           button.className = "group-button";
-          button.textContent = groupName(mesh, group);
+          const name = document.createElement("span");
+          name.className = "group-name";
+          name.textContent = groupName(mesh, group);
+          const type = document.createElement("span");
+          type.className = "group-type";
+          type.textContent = groupType(group);
+          button.append(name, type);
           const color = colorFor(mesh, group);
           button.style.setProperty("--group-color", `#${color.getHexString()}`);
           button.style.setProperty("--group-text-color", textColorFor(color));

@@ -59,6 +59,8 @@ def test_common_viewer_embeds_solver_configuration(tmp_path: Path) -> None:
     assert '"includeInternalGroups":false' in viewer.html
     assert "function isInternalGroup" in viewer.html
     assert "function isOuterBoundaryGroup" in viewer.html
+    assert "function groupType" in viewer.html
+    assert 'type.className = "group-type"' in viewer.html
     assert "mesh.tetrahedra.length || mesh.triangles.length" in viewer.html
 
 
