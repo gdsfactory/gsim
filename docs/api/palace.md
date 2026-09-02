@@ -18,6 +18,7 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
@@ -46,6 +47,7 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
@@ -68,12 +70,29 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
         - validate_config
         - validate_mesh
         - run
+
+## Setup visualization
+
+PALACE meshes can be viewed with the shared, notebook-friendly Three.js
+viewer. The existing `plot_mesh()` method remains available for PyVista
+rendering.
+
+```python
+sim.mesh()
+sim.plot_3d()                    # solid interactive physical groups
+sim.plot_3d(show_mesh=True)      # add mesh edges
+```
+
+The footer reports the exact number of highest-dimensional finite elements in
+the Gmsh file. Its heading and count label can be customized with
+`footer_title` and `cell_count_label`.
 
 ## Mesh
 

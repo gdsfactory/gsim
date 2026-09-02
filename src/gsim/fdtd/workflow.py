@@ -322,6 +322,8 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
         """Render the current or a temporary mesh with the FDTD viewer."""
@@ -339,6 +341,8 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                 show_groups=show_groups,
                 hide_groups=hide_groups,
                 zoom_to_cursor=zoom_to_cursor,
+                footer_title=footer_title,
+                cell_count_label=cell_count_label,
                 cell_size_nm=self.solver.cell_size_nm,
                 pml_cells=self.domain.pml_cells,
                 height=height,
@@ -356,6 +360,8 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                     show_groups=show_groups,
                     hide_groups=hide_groups,
                     zoom_to_cursor=zoom_to_cursor,
+                    footer_title=footer_title,
+                    cell_count_label=cell_count_label,
                     cell_size_nm=self.solver.cell_size_nm,
                     pml_cells=self.domain.pml_cells,
                     height=height,
@@ -370,14 +376,22 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
+        """Show the 3D geometry, optionally with Gmsh surface edges.
+
+        ``footer_title`` and ``cell_count_label`` customize the estimated-grid
+        summary without changing its calculation.
+        """
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
             show_groups=show_groups,
             hide_groups=hide_groups,
             zoom_to_cursor=zoom_to_cursor,
+            footer_title=footer_title,
+            cell_count_label=cell_count_label,
             height=height,
         )
 
@@ -390,6 +404,8 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
         """Show a filled cross-section, optionally with intersected cell edges."""
@@ -401,6 +417,8 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             show_groups=show_groups,
             hide_groups=hide_groups,
             zoom_to_cursor=zoom_to_cursor,
+            footer_title=footer_title,
+            cell_count_label=cell_count_label,
             height=height,
         )
 

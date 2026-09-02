@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" href="data:," />
-    <title>GDSFactory FDTD mesh viewer</title>
+    <title>GDSFactory mesh viewer</title>
     <style>
       :root {
         color-scheme: dark;
@@ -235,7 +235,7 @@
           aria-label="Collapse controls"
           title="Collapse controls"
         >
-          <span class="panel-title">GDSFactory FDTD</span>
+          <span id="viewer-title" class="panel-title">GDSFactory Mesh</span>
           <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path
               d="m5 7.5 5 5 5-5"
@@ -381,7 +381,7 @@
 
       const meshText = __GSIM_MESH_DATA__;
       const options = __GSIM_VIEW_OPTIONS__;
-      const NM_TO_UM = 1e-3;
+      const meshUnitUm = options.meshUnitUm;
       const isSlice = options.mode === "slice" || options.mode === "mesh_slice";
       const showEdges =
         options.mode === "mesh" || options.mode === "mesh_slice";
@@ -408,9 +408,12 @@
       const physicalGroupColors = new Map();
       const panel = document.getElementById("panel");
       const panelToggle = document.getElementById("panel-toggle");
+      const viewerTitle = document.getElementById("viewer-title");
       const zoomPointer = document.getElementById("zoom-pointer");
       const zoomCenter = document.getElementById("zoom-center");
       const orientationGizmo = document.getElementById("orientation-gizmo");
+      document.title = `${options.title} mesh viewer`;
+      viewerTitle.textContent = options.title;
       orientationGizmo.hidden = isSlice;
       zoomPointer.checked = options.zoomToCursor !== false;
       zoomCenter.checked = !zoomPointer.checked;
@@ -507,7 +510,7 @@
             const parts = lines[index++].trim().split(/\s+/).map(Number);
             nodes.set(
               parts[0],
-              parts.slice(1, 4).map((value) => value * NM_TO_UM),
+              parts.slice(1, 4).map((value) => value * meshUnitUm),
             );
           }
         } else {
@@ -526,7 +529,7 @@
                 .map(Number);
               nodes.set(
                 tags[i],
-                point.map((value) => value * NM_TO_UM),
+                point.map((value) => value * meshUnitUm),
               );
             }
           }
@@ -534,6 +537,8 @@
 
         const triangles = [];
         const tetrahedra = [];
+        const triangleElementTypes = new Set([2, 9, 20, 21, 22, 23, 24, 25]);
+        const tetrahedronElementTypes = new Set([4, 11, 29, 30, 31]);
         index = sectionStart(lines, "$Elements");
         if (major === 2) {
           const count = Number(lines[index++]);
@@ -543,12 +548,12 @@
             const tagCount = parts[2];
             const nodeStart = 3 + tagCount;
             const physicalTag = tagCount ? parts[3] : 0;
-            if (type === 2)
+            if (triangleElementTypes.has(type))
               triangles.push({
                 group: `2_${physicalTag}`,
                 nodes: parts.slice(nodeStart, nodeStart + 3),
               });
-            if (type === 4)
+            if (tetrahedronElementTypes.has(type))
               tetrahedra.push({
                 group: `3_${physicalTag}`,
                 nodes: parts.slice(nodeStart, nodeStart + 4),
@@ -563,12 +568,12 @@
               entityGroups.get(`${dimension}_${entityTag}`) ?? 0;
             for (let i = 0; i < count; i++) {
               const parts = lines[index++].trim().split(/\s+/).map(Number);
-              if (type === 2)
+              if (triangleElementTypes.has(type))
                 triangles.push({
                   group: `2_${physicalTag}`,
                   nodes: parts.slice(1, 4),
                 });
-              if (type === 4)
+              if (tetrahedronElementTypes.has(type))
                 tetrahedra.push({
                   group: `3_${physicalTag}`,
                   nodes: parts.slice(1, 5),
@@ -723,7 +728,10 @@
       }
 
       function isPortGroup(mesh, group) {
-        return groupName(mesh, group).toLowerCase().startsWith("port_");
+        const name = groupName(mesh, group);
+        return options.portGroupPrefixes.some((prefix) =>
+          name.startsWith(prefix),
+        );
       }
 
       function colorFor(mesh, group) {
@@ -926,14 +934,16 @@
               "Yee grid",
               `\u2248 ${yeeGrid.map((value) => value.toLocaleString()).join(" × ")}`,
             ],
-            ["Yee cells", `\u2248 ${totalCells.toLocaleString()}`],
+            [options.cellCountLabel, `\u2248 ${totalCells.toLocaleString()}`],
           );
+        } else {
+          const elementCount = mesh.tetrahedra.length || mesh.triangles.length;
+          stats.push([options.cellCountLabel, elementCount.toLocaleString()]);
         }
-        const title = document.createElement("div");
-        title.className = "stats-title muted";
-        title.textContent = "Simulation estimate";
-        title.title =
-          "Yee-grid dimensions include PML cells on both sides of each axis.";
+        const footerTitle = document.createElement("div");
+        footerTitle.className = "stats-title muted";
+        footerTitle.textContent = options.footerTitle;
+        footerTitle.title = options.footerTooltip;
         const list = document.createElement("dl");
         list.className = "stats-grid";
         for (const [label, value] of stats) {
@@ -943,7 +953,7 @@
           description.textContent = value;
           list.append(term, description);
         }
-        statsPanel.replaceChildren(title, list);
+        statsPanel.replaceChildren(footerTitle, list);
         statsPanel.hidden = false;
       }
 

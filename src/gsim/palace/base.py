@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
     from gsim.common import Geometry, LayerStack
+    from gsim.common.viz.gmsh import MeshViewer
     from gsim.palace.results import PalaceTextResults, SParams
 
 logger = logging.getLogger(__name__)
@@ -805,6 +807,16 @@ class PalaceSimMixin:
     # Visualization
     # -------------------------------------------------------------------------
 
+    def _require_mesh_path(self) -> Path:
+        """Return the generated Palace mesh path or raise a setup error."""
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        mesh_path = self._output_dir / "palace.msh"
+        if not mesh_path.exists():
+            raise ValueError(f"Mesh file not found: {mesh_path}. Call mesh() first.")
+        return mesh_path
+
     def plot_mesh(
         self,
         output: str | Path | None = None,
@@ -841,16 +853,11 @@ class PalaceSimMixin:
         """
         from gsim.viz import plot_mesh as _plot_mesh
 
-        if self._output_dir is None:
-            raise ValueError("Output directory not set. Call set_output_dir() first.")
-
-        mesh_path = self._output_dir / "palace.msh"
-        if not mesh_path.exists():
-            raise ValueError(f"Mesh file not found: {mesh_path}. Call mesh() first.")
+        mesh_path = self._require_mesh_path()
 
         # Default output path for the static rendering path.
         if output is None and interactive is not True:
-            output = self._output_dir / "mesh.png"
+            output = mesh_path.parent / "mesh.png"
 
         _plot_mesh(
             msh_path=mesh_path,
@@ -859,6 +866,51 @@ class PalaceSimMixin:
             interactive=interactive,
             style=style,
             transparent_groups=transparent_groups,
+        )
+
+    def plot_3d(
+        self,
+        *,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        footer_title: str = "Mesh statistics",
+        cell_count_label: str = "Finite elements",
+        height: int = 600,
+    ) -> MeshViewer:
+        """Show the Palace mesh in the shared interactive Three.js viewer.
+
+        Requires :meth:`mesh` to be called first. The existing
+        :meth:`plot_mesh` method remains available for PyVista rendering.
+
+        Args:
+            show_mesh: Draw mesh edges over the physical-group surfaces.
+            show_groups: Physical groups to show initially, or all when omitted.
+            hide_groups: Physical groups to hide initially.
+            zoom_to_cursor: Zoom toward the pointer instead of the view center.
+            footer_title: Heading shown above the mesh statistics.
+            cell_count_label: Solver-specific label for the finite-element count.
+            height: Notebook iframe height in pixels.
+        """
+        from gsim.common.viz.gmsh import plot_mesh_interactive
+
+        return plot_mesh_interactive(
+            self._require_mesh_path(),
+            mode="mesh" if show_mesh else "surface",
+            show_groups=show_groups,
+            hide_groups=hide_groups,
+            zoom_to_cursor=zoom_to_cursor,
+            mesh_unit_um=1.0,
+            title="GDSFactory Palace",
+            footer_title=footer_title,
+            cell_count_label=cell_count_label,
+            footer_tooltip=(
+                "Number of highest-dimensional finite elements written to the "
+                "Palace mesh."
+            ),
+            port_group_prefixes=("P",),
+            height=height,
         )
 
     # -------------------------------------------------------------------------

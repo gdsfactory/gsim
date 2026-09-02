@@ -89,7 +89,8 @@ toward the view center instead. The same choice is available in the viewer's
 
 The viewer also summarizes the physical domain, estimated Yee-grid dimensions
 and total cell count (including PML). These values are estimates; the solver
-backend is authoritative when it constructs the final grid.
+backend is authoritative when it constructs the final grid. Customize the
+footer heading and count label with `footer_title` and `cell_count_label`.
 
 ## Sources
 

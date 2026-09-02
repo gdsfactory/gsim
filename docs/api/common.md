@@ -40,6 +40,10 @@
 
 ## Visualization
 
+::: gsim.common.viz.plot_mesh_interactive
+    options:
+      show_source: false
+
 ::: gsim.common.viz.plot_prisms_3d
     options:
       show_source: false

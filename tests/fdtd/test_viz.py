@@ -44,6 +44,8 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
         show_groups=["core"],
         cell_size_nm=50,
         pml_cells=8,
+        footer_title="Grid estimate",
+        cell_count_label="Estimated cells",
         height=420,
     )
     compact_html = "".join(viewer.html.split())
@@ -53,7 +55,12 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert '"positionUm":0.25' in viewer.html
     assert '"zoomToCursor":true' in viewer.html
     assert '"cellSizeNm":50' in viewer.html
+    assert '"cellCountLabel":"Estimated cells"' in viewer.html
+    assert '"footerTitle":"Grid estimate"' in viewer.html
+    assert '"meshUnitUm":0.001' in viewer.html
     assert '"pmlCells":8' in viewer.html
+    assert '"portGroupPrefixes":["port_"]' in viewer.html
+    assert '"title":"GDSFactory FDTD"' in viewer.html
     assert "$MeshFormat\\n2.2" in viewer.html
     assert "__GSIM_" not in viewer.html
     assert 'id="mode"' not in viewer.html
@@ -63,7 +70,7 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert 'id="gizmo-y-target"' in viewer.html
     assert 'id="gizmo-z-target"' in viewer.html
     assert 'id="panel-toggle"' in viewer.html
-    assert '<span class="panel-title">GDSFactory FDTD</span>' in viewer.html
+    assert 'id="viewer-title"' in viewer.html
     assert 'aria-controls="panel-body"' in viewer.html
     assert 'role="radiogroup"' in viewer.html
     assert '<span id="zoom-focus-label" class="muted">Zoom toward</span>' in viewer.html
@@ -94,12 +101,13 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     )
     assert "controls.target.lerpVectors(" in viewer.html
     assert 'button.className = "group-button"' in viewer.html
-    assert 'startsWith("port_")' in viewer.html
+    assert "options.portGroupPrefixes.some" in viewer.html
     assert "new THREE.Color(0xf4f7fb)" in viewer.html
     assert "constphysicalGroupPalette=[0x58c7a3,0xff7a7a];" in compact_html
     assert "constlargestGroupColor=0xb8b2b0;" in compact_html
     assert "if(group===currentLargestGroup)" in compact_html
-    assert 'title.textContent = "Simulation estimate"' in viewer.html
+    assert "footerTitle.textContent = options.footerTitle" in viewer.html
+    assert "options.cellCountLabel" in viewer.html
     assert "\\u2248 ${totalCells.toLocaleString()}" in viewer.html
     assert '"Grid / PML",' not in viewer.html
     assert '"Transfer mesh",' not in viewer.html
@@ -126,6 +134,12 @@ def test_simulation_view_methods_reuse_last_mesh(tmp_path: Path) -> None:
     assert '"mode":"mesh"' in simulation.plot_3d(show_mesh=True).html
     assert '"cellSizeNm":60.0' in simulation.plot_3d().html
     assert '"pmlCells":32' in simulation.plot_3d().html
+    custom_footer = simulation.plot_3d(
+        footer_title="Cell estimate",
+        cell_count_label="Approximate cells",
+    ).html
+    assert '"footerTitle":"Cell estimate"' in custom_footer
+    assert '"cellCountLabel":"Approximate cells"' in custom_footer
     assert '"zoomToCursor":false' in simulation.plot_3d(zoom_to_cursor=False).html
     slice_html = simulation.plot_2d().html
     assert '"mode":"slice"' in slice_html
