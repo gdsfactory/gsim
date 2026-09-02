@@ -100,7 +100,7 @@
       }
       button.group-button {
         background: var(--group-color);
-        color: #101216;
+        color: var(--group-text-color);
       }
       button.group-button.off {
         background: #343a46;
@@ -403,8 +403,7 @@
         -1.5,
         1.8,
       ).normalize();
-      const physicalGroupPalette = [0x58c7a3, 0xff7a7a];
-      const largestGroupColor = 0xb8b2b0;
+      const physicalGroupPalette = options.colorPalette;
       const physicalGroupColors = new Map();
       const panel = document.getElementById("panel");
       const panelToggle = document.getElementById("panel-toggle");
@@ -745,9 +744,10 @@
       }
 
       function colorFor(mesh, group) {
-        if (isPortGroup(mesh, group)) return new THREE.Color(0xf4f7fb);
-        if (group === currentLargestGroup)
-          return new THREE.Color(largestGroupColor);
+        if (isPortGroup(mesh, group) && options.portColor !== null)
+          return new THREE.Color(options.portColor);
+        if (group === currentLargestGroup && options.largestGroupColor !== null)
+          return new THREE.Color(options.largestGroupColor);
         if (!physicalGroupColors.has(group)) {
           physicalGroupColors.set(
             group,
@@ -761,6 +761,15 @@
 
       function groupName(mesh, group) {
         return mesh.names.get(group) ?? `Group ${group}`;
+      }
+
+      function textColorFor(color) {
+        const hex = color.getHex();
+        const red = (hex >> 16) & 0xff;
+        const green = (hex >> 8) & 0xff;
+        const blue = hex & 0xff;
+        const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+        return luminance > 0.52 ? "#101216" : "#f4f7fb";
       }
 
       function isOuterBoundaryGroup(mesh, group) {
@@ -905,7 +914,10 @@
           rawGeometry.dispose();
         }
         const color = colorFor(mesh, group);
-        const opacity = isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1;
+        const opacity =
+          options.groupOpacity ??
+          (isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1);
+        const transparent = opacity < 1;
         const material = new THREE.MeshStandardMaterial({
           color,
           roughness: 0.72,
@@ -914,9 +926,9 @@
             isSlice || group.startsWith("2_")
               ? THREE.DoubleSide
               : THREE.FrontSide,
-          transparent: isLargestMaterial,
+          transparent,
           opacity,
-          depthWrite: !isLargestMaterial,
+          depthWrite: !transparent,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
@@ -1046,10 +1058,9 @@
           const button = document.createElement("button");
           button.className = "group-button";
           button.textContent = groupName(mesh, group);
-          button.style.setProperty(
-            "--group-color",
-            `#${colorFor(mesh, group).getHexString()}`,
-          );
+          const color = colorFor(mesh, group);
+          button.style.setProperty("--group-color", `#${color.getHexString()}`);
+          button.style.setProperty("--group-text-color", textColorFor(color));
           button.classList.toggle("off", !root.visible);
           button.addEventListener("click", () => {
             root.visible = !root.visible;

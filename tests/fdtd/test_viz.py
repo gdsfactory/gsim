@@ -60,6 +60,10 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert '"meshUnitUm":0.001' in viewer.html
     assert '"pmlCells":8' in viewer.html
     assert '"portGroupPrefixes":["port_"]' in viewer.html
+    assert '"colorPalette":["#58c7a3","#ff7a7a"]' in viewer.html
+    assert '"groupOpacity":null' in viewer.html
+    assert '"portColor":"#f4f7fb"' in viewer.html
+    assert '"largestGroupColor":"#b8b2b0"' in viewer.html
     assert '"includeInternalGroups":false' in viewer.html
     assert '"title":"GDSFactory FDTD"' in viewer.html
     assert "$MeshFormat\\n2.2" in viewer.html
@@ -103,10 +107,9 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert "controls.target.lerpVectors(" in viewer.html
     assert 'button.className = "group-button"' in viewer.html
     assert "options.portGroupPrefixes.some" in viewer.html
-    assert "new THREE.Color(0xf4f7fb)" in viewer.html
-    assert "constphysicalGroupPalette=[0x58c7a3,0xff7a7a];" in compact_html
-    assert "constlargestGroupColor=0xb8b2b0;" in compact_html
-    assert "if(group===currentLargestGroup)" in compact_html
+    assert "new THREE.Color(options.portColor)" in viewer.html
+    assert "constphysicalGroupPalette=options.colorPalette;" in compact_html
+    assert "group===currentLargestGroup" in compact_html
     assert "footerTitle.textContent = options.footerTitle" in viewer.html
     assert "options.cellCountLabel" in viewer.html
     assert "\\u2248 ${totalCells.toLocaleString()}" in viewer.html
@@ -116,9 +119,10 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert "function tetrahedronVolume" in viewer.html
     assert "function largestMaterialGroup" in viewer.html
     assert "function orderedGroupEntries" in viewer.html
-    assert "constopacity=isLargestMaterial?(isSlice?0.55:0.35):1;" in compact_html
-    assert "transparent:isLargestMaterial" in compact_html
-    assert "depthWrite:!isLargestMaterial" in compact_html
+    assert "options.groupOpacity??" in compact_html
+    assert "isLargestMaterial?(isSlice?0.55:0.35):1" in compact_html
+    assert "consttransparent=opacity<1;" in compact_html
+    assert "depthWrite:!transparent" in compact_html
     assert 'height="420"' in viewer._repr_html_()
     assert viewer.save(tmp_path / "viewer.html").is_file()
 
@@ -146,6 +150,11 @@ def test_simulation_view_methods_reuse_last_mesh(tmp_path: Path) -> None:
         '"includeInternalGroups":true'
         in simulation.plot_3d(include_internal_groups=True).html
     )
+    styled_html = simulation.plot_3d(
+        color_palette=("#112233", "#abcdef"), group_opacity=0.75
+    ).html
+    assert '"colorPalette":["#112233","#abcdef"]' in styled_html
+    assert '"groupOpacity":0.75' in styled_html
     slice_html = simulation.plot_2d().html
     assert '"mode":"slice"' in slice_html
     assert '"positionUm":0.2' in slice_html

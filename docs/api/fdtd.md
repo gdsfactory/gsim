@@ -75,6 +75,7 @@ listed first, followed by the largest volumetric group and then the ports.
 sim.plot_3d()                                   # solid interactive geometry
 sim.plot_3d(show_mesh=True)                     # add Gmsh surface edges
 sim.plot_3d(zoom_to_cursor=False)               # zoom toward the view center
+sim.plot_3d(color_palette=("#ff9d9d", "#0ff"), group_opacity=0.7)
 sim.plot_2d(axis="z", position_um=0.11)         # filled cross-section
 sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # add cell edges
 ```
@@ -86,6 +87,10 @@ slider that moves the plane through the mesh. Both methods return a standalone
 Zooming moves toward the pointer by default; set `zoom_to_cursor=False` to zoom
 toward the view center instead. The same choice is available in the viewer's
 **Zoom toward** controls.
+
+FDTD retains its original two-color palette and opacity behavior by default.
+Pass an ordered `color_palette` and a uniform `group_opacity` from 0 to 1 to
+customize physical-group rendering.
 
 The viewer also summarizes the physical domain, estimated Yee-grid dimensions
 and total cell count (including PML). These values are estimates; the solver

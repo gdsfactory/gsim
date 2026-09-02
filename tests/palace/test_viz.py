@@ -52,10 +52,20 @@ def test_plot_3d_uses_palace_units_and_footer(tmp_path: Path) -> None:
     assert '"cellCountLabel":"Palace cells"' in viewer.html
     assert '"portGroupPrefixes":["P"]' in viewer.html
     assert '"includeInternalGroups":false' in viewer.html
+    assert '"colorPalette":["#ff9d9d","#c0c0c0","#0ff","#00f"' in viewer.html
+    assert '"groupOpacity":0.65' in viewer.html
+    assert '"portColor":null' in viewer.html
+    assert '"largestGroupColor":null' in viewer.html
     assert 'height="420"' in viewer._repr_html_()
 
     internal_viewer = simulation.plot_3d(include_internal_groups=True)
     assert '"includeInternalGroups":true' in internal_viewer.html
+
+    custom_viewer = simulation.plot_3d(
+        color_palette=("#123456", "gold"), group_opacity=0.3
+    )
+    assert '"colorPalette":["#123456","gold"]' in custom_viewer.html
+    assert '"groupOpacity":0.3' in custom_viewer.html
 
 
 def test_plot_3d_requires_generated_mesh(tmp_path: Path) -> None:
