@@ -763,15 +763,16 @@
           return new THREE.Color(options.portColor);
         if (group === currentLargestGroup && options.largestGroupColor !== null)
           return new THREE.Color(options.largestGroupColor);
-        if (!physicalGroupColors.has(group)) {
+        const displayGroup = displayGroupKey(mesh, group);
+        if (!physicalGroupColors.has(displayGroup)) {
           physicalGroupColors.set(
-            group,
+            displayGroup,
             physicalGroupPalette[
               physicalGroupColors.size % physicalGroupPalette.length
             ],
           );
         }
-        return new THREE.Color(physicalGroupColors.get(group));
+        return new THREE.Color(physicalGroupColors.get(displayGroup));
       }
 
       function groupName(mesh, group) {
@@ -780,6 +781,15 @@
 
       function groupType(group) {
         return group.startsWith("3_") ? "volume" : "surface";
+      }
+
+      function displayGroupName(mesh, group) {
+        const name = groupName(mesh, group);
+        return group.startsWith("2_") ? name.replace(/_(xy|z)$/, "") : name;
+      }
+
+      function displayGroupKey(mesh, group) {
+        return `${groupType(group)}:${displayGroupName(mesh, group)}`;
       }
 
       function textColorFor(color) {
@@ -819,9 +829,11 @@
 
       function shouldShow(mesh, group) {
         const name = groupName(mesh, group);
+        const displayName = displayGroupName(mesh, group);
         if (
           options.showGroups &&
           !options.showGroups.includes(name) &&
+          !options.showGroups.includes(displayName) &&
           !options.showGroups.includes(group)
         )
           return false;
@@ -835,6 +847,7 @@
           return false;
         return (
           !options.hideGroups.includes(name) &&
+          !options.hideGroups.includes(displayName) &&
           !options.hideGroups.includes(group)
         );
       }
@@ -1073,12 +1086,23 @@
       function buildGroupControls(mesh) {
         const container = document.getElementById("groups");
         container.innerHTML = "";
+        const controls = new Map();
         for (const [group, root] of groupRoots) {
+          const key = displayGroupKey(mesh, group);
+          if (!controls.has(key))
+            controls.set(key, {
+              group,
+              name: displayGroupName(mesh, group),
+              roots: [],
+            });
+          controls.get(key).roots.push(root);
+        }
+        for (const { group, name: displayName, roots } of controls.values()) {
           const button = document.createElement("button");
           button.className = "group-button";
           const name = document.createElement("span");
           name.className = "group-name";
-          name.textContent = groupName(mesh, group);
+          name.textContent = displayName;
           const type = document.createElement("span");
           type.className = "group-type";
           type.textContent = groupType(group);
@@ -1086,10 +1110,11 @@
           const color = colorFor(mesh, group);
           button.style.setProperty("--group-color", `#${color.getHexString()}`);
           button.style.setProperty("--group-text-color", textColorFor(color));
-          button.classList.toggle("off", !root.visible);
+          button.classList.toggle("off", !roots.some((root) => root.visible));
           button.addEventListener("click", () => {
-            root.visible = !root.visible;
-            button.classList.toggle("off", !root.visible);
+            const visible = !roots.some((root) => root.visible);
+            roots.forEach((root) => (root.visible = visible));
+            button.classList.toggle("off", !visible);
           });
           container.appendChild(button);
         }
