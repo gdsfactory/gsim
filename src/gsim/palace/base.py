@@ -919,7 +919,7 @@ class PalaceSimMixin:
             include_internal_groups=include_internal_groups,
             color_palette=resolved_color_palette,
             group_opacity=group_opacity,
-            port_color=None,
+            port_color="#f4f7fb",
             largest_group_color=None,
             zoom_to_cursor=zoom_to_cursor,
             mesh_unit_um=1.0,

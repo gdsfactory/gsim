@@ -54,7 +54,7 @@ def test_plot_3d_uses_palace_units_and_footer(tmp_path: Path) -> None:
     assert '"includeInternalGroups":false' in viewer.html
     assert '"colorPalette":["#ff9d9d","#c0c0c0","#0ff","#00f"' in viewer.html
     assert '"groupOpacity":0.65' in viewer.html
-    assert '"portColor":null' in viewer.html
+    assert '"portColor":"#f4f7fb"' in viewer.html
     assert '"largestGroupColor":null' in viewer.html
     assert 'height="420"' in viewer._repr_html_()
 
