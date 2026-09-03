@@ -15,11 +15,14 @@ MaterialSource = Literal["project", "gsim"]
 
 GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
     "Si": SI_SALZBERG.model_copy(update={"name": "Si"}),
+    "si": SI_SALZBERG.model_copy(update={"name": "si"}),
     "Si-Salzberg": SI_SALZBERG,
     "Si-Li-293K": SI_LI_293K,
     "SiN": SIN_LUKE.model_copy(update={"name": "SiN"}),
+    "sin": SIN_LUKE.model_copy(update={"name": "sin"}),
     "SiN-Luke": SIN_LUKE,
     "SiO2": SIO2_MALITSON.model_copy(update={"name": "SiO2"}),
+    "sio2": SIO2_MALITSON.model_copy(update={"name": "sio2"}),
     "SiO2-Malitson": SIO2_MALITSON,
 }
 

@@ -12,6 +12,16 @@ from pydantic import ValidationError
 from gsim import fdtd, gcloud
 
 
+def test_gpdk_material_resolves_through_builtin_material_card() -> None:
+    gf.gpdk.PDK.activate()
+    simulation = fdtd.Simulation(pdk=gf.gpdk.PDK)
+
+    resolved = simulation.geometry(gf.gpdk.PDK.get_component("mmi1x2"))
+
+    assert resolved.materials["si"].card.name == "si"
+    assert resolved.materials["si"].card.optical is not None
+
+
 def test_material_override_participates_in_gpdk_resolution() -> None:
     gf.gpdk.PDK.activate()
     simulation = fdtd.Simulation(pdk=gf.gpdk.PDK)

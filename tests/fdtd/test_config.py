@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 from pydantic import ValidationError
 
@@ -16,7 +14,6 @@ from gsim.fdtd.config import (
     build_fdtd_config,
 )
 from gsim.fdtd.models import (
-    FDTDConfigError,
     MeshGroup,
     MeshManifest,
     PortMeshGroup,
@@ -92,26 +89,27 @@ def test_config_uses_manifest_tags_and_rejects_extra_fields() -> None:
         FDTDConfig.model_validate(document)
 
 
-def test_config_rejects_lossy_scalar_materials() -> None:
+def test_config_serializes_canonical_cards_not_mutated_snapshots() -> None:
     silicon = resolve_material_snapshot("Si", 1.55, {})
     silica = resolve_material_snapshot("SiO2", 1.55, {})
-    lossy_silicon = replace(silicon, extinction_coefficient=0.01)
+    config = build_fdtd_config(
+        _manifest(),
+        {"Si": silicon, "SiO2": silica},
+        background_material="SiO2",
+        center_wavelength_nm=1550,
+        wavelength_halfspan_nm=50,
+        num_wavelengths=3,
+        default_port="o1",
+        nanometers_per_cell=31.25,
+        pml_cells=16,
+        max_timesteps=None,
+        energy_decay_fraction=1e-6,
+        max_wall_seconds=3600,
+    )
 
-    with pytest.raises(FDTDConfigError, match="lossless real"):
-        build_fdtd_config(
-            _manifest(),
-            {"Si": lossy_silicon, "SiO2": silica},
-            background_material="SiO2",
-            center_wavelength_nm=1550,
-            wavelength_halfspan_nm=50,
-            num_wavelengths=3,
-            default_port="o1",
-            nanometers_per_cell=31.25,
-            pml_cells=16,
-            max_timesteps=None,
-            energy_decay_fraction=1e-6,
-            max_wall_seconds=3600,
-        )
+    assert config.materials["Si"].dispersion is not None
+    assert config.materials["Si"].dispersion.sellmeier is not None
+    assert config.materials["Si"].refractive_index is None
 
 
 def test_config_supports_gaussian_beam_and_fiber_monitor() -> None:
