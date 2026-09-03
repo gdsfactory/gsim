@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" href="data:," />
-    <title>GDSFactory FDTD mesh viewer</title>
+    <title>GDSFactory mesh viewer</title>
     <style>
       :root {
         color-scheme: dark;
@@ -100,11 +100,26 @@
       }
       button.group-button {
         background: var(--group-color);
-        color: #101216;
+        color: var(--group-text-color);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
       }
       button.group-button.off {
         background: #343a46;
         color: #9aa5b5;
+      }
+      .group-name {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .group-type {
+        flex: 0 0 auto;
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
       }
       #panel-toggle {
         width: 100%;
@@ -235,7 +250,7 @@
           aria-label="Collapse controls"
           title="Collapse controls"
         >
-          <span class="panel-title">GDSFactory FDTD</span>
+          <span id="viewer-title" class="panel-title">GDSFactory Mesh</span>
           <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path
               d="m5 7.5 5 5 5-5"
@@ -381,7 +396,7 @@
 
       const meshText = __GSIM_MESH_DATA__;
       const options = __GSIM_VIEW_OPTIONS__;
-      const NM_TO_UM = 1e-3;
+      const meshUnitUm = options.meshUnitUm;
       const isSlice = options.mode === "slice" || options.mode === "mesh_slice";
       const showEdges =
         options.mode === "mesh" || options.mode === "mesh_slice";
@@ -403,14 +418,16 @@
         -1.5,
         1.8,
       ).normalize();
-      const physicalGroupPalette = [0x58c7a3, 0xff7a7a];
-      const largestGroupColor = 0xb8b2b0;
+      const physicalGroupPalette = options.colorPalette;
       const physicalGroupColors = new Map();
       const panel = document.getElementById("panel");
       const panelToggle = document.getElementById("panel-toggle");
+      const viewerTitle = document.getElementById("viewer-title");
       const zoomPointer = document.getElementById("zoom-pointer");
       const zoomCenter = document.getElementById("zoom-center");
       const orientationGizmo = document.getElementById("orientation-gizmo");
+      document.title = `${options.title} mesh viewer`;
+      viewerTitle.textContent = options.title;
       orientationGizmo.hidden = isSlice;
       zoomPointer.checked = options.zoomToCursor !== false;
       zoomCenter.checked = !zoomPointer.checked;
@@ -507,7 +524,7 @@
             const parts = lines[index++].trim().split(/\s+/).map(Number);
             nodes.set(
               parts[0],
-              parts.slice(1, 4).map((value) => value * NM_TO_UM),
+              parts.slice(1, 4).map((value) => value * meshUnitUm),
             );
           }
         } else {
@@ -526,7 +543,7 @@
                 .map(Number);
               nodes.set(
                 tags[i],
-                point.map((value) => value * NM_TO_UM),
+                point.map((value) => value * meshUnitUm),
               );
             }
           }
@@ -534,6 +551,8 @@
 
         const triangles = [];
         const tetrahedra = [];
+        const triangleElementTypes = new Set([2, 9, 20, 21, 22, 23, 24, 25]);
+        const tetrahedronElementTypes = new Set([4, 11, 29, 30, 31]);
         index = sectionStart(lines, "$Elements");
         if (major === 2) {
           const count = Number(lines[index++]);
@@ -543,12 +562,12 @@
             const tagCount = parts[2];
             const nodeStart = 3 + tagCount;
             const physicalTag = tagCount ? parts[3] : 0;
-            if (type === 2)
+            if (triangleElementTypes.has(type))
               triangles.push({
                 group: `2_${physicalTag}`,
                 nodes: parts.slice(nodeStart, nodeStart + 3),
               });
-            if (type === 4)
+            if (tetrahedronElementTypes.has(type))
               tetrahedra.push({
                 group: `3_${physicalTag}`,
                 nodes: parts.slice(nodeStart, nodeStart + 4),
@@ -563,12 +582,12 @@
               entityGroups.get(`${dimension}_${entityTag}`) ?? 0;
             for (let i = 0; i < count; i++) {
               const parts = lines[index++].trim().split(/\s+/).map(Number);
-              if (type === 2)
+              if (triangleElementTypes.has(type))
                 triangles.push({
                   group: `2_${physicalTag}`,
                   nodes: parts.slice(1, 4),
                 });
-              if (type === 4)
+              if (tetrahedronElementTypes.has(type))
                 tetrahedra.push({
                   group: `3_${physicalTag}`,
                   nodes: parts.slice(1, 5),
@@ -609,7 +628,13 @@
 
       function surfaceGroups(mesh) {
         const explicitKeys = new Set(
-          mesh.triangles.map((item) => faceKey(...item.nodes)),
+          mesh.triangles
+            .filter(
+              (item) =>
+                shouldInclude(mesh, item.group) &&
+                !isInternalGroup(mesh, item.group),
+            )
+            .map((item) => faceKey(...item.nodes)),
         );
         const faces = new Map();
         const tetFaces = [
@@ -619,6 +644,7 @@
           [1, 2, 3, 0],
         ];
         for (const tet of mesh.tetrahedra) {
+          if (!shouldInclude(mesh, tet.group)) continue;
           for (const indices of tetFaces) {
             const nodes = orientedTetFace(tet, indices, mesh.nodes);
             const key = faceKey(...nodes);
@@ -639,8 +665,10 @@
             }
           }
         }
-        for (const triangle of mesh.triangles)
-          addFace(groups, triangle.group, triangle.nodes);
+        for (const triangle of mesh.triangles) {
+          if (shouldInclude(mesh, triangle.group))
+            addFace(groups, triangle.group, triangle.nodes);
+        }
         return groups;
       }
 
@@ -700,6 +728,7 @@
       function slicedGroups(mesh, position) {
         const groups = new Map();
         for (const tet of mesh.tetrahedra) {
+          if (!shouldInclude(mesh, tet.group)) continue;
           const polygon = slicePolygon(tet, mesh.nodes, axisIndex, position);
           if (!polygon.length) continue;
           if (!groups.has(tet.group))
@@ -723,38 +752,102 @@
       }
 
       function isPortGroup(mesh, group) {
-        return groupName(mesh, group).toLowerCase().startsWith("port_");
+        const name = groupName(mesh, group);
+        return options.portGroupPrefixes.some((prefix) =>
+          name.startsWith(prefix),
+        );
       }
 
       function colorFor(mesh, group) {
-        if (isPortGroup(mesh, group)) return new THREE.Color(0xf4f7fb);
-        if (group === currentLargestGroup)
-          return new THREE.Color(largestGroupColor);
-        if (!physicalGroupColors.has(group)) {
+        if (isPortGroup(mesh, group) && options.portColor !== null)
+          return new THREE.Color(options.portColor);
+        if (group === currentLargestGroup && options.largestGroupColor !== null)
+          return new THREE.Color(options.largestGroupColor);
+        const displayGroup = displayGroupKey(mesh, group);
+        if (!physicalGroupColors.has(displayGroup)) {
           physicalGroupColors.set(
-            group,
+            displayGroup,
             physicalGroupPalette[
               physicalGroupColors.size % physicalGroupPalette.length
             ],
           );
         }
-        return new THREE.Color(physicalGroupColors.get(group));
+        return new THREE.Color(physicalGroupColors.get(displayGroup));
       }
 
       function groupName(mesh, group) {
         return mesh.names.get(group) ?? `Group ${group}`;
       }
 
+      function groupType(group) {
+        return group.startsWith("3_") ? "volume" : "surface";
+      }
+
+      function displayGroupName(mesh, group) {
+        const name = groupName(mesh, group);
+        return group.startsWith("2_") ? name.replace(/_(xy|z)$/, "") : name;
+      }
+
+      function displayGroupKey(mesh, group) {
+        return `${groupType(group)}:${displayGroupName(mesh, group)}`;
+      }
+
+      function textColorFor(color) {
+        const hex = color.getHex();
+        const red = (hex >> 16) & 0xff;
+        const green = (hex >> 8) & 0xff;
+        const blue = hex & 0xff;
+        const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+        return luminance > 0.52 ? "#101216" : "#f4f7fb";
+      }
+
+      function isOuterBoundaryGroup(mesh, group) {
+        return (
+          group.startsWith("2_") && groupName(mesh, group).endsWith("__None")
+        );
+      }
+
+      function isInternalGroup(mesh, group) {
+        const name = groupName(mesh, group);
+        const lowerName = name.toLowerCase();
+        const isMaterialInterface =
+          group.startsWith("2_") &&
+          name.includes("__") &&
+          !isOuterBoundaryGroup(mesh, group);
+        const isMeshHelper =
+          lowerName.includes("gap_partition") ||
+          lowerName.includes("mesh_helper") ||
+          lowerName.includes("mesh_debug") ||
+          lowerName.startsWith("refinement") ||
+          lowerName.startsWith("debug");
+        return isMaterialInterface || isMeshHelper;
+      }
+
+      function shouldInclude(mesh, group) {
+        return options.includeInternalGroups || !isInternalGroup(mesh, group);
+      }
+
       function shouldShow(mesh, group) {
         const name = groupName(mesh, group);
+        const displayName = displayGroupName(mesh, group);
         if (
           options.showGroups &&
           !options.showGroups.includes(name) &&
+          !options.showGroups.includes(displayName) &&
           !options.showGroups.includes(group)
+        )
+          return false;
+        if (!options.showGroups && isOuterBoundaryGroup(mesh, group))
+          return false;
+        if (
+          !options.showGroups &&
+          options.includeInternalGroups &&
+          isInternalGroup(mesh, group)
         )
           return false;
         return (
           !options.hideGroups.includes(name) &&
+          !options.hideGroups.includes(displayName) &&
           !options.hideGroups.includes(group)
         );
       }
@@ -853,7 +946,10 @@
           rawGeometry.dispose();
         }
         const color = colorFor(mesh, group);
-        const opacity = isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1;
+        const opacity =
+          options.groupOpacity ??
+          (isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1);
+        const transparent = opacity < 1;
         const material = new THREE.MeshStandardMaterial({
           color,
           roughness: 0.72,
@@ -862,9 +958,9 @@
             isSlice || group.startsWith("2_")
               ? THREE.DoubleSide
               : THREE.FrontSide,
-          transparent: isLargestMaterial,
+          transparent,
           opacity,
-          depthWrite: !isLargestMaterial,
+          depthWrite: !transparent,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
@@ -926,14 +1022,16 @@
               "Yee grid",
               `\u2248 ${yeeGrid.map((value) => value.toLocaleString()).join(" × ")}`,
             ],
-            ["Yee cells", `\u2248 ${totalCells.toLocaleString()}`],
+            [options.cellCountLabel, `\u2248 ${totalCells.toLocaleString()}`],
           );
+        } else {
+          const elementCount = mesh.tetrahedra.length || mesh.triangles.length;
+          stats.push([options.cellCountLabel, elementCount.toLocaleString()]);
         }
-        const title = document.createElement("div");
-        title.className = "stats-title muted";
-        title.textContent = "Simulation estimate";
-        title.title =
-          "Yee-grid dimensions include PML cells on both sides of each axis.";
+        const footerTitle = document.createElement("div");
+        footerTitle.className = "stats-title muted";
+        footerTitle.textContent = options.footerTitle;
+        footerTitle.title = options.footerTooltip;
         const list = document.createElement("dl");
         list.className = "stats-grid";
         for (const [label, value] of stats) {
@@ -943,7 +1041,7 @@
           description.textContent = value;
           list.append(term, description);
         }
-        statsPanel.replaceChildren(title, list);
+        statsPanel.replaceChildren(footerTitle, list);
         statsPanel.hidden = false;
       }
 
@@ -988,18 +1086,35 @@
       function buildGroupControls(mesh) {
         const container = document.getElementById("groups");
         container.innerHTML = "";
+        const controls = new Map();
         for (const [group, root] of groupRoots) {
+          const key = displayGroupKey(mesh, group);
+          if (!controls.has(key))
+            controls.set(key, {
+              group,
+              name: displayGroupName(mesh, group),
+              roots: [],
+            });
+          controls.get(key).roots.push(root);
+        }
+        for (const { group, name: displayName, roots } of controls.values()) {
           const button = document.createElement("button");
           button.className = "group-button";
-          button.textContent = groupName(mesh, group);
-          button.style.setProperty(
-            "--group-color",
-            `#${colorFor(mesh, group).getHexString()}`,
-          );
-          button.classList.toggle("off", !root.visible);
+          const name = document.createElement("span");
+          name.className = "group-name";
+          name.textContent = displayName;
+          const type = document.createElement("span");
+          type.className = "group-type";
+          type.textContent = groupType(group);
+          button.append(name, type);
+          const color = colorFor(mesh, group);
+          button.style.setProperty("--group-color", `#${color.getHexString()}`);
+          button.style.setProperty("--group-text-color", textColorFor(color));
+          button.classList.toggle("off", !roots.some((root) => root.visible));
           button.addEventListener("click", () => {
-            root.visible = !root.visible;
-            button.classList.toggle("off", !root.visible);
+            const visible = !roots.some((root) => root.visible);
+            roots.forEach((root) => (root.visible = visible));
+            button.classList.toggle("off", !visible);
           });
           container.appendChild(button);
         }

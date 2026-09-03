@@ -18,6 +18,7 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
@@ -46,6 +47,7 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
@@ -68,12 +70,35 @@
         - add_pec
         - mesh
         - plot_mesh
+        - plot_3d
         - plot_stack
         - show_stack
         - preview
         - validate_config
         - validate_mesh
         - run
+
+## Setup visualization
+
+PALACE meshes can be viewed with the shared, notebook-friendly Three.js
+viewer. The existing `plot_mesh()` method remains available for PyVista
+rendering.
+
+```python
+sim.mesh()
+sim.plot_3d()                    # generic-PDK colors, 65% opacity
+sim.plot_3d(show_mesh=True)      # add mesh edges
+sim.plot_3d(color_palette=("#ff9d9d", "#0ff"), group_opacity=0.4)
+```
+
+Palace uses white for ports, assigns the unique generic-PDK layer colors to
+other groups in their defined order, and renders every physical group
+semi-transparently by default. Pass an ordered `color_palette` and a uniform
+`group_opacity` from 0 to 1 to override the palette and opacity.
+
+The footer reports the exact number of highest-dimensional finite elements in
+the Gmsh file. Its heading and count label can be customized with
+`footer_title` and `cell_count_label`.
 
 ## Mesh
 

@@ -19,6 +19,7 @@ from gsim.common.materials import (
 )
 from gsim.common.materials._helpers import material_card
 from gsim.common.pdk import ResolvedPassivePcell, resolve_passive_pcell
+from gsim.common.viz.gmsh import DEFAULT_COLOR_PALETTE
 from gsim.fdtd.api import (
     DipoleSource,
     Domain,
@@ -321,7 +322,12 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         position_um: float | None = None,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
+        include_internal_groups: bool = False,
+        color_palette: Sequence[str] = DEFAULT_COLOR_PALETTE,
+        group_opacity: float | None = None,
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
         """Render the current or a temporary mesh with the FDTD viewer."""
@@ -338,7 +344,12 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                 position_um=position_um,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
+                include_internal_groups=include_internal_groups,
+                color_palette=color_palette,
+                group_opacity=group_opacity,
                 zoom_to_cursor=zoom_to_cursor,
+                footer_title=footer_title,
+                cell_count_label=cell_count_label,
                 cell_size_nm=self.solver.cell_size_nm,
                 pml_cells=self.domain.pml_cells,
                 height=height,
@@ -355,7 +366,12 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                     position_um=position_um,
                     show_groups=show_groups,
                     hide_groups=hide_groups,
+                    include_internal_groups=include_internal_groups,
+                    color_palette=color_palette,
+                    group_opacity=group_opacity,
                     zoom_to_cursor=zoom_to_cursor,
+                    footer_title=footer_title,
+                    cell_count_label=cell_count_label,
                     cell_size_nm=self.solver.cell_size_nm,
                     pml_cells=self.domain.pml_cells,
                     height=height,
@@ -369,15 +385,30 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         show_mesh: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
+        include_internal_groups: bool = False,
+        color_palette: Sequence[str] = DEFAULT_COLOR_PALETTE,
+        group_opacity: float | None = None,
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
+        """Show the 3D geometry, optionally with Gmsh surface edges.
+
+        ``footer_title`` and ``cell_count_label`` customize the estimated-grid
+        summary without changing its calculation. ``color_palette`` and
+        ``group_opacity`` customize physical-group rendering.
+        """
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
             show_groups=show_groups,
             hide_groups=hide_groups,
+            include_internal_groups=include_internal_groups,
+            color_palette=color_palette,
+            group_opacity=group_opacity,
             zoom_to_cursor=zoom_to_cursor,
+            footer_title=footer_title,
+            cell_count_label=cell_count_label,
             height=height,
         )
 
@@ -389,7 +420,12 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         show_mesh: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
+        include_internal_groups: bool = False,
+        color_palette: Sequence[str] = DEFAULT_COLOR_PALETTE,
+        group_opacity: float | None = None,
         zoom_to_cursor: bool = True,
+        footer_title: str = "Simulation estimate",
+        cell_count_label: str = "Estimated Yee cells",
         height: int = 600,
     ) -> Any:
         """Show a filled cross-section, optionally with intersected cell edges."""
@@ -400,7 +436,12 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             position_um=position_um,
             show_groups=show_groups,
             hide_groups=hide_groups,
+            include_internal_groups=include_internal_groups,
+            color_palette=color_palette,
+            group_opacity=group_opacity,
             zoom_to_cursor=zoom_to_cursor,
+            footer_title=footer_title,
+            cell_count_label=cell_count_label,
             height=height,
         )
 
