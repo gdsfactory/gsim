@@ -199,6 +199,21 @@ class WavePortConfig(BaseModel):
         mode: Mode number to excite
         offset: De-embedding distance in um
         excited: Whether this port is excited
+        eigensolver_type: Palace SolverType for this port's 2D mode
+            eigenproblem ("Default", "SLEPc" or "ARPACK"). None uses
+            Palace's own default.
+        eigensolver_tol: Palace EigenTol (eigenvalue solver relative
+            tolerance) for this port's mode solve. None uses Palace's
+            own default.
+        eigensolver_ksp_tol: Palace KSPTol (linear solver tolerance used
+            inside the eigenvalue iteration) for this port's mode solve.
+            None uses Palace's own default.
+        eigensolver_max_size: Palace MaxSize (eigensolver subspace
+            dimension) for this port's mode solve - unrelated to the
+            `max_size` domain-filling flag above. None lets Palace pick
+            its own default (max(2 x Mode, Mode + 15)).
+        eigensolver_verbose: Palace Verbose level for this port's mode
+            solve. None uses Palace's own default.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -217,6 +232,30 @@ class WavePortConfig(BaseModel):
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
     excited: bool = True
+    eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = Field(
+        default=None,
+        description="Palace SolverType for this port's 2D mode eigenproblem",
+    )
+    eigensolver_tol: float | None = Field(
+        default=None, gt=0, description="Palace EigenTol for this port's mode solve"
+    )
+    eigensolver_ksp_tol: float | None = Field(
+        default=None, gt=0, description="Palace KSPTol for this port's mode solve"
+    )
+    eigensolver_max_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Palace MaxSize (eigensolver subspace dimension) for this "
+            "port's mode solve - unrelated to the max_size domain-filling "
+            "flag above"
+        ),
+    )
+    eigensolver_verbose: int | None = Field(
+        default=None,
+        ge=0,
+        description="Palace Verbose level for this port's mode solve",
+    )
 
 
 __all__ = [

@@ -1073,6 +1073,11 @@ class PalaceSimMixin:
                     excited=port_config.excited,
                     mode=port_config.mode,
                     offset=port_config.offset,
+                    eigensolver_type=port_config.eigensolver_type,
+                    eigensolver_tol=port_config.eigensolver_tol,
+                    eigensolver_ksp_tol=port_config.eigensolver_ksp_tol,
+                    eigensolver_max_size=port_config.eigensolver_max_size,
+                    eigensolver_verbose=port_config.eigensolver_verbose,
                 )
 
         self._configured_ports = True
@@ -2428,6 +2433,11 @@ class PalaceSimMixin:
         mode: int = 1,
         excited: bool = True,
         offset: float = 0.0,
+        eigensolver_type: str | None = None,
+        eigensolver_tol: float | None = None,
+        eigensolver_ksp_tol: float | None = None,
+        eigensolver_max_size: int | None = None,
+        eigensolver_verbose: int | None = None,
     ) -> None:
         """Add a single element wave port.
 
@@ -2443,6 +2453,19 @@ class PalaceSimMixin:
             mode: Mode number to excite.
             excited: Whether this port is excited
             offset: Offset distance used for scattering parameter de-embedding.
+            eigensolver_type: Palace SolverType for this port's 2D mode
+                eigenproblem ("Default", "SLEPc" or "ARPACK"). None uses
+                Palace's own default.
+            eigensolver_tol: Palace EigenTol for this port's mode solve.
+                None uses Palace's own default.
+            eigensolver_ksp_tol: Palace KSPTol for this port's mode solve.
+                None uses Palace's own default.
+            eigensolver_max_size: Palace MaxSize (eigensolver subspace
+                dimension) for this port's mode solve - unrelated to
+                max_size above, which sizes geometry. None lets Palace
+                pick its own default.
+            eigensolver_verbose: Palace Verbose level for this port's
+                mode solve. None uses Palace's own default.
 
         Example:
             >>> sim.add_wave_port(
@@ -2466,5 +2489,10 @@ class PalaceSimMixin:
                 mode=mode,
                 excited=excited,
                 offset=offset,
+                eigensolver_type=eigensolver_type,
+                eigensolver_tol=eigensolver_tol,
+                eigensolver_ksp_tol=eigensolver_ksp_tol,
+                eigensolver_max_size=eigensolver_max_size,
+                eigensolver_verbose=eigensolver_verbose,
             )
         )
