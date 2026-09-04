@@ -23,13 +23,21 @@ from pathlib import Path
 import gdsfactory as gf
 import yaml
 
-from gsim.common.stack.doping import make_doping_profile
+from gsim.common.stack.doping import make_doping_profile, make_pn_junction_profile
 from gsim.common.stack.extractor import (
     Layer,
     LayerStack,
     ValidationResult,
     extract_from_pdk,
     extract_layer_stack,
+)
+from gsim.common.stack.junction import (
+    PNJunctionConfig,
+    built_in_voltage,
+    depletion_extents,
+    depletion_width,
+    junction_capacitance_per_area,
+    select_junction_mode,
 )
 from gsim.common.stack.materials import (
     MATERIALS_DB,
@@ -170,25 +178,32 @@ __all__ = [
     "LayerStack",
     "LorentzianTerm",
     "MaterialProperties",
+    "PNJunctionConfig",
     "ResolvedMaterial",
     "SellmeierTerm",
     "StackLayer",
     "ValidationResult",
     "ValidityRange",
+    "built_in_voltage",
+    "depletion_extents",
+    "depletion_width",
     "extract_from_pdk",
     "extract_layer_stack",
     "get_material_properties",
     "get_stack",
+    "junction_capacitance_per_area",
     "load_overlay",
     "load_stack_yaml",
     "make_doped_material",
     "make_doped_materials",
     "make_doping_profile",
+    "make_pn_junction_profile",
     "merge_overlay",
     "parse_layer_stack",
     "plot_stack",
     "print_stack",
     "print_stack_table",
     "resolve_material_at_wavelength",
+    "select_junction_mode",
     "should_enable_dispersion",
 ]

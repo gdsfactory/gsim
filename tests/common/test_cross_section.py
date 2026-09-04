@@ -387,6 +387,44 @@ class TestBuildDopedCrossSection:
         layers = {r.layer_name for r in section}
         assert {"core", "pp_slab_0", "npp_slab_0"} <= layers
 
+    def test_doping_materials_registered_on_stack(self):
+        """Doping/rib materials must land on stack.materials for solver config.
+
+        Regression: the merged materials dict used to be computed but never
+        attached, so doped domains silently resolved to eps=1.0 without
+        conductivity in the generated Palace config.
+        """
+        comp, LAYER = self._build_component()
+        doping = self._doping_result(comp)
+
+        stack, _section = build_doped_cross_section(
+            comp,
+            axis="x",
+            value=0.0,
+            substrate_thickness=2.0,
+            include_substrate=False,
+            doping=doping,
+            metal1=(1.1, 1.0),
+            rib_layers=[
+                ("p_rib", LAYER.P, 1.6e3),
+                ("n_rib", LAYER.N, 1.6e3),
+            ],
+            permittivity=11.9,
+            fmax=200e9,
+            verbose=False,
+        )
+
+        for name, sigma in (
+            ("pp_slab_0", 2e4),
+            ("p_rib", 1.6e3),
+            ("n_rib", 1.6e3),
+        ):
+            assert name in stack.materials, f"{name} missing from stack.materials"
+            props = stack.materials[name]
+            assert isinstance(props, dict)
+            assert props["permittivity"] == pytest.approx(11.9)
+            assert props["conductivity"] == pytest.approx(sigma)
+
     def test_metal1_override_applied(self):
         comp, _LAYER = self._build_component()
         stack, _ = build_doped_cross_section(

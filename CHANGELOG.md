@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- PN-junction depletion model from Sze *Physics of Semiconductor Devices* (`PNJunctionConfig`,
+  `make_pn_junction_profile`): computes built-in voltage, depletion width `W` (abrupt or linearly graded), asymmetric
+  P/N split `x_p`/`x_n`, and capacitance `C_j = eps_s A / W`. The depletion region is represented automatically — meshed
+  as a dielectric strip in high-res mode when `W >= ~1/5` of the flanking doped sections, otherwise applied as a lumped
+  Impedance boundary via `sim.set_pn_junction()`. The 2D TWMZM demo now illustrates both modes.
+- Fix: `build_doped_cross_section()` now registers doping/rib materials on `stack.materials`; previously doped domains
+  silently resolved to eps=1.0 without conductivity in generated Palace configs.
+
 ## 0.1.0
 
 - Electrostatic simulation end-to-end for Palace ([#146](https://github.com/gdsfactory/gsim/pull/146))

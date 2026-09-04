@@ -38,6 +38,38 @@
       inherited_members: false
       members: false
 
+## PN Junction
+
+Depletion model after Sze & Ng, *Physics of Semiconductor Devices*, ch. 2.
+
+::: gsim.common.stack.PNJunctionConfig
+    options:
+      show_source: false
+
+::: gsim.common.stack.make_pn_junction_profile
+    options:
+      show_source: false
+
+::: gsim.common.stack.built_in_voltage
+    options:
+      show_source: false
+
+::: gsim.common.stack.depletion_width
+    options:
+      show_source: false
+
+::: gsim.common.stack.depletion_extents
+    options:
+      show_source: false
+
+::: gsim.common.stack.junction_capacitance_per_area
+    options:
+      show_source: false
+
+::: gsim.common.stack.select_junction_mode
+    options:
+      show_source: false
+
 ## Visualization
 
 ::: gsim.common.viz.plot_prisms_3d

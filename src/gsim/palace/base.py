@@ -427,6 +427,68 @@ class PalaceSimMixin:
             )
         )
 
+    def set_pn_junction(
+        self,
+        junction: Any,
+        *,
+        layer_p: str,
+        layer_n: str,
+        length_um: float,
+        height_um: float,
+        name: str | None = None,
+    ) -> float:
+        """Apply the depletion capacitance of a PN junction between two layers.
+
+        Capacitance-mode modelling of a PN junction: the depletion width
+        ``W`` is computed from the doping concentrations and bias point via
+        :class:`gsim.common.stack.junction.PNJunctionConfig` (Sze,
+        *Physics of Semiconductor Devices*, ch. 2), converted to an absolute
+        parallel-plate capacitance ``C = eps_s * A / W``, and applied as a
+        lumped Impedance boundary on the shared P/N interface.
+
+        Use this when the depletion strip is too thin to resolve on the mesh
+        (the auto-selection in
+        :func:`gsim.common.stack.doping.make_pn_junction_profile` picks this
+        regime); for well-resolved depletion regions prefer drawing them as
+        dielectric geometry (``mode="high_res"``) instead.
+
+        Args:
+            junction: ``PNJunctionConfig`` or its dict form (doping
+                concentrations, bias, temperature, permittivity).
+            layer_p: Name of the P-doped layer.
+            layer_n: Name of the N-doped layer.
+            length_um: Device length along the propagation direction (um).
+            height_um: Junction z-extent (um), e.g. the rib height.
+            name: Optional display name for the boundary.
+
+        Returns:
+            The absolute capacitance applied [F].
+
+        Example:
+            >>> sim.set_pn_junction(
+            ...     {"na_cm3": 1e19, "nd_cm3": 1e19},
+            ...     layer_p="p_rib",
+            ...     layer_n="n_rib",
+            ...     length_um=10.0,
+            ...     height_um=0.22,
+            ... )
+        """
+        from gsim.common.stack.junction import PNJunctionConfig
+
+        cfg = (
+            junction
+            if isinstance(junction, PNJunctionConfig)
+            else PNJunctionConfig.model_validate(junction)
+        )
+        capacitance = cfg.capacitance(length_um=length_um, height_um=height_um)
+        self.add_impedance_boundary(
+            layer_p,
+            layer_n,
+            capacitance=capacitance,
+            name=name,
+        )
+        return capacitance
+
     # -------------------------------------------------------------------------
     # Material methods
     # -------------------------------------------------------------------------
@@ -2121,12 +2183,22 @@ class PalaceSimMixin:
                         lib_dir = resolve_palace_library_dir()
                         if verbose:
                             from gsim.palace.runtime import (
+                                _cached_binary as _cached,
+                            )
+                            from gsim.palace.runtime import (
                                 _palace_cpu_available as _cpu_avail,
+                            )
+                            from gsim.palace.runtime import (
+                                _palace_toolkit_available as _toolkit_avail,
                             )
 
                             source = (
                                 "palace-toolkit-cpu"
                                 if _cpu_avail()
+                                else "gsim cached runtime"
+                                if _cached() is not None
+                                else "palace-toolkit"
+                                if _toolkit_avail()
                                 else "PALACE_BIN / PATH"
                             )
                             logger.info(
@@ -2154,9 +2226,9 @@ class PalaceSimMixin:
 
             if resolved_exe is None:
                 raise FileNotFoundError(
-                    "Palace executable not found. Set PALACE_BIN, "
-                    "PALACE_EXECUTABLE, or install the optional "
-                    "palacetoolkit-palace-cpu wheel documented in the gsim README."
+                    "Palace executable not found. Set PALACE_BIN or "
+                    "PALACE_EXECUTABLE, install a Palace binary, or let gsim "
+                    "auto-download the prebuilt CPU runtime (Linux x86_64)."
                 )
 
             exe_path = Path(resolved_exe)
@@ -2168,8 +2240,8 @@ class PalaceSimMixin:
                     raise FileNotFoundError(
                         f"Palace executable not found: {exe_path}. "
                         "Install Palace directly or provide correct path via "
-                        "palace_executable, or install the optional "
-                        "palacetoolkit-palace-cpu wheel documented in the gsim README."
+                        "palace_executable, or let gsim auto-download the "
+                        "prebuilt CPU runtime (Linux x86_64)."
                     )
                 exe_path = Path(resolved)
 

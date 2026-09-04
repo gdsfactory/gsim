@@ -305,6 +305,12 @@ def build_doped_cross_section(
     for name, layer in layer_specs.items():
         stack.layers[name] = layer
 
+    # Register the doping/rib materials on the stack so downstream consumers
+    # (Palace config generator, Meep, ...) resolve their eps/sigma instead of
+    # silently falling back to vacuum.
+    for name, mat in materials.items():
+        stack.materials[name] = mat.to_dict() if hasattr(mat, "to_dict") else mat
+
     section = extract_plane_section(
         component.copy(),
         stack,
