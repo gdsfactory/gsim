@@ -67,7 +67,7 @@ def gaussian_coupling_efficiency(
 ) -> CouplingEfficiencyResult:
     """Normalize raw port power by the analytic Gaussian-beam source power.
 
-    The pulse transform and power expression match ZapFDTD and the
+    The pulse transform and power expression match GDSFactory FDTD and the
     FDTD-Bench focusing-grating-coupler reference flow. Samples whose analytic
     source power is more than ``noise_floor_db`` below its peak are masked.
     """
@@ -145,7 +145,7 @@ def fiber_coupling_efficiency(
 def _frequency_parameters(
     center_wavelength: float, wavelength_halfspan: float
 ) -> tuple[float, float]:
-    """Reproduce ZapFDTD's pulse center and width parameters."""
+    """Reproduce GDSFactory FDTD pulse center and width parameters."""
     frequency_center = 1 / center_wavelength
     if wavelength_halfspan <= 0:
         return frequency_center, frequency_center * 0.1
@@ -165,7 +165,7 @@ def _source_spectrum(
     frequency_width: float,
     amplitude: float,
 ) -> np.ndarray:
-    """Return ZapFDTD's closed-form Gaussian-pulse Fourier transform."""
+    """Return the GDSFactory FDTD closed-form Gaussian-pulse Fourier transform."""
     frequency_max_offset = frequency_width * 2 ** (-1.5)
     scale_factor = 2 * frequency_max_offset
     if scale_factor <= 0:

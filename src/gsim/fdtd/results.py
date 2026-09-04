@@ -1,4 +1,4 @@
-"""Typed loading, tabulation, and plotting of ZapFDTD output."""
+"""Typed loading, tabulation, and plotting of GDSFactory FDTD output."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class ComplexTrace:
     def from_samples(
         cls, samples: list[Mapping[str, Any]], valid: np.ndarray
     ) -> ComplexTrace:
-        """Build a trace from ZapFDTD's list-of-records representation."""
+        """Build a trace from the GDSFactory FDTD list-of-records representation."""
         values = np.asarray(
             [complex(sample.get("re", 0), sample.get("im", 0)) for sample in samples]
         )
@@ -339,7 +339,7 @@ class MonitorResults(dict[str, PlaneMonitorResult]):
 
 @dataclass
 class FDTDResult:
-    """Complete typed result from one ZapFDTD cloud run."""
+    """Complete typed result from one GDSFactory FDTD cloud run."""
 
     excitation_type: str
     excited_port: str | None
@@ -420,7 +420,7 @@ class FDTDResult:
 
     @classmethod
     def from_run_result(cls, run_result: Any) -> FDTDResult:
-        """Locate and parse ZapFDTD output downloaded by :mod:`gsim.gcloud`."""
+        """Locate and parse GDSFactory FDTD output downloaded by :mod:`gsim.gcloud`."""
         candidates = [
             Path(path)
             for name, path in run_result.files.items()
