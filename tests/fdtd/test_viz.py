@@ -1,4 +1,4 @@
-"""Tests for the ZapFDTD-derived interactive Gmsh viewer."""
+"""Tests for the GDSFactory FDTD interactive Gmsh viewer."""
 
 from __future__ import annotations
 

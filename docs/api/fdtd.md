@@ -67,7 +67,7 @@ sim.domain(
 
 ## Setup visualization
 
-FDTD setup views use the ported ZapFDTD Three.js viewer and do not depend on
+FDTD setup views use the ported GDSFactory FDTD Three.js viewer and do not depend on
 PyVista. All physical groups are shown by default. Smaller material groups are
 listed first, followed by the largest volumetric group and then the ports.
 

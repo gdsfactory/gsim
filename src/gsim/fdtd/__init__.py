@@ -43,7 +43,7 @@ from gsim.gcloud import RunResult, register_result_parser
 
 
 def _parse_fdtd_result(run_result: RunResult) -> FDTDResult:
-    """Parse downloaded ZapFDTD JSON and sidecar outputs."""
+    """Parse downloaded GDSFactory FDTD JSON and sidecar outputs."""
     return FDTDResult.from_run_result(run_result)
 
 
