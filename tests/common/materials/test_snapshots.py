@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from pdk_schema import Index, MaterialCard, TabulatedValue
+from pdk_schema import Coord, Index, MaterialCard, TableData, TabulatedValue
 
+import gsim.common.materials.snapshots as material_snapshots
 from gsim.common.materials import (
     GSIM_MATERIAL_CARDS,
     SI_LI_293K,
@@ -11,6 +12,42 @@ from gsim.common.materials import (
     WavelengthOutOfRangeError,
     resolve_material_snapshot,
 )
+
+
+def _one_dimensional_index_table() -> TabulatedValue:
+    return TabulatedValue(
+        unit="",
+        data=TableData(
+            dims=("wavelength",),
+            coords={"wavelength": Coord(values=[1.5, 1.6], unit="um")},
+            values=[2.0, 2.1],
+            attrs={},
+            interp="linear",
+        ),
+    )
+
+
+def _temperature_index_table() -> TabulatedValue:
+    return TabulatedValue(
+        unit="",
+        data=TableData(
+            dims=("wavelength", "temperature"),
+            coords={
+                "wavelength": Coord(values=[1.5, 1.6], unit="um"),
+                "temperature": Coord(values=[293.0, 303.0], unit="K"),
+            },
+            values=[2.0, 2.1, 2.2, 2.3],
+            attrs={},
+            interp="linear",
+        ),
+    )
+
+
+def _with_table_updates(
+    value: TabulatedValue,
+    **updates: object,
+) -> TabulatedValue:
+    return value.model_copy(update={"data": value.data.model_copy(update=updates)})
 
 
 def _li_index_at(wavelength_um: float, temperature_kelvin: float) -> float:
@@ -25,6 +62,71 @@ def _li_index_at(wavelength_um: float, temperature_kelvin: float) -> float:
     temperature_index = temperatures_kelvin.index(temperature_kelvin)
     flat_index = wavelength_index * len(temperatures_kelvin) + temperature_index
     return table.values[flat_index]
+
+
+def test_temperature_unit_conversion() -> None:
+    assert material_snapshots._temperature_to_kelvin(293.0, "K") == 293.0
+    assert material_snapshots._temperature_to_kelvin(20.0, "degC") == pytest.approx(
+        293.15
+    )
+
+    with pytest.raises(MaterialModelError, match="Unsupported temperature unit"):
+        material_snapshots._temperature_to_kelvin(68.0, "degF")
+
+
+def test_wavelength_table_values_supports_one_dimensional_tables() -> None:
+    wavelengths_um, refractive_indices = material_snapshots._wavelength_table_values(
+        _one_dimensional_index_table(),
+        temperature_ref_kelvin=None,
+    )
+
+    assert wavelengths_um == [1.5, 1.6]
+    assert refractive_indices == [2.0, 2.1]
+
+
+def test_wavelength_table_values_requires_wavelength_coordinates() -> None:
+    value = _with_table_updates(_one_dimensional_index_table(), coords={})
+
+    with pytest.raises(MaterialModelError, match="missing wavelength coordinates"):
+        material_snapshots._wavelength_table_values(value, 293.0)
+
+
+def test_wavelength_table_values_rejects_unsupported_dimensions() -> None:
+    value = _with_table_updates(
+        _temperature_index_table(),
+        dims=("temperature", "wavelength"),
+    )
+
+    with pytest.raises(MaterialModelError, match="must have 'wavelength'"):
+        material_snapshots._wavelength_table_values(value, 293.0)
+
+
+def test_temperature_table_requires_reference_temperature() -> None:
+    with pytest.raises(MaterialModelError, match="require a reference temperature"):
+        material_snapshots._wavelength_table_values(
+            _temperature_index_table(),
+            temperature_ref_kelvin=None,
+        )
+
+
+def test_temperature_table_requires_temperature_coordinates() -> None:
+    value = _with_table_updates(
+        _temperature_index_table(),
+        coords={"wavelength": Coord(values=[1.5, 1.6], unit="um")},
+    )
+
+    with pytest.raises(MaterialModelError, match="missing temperature coordinates"):
+        material_snapshots._wavelength_table_values(value, 293.0)
+
+
+def test_temperature_table_rejects_invalid_shape() -> None:
+    value = _with_table_updates(
+        _temperature_index_table(),
+        values=[2.0, 2.1, 2.2],
+    )
+
+    with pytest.raises(MaterialModelError, match="invalid shape"):
+        material_snapshots._wavelength_table_values(value, 293.0)
 
 
 @pytest.mark.parametrize(
