@@ -155,6 +155,26 @@ def test_tabulated_material_interpolates() -> None:
     assert snapshot.refractive_index == pytest.approx(3.477775832)
 
 
+def test_temperature_table_resolves_extinction_at_reference_temperature() -> None:
+    base_card = GSIM_MATERIAL_CARDS["Si-Li-293K"]
+    assert base_card.optical is not None
+    base_model = base_card.optical.permittivity
+    assert isinstance(base_model, Index)
+    extinction_table = _with_table_updates(
+        _temperature_index_table(),
+        values=[0.01, 0.02, 0.03, 0.04],
+    )
+    lossy_model = base_model.model_copy(update={"k": extinction_table})
+    lossy_optical = base_card.optical.model_copy(update={"permittivity": lossy_model})
+    lossy_card = base_card.model_copy(
+        update={"name": "Lossy-Si", "optical": lossy_optical}
+    )
+
+    snapshot = resolve_material_snapshot("Lossy-Si", 1.55, {"Lossy-Si": lossy_card})
+
+    assert snapshot.extinction_coefficient == pytest.approx(0.02)
+
+
 def test_li_card_supports_temperature_axis() -> None:
     assert SI_LI_293K.optical is not None
     model = SI_LI_293K.optical.permittivity
