@@ -1,6 +1,6 @@
 """Salzberg and Villa crystalline silicon model."""
 
-from pdk_schema import Sellmeier, SellmeierTerm
+from pdk_schema import Citation, Provenance, Sellmeier, SellmeierTerm
 
 from gsim.common.materials._helpers import material_card, wavelength_validity
 
@@ -18,6 +18,26 @@ SI_SALZBERG = material_card(
         ),
         offset=0.0,
     ),
+    provenance=Provenance(
+        source="literature",
+        label="Salzberg and Villa 1957 crystalline silicon",
+        maturity="empirical",
+        citations=[
+            Citation(
+                role="fit",
+                doi="10.1364/JOSA.47.000244",
+                journal="Journal of the Optical Society of America 47, 244-246 (1957)",
+                authors="C. D. Salzberg and J. J. Villa",
+                url="https://doi.org/10.1364/JOSA.47.000244",
+            )
+        ],
+        comment="Single-crystal silicon refractive index measured at 26 °C.",
+        url="https://doi.org/10.1364/JOSA.47.000244",
+        data_url=None,
+        info={},
+    ),
+    optical_info={"source_model": "three-term Sellmeier"},
+    info={"composition": "single-crystal silicon"},
 )
 
 __all__ = ["SI_SALZBERG"]

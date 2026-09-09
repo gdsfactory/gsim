@@ -25,6 +25,7 @@ nav = [
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Reference" = [
+    { "Materials" = "materials.md" },
     { "GDSFactory FDTD" = "api/fdtd.md" },
     { "Palace" = "api/palace.md" },
     { "Meep" = "api/meep.md" },
