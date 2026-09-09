@@ -6,6 +6,10 @@ from typing import Any, Literal
 import gdsfactory as gf
 from pdk_schema import MaterialCard
 
+from gsim.common.materials.lithium_niobate import (
+    LINBO3_MGO5_GAYER,
+    LINBO3_ZELMON,
+)
 from gsim.common.materials.si_li_293k import SI_LI_293K
 from gsim.common.materials.si_salzberg import SI_SALZBERG
 from gsim.common.materials.sin_luke import SIN_LUKE
@@ -21,6 +25,9 @@ GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
     "SiN-Luke": SIN_LUKE,
     "SiO2": SIO2_MALITSON.model_copy(update={"name": "SiO2"}),
     "SiO2-Malitson": SIO2_MALITSON,
+    "LN": LINBO3_ZELMON.model_copy(update={"name": "LN"}),
+    "LiNbO3-Zelmon": LINBO3_ZELMON,
+    "LiNbO3-MgO5-Gayer": LINBO3_MGO5_GAYER,
 }
 
 
