@@ -15,7 +15,10 @@ from gsim.palace.mesh.geometry import (
     GeometryData,
     _snap_via_z_range,
     add_dielectrics,
+    add_metals,
     add_ports,
+    get_layer_info,
+    get_layer_infos,
 )
 from gsim.palace.ports.config import PalacePort, PortGeometry, PortType
 
@@ -302,6 +305,161 @@ def _mk_layer(
         material="aluminum",
         layer_type=ltype,
     )
+
+
+def _mk_mim_stack() -> LayerStack:
+    """Return a stack where one GDS layer backs two LayerLevels (IHP MIM).
+
+    Both ``mim_diel`` (40 nm high-k dielectric) and ``mim`` (top-plate
+    conductor) live on GDS layer 10 (``MIMdrawing``). Each must be meshed at
+    its own z-height, which is the reason ``get_layer_infos`` exists.
+    """
+    return LayerStack(
+        layers={
+            "mim_diel": Layer(
+                name="mim_diel",
+                gds_layer=(10, 0),
+                zmin=5.0,
+                zmax=5.04,
+                thickness=0.04,
+                material="HIK",
+                layer_type="dielectric",
+            ),
+            "mim": Layer(
+                name="mim",
+                gds_layer=(10, 0),
+                zmin=5.04,
+                zmax=5.14,
+                thickness=0.1,
+                material="aluminum",
+                layer_type="conductor",
+            ),
+            "topmetal1": Layer(
+                name="topmetal1",
+                gds_layer=(11, 0),
+                zmin=6.0,
+                zmax=8.0,
+                thickness=2.0,
+                material="aluminum",
+                layer_type="conductor",
+            ),
+        }
+    )
+
+
+class TestGetLayerInfos:
+    """A single GDS layer may back multiple stack LayerLevels."""
+
+    def test_returns_all_matching_layers_in_stack_order(self):
+        stack = _mk_mim_stack()
+        infos = get_layer_infos(stack, 10)
+        assert [info["name"] for info in infos] == ["mim_diel", "mim"]
+        assert infos[0]["type"] == "dielectric"
+        assert infos[0]["zmin"] == pytest.approx(5.0)
+        assert infos[0]["zmax"] == pytest.approx(5.04)
+        assert infos[0]["thickness"] == pytest.approx(0.04)
+        assert infos[1]["type"] == "conductor"
+        assert infos[1]["zmin"] == pytest.approx(5.04)
+        assert infos[1]["zmax"] == pytest.approx(5.14)
+        assert infos[1]["thickness"] == pytest.approx(0.1)
+
+    def test_legacy_single_lookup_returns_only_first(self):
+        stack = _mk_mim_stack()
+        info = get_layer_info(stack, 10)
+        assert info is not None
+        assert info["name"] == "mim_diel"
+        assert info["type"] == "dielectric"
+
+    def test_unmatched_layer_returns_empty_list(self):
+        stack = _mk_mim_stack()
+        assert get_layer_infos(stack, 999) == []
+        assert get_layer_info(stack, 999) is None
+
+    def test_layers_on_distinct_gds_numbers_are_isolated(self):
+        stack = _mk_mim_stack()
+        infos = get_layer_infos(stack, 11)
+        assert [info["name"] for info in infos] == ["topmetal1"]
+
+
+class TestAddMetalsSharedGdsLayer:
+    """Both LayerLevels on a shared GDS layer must be meshed at own z."""
+
+    def test_meshes_dielectric_and_conductor_on_same_gds_layer(self):
+        import gmsh
+
+        stack = _mk_mim_stack()
+        geometry = GeometryData(
+            polygons=[(10, [0.0, 10.0, 10.0, 0.0], [0.0, 0.0, 10.0, 10.0], [])],
+            bbox=(0.0, 0.0, 10.0, 10.0),
+            layer_bboxes={},
+        )
+
+        gmsh.initialize()
+        try:
+            gmsh.option.setNumber("General.Verbosity", 0)
+            gmsh.model.add("mim_shared_layer")
+            kernel = gmsh.model.occ
+
+            tags = add_metals(kernel, geometry, stack)
+            kernel.synchronize()
+
+            assert "mim_diel" in tags
+            assert "mim" in tags
+
+            # mim_diel is a shaped dielectric -> solid 3D volume
+            mim_diel_vols = tags["mim_diel"]["volumes"]
+            assert mim_diel_vols
+            for vol in mim_diel_vols:
+                bbox = kernel.getBoundingBox(3, vol)
+                assert bbox[2] == pytest.approx(5.0, abs=0.01)
+                assert bbox[5] == pytest.approx(5.04, abs=0.01)
+
+            # mim conductor -> shell volume (tuple tag) at its own z-height
+            mim_vols = tags["mim"]["volumes"]
+            assert mim_vols
+            assert isinstance(mim_vols[0], tuple)
+            # shell loop surfaces bound the conductor z-range [5.04, 5.14]
+            loop = mim_vols[0][1]
+            zmin_surfs = [kernel.getBoundingBox(2, s) for s in loop]
+            assert any(
+                abs(bbox[2] - 5.04) < 0.01 and abs(bbox[5] - 5.04) < 0.01
+                for bbox in zmin_surfs
+            )
+            assert any(
+                abs(bbox[2] - 5.14) < 0.01 and abs(bbox[5] - 5.14) < 0.01
+                for bbox in zmin_surfs
+            )
+        finally:
+            gmsh.clear()
+            gmsh.finalize()
+
+    def test_unrelated_gds_layer_untouched(self):
+        import gmsh
+
+        stack = _mk_mim_stack()
+        geometry = GeometryData(
+            polygons=[
+                (10, [0.0, 10.0, 10.0, 0.0], [0.0, 0.0, 10.0, 10.0], []),
+                (11, [0.0, 5.0, 5.0, 0.0], [0.0, 0.0, 5.0, 5.0], []),
+            ],
+            bbox=(0.0, 0.0, 10.0, 10.0),
+            layer_bboxes={},
+        )
+
+        gmsh.initialize()
+        try:
+            gmsh.option.setNumber("General.Verbosity", 0)
+            gmsh.model.add("mim_shared_layer")
+            kernel = gmsh.model.occ
+
+            tags = add_metals(kernel, geometry, stack)
+            kernel.synchronize()
+
+            assert "topmetal1" in tags
+            assert tags["topmetal1"]["volumes"]
+        finally:
+            gmsh.clear()
+            gmsh.finalize()
 
 
 class TestSnapViaZRange:
