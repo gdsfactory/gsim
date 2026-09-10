@@ -1513,6 +1513,11 @@ class PalaceSimMixin:
         if merge_via_distance is not None:
             mesh_config.merge_via_distance = merge_via_distance
 
+        # A coarse mesh is for fast iteration; default to first-order elements
+        # unless the user already overrode the order explicitly.
+        if preset == "coarse" and self.numerical.order == NumericalConfig().order:
+            self.numerical.order = 1
+
         # Validate configuration
         validation = self.validate_config()
         if not validation.valid:
