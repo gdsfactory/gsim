@@ -2121,12 +2121,22 @@ class PalaceSimMixin:
                         lib_dir = resolve_palace_library_dir()
                         if verbose:
                             from gsim.palace.runtime import (
+                                _cached_binary as _cached,
+                            )
+                            from gsim.palace.runtime import (
                                 _palace_cpu_available as _cpu_avail,
+                            )
+                            from gsim.palace.runtime import (
+                                _palace_toolkit_available as _toolkit_avail,
                             )
 
                             source = (
                                 "palace-toolkit-cpu"
                                 if _cpu_avail()
+                                else "gsim cached runtime"
+                                if _cached() is not None
+                                else "palace-toolkit"
+                                if _toolkit_avail()
                                 else "PALACE_BIN / PATH"
                             )
                             logger.info(
@@ -2154,9 +2164,9 @@ class PalaceSimMixin:
 
             if resolved_exe is None:
                 raise FileNotFoundError(
-                    "Palace executable not found. Set PALACE_BIN, "
-                    "PALACE_EXECUTABLE, or install the optional "
-                    "palacetoolkit-palace-cpu wheel documented in the gsim README."
+                    "Palace executable not found. Set PALACE_BIN or "
+                    "PALACE_EXECUTABLE, install a Palace binary, or let gsim "
+                    "auto-download the prebuilt CPU runtime (Linux x86_64)."
                 )
 
             exe_path = Path(resolved_exe)
@@ -2168,8 +2178,8 @@ class PalaceSimMixin:
                     raise FileNotFoundError(
                         f"Palace executable not found: {exe_path}. "
                         "Install Palace directly or provide correct path via "
-                        "palace_executable, or install the optional "
-                        "palacetoolkit-palace-cpu wheel documented in the gsim README."
+                        "palace_executable, or let gsim auto-download the "
+                        "prebuilt CPU runtime (Linux x86_64)."
                     )
                 exe_path = Path(resolved)
 
