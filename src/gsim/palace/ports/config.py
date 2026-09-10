@@ -74,6 +74,15 @@ class PalacePort:
     mode: int = 1  # Mode number to excite.
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
+    # Waveport 2D eigensolver controls (Palace SolverType/EigenTol/KSPTol/
+    # MaxSize/Verbose) - unrelated to max_size above, which sizes geometry.
+    # None for any of these lets Palace use its own default.
+    eigensolver_type: str | None = None
+    eigensolver_tol: float | None = None
+    eigensolver_ksp_tol: float | None = None
+    eigensolver_max_size: int | None = None
+    eigensolver_verbose: int | None = None
+
     @property
     def direction(self) -> str:
         """Get direction from orientation."""
@@ -292,6 +301,11 @@ def configure_wave_port(
     mode: int = 1,
     excited: bool = True,
     offset: float = 0.0,
+    eigensolver_type: str | None = None,
+    eigensolver_tol: float | None = None,
+    eigensolver_ksp_tol: float | None = None,
+    eigensolver_max_size: int | None = None,
+    eigensolver_verbose: int | None = None,
 ):
     """Configure gdsfactory port(s) as wave ports for Palace simulation.
 
@@ -307,6 +321,19 @@ def configure_wave_port(
         mode: Mode number to excite.
         offset: Offset distance used for scattering parameter de-embedding.
         excited: Whether port is excited vs just measured (default: True)
+        eigensolver_type: Palace SolverType for this port's 2D mode
+            eigenproblem ("Default", "SLEPc" or "ARPACK"). None uses
+            Palace's own default.
+        eigensolver_tol: Palace EigenTol for this port's mode solve. None
+            uses Palace's own default.
+        eigensolver_ksp_tol: Palace KSPTol for this port's mode solve.
+            None uses Palace's own default.
+        eigensolver_max_size: Palace MaxSize (eigensolver subspace
+            dimension) for this port's mode solve - unrelated to
+            max_size above, which sizes geometry. None lets Palace pick
+            its own default.
+        eigensolver_verbose: Palace Verbose level for this port's mode
+            solve. None uses Palace's own default.
 
     Examples:
         ```python
@@ -330,6 +357,11 @@ def configure_wave_port(
         port.info["mode"] = mode
         port.info["offset"] = offset
         port.info["excited"] = excited
+        port.info["eigensolver_type"] = eigensolver_type
+        port.info["eigensolver_tol"] = eigensolver_tol
+        port.info["eigensolver_ksp_tol"] = eigensolver_ksp_tol
+        port.info["eigensolver_max_size"] = eigensolver_max_size
+        port.info["eigensolver_verbose"] = eigensolver_verbose
 
 
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
@@ -473,6 +505,11 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             excited=info.get("excited", True),
             mode=info.get("mode", 1),
             offset=info.get("offset", 0.0),
+            eigensolver_type=info.get("eigensolver_type"),
+            eigensolver_tol=info.get("eigensolver_tol"),
+            eigensolver_ksp_tol=info.get("eigensolver_ksp_tol"),
+            eigensolver_max_size=info.get("eigensolver_max_size"),
+            eigensolver_verbose=info.get("eigensolver_verbose"),
         )
         palace_ports.append(palace_port)
 
