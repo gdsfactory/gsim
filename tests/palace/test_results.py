@@ -775,3 +775,66 @@ class TestTextResults:
         (tmp_path / "output" / "palace").mkdir(parents=True)
         with pytest.raises(FileNotFoundError, match="parseable"):
             load_text_results(tmp_path)
+
+
+@pytest.fixture
+def postproc_results_dir(tmp_path: Path) -> Path:
+    """BoundaryMode output with impedance and voltage postprocessing CSVs."""
+    palace_dir = tmp_path / "output" / "palace"
+    palace_dir.mkdir(parents=True)
+
+    (palace_dir / "mode-kn.csv").write_text(
+        "m,Re{kn} (1/m),Im{kn} (1/m),Re{n_eff},Im{n_eff}\n1,2.0,0.0,1.50,0.00\n"
+    )
+    (palace_dir / "mode-Z.csv").write_text(
+        "        m,              Z_PV[1] (Ohm),              L_PV[1] (H/m),"
+        "              C_PV[1] (F/m),              Z_PV[2] (Ohm),"
+        "              Z_VI[1] (Ohm),              L_VI[1] (H/m)\n"
+        " 1.00e+00,        +3.878574108173e+01,        +3.230530779000e-07,"
+        "        +2.147482805724e-10,        +5.000000000000e+01,"
+        "        +1.230000000000e+01,        +1.000000000000e-07\n"
+    )
+    (palace_dir / "mode-V.csv").write_text(
+        "        m,               Re{V[1]} (V),               Im{V[1]} (V)\n"
+        " 1.00e+00,        -4.389238602922e+00,        -7.635835463547e+00\n"
+    )
+    return tmp_path
+
+
+class TestModePostprocessingResults:
+    """Tests for mode-Z.csv / mode-V.csv postprocessing parsing."""
+
+    def test_impedance_parsed_per_index(self, postproc_results_dir: Path) -> None:
+        out = load_text_results(postproc_results_dir)
+        assert set(out.mode_impedance) == {1, 2}
+        assert out.characteristic_impedance(index=1, mode=1) == pytest.approx(
+            3.878574108173e01
+        )
+        assert out.characteristic_impedance(index=1, mode=1, quantity="L_PV") == (
+            pytest.approx(3.230530779000e-07)
+        )
+        assert out.characteristic_impedance(index=2, mode=1) == pytest.approx(50.0)
+        assert out.characteristic_impedance(
+            index=1, mode=1, quantity="Z_VI"
+        ) == pytest.approx(12.3)
+        assert out.characteristic_impedance(
+            index=1, mode=1, quantity="L_VI"
+        ) == pytest.approx(1.0e-07)
+
+    def test_voltage_parsed_complex(self, postproc_results_dir: Path) -> None:
+        out = load_text_results(postproc_results_dir)
+        voltage = out.mode_voltage(index=1, mode=1)
+        assert voltage == complex(-4.389238602922, -7.635835463547)
+
+    def test_missing_quantity_returns_none(self, postproc_results_dir: Path) -> None:
+        out = load_text_results(postproc_results_dir)
+        assert out.characteristic_impedance(index=9, mode=1) is None
+        assert out.mode_voltage(index=9, mode=1) is None
+
+    def test_pretty_text_includes_postprocessing(
+        self, postproc_results_dir: Path
+    ) -> None:
+        out = load_text_results(postproc_results_dir)
+        text = str(out)
+        assert "Z[1] mode 1:" in text
+        assert "V[1] mode 1:" in text

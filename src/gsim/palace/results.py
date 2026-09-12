@@ -42,6 +42,11 @@ class ModeMetrics(TypedDict):
     eta_eff: complex
 
 
+_MODE_Z_COL_RE = re.compile(r"^(Z_PV|Z_VI|L_PV|C_PV|L_VI|C_VI)\[(\d+)\]")
+_MODE_V_RE_COL_RE = re.compile(r"^Re\{V\[(\d+)\]\}")
+_MODE_V_IM_COL_RE = re.compile(r"^Im\{V\[(\d+)\]\}")
+
+
 class PalaceTextResults:
     """Parsed Palace text output files with pretty-print helpers.
 
@@ -66,6 +71,10 @@ class PalaceTextResults:
         self.json_data = json_data
         self.text_data = text_data
         self.modes = self._parse_modes()
+        # BoundaryMode postprocessing results (mode-Z.csv / mode-V.csv):
+        # {index: {mode: metrics}}.
+        self.mode_impedance = self._parse_mode_impedance()
+        self.mode_voltages = self._parse_mode_voltages()
 
     @staticmethod
     def _to_float(value: object) -> float:
@@ -142,6 +151,90 @@ class PalaceTextResults:
 
         return modes
 
+    def _parse_mode_impedance(self) -> dict[int, dict[int, dict[str, float]]]:
+        """Parse ``mode-Z.csv`` into ``{index: {mode: metrics}}``.
+
+        Palace writes one row per mode with columns such as
+        ``Z_PV[1] (Ohm)``, ``Z_VI[1] (Ohm)``, ``L_PV[1] (H/m)`` and
+        ``C_PV[1] (F/m)`` for each postprocessing impedance index.
+        """
+        rows = self.csv_tables.get("mode-Z.csv", [])
+        result: dict[int, dict[int, dict[str, float]]] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            for column, raw_value in row.items():
+                match = _MODE_Z_COL_RE.match(column)
+                if match is None:
+                    continue
+                quantity, index = match.group(1), int(match.group(2))
+                value = self._to_float(raw_value)
+                if not np.isfinite(value):
+                    continue
+                result.setdefault(index, {}).setdefault(mode_id, {})[quantity] = value
+
+        return result
+
+    def _parse_mode_voltages(self) -> dict[int, dict[int, complex]]:
+        """Parse ``mode-V.csv`` into ``{index: {mode: complex voltage}}``."""
+        rows = self.csv_tables.get("mode-V.csv", [])
+        re_parts: dict[int, dict[int, float]] = {}
+        im_parts: dict[int, dict[int, float]] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            for column, raw_value in row.items():
+                value = self._to_float(raw_value)
+                re_match = _MODE_V_RE_COL_RE.match(column)
+                im_match = _MODE_V_IM_COL_RE.match(column)
+                if re_match is not None and np.isfinite(value):
+                    index = int(re_match.group(1))
+                    re_parts.setdefault(index, {})[mode_id] = value
+                elif im_match is not None and np.isfinite(value):
+                    index = int(im_match.group(1))
+                    im_parts.setdefault(index, {})[mode_id] = value
+
+        result: dict[int, dict[int, complex]] = {}
+        for index, modes in re_parts.items():
+            for mode_id, re_val in modes.items():
+                im_val = im_parts.get(index, {}).get(mode_id, 0.0)
+                result.setdefault(index, {})[mode_id] = complex(re_val, im_val)
+        return result
+
+    def characteristic_impedance(
+        self, *, index: int = 1, mode: int = 1, quantity: str = "Z_PV"
+    ) -> float | None:
+        """Return a characteristic-impedance quantity from ``mode-Z.csv``.
+
+        Args:
+            index: Postprocessing impedance index (``Z_PV[i]``).
+            mode: Mode number (the ``m`` column).
+            quantity: One of ``"Z_PV"``, ``"Z_VI"``, ``"L_PV"``, ``"C_PV"``,
+                ``"L_VI"``, ``"C_VI"``.
+
+        Returns:
+            The value, or ``None`` when unavailable.
+        """
+        return self.mode_impedance.get(index, {}).get(mode, {}).get(quantity)
+
+    def mode_voltage(self, *, index: int = 1, mode: int = 1) -> complex | None:
+        """Return the complex mode voltage from ``mode-V.csv``."""
+        return self.mode_voltages.get(index, {}).get(mode)
+
     @overload
     def __getitem__(self, key: Literal["modes"]) -> dict[int, ModeMetrics]: ...
 
@@ -216,6 +309,21 @@ class PalaceTextResults:
                 f"n_eff = {self._format_complex(mode['n_eff'])}, "
                 f"eta_eff ~= {self._format_complex(mode['eta_eff'], sci=False)}"
             )
+
+        for index in sorted(self.mode_impedance):
+            for mode_id in sorted(self.mode_impedance[index]):
+                metrics = self.mode_impedance[index][mode_id]
+                parts = [f"{name} = {value:.6g}" for name, value in metrics.items()]
+                lines.append(f"  Z[{index}] mode {mode_id}: " + ", ".join(parts))
+
+        for index in sorted(self.mode_voltages):
+            for mode_id in sorted(self.mode_voltages[index]):
+                voltage = self.mode_voltages[index][mode_id]
+                lines.append(
+                    f"  V[{index}] mode {mode_id}: "
+                    f"{self._format_complex(voltage, sci=False)} V"
+                )
+
         return "\n".join(lines)
 
     def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:

@@ -136,8 +136,12 @@ from gsim.palace.results import (
     load_sparams,
 )
 
-# Runtime / binary resolution (optional palace-toolkit-cpu dependency)
-from gsim.palace.runtime import resolve_palace_binary, resolve_palace_library_dir
+# Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
+from gsim.palace.runtime import (
+    install_palace_runtime,
+    resolve_palace_binary,
+    resolve_palace_library_dir,
+)
 from gsim.viz import (
     close_interactive_view,
     close_interactive_views,
@@ -206,6 +210,7 @@ __all__ = [
     "get_material_properties",
     "get_port_map",
     "get_stack",
+    "install_palace_runtime",
     "interactive_mode",
     "load_boundary_field_data",
     "load_field_context",
