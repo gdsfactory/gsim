@@ -2433,7 +2433,7 @@ class PalaceSimMixin:
         mode: int = 1,
         excited: bool = True,
         offset: float = 0.0,
-        eigensolver_type: str | None = None,
+        eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None,
         eigensolver_tol: float | None = None,
         eigensolver_ksp_tol: float | None = None,
         eigensolver_max_size: int | None = None,

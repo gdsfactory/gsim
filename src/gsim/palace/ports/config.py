@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
@@ -77,7 +77,7 @@ class PalacePort:
     # Waveport 2D eigensolver controls (Palace SolverType/EigenTol/KSPTol/
     # MaxSize/Verbose) - unrelated to max_size above, which sizes geometry.
     # None for any of these lets Palace use its own default.
-    eigensolver_type: str | None = None
+    eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None
     eigensolver_tol: float | None = None
     eigensolver_ksp_tol: float | None = None
     eigensolver_max_size: int | None = None
@@ -301,7 +301,7 @@ def configure_wave_port(
     mode: int = 1,
     excited: bool = True,
     offset: float = 0.0,
-    eigensolver_type: str | None = None,
+    eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None,
     eigensolver_tol: float | None = None,
     eigensolver_ksp_tol: float | None = None,
     eigensolver_max_size: int | None = None,
