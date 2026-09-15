@@ -1646,6 +1646,34 @@ def add_ports(
                     }
                 )
 
+        elif port.geometry == PortGeometry.GAP:
+            x, y = port.center
+            half_gap = port.width / 2
+            along_x = port.direction in ("x", "-x")
+            xmin, xmax = (x - half_gap, x + half_gap) if along_x else (x, x)
+            ymin, ymax = (y, y) if along_x else (y - half_gap, y + half_gap)
+            surface = gmsh_utils.create_port_rectangle(
+                kernel, xmin, ymin, port.zmin, xmax, ymax, port.zmax
+            )
+            port_tags[f"P{port_num}"] = [surface]
+            port_info.append(
+                {
+                    "portnumber": port_num,
+                    "name": port.name,
+                    "Z0": port.impedance,
+                    "type": "lumped",
+                    "direction": port.direction.upper(),
+                    "length": port.width,
+                    "width": port.zmax - port.zmin,
+                    "xmin": xmin,
+                    "xmax": xmax,
+                    "ymin": ymin,
+                    "ymax": ymax,
+                    "zmin": port.zmin,
+                    "zmax": port.zmax,
+                }
+            )
+
         elif port.geometry == PortGeometry.VIA:
             # Via port: vertical between two layers
             if port.from_layer is None or port.to_layer is None:

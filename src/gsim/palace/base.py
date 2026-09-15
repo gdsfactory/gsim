@@ -1007,7 +1007,21 @@ class PalaceSimMixin:
                     f"Available ports: {[p.name for p in component.ports]}"
                 )
 
-            if port_config.geometry == "inplane" and port_config.layer is not None:
+            if port_config.geometry == "gap":
+                from gsim.palace.ports.config import configure_gap_port
+
+                if port_config.layer is None:
+                    raise ValueError(
+                        f"Port '{port_config.name}': gap port requires a layer."
+                    )
+                configure_gap_port(
+                    gf_port,
+                    layer=port_config.layer,
+                    impedance=port_config.impedance,
+                    excited=port_config.excited,
+                    offset=port_config.offset,
+                )
+            elif port_config.geometry == "inplane" and port_config.layer is not None:
                 configure_inplane_port(
                     gf_port,
                     layer=port_config.layer,
@@ -2340,7 +2354,7 @@ class PalaceSimMixin:
         inductance: float | None = None,
         capacitance: float | None = None,
         excited: bool = True,
-        geometry: Literal["inplane", "via"] = "inplane",
+        geometry: Literal["inplane", "via", "gap"] = "inplane",
     ) -> None:
         """Add a single-element lumped port.
 
@@ -2357,7 +2371,10 @@ class PalaceSimMixin:
             inductance: Series inductance (H)
             capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
-            geometry: Port geometry type ("inplane" or "via")
+            geometry: "inplane", "via", or "gap". Gap ports are vertical sheets
+                with GDS width spanning the gap along orientation, centered in
+                the gap and extending through the conductor layer thickness.
+                Gap ports currently require cardinal orientations; omit length.
 
         Example:
             >>> sim.add_port("o1", layer="topmetal2", length=5.0)

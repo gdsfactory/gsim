@@ -30,7 +30,8 @@ class PortConfig(BaseModel):
             Positive = away from boundary, into conductor.
         impedance: Port impedance (Ohms)
         excited: Whether this port is excited
-        geometry: Port geometry type ("inplane" or "via")
+        geometry: "gap" creates a vertical sheet across a coplanar gap.
+            GDS width is the span along orientation; layer thickness is its height.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -49,7 +50,7 @@ class PortConfig(BaseModel):
         default=None, ge=0, description="Capacitance in F"
     )
     excited: bool = True
-    geometry: Literal["inplane", "via"] = "inplane"
+    geometry: Literal["inplane", "via", "gap"] = "inplane"
     offset: float = Field(
         default=0.0,
         description="Shift port inward along the waveguide (um). "
@@ -59,12 +60,19 @@ class PortConfig(BaseModel):
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
         """Validate layer configuration based on geometry type."""
-        if self.geometry == "inplane" and self.layer is None:
-            raise ValueError("Inplane ports require 'layer' to be specified")
+        if self.geometry in ("inplane", "gap") and self.layer is None:
+            raise ValueError("Inplane and gap ports require 'layer' to be specified")
         if self.geometry == "via" and (
             self.from_layer is None or self.to_layer is None
         ):
             raise ValueError("Via ports require both 'from_layer' and 'to_layer'")
+        if self.geometry == "gap":
+            if self.from_layer is not None or self.to_layer is not None:
+                raise ValueError("Gap ports use a single conductor layer")
+            if self.length is not None:
+                raise ValueError(
+                    "Gap ports use GDS port width as the gap span; omit length"
+                )
         return self
 
 

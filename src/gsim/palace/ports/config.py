@@ -28,6 +28,7 @@ class PortGeometry(Enum):
 
     INPLANE = "inplane"  # Horizontal surface on single metal layer (Direction: +X, +Y)
     VIA = "via"  # Vertical surface between two metal layers (Direction: +Z)
+    GAP = "gap"  # Vertical sheet across a coplanar gap, tangential X/Y field
     EDGE = "edge"  # Vertical surface at conductor face, within a single layer (X/Y dir)
 
 
@@ -153,6 +154,24 @@ def configure_inplane_port(
         port.info["length"] = length
         port.info["impedance"] = impedance
         port.info["excited"] = excited
+
+
+def configure_gap_port(
+    port,
+    layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure a vertical gap sheet; GDS width spans along its orientation."""
+    if offset != 0.0:
+        _shift_port_center(port, offset)
+    port.info["palace_type"] = "gap"
+    port.info["layer"] = layer
+    port.info["impedance"] = impedance
+    port.info["excited"] = excited
+    for key in ("from_layer", "to_layer", "length"):
+        port.info[key] = None
 
 
 def configure_via_port(
@@ -532,7 +551,21 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         to_layer = info.get("to_layer")
         layer_name = info.get("layer")
 
-        if palace_type == "lumped":
+        if palace_type == "gap":
+            port_type = PortType.LUMPED
+            geometry = PortGeometry.GAP
+            layer = stack.layers.get(layer_name)
+            if layer is None or layer.layer_type != "conductor":
+                raise ValueError(f"Gap port '{port.name}' requires a conductor layer")
+            zmin, zmax = layer.zmin, layer.zmax
+            if zmax <= zmin or width <= 0:
+                raise ValueError("Gap ports require positive width and layer thickness")
+            if abs((orientation + 45) % 90 - 45) > 1e-6:
+                raise ValueError(
+                    "Gap ports require a cardinal orientation (0/90/180/270)"
+                )
+
+        elif palace_type == "lumped":
             port_type = PortType.LUMPED
             if from_layer and to_layer:
                 geometry = PortGeometry.VIA
