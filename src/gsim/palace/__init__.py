@@ -111,6 +111,7 @@ from gsim.palace.models import (
     SimulationResult,
     TerminalConfig,
     TransientConfig,
+    TwoTerminalPortConfig,
     ValidationResult,
     WavePortConfig,
 )
@@ -123,6 +124,7 @@ from gsim.palace.ports import (
     PortType,
     configure_cpw_port,
     configure_inplane_port,
+    configure_two_terminal_port,
     configure_via_port,
     extract_ports,
 )
@@ -184,6 +186,7 @@ __all__ = [
     "StackLayer",
     "TerminalConfig",
     "TransientConfig",
+    "TwoTerminalPortConfig",
     "ValidationResult",
     "VolumeFieldData",
     "WavePortConfig",
@@ -193,6 +196,7 @@ __all__ = [
     "close_interactive_views",
     "configure_cpw_port",
     "configure_inplane_port",
+    "configure_two_terminal_port",
     "configure_via_port",
     "extract_axis_slice",
     "extract_boundary_cells",

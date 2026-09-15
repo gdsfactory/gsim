@@ -23,6 +23,7 @@ from gsim.palace.models import (
     NumericalConfig,
     PortConfig,
     TerminalConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 from gsim.palace.models.results import SimulationResult, ValidationResult
@@ -165,6 +166,7 @@ class PalaceSimMixin:
     ports: list[PortConfig]
     cpw_ports: list[CPWPortConfig]
     wave_ports: list[WavePortConfig]
+    two_terminal_ports: list[TwoTerminalPortConfig]
     terminals: list[TerminalConfig]
     simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
     _output_dir: Path | None
@@ -886,7 +888,12 @@ class PalaceSimMixin:
 
         # Check ports
 
-        has_ports = bool(self.ports) or bool(self.cpw_ports) or bool(self.wave_ports)
+        has_ports = (
+            bool(self.ports)
+            or bool(self.cpw_ports)
+            or bool(self.wave_ports)
+            or bool(self.two_terminal_ports)
+        )
         if not has_ports:
             if self.simulation_type == "driven":
                 warnings_list.append(
@@ -975,6 +982,7 @@ class PalaceSimMixin:
         from gsim.palace.ports import (
             configure_cpw_port,
             configure_inplane_port,
+            configure_two_terminal_port,
             configure_via_port,
             configure_wave_port,
         )
@@ -1074,6 +1082,19 @@ class PalaceSimMixin:
                     mode=port_config.mode,
                     offset=port_config.offset,
                 )
+
+        # Configure two-terminal ports
+        for tt_config in self.two_terminal_ports or []:
+            plus_gf_port = self._find_gf_port(tt_config.plus_port)
+            minus_gf_port = self._find_gf_port(tt_config.minus_port)
+
+            configure_two_terminal_port(
+                plus_gf_port,
+                minus_gf_port,
+                layer=tt_config.layer,
+                impedance=tt_config.impedance,
+                excited=tt_config.excited,
+            )
 
         self._configured_ports = True
 
@@ -2412,6 +2433,47 @@ class PalaceSimMixin:
                 gap_width=gap_width,
                 length=length,
                 offset=offset,
+                impedance=impedance,
+                excited=excited,
+            )
+        )
+
+    def add_two_terminal_port(
+        self,
+        plus_port: str,
+        minus_port: str,
+        *,
+        layer: str,
+        impedance: float = 50.0,
+        excited: bool = True,
+    ) -> None:
+        """Add a two-terminal lumped port for true 1-port S11 simulation.
+
+        Combines two GDS ports into a single Palace LumpedPort with two EDGE-geometry
+        elements (vertical surfaces spanning the conductor thickness). No artificial
+        reference layer is needed — P1 is the excitation and P2 is the reference,
+        both on the same metal layer.
+
+        Args:
+            plus_port: GDS port name for the + (excitation) terminal
+            minus_port: GDS port name for the - (reference) terminal
+            layer: Conductor layer containing both terminals (e.g., "metal1")
+            impedance: Port impedance in Ohms (default: 50)
+            excited: Whether this port is excited (default: True)
+
+        Example:
+            >>> sim.add_two_terminal_port("P1", "P2", layer="metal1", excited=True)
+        """
+        self.two_terminal_ports = [
+            p
+            for p in self.two_terminal_ports
+            if p.plus_port != plus_port and p.minus_port != minus_port
+        ]
+        self.two_terminal_ports.append(
+            TwoTerminalPortConfig(
+                plus_port=plus_port,
+                minus_port=minus_port,
+                layer=layer,
                 impedance=impedance,
                 excited=excited,
             )

@@ -1554,51 +1554,97 @@ def add_ports(
 
     for port in ports:
         if port.multi_element:
-            # Multi-element port (CPW)
-            if port.layer is None or port.centers is None or port.directions is None:
-                continue
-            target_layer = stack.layers.get(port.layer)
-            if target_layer is None:
+            if port.centers is None or port.directions is None:
                 continue
 
-            zmin = target_layer.zmin
-            hw = port.width / 2
-            hl = (port.length or port.width) / 2
+            if port.geometry == PortGeometry.EDGE:
+                # Two-terminal EDGE port: one vertical surface per conductor face
+                if port.layer is None:
+                    continue
+                target_layer = stack.layers.get(port.layer)
+                if target_layer is None:
+                    continue
 
-            # Determine axis from orientation
-            angle = port.orientation % 360
-            is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
+                zmin = port.zmin
+                zmax = port.zmax
+                hw = port.width / 2
 
-            surfaces = []
-            for cx, cy in port.centers:
-                if is_y_axis:
-                    surf = gmsh_utils.create_port_rectangle(
-                        kernel, cx - hw, cy - hl, zmin, cx + hw, cy + hl, zmin
-                    )
-                else:
-                    surf = gmsh_utils.create_port_rectangle(
-                        kernel, cx - hl, cy - hw, zmin, cx + hl, cy + hw, zmin
-                    )
-                surfaces.append(surf)
+                surfaces = []
+                for i, (cx, cy) in enumerate(port.centers):
+                    # "+X"/"-X" -> sheet at constant x; "+Y"/"-Y" -> constant y
+                    d = port.directions[i].lstrip("+").lower()
+                    if d in ("x", "-x"):
+                        surf = gmsh_utils.create_port_rectangle(
+                            kernel, cx, cy - hw, zmin, cx, cy + hw, zmax
+                        )
+                    else:
+                        surf = gmsh_utils.create_port_rectangle(
+                            kernel, cx - hw, cy, zmin, cx + hw, cy, zmax
+                        )
+                    surfaces.append(surf)
 
-            port_tags[f"P{port_num}"] = surfaces
+                port_tags[f"P{port_num}"] = surfaces
+                port_info.append(
+                    {
+                        "portnumber": port_num,
+                        "name": port.name,
+                        "Z0": port.impedance,
+                        "type": "two_terminal",
+                        "elements": [
+                            {"surface_idx": i, "direction": port.directions[i]}
+                            for i in range(len(port.centers))
+                        ],
+                        "width": port.width,
+                        "zmin": zmin,
+                        "zmax": zmax,
+                    }
+                )
 
-            port_info.append(
-                {
-                    "portnumber": port_num,
-                    "name": port.name,
-                    "Z0": port.impedance,
-                    "type": "cpw",
-                    "elements": [
-                        {"surface_idx": i, "direction": port.directions[i]}
-                        for i in range(len(port.centers))
-                    ],
-                    "width": port.width,
-                    "length": port.length or port.width,
-                    "zmin": zmin,
-                    "zmax": zmin,
-                }
-            )
+            else:
+                # Multi-element inplane port (CPW)
+                if port.layer is None:
+                    continue
+                target_layer = stack.layers.get(port.layer)
+                if target_layer is None:
+                    continue
+
+                zmin = target_layer.zmin
+                hw = port.width / 2
+                hl = (port.length or port.width) / 2
+
+                # Determine axis from orientation
+                angle = port.orientation % 360
+                is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
+
+                surfaces = []
+                for cx, cy in port.centers:
+                    if is_y_axis:
+                        surf = gmsh_utils.create_port_rectangle(
+                            kernel, cx - hw, cy - hl, zmin, cx + hw, cy + hl, zmin
+                        )
+                    else:
+                        surf = gmsh_utils.create_port_rectangle(
+                            kernel, cx - hl, cy - hw, zmin, cx + hl, cy + hw, zmin
+                        )
+                    surfaces.append(surf)
+
+                port_tags[f"P{port_num}"] = surfaces
+                port_info.append(
+                    {
+                        "portnumber": port_num,
+                        "name": port.name,
+                        "Z0": port.impedance,
+                        "type": "cpw",
+                        "elements": [
+                            {"surface_idx": i, "direction": port.directions[i]}
+                            for i in range(len(port.centers))
+                        ],
+                        "width": port.width,
+                        "length": port.length or port.width,
+                        "zmin": zmin,
+                        "zmax": zmin,
+                    }
+                )
 
         elif port.geometry == PortGeometry.VIA:
             # Via port: vertical between two layers

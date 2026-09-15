@@ -219,10 +219,35 @@ class WavePortConfig(BaseModel):
     excited: bool = True
 
 
+class TwoTerminalPortConfig(BaseModel):
+    """Configuration for a two-terminal lumped port (single Palace port, two elements).
+
+    Both terminals are combined into one Palace LumpedPort with two EDGE-geometry
+    elements (vertical surfaces spanning the conductor thickness), collapsing the
+    simulation to a true 1-port S11 measurement on a coplanar device.
+
+    Attributes:
+        plus_port: GDS port name for the + (excitation) terminal
+        minus_port: GDS port name for the - (reference) terminal
+        layer: Conductor layer containing both terminals (e.g., "metal1")
+        impedance: Port impedance in Ohms
+        excited: Whether this port is excited
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    plus_port: str = Field(description="GDS port name for the + terminal")
+    minus_port: str = Field(description="GDS port name for the - terminal")
+    layer: str = Field(description="Conductor layer containing both terminals")
+    impedance: float = Field(default=50.0, gt=0)
+    excited: bool = True
+
+
 __all__ = [
     "CPWPortConfig",
     "ImpedanceBoundaryConfig",
     "PortConfig",
     "TerminalConfig",
+    "TwoTerminalPortConfig",
     "WavePortConfig",
 ]

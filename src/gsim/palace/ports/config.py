@@ -28,6 +28,7 @@ class PortGeometry(Enum):
 
     INPLANE = "inplane"  # Horizontal surface on single metal layer (Direction: +X, +Y)
     VIA = "via"  # Vertical surface between two metal layers (Direction: +Z)
+    EDGE = "edge"  # Vertical surface at conductor face, within a single layer (X/Y dir)
 
 
 @dataclass
@@ -283,6 +284,45 @@ def configure_cpw_port(
     port.info["cpw_gap_width"] = gap_width
 
 
+def configure_two_terminal_port(
+    plus_port,
+    minus_port,
+    layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+):
+    """Configure two gdsfactory ports as a single two-terminal Palace lumped port.
+
+    Both ports are combined into one Palace LumpedPort with two EDGE-geometry
+    elements (vertical surfaces spanning the conductor thickness). This models
+    a true 1-port S11 simulation without an artificial reference layer.
+
+    Args:
+        plus_port: Excited gdsfactory Port (+ terminal)
+        minus_port: Reference gdsfactory Port (- terminal)
+        layer: Conductor layer name containing both ports (e.g., "metal1")
+        impedance: Port impedance in Ohms (default: 50)
+        excited: Whether this port is excited (default: True)
+
+    Examples:
+        ```python
+        configure_two_terminal_port(
+            c.ports["P1"], c.ports["P2"], layer="metal1", excited=True
+        )
+        ```
+    """
+    plus_port.info["palace_type"] = "two_terminal"
+    plus_port.info["layer"] = layer
+    plus_port.info["impedance"] = impedance
+    plus_port.info["excited"] = excited
+    plus_port.info["minus_port_name"] = minus_port.name
+
+    # Clear minus port so extract_ports skips it as a standalone port
+    minus_port.info["palace_type"] = None
+    for key in ("from_layer", "to_layer", "layer", "impedance", "excited"):
+        minus_port.info[key] = None
+
+
 def configure_wave_port(
     ports,
     layer: str,
@@ -346,11 +386,80 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """
     palace_ports = []
 
+    # Build name-to-port lookup for two-terminal minus-port resolution
+    port_by_name = {p.name: p for p in component.ports}
+
     for port in component.ports:
         info = port.info
         palace_type = info.get("palace_type")
 
         if palace_type is None:
+            continue
+
+        if palace_type == "two_terminal":
+            minus_port_name = info.get("minus_port_name")
+            if minus_port_name is None:
+                raise ValueError(
+                    f"Two-terminal port '{port.name}' missing 'minus_port_name'"
+                )
+            minus_port = port_by_name.get(minus_port_name)
+            if minus_port is None:
+                raise ValueError(
+                    f"Minus port '{minus_port_name}' not found on component"
+                )
+
+            layer_name = info.get("layer")
+            zmin, zmax = 0.0, 0.0
+            if layer_name and layer_name in stack.layers:
+                layer_obj = stack.layers[layer_name]
+                zmin = layer_obj.zmin
+                zmax = layer_obj.zmax
+
+            plus_center = (float(port.center[0]), float(port.center[1]))
+            minus_center = (
+                float(minus_port.center[0]),
+                float(minus_port.center[1]),
+            )
+
+            def _orient_to_palace_dir(angle: float) -> str:
+                a = angle % 360
+                if a < 45 or a >= 315:
+                    return "+X"
+                if 45 <= a < 135:
+                    return "+Y"
+                if 135 <= a < 225:
+                    return "-X"
+                return "-Y"
+
+            plus_orient = (
+                float(port.orientation) if port.orientation is not None else 0.0
+            )
+            minus_orient = (
+                float(minus_port.orientation)
+                if minus_port.orientation is not None
+                else 0.0
+            )
+
+            tt_port = PalacePort(
+                name=port.name,
+                port_type=PortType.LUMPED,
+                geometry=PortGeometry.EDGE,
+                center=plus_center,
+                width=float(port.width),
+                orientation=plus_orient,
+                zmin=zmin,
+                zmax=zmax,
+                layer=layer_name,
+                multi_element=True,
+                centers=[plus_center, minus_center],
+                directions=[
+                    _orient_to_palace_dir(plus_orient),
+                    _orient_to_palace_dir(minus_orient),
+                ],
+                impedance=info.get("impedance", 50.0),
+                excited=info.get("excited", True),
+            )
+            palace_ports.append(tt_port)
             continue
 
         if palace_type == "cpw":
