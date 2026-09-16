@@ -375,7 +375,11 @@ class SParams:
         S = np.zeros((len(f_hz), n, n), dtype=complex)
         for i, pi in enumerate(self._port_names):
             for j, pj in enumerate(self._port_names):
-                S[:, i, j] = self[(pi, pj)].complex
+                if (pi, pj) in self._data:
+                    S[:, i, j] = self._data[(pi, pj)].complex
+                elif (pj, pi) in self._data:
+                    # assume reciprocity: S_ij = S_ji
+                    S[:, i, j] = self._data[(pj, pi)].complex
         return rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
 
     def _filtered_entries(self, full: bool) -> list[tuple[str, SParam]]:
