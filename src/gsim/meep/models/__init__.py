@@ -7,6 +7,7 @@ from gsim.meep.models.api import (
     Material,
     ModeSolver,
     ModeSource,
+    PortVerticalOverride,
     Symmetry,
 )
 from gsim.meep.models.config import (
@@ -51,6 +52,7 @@ __all__ = [
     "ModeSolverConfig",
     "ModeSource",
     "PortData",
+    "PortVerticalOverride",
     "ResolutionConfig",
     "SParameterResult",
     "SimConfig",

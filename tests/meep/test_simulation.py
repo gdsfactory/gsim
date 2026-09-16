@@ -9,6 +9,7 @@ from gsim.meep import (
     FDTD,
     Domain,
     ModeSource,
+    PortVerticalOverride,
     Simulation,
 )
 from gsim.meep.models.api import Material
@@ -28,6 +29,29 @@ class TestMaterial:
     def test_loss_tangent_must_be_non_negative(self):
         with pytest.raises(ValidationError):
             Material(permittivity=1.5, loss_tangent=-0.1)
+
+
+class TestPortVerticalOverride:
+    """Tests for typed explicit port-plane values."""
+
+    def test_requires_z_or_span(self):
+        with pytest.raises(ValidationError, match="provide z, z_span, or both"):
+            PortVerticalOverride()
+
+    @pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), float("nan")])
+    def test_span_must_be_positive_and_finite(self, value):
+        with pytest.raises(ValidationError):
+            PortVerticalOverride(z_span=value)
+
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+    def test_z_must_be_finite(self, value):
+        with pytest.raises(ValidationError):
+            PortVerticalOverride(z=value)
+
+    def test_simulation_accepts_numeric_center_shorthand(self):
+        sim = Simulation(port_overrides={"o1": 1.535})
+
+        assert sim.port_overrides["o1"] == PortVerticalOverride(z=1.535)
 
 
 class TestStoppingFields:
@@ -299,6 +323,31 @@ class TestValidation:
         sim.monitors = ["o1", "o2", "o3"]
         assert sim.monitors == ["o1", "o2", "o3"]
 
+    def test_rejects_unknown_port_override(self):
+        import gdsfactory as gf
+
+        gf.gpdk.PDK.activate()
+        component = gf.Component()
+        component.add_port(
+            name="o1", center=(0.0, 0.0), width=0.5, orientation=0, layer=(1, 0)
+        )
+        sim = Simulation()
+        sim.geometry.component = component
+        sim.port_overrides = {"typo": PortVerticalOverride(z=1.535)}
+
+        result = sim.validate_config()
+
+        assert any("Port override 'typo' not found" in error for error in result.errors)
+
+    def test_rejects_port_override_in_collapsed_xy(self):
+        sim = Simulation()
+        sim.solver(mode="2d", z_cut="auto")
+        sim.port_overrides = {"o1": PortVerticalOverride(z=1.535)}
+
+        result = sim.validate_config()
+
+        assert any("XY 2D collapses Z" in error for error in result.errors)
+
     def test_write_config_requires_output_dir(self):
         sim = Simulation()
         with pytest.raises(TypeError):
@@ -541,6 +590,147 @@ def _xy_background_simulation(z_cut="auto"):
     return simulation
 
 
+def _mixed_vertical_simulation():
+    """Build a PH18DA-independent component with Si and SiN ports."""
+    import gdsfactory as gf
+
+    from gsim.common.stack import Layer, LayerStack
+
+    gf.gpdk.PDK.activate()
+    component = gf.Component()
+    component.add_polygon(
+        [(-2, -0.25), (0, -0.25), (0, 0.25), (-2, 0.25)],
+        layer=(171, 0),
+    )
+    component.add_polygon(
+        [(0, -0.4), (2, -0.4), (2, 0.4), (0, 0.4)],
+        layer=(174, 0),
+    )
+    component.add_port(
+        name="si",
+        center=(-2.0, 0.0),
+        width=0.5,
+        orientation=180,
+        layer=(171, 0),
+    )
+    component.add_port(
+        name="sin",
+        center=(2.0, 0.0),
+        width=0.8,
+        orientation=0,
+        layer=(174, 0),
+    )
+    stack = LayerStack(
+        pdk_name="test",
+        layers={
+            "core": Layer(
+                name="core",
+                gds_layer=(171, 0),
+                zmin=0.0,
+                zmax=0.49,
+                thickness=0.49,
+                material="si",
+                layer_type="dielectric",
+            ),
+            "sin": Layer(
+                name="sin",
+                gds_layer=(174, 0),
+                zmin=1.34,
+                zmax=1.73,
+                thickness=0.39,
+                material="sin",
+                layer_type="dielectric",
+            ),
+        },
+        dielectrics=[
+            {"name": "cladding", "zmin": -1.0, "zmax": 3.0, "material": "SiO2"}
+        ],
+    )
+    simulation = Simulation()
+    simulation.geometry(component=component, stack=stack)
+    simulation.materials = {"si": 12.0, "sin": 4.0, "SiO2": 2.1}
+    simulation.source(port="si")
+    simulation.monitors = ["si", "sin"]
+    simulation.domain(z_bounds=(-1.0, 3.0))
+    return simulation
+
+
+class TestPerPortVerticalBuild:
+    """Integration coverage across inference, remapping, and overrides."""
+
+    def test_mixed_ports_resolve_before_physical_layer_remapping(self):
+        simulation = _mixed_vertical_simulation()
+        original_layers = {
+            name: tuple(layer.gds_layer)
+            for name, layer in simulation.geometry.stack.layers.items()
+        }
+
+        result = simulation.build_config()
+        ports = {port.name: port for port in result.config.ports}
+        remapped_layers = {
+            entry.layer_name: tuple(entry.gds_layer)
+            for entry in result.config.layer_stack
+        }
+
+        assert ports["si"].center[2] == pytest.approx(0.245)
+        assert ports["si"].z_span == pytest.approx(1.49)
+        assert ports["sin"].center[2] == pytest.approx(1.535)
+        assert ports["sin"].z_span == pytest.approx(1.39)
+        assert remapped_layers["core"] != original_layers["core"]
+        assert remapped_layers["sin"] != original_layers["sin"]
+
+    def test_field_wise_overrides_serialize_resolved_geometry(self, tmp_path):
+        import json
+
+        simulation = _mixed_vertical_simulation()
+        simulation.port_overrides = {
+            "si": {"z": 1.0},
+            "sin": {"z_span": 1.5},
+        }
+
+        result = simulation.build_config()
+        result.config.to_json(tmp_path / "config.json")
+        ports = {port.name: port for port in result.config.ports}
+        serialized = {
+            port["name"]: port
+            for port in json.loads((tmp_path / "config.json").read_text())["ports"]
+        }
+
+        assert ports["si"].center[2] == pytest.approx(1.0)
+        assert ports["si"].z_span == pytest.approx(1.49)
+        assert ports["sin"].center[2] == pytest.approx(1.535)
+        assert ports["sin"].z_span == pytest.approx(1.5)
+        assert serialized["si"]["z_span"] == pytest.approx(1.49)
+        assert serialized["sin"]["z_span"] == pytest.approx(1.5)
+
+    def test_override_plane_must_fit_inside_domain(self):
+        simulation = _mixed_vertical_simulation()
+        simulation.port_overrides = {"si": {"z": 2.8, "z_span": 1.0}}
+
+        with pytest.raises(ValueError, match=r"outside domain\.z_bounds"):
+            simulation.build_config()
+
+    def test_inferred_plane_uses_pre_crop_stack_then_checks_domain(self):
+        simulation = _mixed_vertical_simulation()
+        simulation.domain.z_bounds = (-1.0, 1.0)
+
+        with pytest.raises(
+            ValueError,
+            match=r"Port 'sin' mode plane spans Z=.*outside domain\.z_bounds",
+        ):
+            simulation.build_config()
+
+    def test_auto_crop_checks_every_mixed_height_port_plane(self):
+        simulation = _mixed_vertical_simulation()
+        simulation.domain.z_bounds = "auto"
+
+        with pytest.raises(
+            ValueError,
+            match=r"Port 'sin' mode plane spans Z=.*outside domain\.z_bounds",
+        ):
+            simulation.build_config()
+
+
 class Test2DMode:
     """Tests for 2D simulation mode (mode='2d')."""
 
@@ -717,6 +907,106 @@ def _xz_trivial_stack():
 
 class TestXZBuildConfig:
     """Tests for XZ 2D fields wired through Simulation.build_config()."""
+
+    def test_port_override_is_honored_with_active_z(self):
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 12.0, "SiO2": 2.1}
+        sim.solver(mode="2d", y_cut="auto")
+        sim.domain.z_bounds = (0.0, 3.0)
+        sim.source.port = "o1"
+        sim.monitors = ["o1"]
+        sim.port_overrides = {"o1": PortVerticalOverride(z=1.535, z_span=1.39)}
+
+        port = sim.build_config().config.ports[0]
+
+        assert port.center[2] == pytest.approx(1.535)
+        assert port.z_span == pytest.approx(1.39)
+
+    def test_automatic_port_z_is_inferred_in_xz(self):
+        sim = Simulation()
+        sim.geometry.component = _xz_straight_component()
+        sim.geometry.stack = _xz_trivial_stack()
+        sim.materials = {"si": 12.0, "SiO2": 2.1}
+        sim.solver(mode="2d", y_cut="auto")
+        sim.source.port = "o1"
+        sim.monitors = ["o1"]
+
+        port = sim.build_config().config.ports[0]
+
+        assert port.center[2] == pytest.approx(0.11)
+        assert port.z_span == pytest.approx(1.22)
+
+    def test_irrelevant_ports_are_filtered_before_vertical_inference(self, caplog):
+        from gsim.common.stack import Layer, LayerStack
+
+        component = _xz_straight_component()
+        component.add_polygon(
+            [(-1.0, 2.75), (1.0, 2.75), (1.0, 3.25), (-1.0, 3.25)],
+            layer=(2, 0),
+        )
+        component.add_port(
+            name="off_cut",
+            center=(1.0, 3.0),
+            orientation=0.0,
+            width=0.5,
+            layer=(2, 0),
+        )
+        component.add_port(
+            name="y_facing",
+            center=(0.0, 0.0),
+            orientation=90.0,
+            width=0.5,
+            layer=(2, 0),
+        )
+        stack = LayerStack(
+            layers={
+                "core": Layer(
+                    name="core",
+                    gds_layer=(1, 0),
+                    zmin=0.0,
+                    zmax=0.22,
+                    thickness=0.22,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+                "ambiguous_lower": Layer(
+                    name="ambiguous_lower",
+                    gds_layer=(2, 0),
+                    zmin=0.0,
+                    zmax=0.2,
+                    thickness=0.2,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+                "ambiguous_upper": Layer(
+                    name="ambiguous_upper",
+                    gds_layer=(2, 0),
+                    zmin=1.0,
+                    zmax=1.4,
+                    thickness=0.4,
+                    material="si",
+                    layer_type="dielectric",
+                ),
+            },
+            dielectrics=[
+                {"name": "clad", "zmin": -1.0, "zmax": 2.0, "material": "SiO2"}
+            ],
+        )
+        sim = Simulation()
+        sim.geometry(component=component, stack=stack)
+        sim.materials = {"si": 12.0, "SiO2": 2.1}
+        sim.solver(mode="2d", y_cut=0.0)
+        sim.domain.z_bounds = (-1.0, 2.0)
+        sim.source.port = "o1"
+        sim.monitors = ["o1"]
+
+        ports = sim.build_config().config.ports
+
+        assert [port.name for port in ports] == ["o1"]
+        assert "Dropping port 'off_cut'" in caplog.text
+        assert "Dropping port 'y_facing'" in caplog.text
 
     def test_materializes_derived_layers_without_target_alias(self):
         """Derived and direct physical levels receive independent GDS tuples."""

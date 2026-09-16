@@ -22,6 +22,7 @@ from gsim.meep.models.api import (
     Material,
     ModeSolver,
     ModeSource,
+    PortVerticalOverride,
 )
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,13 @@ class Simulation(BaseModel):
         ),
     )
     monitors: list[str] = Field(default_factory=list)
+    port_overrides: dict[str, PortVerticalOverride] = Field(
+        default_factory=dict,
+        description=(
+            "Explicit per-port Z center/span overrides. Numeric values are "
+            "accepted as shorthand for {'z': value}."
+        ),
+    )
     num_freqs: int = Field(
         default=11,
         ge=1,
@@ -375,6 +383,21 @@ class Simulation(BaseModel):
                     f"got {type(val).__name__}."
                 )
         return out
+
+    @field_validator("port_overrides", mode="before")
+    @classmethod
+    def _normalize_port_overrides(cls, value: Any) -> Any:
+        """Accept ``{"o1": 1.5}`` as shorthand for a Z-center override."""
+        if not isinstance(value, dict):
+            return value
+        return {
+            name: PortVerticalOverride(z=float(override))
+            if isinstance(override, (int, float)) and not isinstance(override, bool)
+            else override
+            if isinstance(override, PortVerticalOverride)
+            else PortVerticalOverride.model_validate(override)
+            for name, override in value.items()
+        }
 
     # -------------------------------------------------------------------------
     # Resolved materials helper
@@ -451,6 +474,22 @@ class Simulation(BaseModel):
                     for m in self.monitors
                     if m not in port_names
                 )
+
+            if self.port_overrides:
+                port_names = [p.name for p in ports]
+                errors.extend(
+                    f"Port override '{name}' not found. Available: {port_names}"
+                    for name in self.port_overrides
+                    if name not in port_names
+                )
+
+        if self.port_overrides and not (
+            self.solver.resolved_is_3d() or self.solver.resolved_plane() == "xz"
+        ):
+            errors.append(
+                "Port Z overrides require an active Z axis (3D or XZ 2D); "
+                "XY 2D collapses Z."
+            )
 
         # TODO: refactor source into a more coherent style. Today `Simulation.source`
         # is a default-factory ModeSource that's always present, so we detect
@@ -899,13 +938,17 @@ class Simulation(BaseModel):
         )
 
     def _domain_config(self, z_bounds: tuple[float, float] | None = None) -> Any:
-        """Translate Domain to config with optional resolved Z bounds."""
+        """Translate public bounds and automatic margins to runner config."""
         from gsim.meep.models.config import DomainConfig
 
-        mx = self.domain.resolved_margin_x()
-        my = self.domain.resolved_margin_y()
+        x_bounds = None if self.domain.x_bounds == "auto" else self.domain.x_bounds
+        y_bounds = None if self.domain.y_bounds == "auto" else self.domain.y_bounds
+        mx = (0.0, 0.0) if x_bounds is not None else self.domain.resolved_margin_x()
+        my = (0.0, 0.0) if y_bounds is not None else self.domain.resolved_margin_y()
         mz = self.domain.resolved_margin_z()
         return DomainConfig(
+            x_bounds=x_bounds,
+            y_bounds=y_bounds,
             z_bounds=z_bounds,
             dpml=self.domain.pml,
             extend_into_pml=self.domain.extend_into_pml,
@@ -1299,6 +1342,12 @@ class Simulation(BaseModel):
         is_3d = self.solver.resolved_is_3d()
         plane = self.solver.resolved_plane()
 
+        if plane == "xz" and self.domain.y_bounds != "auto":
+            raise ValueError(
+                "Explicit domain.y_bounds requires an active Y axis; XZ 2D "
+                "collapses Y. Use solver.y_cut to choose the slice."
+            )
+
         # Resolve stack
         self._ensure_stack()
         if self.geometry.stack is None:
@@ -1317,10 +1366,14 @@ class Simulation(BaseModel):
         # with an active Z axis. XY 2D collapses Z and therefore rejects an
         # explicit interval.
         resolved_z_bounds: tuple[float, float] | None = None
+        port_layer_stack = self.geometry.stack
         if is_3d or plane == "xz":
             self._prepare_stack_for_z_crop()
             if self.geometry.stack is None:  # pragma: no cover - guarded above
                 raise ValueError("Stack resolution failed.")
+            # Ports retain their fabrication-mask tuples. Resolve them against
+            # this original stack, before Z cropping and physical-layer remap.
+            port_layer_stack = self.geometry.stack
             reference_export = materialize_physical_layers(
                 original_component,
                 self.geometry.stack,
@@ -1372,17 +1425,53 @@ class Simulation(BaseModel):
         accuracy_cfg = self._accuracy_config()
         diagnostics_cfg = self._diagnostics_config()
 
+        # Reject invalid explicit X/Y windows before automatic port extension.
+        # Materialize only the original physical layers for this check so
+        # fabrication markers do not affect containment, while avoiding an
+        # enormous extension when bounds are far from the device.
+        if domain_cfg.x_bounds is not None or domain_cfg.y_bounds is not None:
+            from gsim.meep.domain import validate_explicit_xy_bounds
+
+            if self.geometry.stack is None:  # pragma: no cover - guarded above
+                raise ValueError("Stack resolution failed.")
+            physical_reference = materialize_physical_layers(
+                original_component,
+                self.geometry.stack,
+            )
+            validation_port_infos = extract_port_info(
+                original_component,
+                self.geometry.stack,
+                source_port=source_cfg.port,
+                is_3d=is_3d,
+            )
+            if plane == "xz":
+                validation_port_infos = filter_ports_for_xz(
+                    validation_port_infos,
+                    y_cut=y_cut if y_cut is not None else 0.0,
+                )
+                if self.fiber_source is not None:
+                    validation_port_infos = [
+                        port.model_copy(update={"is_source": False})
+                        for port in validation_port_infos
+                    ]
+            validate_explicit_xy_bounds(
+                physical_reference.component,
+                physical_reference.stack,
+                validation_port_infos,
+                domain_cfg,
+                plane,
+                y_cut,
+                self.fiber_source,
+            )
+
         # Compute port extension length
         extend_length = domain_cfg.extend_ports
         if extend_length == 0.0:
-            extend_length = (
-                max(
-                    domain_cfg.margin_x_low,
-                    domain_cfg.margin_x_high,
-                    domain_cfg.margin_y_low,
-                    domain_cfg.margin_y_high,
-                )
-                + domain_cfg.dpml
+            from gsim.meep.domain import automatic_port_extension_length
+
+            extend_length = automatic_port_extension_length(
+                original_component,
+                domain_cfg,
             )
 
         # Extend source-mask waveguide ports before evaluating physical layers.
@@ -1444,20 +1533,32 @@ class Simulation(BaseModel):
 
         # Extract port info from original component
         port_infos = extract_port_info(
-            original_component, stack, source_port=source_cfg.port, is_3d=is_3d
+            original_component,
+            port_layer_stack,
+            source_port=source_cfg.port,
+            is_3d=is_3d or plane == "xz",
+            port_margin=domain_cfg.port_margin,
+            port_overrides=self.port_overrides,
+            y_cut=y_cut if plane == "xz" else None,
         )
 
-        # Drop ports that don't intersect the XZ cut.
         if plane == "xz":
-            port_infos = filter_ports_for_xz(
-                port_infos, y_cut=y_cut if y_cut is not None else 0.0
-            )
             # When a fiber source drives the sim, no port is the excitation —
             # demote any auto-tagged source port to a monitor.
             if self.fiber_source is not None:
                 port_infos = [
                     p.model_copy(update={"is_source": False}) for p in port_infos
                 ]
+
+            inactive_overrides = set(self.port_overrides) - {
+                port.name for port in port_infos
+            }
+            if inactive_overrides:
+                logger.warning(
+                    "Port override(s) %s are unused because those ports do not "
+                    "intersect the XZ cut.",
+                    sorted(inactive_overrides),
+                )
 
         # Build FiberSourceConfig (XZ 2D only) with pre-computed k-direction.
         fiber_source_cfg: FiberSourceConfig | None = None
@@ -1489,6 +1590,35 @@ class Simulation(BaseModel):
                 "nothing to observe. Either add a port intersecting y_cut, "
                 "or call sim.source_fiber(...)."
             )
+
+        # Retain the top-level span as a legacy runner fallback, while every
+        # newly built port carries its independently resolved vertical span.
+        core_layer, _ = _find_highest_n_layer(stack)
+        if core_layer is not None:
+            monitor_z_span: float | None = (
+                core_layer.zmax - core_layer.zmin
+            ) + 2 * domain_cfg.port_margin
+        else:
+            monitor_z_span = None
+
+        if resolved_z_bounds is not None:
+            z_low, z_high = resolved_z_bounds
+            tolerance = 1e-9
+            for port in port_infos:
+                port_z_span = (
+                    port.z_span
+                    if port.z_span is not None
+                    else monitor_z_span
+                    if monitor_z_span is not None
+                    else z_high - z_low
+                )
+                port_low = port.center[2] - port_z_span / 2
+                port_high = port.center[2] + port_z_span / 2
+                if port_low < z_low - tolerance or port_high > z_high + tolerance:
+                    raise ValueError(
+                        f"Port '{port.name}' mode plane spans Z=[{port_low}, "
+                        f"{port_high}], outside domain.z_bounds=[{z_low}, {z_high}]."
+                    )
 
         # Resolve materials (three-tier: user override > PDK overlay > built-in DB)
         active_source = (
@@ -1530,19 +1660,6 @@ class Simulation(BaseModel):
                 "(only applied in preview-only mode).",
                 stacklevel=2,
             )
-
-        # Size waveguide port monitors around the core layer (core
-        # thickness + 2·port_margin) rather than the full stack. For
-        # XZ 2D sims the stack is inflated to hold the fiber beam plane;
-        # using the full stack would make the port monitor unreasonably
-        # tall.
-        core_layer, _ = _find_highest_n_layer(stack)
-        if core_layer is not None:
-            monitor_z_span: float | None = (
-                core_layer.zmax - core_layer.zmin
-            ) + 2 * domain_cfg.port_margin
-        else:
-            monitor_z_span = None
 
         # Compute meep verbosity from `meep.native` logger level, with
         # `run(verbose="full")` override.

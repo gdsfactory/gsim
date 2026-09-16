@@ -550,12 +550,11 @@ def build_geometry(config, materials):
 # Sources and monitors
 # ---------------------------------------------------------------------------
 
-def get_port_z_span(config):
+def get_port_z_span(config, port=None):
     """Get z-span for waveguide port mode monitors.
 
-    Prefers the precomputed ``monitor_z_span`` (sized around the core
-    layer: ``core_thickness + 2*port_margin``) so monitors capture the
-    guided mode without spanning the full cell.
+    New configs carry a span resolved from each port's physical layer.
+    Legacy configs fall back to the global ``monitor_z_span``.
 
     In XY 2D mode returns a large arbitrary value (20 um) since the
     z-dimension is collapsed and the size doesn't affect the simulation.
@@ -564,6 +563,8 @@ def get_port_z_span(config):
     plane = config.get("plane", "xy")
     if not is_3d and plane == "xy":
         return 20
+    if port is not None and port.get("z_span") is not None:
+        return port["z_span"]
     mz = config.get("monitor_z_span")
     if mz is not None:
         return mz
@@ -617,33 +618,28 @@ def _estimate_source_x_size(config):
 
     Target length is ``6 * waist`` so the Gaussian envelope is captured
     well. If the cell is too narrow for that, cap and log a warning —
-    the user should increase ``domain.margin_x``/``domain.margin_y`` or
-    move the fiber.
+    the user should expand ``domain.x_bounds`` or ``domain.margin_x``, or move
+    the fiber.
     """
     bbox = config.get("component_bbox")
     domain = config["domain"]
     dpml = domain["dpml"]
-    margin_xy = max(
-        domain["margin_x_low"],
-        domain["margin_x_high"],
-        domain["margin_y_low"],
-        domain["margin_y_high"],
-    )
     fiber = config.get("fiber_source")
 
-    if bbox is not None:
-        width = bbox[2] - bbox[0]
-        bbox_left, bbox_right = bbox[0], bbox[2]
+    x_bounds = domain.get("x_bounds")
+    if x_bounds is not None:
+        interior_left, interior_right = x_bounds
+    elif bbox is not None:
+        interior_left = bbox[0] - domain.get("margin_x_low", 0.0)
+        interior_right = bbox[2] + domain.get("margin_x_high", 0.0)
     else:
-        width = 20.0
-        bbox_left, bbox_right = -10.0, 10.0
+        interior_left = -10.0 - domain.get("margin_x_low", 0.0)
+        interior_right = 10.0 + domain.get("margin_x_high", 0.0)
 
-    interior_width = width + 2 * margin_xy
+    interior_width = interior_right - interior_left
     if fiber is None:
         return max(interior_width, 2.0)
 
-    interior_left = bbox_left - margin_xy
-    interior_right = bbox_right + margin_xy
     fx = fiber["x"]
     waist = fiber.get("waist", 0.0)
 
@@ -653,7 +649,7 @@ def _estimate_source_x_size(config):
         logger.warning(
             "Fiber x=%.2f is outside or at the cell interior edge "
             "(interior [%.2f, %.2f]); using minimum source size. "
-            "Increase domain.margin_x/margin_y or move the fiber.",
+            "Expand domain.x_bounds/margin_x or move the fiber.",
             fx, interior_left, interior_right,
         )
         return 2.0
@@ -663,7 +659,7 @@ def _estimate_source_x_size(config):
         logger.warning(
             "Fiber source line capped at %.2f um (target %.2f = 6*waist); "
             "cell is too narrow on one side of fiber x=%.2f. "
-            "Increase domain.margin_x/margin_y so the Gaussian envelope fits.",
+            "Expand domain.x_bounds/margin_x so the Gaussian envelope fits.",
             2.0 * max_half, target, fx,
         )
         return 2.0 * max_half
@@ -692,7 +688,6 @@ def build_sources(config):
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     fwidth = config["source"]["fwidth"]
-    z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
     source_port_offset = config["domain"].get("source_port_offset", 0.1)
     is_3d = config.get("is_3d", True)
@@ -709,6 +704,7 @@ def build_sources(config):
     for port in config["ports"]:
         if not port["is_source"]:
             continue
+        z_span = get_port_z_span(config, port)
 
         # Offset source center into the device along propagation direction
         center_list = list(port["center"])
@@ -772,7 +768,6 @@ def build_monitors(config, sim):
     fcen = fdtd["fcen"]
     df = fdtd["df"]
     nfreq = fdtd["num_freqs"]
-    z_span = get_port_z_span(config)
     port_margin = config["domain"]["port_margin"]
     source_port_offset = config["domain"].get("source_port_offset", 0.1)
     distance_source_to_monitors = config["domain"].get(
@@ -781,6 +776,7 @@ def build_monitors(config, sim):
 
     monitors = {}
     for port in config["ports"]:
+        z_span = get_port_z_span(config, port)
         center_list = list(port["center"])
         normal_axis = port["normal_axis"]
         direction = port["direction"]
@@ -1527,6 +1523,22 @@ def save_epsilon_raw(sim, config, cell_center):
 # Main
 # ---------------------------------------------------------------------------
 
+def resolve_xy_cell(domain, bbox_low, bbox_high, axis):
+    """Return ``(cell_span, center)`` for one X/Y axis.
+
+    Explicit bounds are authoritative in new configs. Missing bounds preserve
+    legacy bbox-plus-per-side-margin sizing.
+    """
+    dpml = domain["dpml"]
+    resolved_bounds = domain.get(f"{axis}_bounds")
+    if resolved_bounds is not None:
+        inner_low, inner_high = resolved_bounds
+    else:
+        inner_low = bbox_low - domain.get(f"margin_{axis}_low", 0.0)
+        inner_high = bbox_high + domain.get(f"margin_{axis}_high", 0.0)
+    return (inner_high - inner_low) + 2 * dpml, (inner_high + inner_low) / 2
+
+
 def resolve_z_cell(domain, z_min, z_max, is_3d, is_xz):
     """Return ``(cell_span, center)`` for the active Z axis.
 
@@ -1586,7 +1598,7 @@ def main():
 
     # Compute simulation cell from component bounds + layer z-range
     # Use original component bbox if available (port extension changes GDS bbox)
-    component_bbox = config["component_bbox"]
+    component_bbox = config.get("component_bbox")
     if component_bbox is not None:
         bbox_left, bbox_bottom, bbox_right, bbox_top = component_bbox
     else:
@@ -1596,16 +1608,13 @@ def main():
 
     domain = config["domain"]
     dpml = domain["dpml"]
-    mx_lo = domain["margin_x_low"]
-    mx_hi = domain["margin_x_high"]
-    my_lo = domain["margin_y_low"]
-    my_hi = domain["margin_y_high"]
+    mx_lo = domain.get("margin_x_low", 0.0)
+    mx_hi = domain.get("margin_x_high", 0.0)
+    my_lo = domain.get("margin_y_low", 0.0)
+    my_hi = domain.get("margin_y_high", 0.0)
 
-    # XY: per-side margins are the gap between geometry bbox and PML.
-    cell_x = (bbox_right - bbox_left) + mx_lo + mx_hi + 2 * dpml
-    cell_y = (bbox_top - bbox_bottom) + my_lo + my_hi + 2 * dpml
-    center_x = (bbox_right + bbox_left) / 2 + (mx_hi - mx_lo) / 2
-    center_y = (bbox_top + bbox_bottom) / 2 + (my_hi - my_lo) / 2
+    cell_x, center_x = resolve_xy_cell(domain, bbox_left, bbox_right, "x")
+    cell_y, center_y = resolve_xy_cell(domain, bbox_bottom, bbox_top, "y")
 
     # Z range for 3D and XZ 2D. Include both layers and dielectrics
     # so PDKs without explicit box/clad layers still have headroom.

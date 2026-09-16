@@ -54,6 +54,29 @@ def test_legacy_xz_margins_are_applied_once():
     assert resolve_z_cell(domain, -0.5, 2.0, False, True) == (6.0, 1.0)
 
 
+def test_explicit_xy_bounds_override_bbox_and_margins():
+    resolve_xy_cell = _extract_runner_func("resolve_xy_cell")
+    domain = {
+        "dpml": 1.0,
+        "x_bounds": [-6.0, 8.0],
+        "margin_x_low": 20.0,
+        "margin_x_high": 30.0,
+    }
+
+    assert resolve_xy_cell(domain, -100.0, 100.0, "x") == (16.0, 1.0)
+
+
+def test_legacy_xy_config_uses_bbox_and_asymmetric_margins():
+    resolve_xy_cell = _extract_runner_func("resolve_xy_cell")
+    domain = {
+        "dpml": 1.0,
+        "margin_y_low": 0.5,
+        "margin_y_high": 1.5,
+    }
+
+    assert resolve_xy_cell(domain, -2.0, 3.0, "y") == (9.0, 1.0)
+
+
 def _extract_runner_func(name: str):
     """Exec a single pure-Python helper from the runner template in isolation.
 
@@ -114,3 +137,32 @@ def test_core_z_center_falls_back_to_midpoint_without_optical_data():
     }
 
     assert core_z_center(config) == 1.0
+
+
+def test_port_z_span_prefers_per_port_value_with_legacy_fallback():
+    """New and old serialized configs run through the same helper."""
+    get_port_z_span = _extract_runner_func("get_port_z_span")
+    config = {
+        "is_3d": True,
+        "monitor_z_span": 1.22,
+        "layer_stack": [{"zmin": 0.0, "zmax": 3.0}],
+    }
+
+    assert get_port_z_span(config, {"z_span": 1.39}) == 1.39
+    assert get_port_z_span(config, {}) == 1.22
+
+
+def test_port_z_span_keeps_collapsed_xy_behavior():
+    get_port_z_span = _extract_runner_func("get_port_z_span")
+    config = {
+        "is_3d": False,
+        "plane": "xy",
+        "monitor_z_span": 1.22,
+        "layer_stack": [{"zmin": 0.0, "zmax": 3.0}],
+    }
+
+    assert get_port_z_span(config, {"z_span": 1.39}) == 20
+
+
+def test_sources_and_monitors_resolve_span_inside_each_port_loop():
+    assert _MEEP_RUNNER_TEMPLATE.count("get_port_z_span(config, port)") == 2
