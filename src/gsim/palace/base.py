@@ -909,11 +909,11 @@ class PalaceSimMixin:
             for port in self.ports:
                 if port.geometry == "inplane" and port.layer is None:
                     errors.append(f"Port '{port.name}': inplane ports require 'layer'")
-                if port.geometry == "via" and (
+                if port.geometry == "interlayer" and (
                     port.from_layer is None or port.to_layer is None
                 ):
                     errors.append(
-                        f"Port '{port.name}': via ports require "
+                        f"Port '{port.name}': interlayer ports require "
                         "'from_layer' and 'to_layer'"
                     )
 
@@ -982,8 +982,8 @@ class PalaceSimMixin:
         from gsim.palace.ports import (
             configure_cpw_port,
             configure_inplane_port,
+            configure_interlayer_port,
             configure_two_terminal_port,
-            configure_via_port,
             configure_wave_port,
         )
 
@@ -1030,10 +1030,10 @@ class PalaceSimMixin:
                     excited=port_config.excited,
                     offset=port_config.offset,
                 )
-            elif port_config.geometry == "via" and (
+            elif port_config.geometry == "interlayer" and (
                 port_config.from_layer is not None and port_config.to_layer is not None
             ):
-                configure_via_port(
+                configure_interlayer_port(
                     gf_port,
                     from_layer=port_config.from_layer,
                     to_layer=port_config.to_layer,
@@ -2354,15 +2354,15 @@ class PalaceSimMixin:
         inductance: float | None = None,
         capacitance: float | None = None,
         excited: bool = True,
-        geometry: Literal["inplane", "via", "gap"] = "inplane",
+        geometry: Literal["inplane", "gap", "interlayer", "via"] = "inplane",
     ) -> None:
         """Add a single-element lumped port.
 
         Args:
             name: Port name (must match component port name)
             layer: Target layer for inplane ports
-            from_layer: Bottom layer for via ports
-            to_layer: Top layer for via ports
+            from_layer: First conductor layer for interlayer ports
+            to_layer: Second conductor layer for interlayer ports
             length: Port extent along direction (um)
             offset: Shift the port inward along the waveguide (um).
                 Positive moves away from the boundary, into the conductor.
@@ -2371,15 +2371,22 @@ class PalaceSimMixin:
             inductance: Series inductance (H)
             capacitance: Shunt capacitance (F)
             excited: Whether this port is excited
-            geometry: "inplane", "via", or "gap". Gap ports are vertical sheets
+            geometry: ``"inplane"``, ``"gap"``, or ``"interlayer"``. Gap ports
+                are vertical sheets
                 with GDS width spanning the gap along orientation, centered in
                 the gap and extending through the conductor layer thickness.
                 Gap ports currently require cardinal orientations; omit length.
+                ``"interlayer"`` creates a Z-directed sheet between two layers.
+                ``"via"`` is a deprecated alias for ``"interlayer"``. Use
+                :meth:`add_cpw_port` for the ``"cpw"`` lumped-port geometry.
 
         Example:
             >>> sim.add_port("o1", layer="topmetal2", length=5.0)
             >>> sim.add_port(
-            ...     "feed", from_layer="metal1", to_layer="topmetal2", geometry="via"
+            ...     "feed",
+            ...     from_layer="metal1",
+            ...     to_layer="topmetal2",
+            ...     geometry="interlayer",
             ... )
         """
         # Remove existing config for this port if any

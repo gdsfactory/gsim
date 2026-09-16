@@ -37,12 +37,24 @@ class TestDrivenSimValidation:
         with pytest.raises(ValueError):
             sim.add_port("o1", geometry="inplane")  # No layer specified
 
-    def test_via_port_requires_layers(self):
-        """Test that add_port raises for via port without layers."""
+    def test_interlayer_port_requires_layers(self):
+        """Test that add_port raises for interlayer port without layers."""
         sim = DrivenSim()
         # PortConfig validates eagerly at creation time
         with pytest.raises(ValueError):
-            sim.add_port("o1", geometry="via")  # No from_layer/to_layer
+            sim.add_port("o1", geometry="interlayer")
+
+    def test_via_port_warns_and_normalizes(self):
+        """The legacy via name remains functional as an interlayer alias."""
+        sim = DrivenSim()
+        with pytest.warns(DeprecationWarning, match="use 'interlayer'"):
+            sim.add_port(
+                "o1",
+                from_layer="metal1",
+                to_layer="topmetal2",
+                geometry="via",
+            )
+        assert sim.ports[0].geometry == "interlayer"
 
     def test_cpw_port_requires_layer(self):
         """Test validation catches CPW port without layer."""
@@ -51,6 +63,12 @@ class TestDrivenSimValidation:
         result = sim.validate_config()
         assert not result.valid
         assert any("'layer' is required" in e for e in result.errors)
+
+    def test_cpw_port_uses_canonical_geometry_name(self):
+        """The dedicated CPW config exposes the canonical geometry name."""
+        sim = DrivenSim()
+        sim.add_cpw_port("P1", layer="metal1", s_width=10, gap_width=6)
+        assert sim.cpw_ports[0].geometry == "cpw"
 
     def test_no_ports_warning(self):
         """Test validation warns when no ports configured."""

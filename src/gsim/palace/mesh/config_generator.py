@@ -530,7 +530,8 @@ def generate_palace_config(
                     if port.port_type == PortType.LUMPED:
                         direction = (
                             "Z"
-                            if port.geometry == PortGeometry.VIA
+                            if port.geometry
+                            in (PortGeometry.INTERLAYER, PortGeometry.VIA)
                             else port.direction.upper()
                         )
 

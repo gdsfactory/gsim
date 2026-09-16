@@ -6,6 +6,7 @@ This module provides helpers to configure gdsfactory ports with Palace metadata.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -24,11 +25,13 @@ class PortType(Enum):
 
 
 class PortGeometry(Enum):
-    """Internal geometry type for mesh generation."""
+    """Lumped-port surface geometry used for mesh generation."""
 
     INPLANE = "inplane"  # Horizontal surface on single metal layer (Direction: +X, +Y)
-    VIA = "via"  # Vertical surface between two metal layers (Direction: +Z)
     GAP = "gap"  # Vertical sheet across a coplanar gap, tangential X/Y field
+    INTERLAYER = "interlayer"  # Surface between two layers (Direction: +Z)
+    CPW = "cpw"  # Multi-element coplanar-waveguide port
+    VIA = "via"  # Deprecated compatibility name for INTERLAYER
     EDGE = "edge"  # Vertical surface at conductor face, within a single layer (X/Y dir)
 
 
@@ -49,8 +52,8 @@ class PalacePort:
 
     # Layer info
     layer: str | None = None  # For inplane: target layer
-    from_layer: str | None = None  # For via: bottom layer
-    to_layer: str | None = None  # For via: top layer
+    from_layer: str | None = None  # For interlayer: first layer
+    to_layer: str | None = None  # For interlayer: second layer
 
     # Port geometry
     length: float | None = None  # Port extent along direction (um)
@@ -174,7 +177,7 @@ def configure_gap_port(
         port.info[key] = None
 
 
-def configure_via_port(
+def configure_interlayer_port(
     ports,
     from_layer: str,
     to_layer: str,
@@ -182,29 +185,29 @@ def configure_via_port(
     excited: bool = True,
     offset: float = 0.0,
 ):
-    """Configure gdsfactory port(s) as via (vertical) lumped ports.
+    """Configure lumped ports between conductors on different layers.
 
-    Via ports are vertical lumped ports between two metal layers, used for microstrip
-    feed structures where excitation occurs in the Z direction.
+    Interlayer ports are used for structures such as microstrip feeds where the
+    excitation occurs in the Z direction between conductors on different layers.
 
     Args:
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         from_layer: Bottom conductor layer name (e.g., 'metal1')
         to_layer: Top conductor layer name (e.g., 'topmetal2')
-        resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
         offset: Shift port inward along the waveguide in XY (um).
             Positive moves away from the boundary, into the conductor.
 
     Examples:
         ```python
-        configure_via_port(c.ports["o1"], from_layer="metal1", to_layer="topmetal2")
-        configure_via_port(
+        configure_interlayer_port(
+            c.ports["o1"], from_layer="metal1", to_layer="topmetal2"
+        )
+        configure_interlayer_port(
             c.ports, from_layer="metal1", to_layer="topmetal2"
         )  # all ports
-        configure_via_port(
+        configure_interlayer_port(
             c.ports["o1"], from_layer="metal1", to_layer="topmetal2", offset=2.0
         )
         ```
@@ -221,6 +224,30 @@ def configure_via_port(
         port.info["to_layer"] = to_layer
         port.info["impedance"] = impedance
         port.info["excited"] = excited
+
+
+def configure_via_port(
+    ports,
+    from_layer: str,
+    to_layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure an interlayer port using the deprecated ``via`` name."""
+    warnings.warn(
+        "configure_via_port() is deprecated; use configure_interlayer_port() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return configure_interlayer_port(
+        ports,
+        from_layer=from_layer,
+        to_layer=to_layer,
+        impedance=impedance,
+        excited=excited,
+        offset=offset,
+    )
 
 
 def configure_cpw_port(
@@ -394,7 +421,7 @@ def configure_wave_port(
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """Extract Palace ports from a gdsfactory component.
 
-    Handles all port types: inplane, via, and CPW (multi-element).
+    Handles inplane, gap, interlayer, CPW, wave, and legacy edge ports.
 
     Args:
         component: gdsfactory Component with configured ports
@@ -522,7 +549,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             cpw_port = PalacePort(
                 name=port.name,
                 port_type=PortType.LUMPED,
-                geometry=PortGeometry.INPLANE,
+                geometry=PortGeometry.CPW,
                 center=(float(port.center[0]), float(port.center[1])),
                 width=gap_width,
                 orientation=float(port.orientation)
@@ -568,7 +595,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         elif palace_type == "lumped":
             port_type = PortType.LUMPED
             if from_layer and to_layer:
-                geometry = PortGeometry.VIA
+                geometry = PortGeometry.INTERLAYER
                 if from_layer in stack.layers:
                     zmin = stack.layers[from_layer].zmin
                 if to_layer in stack.layers:

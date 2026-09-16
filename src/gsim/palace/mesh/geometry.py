@@ -1674,8 +1674,8 @@ def add_ports(
                 }
             )
 
-        elif port.geometry == PortGeometry.VIA:
-            # Via port: vertical between two layers
+        elif port.geometry in (PortGeometry.INTERLAYER, PortGeometry.VIA):
+            # Interlayer port: vertical between two layers
             if port.from_layer is None or port.to_layer is None:
                 continue
             from_layer = stack.layers.get(port.from_layer)

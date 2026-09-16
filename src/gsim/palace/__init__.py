@@ -6,7 +6,7 @@ electromagnetic simulations using the Palace solver with gdsfactory components.
 Features:
     - Problem-specific simulation classes (DrivenSim, EigenmodeSim, ElectrostaticSim)
     - Layer stack extraction from PDK
-    - Port configuration (inplane, via, CPW)
+    - Lumped-port geometry (inplane, gap, interlayer, CPW)
     - Mesh generation with quality presets
     - Palace config file generation
 
@@ -123,7 +123,9 @@ from gsim.palace.ports import (
     PortGeometry,
     PortType,
     configure_cpw_port,
+    configure_gap_port,
     configure_inplane_port,
+    configure_interlayer_port,
     configure_two_terminal_port,
     configure_via_port,
     extract_ports,
@@ -195,7 +197,9 @@ __all__ = [
     "close_interactive_view",
     "close_interactive_views",
     "configure_cpw_port",
+    "configure_gap_port",
     "configure_inplane_port",
+    "configure_interlayer_port",
     "configure_two_terminal_port",
     "configure_via_port",
     "extract_axis_slice",
