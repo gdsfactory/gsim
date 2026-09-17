@@ -1786,6 +1786,17 @@ def add_ports(
                     # Backward-compatible fallback when 3D bounds are unavailable.
                     zmin = layer_zmin
                     zmax = layer_zmax
+                elif port.full_height:
+                    # Partial-width port that still needs the full z extent: the
+                    # air box is not part of the layer stack, so the clamp below
+                    # would cap the port just above the top metal and act as a
+                    # PEC lid in the port eigenproblem.
+                    if domain_bounds is None:
+                        raise ValueError(
+                            f"Port '{port.name}' has full_height=True but "
+                            "domain bounds were not provided to add_ports()"
+                        )
+                    _, _, zmin, _, _, zmax = domain_bounds
                 else:
                     zmin = zmin - port.z_margin
                     zmax = zmax + port.z_margin

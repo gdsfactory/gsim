@@ -221,6 +221,8 @@ class WavePortConfig(BaseModel):
         z_margin: Margin to extend port geometry in z-direction (um)
         max_size: If True, set z_margin and lateral_margin to
         fill the full simulation domain
+        full_height: If True, span the full simulation domain in z while
+        keeping the lateral extent set by lateral_margin
         mode: Mode number to excite
         offset: De-embedding distance in um
         excited: Whether this port is excited
@@ -237,6 +239,13 @@ class WavePortConfig(BaseModel):
         description=(
             "When True, set z_margin and lateral_margin"
             " to fill the full simulation domain"
+        ),
+    )
+    full_height: bool = Field(
+        default=False,
+        description=(
+            "When True, span the full simulation domain in z while keeping the"
+            " lateral extent set by lateral_margin"
         ),
     )
     mode: int = Field(default=1, ge=1, description="Mode number to excite")

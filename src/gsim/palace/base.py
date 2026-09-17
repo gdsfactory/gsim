@@ -1092,6 +1092,7 @@ class PalaceSimMixin:
                     z_margin=port_config.z_margin,
                     lateral_margin=port_config.lateral_margin,
                     max_size=port_config.max_size,
+                    full_height=port_config.full_height,
                     excited=port_config.excited,
                     mode=port_config.mode,
                     offset=port_config.offset,
@@ -2511,6 +2512,7 @@ class PalaceSimMixin:
         z_margin: float = 0.0,
         lateral_margin: float = 0.0,
         max_size: bool = False,
+        full_height: bool = False,
         mode: int = 1,
         excited: bool = True,
         offset: float = 0.0,
@@ -2526,6 +2528,12 @@ class PalaceSimMixin:
             max_size: When True, automatically set z_margin and lateral_margin
                 to fill the full simulation domain boundary on that side.
                 Overrides z_margin and lateral_margin values.
+            full_height: When True, span the full simulation domain in z while
+                the lateral extent stays governed by lateral_margin. Use this
+                for partial-width ports (e.g. one port per signal line on a
+                shared boundary face), where max_size would make the ports
+                overlap but the stack-clamped default z extent would place a
+                PEC lid just above the top metal. Ignored when max_size=True.
             mode: Mode number to excite.
             excited: Whether this port is excited
             offset: Offset distance used for scattering parameter de-embedding.
@@ -2549,6 +2557,7 @@ class PalaceSimMixin:
                 z_margin=z_margin,
                 lateral_margin=lateral_margin,
                 max_size=max_size,
+                full_height=full_height,
                 mode=mode,
                 excited=excited,
                 offset=offset,
