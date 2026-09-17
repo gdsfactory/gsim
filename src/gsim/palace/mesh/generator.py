@@ -983,6 +983,79 @@ def _setup_mesh_fields(
         gmsh_utils.finalize_mesh_fields(field_ids)
 
 
+def _fine_size_targets(
+    groups: dict,
+    stack,
+    refined_mesh_size: float,
+) -> dict[str, float]:
+    """Map volume names to requested fine mesh sizes (no gmsh needed).
+
+    Volumes whose stack ``Layer`` carries a numeric ``mesh_resolution``
+    smaller than the global ``refined_mesh_size`` (e.g. the PN-junction
+    depletion strip, whose width can be far below the mesh target)
+    request dedicated refinement. Returns ``{volume_name: size_um}``.
+    """
+    layers = getattr(stack, "layers", {}) or {}
+    targets: dict[str, float] = {}
+    for name in groups.get("volumes", {}):
+        resolution = getattr(layers.get(name), "mesh_resolution", None)
+        if isinstance(resolution, bool) or not isinstance(resolution, (int, float)):
+            continue
+        size_um = float(resolution)
+        if 0.0 < size_um < refined_mesh_size:
+            targets[name] = size_um
+    return targets
+
+
+def _collect_fine_size_requests(
+    groups: dict,
+    stack,
+    refined_mesh_size: float,
+) -> list[tuple[list[int], float]]:
+    """Collect per-volume fine mesh-size requests for native 2D meshing.
+
+    Only curves shared with another dielectric volume (the registered
+    ``interface_surfaces``) are refined — domain-wall curves are excluded
+    so the fine zone never leaks onto the simulation boundary.
+
+    Requires an active gmsh session; returns ``[]`` when gmsh is not
+    initialized. Each entry is ``(curve_tags, size_um)``.
+    """
+    if not gmsh.isInitialized():
+        return []
+    targets = _fine_size_targets(groups, stack, refined_mesh_size)
+
+    internal_curves: set[int] = set()
+    for iface in groups.get("interface_surfaces", {}).values():
+        for tag in iface.get("tags", []):
+            internal_curves.add(int(tag))
+    if not internal_curves:
+        return []
+
+    requests: list[tuple[list[int], float]] = []
+    for name, vol_info in groups.get("volumes", {}).items():
+        if name not in targets:
+            continue
+        size_um = targets[name]
+        curves: set[int] = set()
+        for stag in vol_info.get("tags", []):
+            try:
+                boundary = gmsh.model.getBoundary(
+                    [(2, int(stag))],
+                    combined=False,
+                    oriented=False,
+                    recursive=False,
+                )
+            except Exception:
+                continue
+            for dim, ctag in boundary:
+                if dim == 1 and int(ctag) in internal_curves:
+                    curves.add(int(ctag))
+        if curves:
+            requests.append((sorted(curves), size_um))
+    return requests
+
+
 def generate_mesh(
     component,
     stack: LayerStack,
@@ -1136,16 +1209,63 @@ def generate_mesh(
                     for tag in info.get("tags", [])
                 }
             )
+            # Per-volume fine-size requests (e.g. the PN-junction depletion
+            # strip): each gets its own Threshold field keyed to the
+            # requested size so narrow features mesh with several
+            # well-shaped elements across instead of slivers.
+            fine_requests = _collect_fine_size_requests(
+                groups, stack, refined_mesh_size
+            )
+            field_ids: list[int] = []
+            next_field_id = 1
             if refinement_lines:
                 aggressive_size = max(refined_mesh_size * 0.5, 1e-4)
-                field_id = gmsh_utils.setup_mesh_refinement(
-                    refinement_lines,
-                    aggressive_size,
-                    max_mesh_size,
-                    sampling=400,
-                    dist_max=max_mesh_size * 0.5,
+                field_ids.append(
+                    gmsh_utils.setup_mesh_refinement(
+                        refinement_lines,
+                        aggressive_size,
+                        max_mesh_size,
+                        sampling=400,
+                        dist_max=max_mesh_size * 0.5,
+                        distance_id=next_field_id,
+                        threshold_id=next_field_id + 1,
+                    )
                 )
-                gmsh_utils.finalize_mesh_fields([field_id])
+                next_field_id += 2
+            for curve_tags, size_um in fine_requests:
+                total_length = 0.0
+                for ctag in curve_tags:
+                    try:
+                        bb = gmsh.model.getBoundingBox(1, int(ctag))
+                        total_length += math.hypot(bb[3] - bb[0], bb[4] - bb[1])
+                    except Exception:
+                        pass
+                sampling = (
+                    min(20000, max(400, math.ceil(total_length / (size_um / 4.0))))
+                    if total_length > 0
+                    else 2000
+                )
+                logger.info(
+                    "Fine mesh request: %d curves at %.4g um (sampling %d)",
+                    len(curve_tags),
+                    size_um,
+                    sampling,
+                )
+                field_ids.append(
+                    gmsh_utils.setup_mesh_refinement(
+                        curve_tags,
+                        size_um,
+                        max_mesh_size,
+                        sampling=sampling,
+                        dist_min=2.0 * size_um,
+                        dist_max=max(1.0, 40.0 * size_um),
+                        distance_id=next_field_id,
+                        threshold_id=next_field_id + 1,
+                    )
+                )
+                next_field_id += 2
+            if field_ids:
+                gmsh_utils.finalize_mesh_fields(field_ids)
             else:
                 gmsh.option.setNumber("Mesh.MeshSizeMin", refined_mesh_size)
                 gmsh.option.setNumber("Mesh.MeshSizeMax", max_mesh_size)

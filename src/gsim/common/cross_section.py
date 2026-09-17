@@ -233,7 +233,7 @@ def build_doped_cross_section(
 
     Builds the base PDK stack, optionally overrides the ``metal1`` electrodes,
     registers the gradient-doping layers/materials produced by
-    :func:`gsim.common.stack.doping.make_doping_profile` plus any additional rib
+    :func:`gsim.common.stack.pn_junction.make_doping_profile` plus any additional rib
     doping layers (e.g. a PN junction), and slices the component at the requested
     plane.
 
@@ -305,6 +305,12 @@ def build_doped_cross_section(
     for name, layer in layer_specs.items():
         stack.layers[name] = layer
 
+    # Register the doping/rib materials on the stack so downstream consumers
+    # (Palace config generator, Meep, ...) resolve their eps/sigma instead of
+    # silently falling back to vacuum.
+    for name, mat in materials.items():
+        stack.materials[name] = mat.to_dict() if hasattr(mat, "to_dict") else mat
+
     section = extract_plane_section(
         component.copy(),
         stack,
@@ -355,6 +361,8 @@ def build_optical_cross_section(
     cladding_top: float = 2.0,
     device_material: str = "si",
     cladding_material: str = "sio2",
+    device_materials: Mapping[str, str] | None = None,
+    extra_materials: Mapping[str, Any] | None = None,
     mesh_resolution: str | float = "fine",
     verbose: bool = True,
 ) -> tuple[LayerStack, list[Rect2D] | list[RectYZ2D] | list[PolygonXY2D]]:
@@ -362,12 +370,18 @@ def build_optical_cross_section(
 
     Builds a photonic ``LayerStack`` for a simplified device — e.g. a rib +
     slab + PN junction made of a single semiconductor — sitting in a uniform
-    cladding background. Unlike :func:`build_doped_cross_section`, every device
-    region is mapped to the same plain dielectric material (e.g. ``"si"``) and
-    no electrodes, vias, or graded doping are registered. A single ``oxide``
+    cladding background. Unlike :func:`build_doped_cross_section`, no
+    electrodes, vias, or graded doping are registered. A single ``oxide``
     dielectric slab (the cladding material) spans the full stack z-range, so the
     simulation domain is a uniform cladding with only the drawn device embedded
     in it.
+
+    By default every device region shares ``device_material`` (homogeneous
+    body). Pass ``device_materials`` to map individual regions to their own
+    materials (e.g. per-strip free-carrier permittivities from
+    :func:`gsim.common.stack.pn_junction.make_segmented_junction_profile`)
+    and ``extra_materials`` to register those ``MaterialProperties`` on the
+    stack.
 
     Args:
         component: gdsfactory component the cross-section is extracted from.
@@ -375,12 +389,18 @@ def build_optical_cross_section(
         value: Plane coordinate in um.
         device_layers: Mapping of ``name -> (gds_layer, zmin, zmax)`` for every
             patterned device region (e.g. ``{"core": ((1, 0), 0.0, 0.22)}``).
-            All regions share ``device_material``.
         substrate_thickness: Cladding thickness below z=0 in um.
         cladding_top: Cladding thickness above z=0 in um.
-        device_material: Material name for all device regions (default ``"si"``).
+        device_material: Default material name for all device regions.
         cladding_material: Material name of the uniform background (default
             ``"sio2"``).
+        device_materials: Optional per-region material override
+            (``{region_name: material_name}``); regions absent from the
+            mapping use ``device_material``.
+        extra_materials: Optional ``{material_name: MaterialProperties}``
+            (or plain dicts) merged into ``stack.materials`` after the
+            database lookup, so custom per-region materials resolve
+            downstream.
         mesh_resolution: Mesh resolution assigned to the device ``Layer`` specs.
         verbose: Print the assembled stack and the extracted section.
 
@@ -394,6 +414,7 @@ def build_optical_cross_section(
 
     stack = LayerStack(pdk_name="optical")
 
+    per_region = device_materials or {}
     for name, (gds_layer, zmin, zmax) in device_layers.items():
         stack.layers[name] = Layer(
             name=name,
@@ -401,7 +422,7 @@ def build_optical_cross_section(
             zmin=zmin,
             zmax=zmax,
             thickness=zmax - zmin,
-            material=device_material,
+            material=per_region.get(name, device_material),
             layer_type="dielectric",
             mesh_resolution=mesh_resolution,
         )
@@ -415,10 +436,13 @@ def build_optical_cross_section(
         }
     )
 
-    for material in (device_material, cladding_material):
+    for material in {device_material, cladding_material} | set(per_region.values()):
         props = get_material_properties(material)
         if props is not None:
             stack.materials[material] = props.to_dict()
+
+    for name, mat in (extra_materials or {}).items():
+        stack.materials[name] = mat.to_dict() if hasattr(mat, "to_dict") else mat
 
     section = extract_plane_section(
         component.copy(),

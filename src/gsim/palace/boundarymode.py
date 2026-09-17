@@ -135,10 +135,10 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
                 "Use set_cross_section('x=<value>') or set_cross_section('y=<value>')."
             )
 
-        if self.ports or self.cpw_ports or self.wave_ports:
+        if self.wave_ports:
             errors.append(
                 "Boundary mode uses cross_section-only native 2D meshing. "
-                "add_port(), add_cpw_port(), and add_wave_port() are not supported."
+                "add_wave_port() is not supported."
             )
 
         return ValidationResult(

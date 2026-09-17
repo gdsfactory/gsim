@@ -89,7 +89,7 @@ requires = ["build", "setuptools>=61", "uv", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.codespell]
-ignore-words-list = "doubleclick,euclidian,te"
+ignore-words-list = "doubleclick,euclidian,te,nd"
 
 [tool.interrogate]
 docstring-style = "google"
@@ -275,6 +275,7 @@ select = ["ALL"]
 ]
 "tests/**/*.py" = [
   "ANN",  # flake8-annotations
+  "ARG005",  # unused-lambda-argument (test stubs)
   "D",  # pydocstyle
   "INP001",  # implicit-namespace-package
   "PLC0415",  # allow imports inside tests

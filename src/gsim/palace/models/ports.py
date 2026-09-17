@@ -56,10 +56,54 @@ class PortConfig(BaseModel):
         "Positive = away from boundary, into conductor.",
     )
 
+    # BoundaryMode postprocessing (2D voltage/impedance paths). These paths do
+    # not affect the 2D eigenproblem; Palace uses them only to post-process the
+    # mode voltage (mode-V.csv) and characteristic impedance (mode-Z.csv).
+    voltage_path: list[list[float]] | None = Field(
+        default=None,
+        description="Open signal->ground coordinate path (um) for BoundaryMode "
+        "voltage/impedance postprocessing. Points may be 2D (cross-section "
+        "coordinates h, v) or 3D (layout x, y, z).",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) port center (um). Used to auto-derive a "
+        "BoundaryMode voltage path when voltage_path is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    width: float | None = Field(
+        default=None,
+        gt=0,
+        description="Port width (um). Used to auto-derive a BoundaryMode "
+        "voltage path when voltage_path is not given.",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
+
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
         """Validate layer configuration based on geometry type."""
-        if self.geometry == "inplane" and self.layer is None:
+        if (
+            self.geometry == "inplane"
+            and self.layer is None
+            and self.voltage_path is None
+        ):
             raise ValueError("Inplane ports require 'layer' to be specified")
         if self.geometry == "via" and (
             self.from_layer is None or self.to_layer is None
@@ -114,6 +158,39 @@ class CPWPortConfig(BaseModel):
 
     impedance: float = Field(default=50.0, gt=0)
     excited: bool = True
+
+    # BoundaryMode postprocessing (2D voltage/impedance paths).
+    voltage_paths: list[list[list[float]]] | None = Field(
+        default=None,
+        description="Explicit open signal->ground coordinate paths (um) for "
+        "BoundaryMode postprocessing, one per CPW gap. Points may be 2D "
+        "(cross-section coordinates h, v) or 3D (layout x, y, z). When omitted "
+        "and a port center is available, the two gap paths are auto-derived.",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) signal-center (um). Used to auto-derive "
+        "BoundaryMode gap voltage paths when voltage_paths is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
 
 
 class TerminalConfig(BaseModel):
