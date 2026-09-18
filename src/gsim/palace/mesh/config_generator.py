@@ -590,15 +590,24 @@ def generate_palace_config(
                             lumped_ports.append(eigenmode_entry)
 
                     elif port.port_type == PortType.WAVEPORT:
-                        wave_ports.append(
-                            {
-                                "Index": port_idx,
-                                "Mode": port.mode,
-                                "Offset": port.offset,
-                                "Excitation": port_idx if port.excited else False,
-                                "Attributes": [port_group["phys_group"]],
-                            }
-                        )
+                        wave_port_entry: dict[str, object] = {
+                            "Index": port_idx,
+                            "Mode": port.mode,
+                            "Offset": port.offset,
+                            "Excitation": port_idx if port.excited else False,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                        if port.eigensolver_type is not None:
+                            wave_port_entry["SolverType"] = port.eigensolver_type
+                        if port.eigensolver_tol is not None:
+                            wave_port_entry["EigenTol"] = port.eigensolver_tol
+                        if port.eigensolver_ksp_tol is not None:
+                            wave_port_entry["KSPTol"] = port.eigensolver_ksp_tol
+                        if port.eigensolver_max_size is not None:
+                            wave_port_entry["MaxSize"] = port.eigensolver_max_size
+                        if port.eigensolver_verbose is not None:
+                            wave_port_entry["Verbose"] = port.eigensolver_verbose
+                        wave_ports.append(wave_port_entry)
             port_idx += 1
 
         # Assign unique indices to passive reactive ports now that all primary
