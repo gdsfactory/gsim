@@ -302,7 +302,9 @@ def check_lumped_port_geometry(
                 )
                 continue
             direction_str = (
-                "+Z" if port.geometry == PortGeometry.VIA else port.direction.upper()
+                "+Z"
+                if port.geometry in (PortGeometry.INTERLAYER, PortGeometry.VIA)
+                else port.direction.upper()
             )
             context = f"Port {port_idx} ('{port.name}') (physical group {phys_tag})"
             errors.extend(
