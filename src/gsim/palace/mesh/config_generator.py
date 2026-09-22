@@ -579,10 +579,20 @@ def generate_palace_config(
                                 "Excitation": port_idx if port.excited else False,
                                 "Attributes": [port_group["phys_group"]],
                             }
-                            if port.impedance:
-                                eigenmode_entry["R"] = port.impedance
+                            # A port carrying reactive elements (e.g. a lumped
+                            # Josephson junction modelled as L/C) is a pure
+                            # reactive termination. The default 50 Ohm impedance
+                            # must not be emitted in parallel with it, otherwise
+                            # it would load the junction. Only emit R from the
+                            # default impedance when the port is purely
+                            # resistive, unless a resistance is set explicitly.
+                            has_reactive = (
+                                port.inductance is not None and port.inductance > 0
+                            ) or (port.capacitance is not None and port.capacitance > 0)
                             if port.resistance is not None:
                                 eigenmode_entry["R"] = port.resistance
+                            elif port.impedance and not has_reactive:
+                                eigenmode_entry["R"] = port.impedance
                             if port.inductance is not None and port.inductance > 0:
                                 eigenmode_entry["L"] = port.inductance
                             if port.capacitance is not None and port.capacitance > 0:
