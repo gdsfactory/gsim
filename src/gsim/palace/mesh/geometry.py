@@ -1853,6 +1853,7 @@ def add_ports(
                 port_info.append(
                     {
                         "portnumber": port_num,
+                        "name": port.name,
                         "type": "waveport",
                         "width": effective_width,
                         "xmin": xmin,

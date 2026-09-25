@@ -358,17 +358,9 @@ class SParams:
             cols[f"S_{to_p}_{from_p}_deg"] = sp.deg
         return pd.DataFrame(cols)
 
-    def to_skrf(self, z0: float = 50.0):
-        """Convert to a scikit-rf Network object.
-
-        Args:
-            z0: Reference impedance in ohms (default 50).
-
-        Returns:
-            skrf.Network with frequency in Hz and S-parameters in (f, i, j) order.
-        """
+    def _s_matrix_hz(self):
+        """Build the dense (f, i, j) complex S-matrix and frequency in Hz."""
         import numpy as np
-        import skrf as rf
 
         n = len(self._port_names)
         f_hz = self._freq * 1e9
@@ -380,7 +372,56 @@ class SParams:
                 elif (pj, pi) in self._data:
                     # assume reciprocity: S_ij = S_ji
                     S[:, i, j] = self._data[(pj, pi)].complex
-        return rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        return f_hz, S
+
+    def to_skrf(self, z0: float = 50.0):
+        """Convert to a scikit-rf Network object.
+
+        Args:
+            z0: Reference impedance in ohms (default 50).
+
+        Returns:
+            skrf.Network with frequency in Hz and S-parameters in (f, i, j) order.
+        """
+        import skrf as rf
+
+        f_hz, S = self._s_matrix_hz()
+        net = rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        net.port_names = list(self._port_names)
+        return net
+
+    def to_sax(self):
+        """Convert to a SAX-compatible model callable.
+
+        The returned callable interpolates the Palace sweep onto the
+        ``frequency`` (Hz) it is called with, so it can be passed directly as
+        a component model to ``sax.circuit``.
+
+        Returns:
+            A callable ``model(*, frequency=...) -> SDict`` keyed by
+            ``(out_port, in_port)`` port-name pairs.
+
+        Example:
+            >>> sax.circuit(netlist=netlist, models={"palace": sparams.to_sax()})
+        """
+        import jax.numpy as jnp
+
+        f_hz, S = self._s_matrix_hz()
+        frequencies = jnp.asarray(f_hz)
+        scattering = jnp.asarray(S)
+        names = tuple(self._port_names)
+
+        def model(*, frequency=frequencies[0]):
+            return {
+                (out_port, in_port): jnp.interp(
+                    frequency, frequencies, scattering[:, i, j].real
+                )
+                + 1j * jnp.interp(frequency, frequencies, scattering[:, i, j].imag)
+                for i, out_port in enumerate(names)
+                for j, in_port in enumerate(names)
+            }
+
+        return model
 
     def _filtered_entries(self, full: bool) -> list[tuple[str, SParam]]:
         """Return ``[(label, SParam), ...]`` filtered by excitation port."""
