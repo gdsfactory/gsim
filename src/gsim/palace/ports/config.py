@@ -6,6 +6,7 @@ This module provides helpers to configure gdsfactory ports with Palace metadata.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -24,10 +25,14 @@ class PortType(Enum):
 
 
 class PortGeometry(Enum):
-    """Internal geometry type for mesh generation."""
+    """Lumped-port surface geometry used for mesh generation."""
 
     INPLANE = "inplane"  # Horizontal surface on single metal layer (Direction: +X, +Y)
-    VIA = "via"  # Vertical surface between two metal layers (Direction: +Z)
+    GAP = "gap"  # Vertical sheet across a coplanar gap, tangential X/Y field
+    INTERLAYER = "interlayer"  # Surface between two layers (Direction: +Z)
+    CPW = "cpw"  # Multi-element coplanar-waveguide port
+    VIA = "via"  # Deprecated compatibility name for INTERLAYER
+    EDGE = "edge"  # Vertical surface at conductor face, within a single layer (X/Y dir)
 
 
 @dataclass
@@ -47,8 +52,8 @@ class PalacePort:
 
     # Layer info
     layer: str | None = None  # For inplane: target layer
-    from_layer: str | None = None  # For via: bottom layer
-    to_layer: str | None = None  # For via: top layer
+    from_layer: str | None = None  # For interlayer: first layer
+    to_layer: str | None = None  # For interlayer: second layer
 
     # Port geometry
     length: float | None = None  # Port extent along direction (um)
@@ -71,6 +76,8 @@ class PalacePort:
     z_margin: float = 0.0  # For waveports: height margin in um
     lateral_margin: float = 0.0
     max_size: bool = False  # When True, fill the full simulation domain
+    # When True, span the domain in z only; lateral extent stays lateral_margin
+    full_height: bool = False
     mode: int = 1  # Mode number to excite.
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
@@ -154,7 +161,25 @@ def configure_inplane_port(
         port.info["excited"] = excited
 
 
-def configure_via_port(
+def configure_gap_port(
+    port,
+    layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure a vertical gap sheet; GDS width spans along its orientation."""
+    if offset != 0.0:
+        _shift_port_center(port, offset)
+    port.info["palace_type"] = "gap"
+    port.info["layer"] = layer
+    port.info["impedance"] = impedance
+    port.info["excited"] = excited
+    for key in ("from_layer", "to_layer", "length"):
+        port.info[key] = None
+
+
+def configure_interlayer_port(
     ports,
     from_layer: str,
     to_layer: str,
@@ -162,29 +187,29 @@ def configure_via_port(
     excited: bool = True,
     offset: float = 0.0,
 ):
-    """Configure gdsfactory port(s) as via (vertical) lumped ports.
+    """Configure lumped ports between conductors on different layers.
 
-    Via ports are vertical lumped ports between two metal layers, used for microstrip
-    feed structures where excitation occurs in the Z direction.
+    Interlayer ports are used for structures such as microstrip feeds where the
+    excitation occurs in the Z direction between conductors on different layers.
 
     Args:
         ports: Single gdsfactory Port or iterable of Ports (e.g., c.ports)
         from_layer: Bottom conductor layer name (e.g., 'metal1')
         to_layer: Top conductor layer name (e.g., 'topmetal2')
-        resistance: Series resistance in Ohms (default: 50)
-        inductance: Series inductance in Henries (default: 0)
-        capacitance: Shunt capacitance in Farads (default: 0)
+        impedance: Port impedance in Ohms (default: 50)
         excited: Whether port is excited vs just measured (default: True)
         offset: Shift port inward along the waveguide in XY (um).
             Positive moves away from the boundary, into the conductor.
 
     Examples:
         ```python
-        configure_via_port(c.ports["o1"], from_layer="metal1", to_layer="topmetal2")
-        configure_via_port(
+        configure_interlayer_port(
+            c.ports["o1"], from_layer="metal1", to_layer="topmetal2"
+        )
+        configure_interlayer_port(
             c.ports, from_layer="metal1", to_layer="topmetal2"
         )  # all ports
-        configure_via_port(
+        configure_interlayer_port(
             c.ports["o1"], from_layer="metal1", to_layer="topmetal2", offset=2.0
         )
         ```
@@ -201,6 +226,30 @@ def configure_via_port(
         port.info["to_layer"] = to_layer
         port.info["impedance"] = impedance
         port.info["excited"] = excited
+
+
+def configure_via_port(
+    ports,
+    from_layer: str,
+    to_layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+    offset: float = 0.0,
+):
+    """Configure an interlayer port using the deprecated ``via`` name."""
+    warnings.warn(
+        "configure_via_port() is deprecated; use configure_interlayer_port() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return configure_interlayer_port(
+        ports,
+        from_layer=from_layer,
+        to_layer=to_layer,
+        impedance=impedance,
+        excited=excited,
+        offset=offset,
+    )
 
 
 def configure_cpw_port(
@@ -283,12 +332,52 @@ def configure_cpw_port(
     port.info["cpw_gap_width"] = gap_width
 
 
+def configure_two_terminal_port(
+    plus_port,
+    minus_port,
+    layer: str,
+    impedance: float = 50.0,
+    excited: bool = True,
+):
+    """Configure two gdsfactory ports as a single two-terminal Palace lumped port.
+
+    Both ports are combined into one Palace LumpedPort with two EDGE-geometry
+    elements (vertical surfaces spanning the conductor thickness). This models
+    a true 1-port S11 simulation without an artificial reference layer.
+
+    Args:
+        plus_port: Excited gdsfactory Port (+ terminal)
+        minus_port: Reference gdsfactory Port (- terminal)
+        layer: Conductor layer name containing both ports (e.g., "metal1")
+        impedance: Port impedance in Ohms (default: 50)
+        excited: Whether this port is excited (default: True)
+
+    Examples:
+        ```python
+        configure_two_terminal_port(
+            c.ports["P1"], c.ports["P2"], layer="metal1", excited=True
+        )
+        ```
+    """
+    plus_port.info["palace_type"] = "two_terminal"
+    plus_port.info["layer"] = layer
+    plus_port.info["impedance"] = impedance
+    plus_port.info["excited"] = excited
+    plus_port.info["minus_port_name"] = minus_port.name
+
+    # Clear minus port so extract_ports skips it as a standalone port
+    minus_port.info["palace_type"] = None
+    for key in ("from_layer", "to_layer", "layer", "impedance", "excited"):
+        minus_port.info[key] = None
+
+
 def configure_wave_port(
     ports,
     layer: str,
     z_margin: float = 0.0,
     lateral_margin: float = 0.0,
     max_size: bool = False,
+    full_height: bool = False,
     mode: int = 1,
     excited: bool = True,
     offset: float = 0.0,
@@ -304,6 +393,9 @@ def configure_wave_port(
         lateral_margin: Margin in the x/y direction
         max_size: When True, automatically set z_margin and lateral_margin
             to fill the full simulation domain boundary on that side.
+        full_height: When True, span the full simulation domain in z while
+            keeping the lateral extent set by lateral_margin. Use for
+            partial-width ports whose mode extends into the air box.
         mode: Mode number to excite.
         offset: Offset distance used for scattering parameter de-embedding.
         excited: Whether port is excited vs just measured (default: True)
@@ -327,6 +419,7 @@ def configure_wave_port(
         port.info["z_margin"] = z_margin
         port.info["lateral_margin"] = lateral_margin
         port.info["max_size"] = max_size
+        port.info["full_height"] = full_height
         port.info["mode"] = mode
         port.info["offset"] = offset
         port.info["excited"] = excited
@@ -335,7 +428,7 @@ def configure_wave_port(
 def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """Extract Palace ports from a gdsfactory component.
 
-    Handles all port types: inplane, via, and CPW (multi-element).
+    Handles inplane, gap, interlayer, CPW, wave, and legacy edge ports.
 
     Args:
         component: gdsfactory Component with configured ports
@@ -346,11 +439,80 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
     """
     palace_ports = []
 
+    # Build name-to-port lookup for two-terminal minus-port resolution
+    port_by_name = {p.name: p for p in component.ports}
+
     for port in component.ports:
         info = port.info
         palace_type = info.get("palace_type")
 
         if palace_type is None:
+            continue
+
+        if palace_type == "two_terminal":
+            minus_port_name = info.get("minus_port_name")
+            if minus_port_name is None:
+                raise ValueError(
+                    f"Two-terminal port '{port.name}' missing 'minus_port_name'"
+                )
+            minus_port = port_by_name.get(minus_port_name)
+            if minus_port is None:
+                raise ValueError(
+                    f"Minus port '{minus_port_name}' not found on component"
+                )
+
+            layer_name = info.get("layer")
+            zmin, zmax = 0.0, 0.0
+            if layer_name and layer_name in stack.layers:
+                layer_obj = stack.layers[layer_name]
+                zmin = layer_obj.zmin
+                zmax = layer_obj.zmax
+
+            plus_center = (float(port.center[0]), float(port.center[1]))
+            minus_center = (
+                float(minus_port.center[0]),
+                float(minus_port.center[1]),
+            )
+
+            def _orient_to_palace_dir(angle: float) -> str:
+                a = angle % 360
+                if a < 45 or a >= 315:
+                    return "+X"
+                if 45 <= a < 135:
+                    return "+Y"
+                if 135 <= a < 225:
+                    return "-X"
+                return "-Y"
+
+            plus_orient = (
+                float(port.orientation) if port.orientation is not None else 0.0
+            )
+            minus_orient = (
+                float(minus_port.orientation)
+                if minus_port.orientation is not None
+                else 0.0
+            )
+
+            tt_port = PalacePort(
+                name=port.name,
+                port_type=PortType.LUMPED,
+                geometry=PortGeometry.EDGE,
+                center=plus_center,
+                width=float(port.width),
+                orientation=plus_orient,
+                zmin=zmin,
+                zmax=zmax,
+                layer=layer_name,
+                multi_element=True,
+                centers=[plus_center, minus_center],
+                directions=[
+                    _orient_to_palace_dir(plus_orient),
+                    _orient_to_palace_dir(minus_orient),
+                ],
+                impedance=info.get("impedance", 50.0),
+                excited=info.get("excited", True),
+            )
+            palace_ports.append(tt_port)
             continue
 
         if palace_type == "cpw":
@@ -394,7 +556,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             cpw_port = PalacePort(
                 name=port.name,
                 port_type=PortType.LUMPED,
-                geometry=PortGeometry.INPLANE,
+                geometry=PortGeometry.CPW,
                 center=(float(port.center[0]), float(port.center[1])),
                 width=gap_width,
                 orientation=float(port.orientation)
@@ -423,10 +585,24 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
         to_layer = info.get("to_layer")
         layer_name = info.get("layer")
 
-        if palace_type == "lumped":
+        if palace_type == "gap":
+            port_type = PortType.LUMPED
+            geometry = PortGeometry.GAP
+            layer = stack.layers.get(layer_name)
+            if layer is None or layer.layer_type != "conductor":
+                raise ValueError(f"Gap port '{port.name}' requires a conductor layer")
+            zmin, zmax = layer.zmin, layer.zmax
+            if zmax <= zmin or width <= 0:
+                raise ValueError("Gap ports require positive width and layer thickness")
+            if abs((orientation + 45) % 90 - 45) > 1e-6:
+                raise ValueError(
+                    "Gap ports require a cardinal orientation (0/90/180/270)"
+                )
+
+        elif palace_type == "lumped":
             port_type = PortType.LUMPED
             if from_layer and to_layer:
-                geometry = PortGeometry.VIA
+                geometry = PortGeometry.INTERLAYER
                 if from_layer in stack.layers:
                     zmin = stack.layers[from_layer].zmin
                 if to_layer in stack.layers:
@@ -470,6 +646,7 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             z_margin=info.get("z_margin", 0.0),
             lateral_margin=info.get("lateral_margin", 0.0),
             max_size=info.get("max_size", False),
+            full_height=info.get("full_height", False),
             excited=info.get("excited", True),
             mode=info.get("mode", 1),
             offset=info.get("offset", 0.0),

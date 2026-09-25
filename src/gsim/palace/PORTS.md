@@ -1,220 +1,116 @@
-# Palace Port Types Explained
+# Palace Ports
 
-This document explains how ports work in Palace and how to define them for different transmission line configurations.
+Palace uses two solver-level port families:
 
-## Port Types Overview
+- **Lumped ports** integrate the electric field across one or more prescribed surfaces and apply a circuit impedance.
+- **Wave ports** solve a modal field on a simulation-domain boundary.
 
-### In-Plane Port
+The lumped-port names in gsim describe conductor topology rather than a fixed global coordinate plane. Port orientation
+and layer placement determine whether the generated surface lies in XY, XZ, or YZ.
 
-- **Orientation**: Horizontal surface in the XY plane
-- **Location**: Sits on a **single** metal layer
-- **Definition**: `target_layername='TopMetal2'`
-- **GDS shape**: Rectangle with finite width and length
+## Lumped-port geometries
 
-```text
-      ════════════════  ← metal layer
-         ▓▓▓▓▓▓▓▓       ← port surface (horizontal)
-```
+| Geometry     | Use                                       | Surface                                              |
+| ------------ | ----------------------------------------- | ---------------------------------------------------- |
+| `inplane`    | Two conductors on one layer               | Horizontal rectangle on that layer                   |
+| `gap`        | A direct connection across a coplanar gap | Vertical sheet through the conductor thickness       |
+| `interlayer` | Conductors on different layers            | Vertical sheet spanning the layers                   |
+| `cpw`        | Signal with two coplanar grounds          | Two horizontal gap elements with opposite directions |
 
-### Via Port
+All four are surface definitions. They specify where Palace integrates the field; they do not add a physical conductor.
 
-- **Orientation**: Vertical surface in the XZ or YZ plane
-- **Location**: Spans **between two** metal layers
-- **Definition**: `from_layername='Metal3', to_layername='TopMetal2'`
-- **GDS shape**: Line (degenerate rectangle) - one dimension is minimal
+### In-plane
 
-```text
-      ════════════════  ← TopMetal2
-            ║
-            ║  ← port surface (vertical, like a wall)
-            ║
-      ════════════════  ← Metal3
-```
-
-Note: "Via port" does NOT mean a port on via structures. It's named this way because it spans the vertical gap between
-layers, similar to how a via connects layers.
-
-## How Palace Lumped Ports Work
-
-A lumped port is a **2D surface** with:
-
-- `R` = impedance (typically 50Ω)
-- `Direction` = positive current flow direction (X, Y, Z, -X, -Y, -Z)
-
-Palace integrates the E-field across this surface to compute voltage. The port acts as a lumped resistor connected
-between whatever conductors touch the port surface.
-
-## GDS Port Geometry
-
-### In-Plane Ports: Rectangle Required
-
-In-plane ports need a **rectangle** in the GDS (not just a line):
+Use `inplane` when one rectangular surface on a conductor layer describes the desired lumped excitation:
 
 ```python
-# Port dimensions from GDS bounding box
-xmin, xmax, ymin, ymax = polygon.bbox
-
-# For Y-direction port (typical CPW facet):
-width  = xmax - xmin   # CPW cross-section width
-length = ymax - ymin   # extent perpendicular to port face
-
-# For X-direction port:
-width  = ymax - ymin
-length = xmax - xmin
-```
-
-### Via Ports: Line Expected
-
-Via ports expect essentially a line in the GDS:
-
-- The smaller XY dimension determines orientation
-- The port surface is created vertically between the two layers
-
-## Transmission Line Configurations
-
-### Case 1: Microstrip (Ground on Different Layer)
-
-Use a **via port** spanning from signal layer to ground layer:
-
-```text
-TopMetal2 (signal) ════════════
-                        ║ ← via port surface (vertical)
-Metal1 (ground)    ════════════
-```
-
-Configuration:
-
-```python
-configure_port(
-    port,
-    type="via",
-    from_layer="metal1",      # ground layer
-    to_layer="topmetal2",     # signal layer
+sim.add_port(
+    "feed",
+    layer="topmetal2",
+    length=5.0,
     impedance=50.0,
+    geometry="inplane",
 )
 ```
 
-### Case 2: CPW (Signal/Ground on Same Layer)
+The gdsfactory port width sets one rectangle dimension and `length` sets the other. Its orientation determines the
+integration direction.
 
-Use an **in-plane port** spanning the gap between signal and ground:
+### Gap
 
-```text
-Ground ═══╡    ║    ╞═══ Signal ═══╡    ║    ╞═══ Ground
-          └────┘                   └────┘
-          port 1                   port 2
-          (in gap)                 (in gap)
-```
-
-The port rectangle spans **from signal edge to ground edge** (across the gap).
-
-Configuration:
+Use `gap` to place one vertical sheet directly between two coplanar terminals:
 
 ```python
-configure_port(
-    port,
-    type="lumped",
-    layer="topmetal2",  # layer where CPW lives
-    length=5.0,         # port extent along direction
+sim.add_port(
+    "Pdiff",
+    layer="topmetal2",
     impedance=50.0,
+    geometry="gap",
 )
 ```
 
-## Converting gdsfactory Ports to Palace Format
+The gdsfactory port must be centered in the gap. Its width spans the gap along its cardinal orientation, and the
+generated sheet extends through the selected conductor layer's thickness. Omit `length`.
 
-gdsfactory ports have:
+This geometry can define a floating terminal-to-terminal one-port measurement; it does not require a global ground plane
+when the sheet touches both conductors.
 
-- `center`: (x, y) position
-- `width`: port width (e.g., CPW signal + gaps)
-- `orientation`: angle in degrees (0=east, 90=north, 180=west, 270=south)
+### Interlayer
 
-Using palace_api:
-
-```python
-from gplugins.palace_api import configure_port, extract_ports
-
-# Configure ports
-configure_port(c.ports['o1'], type='lumped', layer='topmetal2', length=5.0)
-configure_port(c.ports['o2'], type='lumped', layer='topmetal2', length=5.0)
-
-# Extract for simulation
-ports = extract_ports(c, stack)
-```
-
-## Why Ports Must Touch Both Signal and Ground
-
-A lumped port is essentially a **virtual VNA probe**. To compute S-parameters, Palace needs:
-
-1. **Voltage** = potential difference between two conductors
-1. **Current** = flow between those conductors
-
-Palace computes these by:
-
-- **Voltage**: Integrating E-field across the port surface (from one conductor to the other)
-- **Current**: Integrating H-field around the port boundary
-
-If the port only touches one conductor, voltage is undefined - there's no second reference point.
-
-```text
-                Port touching both (CORRECT):
-
-Ground ═══════╡▓▓▓▓▓▓╞═══════ Signal
-              ↑     ↑
-              └──┬──┘
-           E-field integrated -> Voltage
-
-
-                Port touching only signal (WRONG):
-
-Ground ═══════      ▓▓▓▓▓▓═══════ Signal
-                    ↑
-                    No reference -> Voltage undefined
-```
-
-### Real-World Analogy
-
-When probing a CPW with a VNA:
-
-- Signal pin touches the center conductor
-- Ground pins touch the ground planes
-- Measurement happens **across the gap**
-
-The port rectangle represents exactly this: the cross-section where your virtual probe connects signal to ground.
-
-## Multi-Element CPW Ports
-
-For proper CPW mode excitation, use `configure_cpw_port()` to link two gap ports:
+Use `interlayer` when the two conductors are on different layers, such as a microstrip signal referenced to a lower
+ground plane:
 
 ```python
-from gplugins.palace_api import configure_cpw_port
+sim.add_port(
+    "feed",
+    from_layer="metal1",
+    to_layer="topmetal2",
+    impedance=50.0,
+    geometry="interlayer",
+)
+```
 
-# CPW has two gaps with opposite E-field directions
-configure_cpw_port(
-    port_upper=c.ports['gap_upper'],  # signal-to-ground2 gap
-    port_lower=c.ports['gap_lower'],  # ground1-to-signal gap
-    layer='topmetal2',
+The gdsfactory port width sets the lateral size. The generated sheet spans the vertical space between the named layers.
+
+The former name `via` is a deprecated alias. Existing code remains functional and emits a `DeprecationWarning`:
+
+```python
+sim.add_port(
+    "feed",
+    from_layer="metal1",
+    to_layer="topmetal2",
+    geometry="via",  # Deprecated: use "interlayer".
+)
+```
+
+The lower-level `configure_via_port()` helper is likewise retained as a warning alias for `configure_interlayer_port()`.
+
+### CPW
+
+Use the dedicated CPW method when a coplanar signal is referenced to ground on both sides:
+
+```python
+sim.add_cpw_port(
+    "feed",
+    layer="topmetal2",
+    s_width=10.0,
+    gap_width=6.0,
     length=5.0,
     impedance=50.0,
 )
 ```
 
-This generates a multi-element lumped port in Palace:
+gsim constructs two gap elements and assigns opposite integration directions so they form one Palace lumped port. CPW
+has its own method because signal width and gap width are required to construct both surfaces.
 
-```json
-{
-  "Index": 1,
-  "R": 50.0,
-  "Elements": [
-    {"Attributes": [gap1_surface], "Direction": "+Y"},
-    {"Attributes": [gap2_surface], "Direction": "-Y"}
-  ]
-}
-```
+## Choosing a geometry
 
-## Key Points
+- Choose `gap` for a direct floating measurement between coplanar terminals.
+- Choose `interlayer` when signal and reference are on different layers.
+- Choose `cpw` when one signal uses two coplanar return gaps.
+- Choose `inplane` for other single-surface, same-layer lumped excitations.
+- Choose a wave port when the port lies on the domain boundary and modal solving or de-embedding is important.
 
-1. **One port = one rectangle** defining the port surface
-1. **Port must touch both signal and ground** - it's the bridge between them
-1. **Direction** tells Palace the positive current flow direction
-1. **In-plane ports** need actual area (rectangle), not just a line
-1. **Via ports** are for vertical connections between layers
-1. **CPW ports** need two elements with opposite directions
+A lumped-port surface must connect the two conductors that define its voltage. The S-parameter reference impedance
+(typically 50 Ω) is a normalization and circuit loading value; it does not mean the reference conductor must be global
+ground.

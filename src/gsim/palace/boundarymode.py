@@ -18,6 +18,7 @@ from gsim.palace.models import (
     NumericalConfig,
     PortConfig,
     TerminalConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 from gsim.palace.models.results import ValidationResult
@@ -51,6 +52,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: list[TerminalConfig] = Field(default_factory=list)
 
     # Mesh and solver config

@@ -689,3 +689,73 @@ class TestShapedDielectric:
         """validate_mesh() must pass for shaped dielectric simulations."""
         result = shaped_dielectric_sim.validate_mesh()
         assert result.valid, f"Validation failed:\n{result}"
+
+
+class TestWavePortFullHeight:
+    """Partial-width wave ports need an opt-in to span the air box in z.
+
+    ``max_size=True`` fills the domain both laterally and in z, so it cannot be
+    used when several ports share a boundary face (they would overlap). Without
+    ``full_height`` the z extent is clamped to the layer stack, which puts a PEC
+    lid just above the top conductor in the port eigenproblem.
+    """
+
+    Z_ABOVE = 300.0
+
+    @pytest.fixture(scope="class")
+    def partial_width_sim(self, tmp_path_factory):
+        """Mesh one geometry carrying both port variants side by side."""
+        tmp_path = tmp_path_factory.mktemp("waveport_full_height")
+        component = _make_cpw_component()
+
+        sim = DrivenSim()
+        sim.set_output_dir(str(tmp_path / "palace-sim"))
+        sim.set_geometry(component)
+        sim.set_stack(substrate_thickness=2.0)
+        sim.set_airbox(margin_x=0.0, margin_y=50.0, z_above=self.Z_ABOVE, z_below=50.0)
+        # Both ports are partial width (lateral_margin, not max_size); only o1
+        # opts into the full z extent.
+        sim.add_wave_port(
+            "o1", layer="metal1", lateral_margin=10.0, full_height=True, mode=1
+        )
+        sim.add_wave_port(
+            "o2", layer="metal1", lateral_margin=10.0, full_height=False, mode=1
+        )
+        sim.set_driven(fmin=1e9, fmax=50e9, num_points=2)
+        sim.mesh(preset="coarse")
+        return sim
+
+    @staticmethod
+    def _waveports(sim) -> dict[int, dict]:
+        return {
+            p["portnumber"]: p
+            for p in sim._last_mesh_result.port_info
+            if p.get("type") == "waveport"
+        }
+
+    def test_full_height_port_reaches_air_box(self, partial_width_sim):
+        """full_height=True must extend past the stack, up into the air box."""
+        _, stack_zmax = partial_width_sim.stack.get_z_range()
+        port = self._waveports(partial_width_sim)[1]
+        assert port["zmax"] > stack_zmax, (
+            f"full_height port capped at stack top: zmax={port['zmax']} "
+            f"vs stack zmax={stack_zmax}"
+        )
+
+    def test_default_port_stays_clamped_to_stack(self, partial_width_sim):
+        """full_height=False keeps the pre-existing stack-clamped behaviour."""
+        _, stack_zmax = partial_width_sim.stack.get_z_range()
+        port = self._waveports(partial_width_sim)[2]
+        assert port["zmax"] <= stack_zmax + 1e-9, (
+            f"default port should stay within the stack: zmax={port['zmax']} "
+            f"vs stack zmax={stack_zmax}"
+        )
+
+    def test_ports_are_partial_width(self, partial_width_sim):
+        """Neither port spans the full domain laterally, so they cannot overlap."""
+        ports = self._waveports(partial_width_sim)
+        domain_y = partial_width_sim._last_mesh_result.groups
+        assert domain_y is not None  # mesh completed
+        for port in ports.values():
+            width = port["ymax"] - port["ymin"]
+            assert 0 < width < 200, f"expected a partial-width port, got {width}"

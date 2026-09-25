@@ -29,6 +29,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_width_sweep.ipynb",
     "nbs/palace_qpdk_resonator.ipynb",
     "nbs/palace_inductor.ipynb",
+    "nbs/palace_inductor_port_comparison.ipynb",
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
 ]
