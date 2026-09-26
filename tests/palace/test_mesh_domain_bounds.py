@@ -89,15 +89,11 @@ def test_empty_stack_uses_default_z_range_for_airbox_and_ports():
 @pytest.mark.parametrize(
     "resolve", [resolve_mesh_domain_bounds, resolve_dielectric_regions]
 )
-@pytest.mark.parametrize(
-    ("zmin", "zmax"), [(float("-inf"), 5.2), (-2.0, float("inf"))]
-)
+@pytest.mark.parametrize(("zmin", "zmax"), [(float("-inf"), 5.2), (-2.0, float("inf"))])
 def test_nonfinite_stack_extents_are_rejected(resolve, zmin, zmax):
     geometry = GeometryData(polygons=[], bbox=(0.0, 0.0, 10.0, 20.0), layer_bboxes={})
     stack = LayerStack(
-        dielectrics=[
-            {"name": "oxide", "zmin": zmin, "zmax": zmax, "material": "sio2"}
-        ],
+        dielectrics=[{"name": "oxide", "zmin": zmin, "zmax": zmax, "material": "sio2"}],
         materials={"sio2": {"type": "dielectric", "permittivity": 3.9}},
     )
 
