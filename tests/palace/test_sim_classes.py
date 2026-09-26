@@ -10,9 +10,11 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from gsim.common import LayerStack
 from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -204,6 +206,80 @@ class TestBoundaryModeSimValidation:
         assert cfg.tolerance == pytest.approx(1e-8)
         assert cfg.max_size == 60
         assert cfg.solver_type == "SLEPc"
+
+
+class TestBoundaryModePostprocessing:
+    """BoundaryMode voltage/impedance postprocessing path derivation."""
+
+    @staticmethod
+    def _stack() -> LayerStack:
+        return cast(
+            LayerStack,
+            SimpleNamespace(
+                layers={
+                    "metal1": SimpleNamespace(zmin=1.1, zmax=2.1),
+                    "p_rib": SimpleNamespace(zmin=0.0, zmax=0.22),
+                }
+            ),
+        )
+
+    def test_cpw_gap_paths_auto_derived(self):
+        """A CPW port yields one voltage path per gap in cross-section coords."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_cpw_port(
+            "input",
+            layer="metal1",
+            s_width=20.0,
+            gap_width=20.0,
+            center=(0.0, 0.0),
+            orientation=0.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert len(post["Impedance"]) == 2
+        assert len(post["Voltage"]) == 2
+        assert post["Impedance"][0]["VoltagePath"] == [[10.0, 1.6], [30.0, 1.6]]
+        assert post["Impedance"][1]["VoltagePath"] == [[-10.0, 1.6], [-30.0, 1.6]]
+        assert post["Voltage"][0]["Index"] == 1
+
+    def test_single_port_explicit_path_projected_from_3d(self):
+        """3D layout path points are projected onto an x-normal cross-section."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            voltage_path=[[1.0, -19.8, 0.11], [1.0, -20.2, 0.11]],
+            nsamples=200,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        entry = post["Impedance"][0]
+        assert entry["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+        assert entry["NSamples"] == 200
+        # Same path is also reported to the Voltage postprocessing section.
+        assert post["Voltage"][0]["VoltagePath"] == entry["VoltagePath"]
+
+    def test_single_port_auto_derived_across_width(self):
+        """A single lumped port derives a path across its width at layer mid-z."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            layer="p_rib",
+            width=0.4,
+            center=(0.0, -20.0),
+            orientation=180.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert post["Impedance"][0]["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+
+    def test_voltage_path_allows_missing_layer(self):
+        """A postprocessing port with an explicit path does not require a layer."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port("junction", voltage_path=[[-19.8, 0.11], [-20.2, 0.11]])
+        # Only the (expected) missing geometry error remains, no layer error.
+        errors = sim.validate_config().errors
+        assert not any("require 'layer'" in e for e in errors)
 
 
 class TestMixinMethods:

@@ -89,7 +89,7 @@ requires = ["build", "setuptools>=61", "uv", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.codespell]
-ignore-words-list = "doubleclick,euclidian,te"
+ignore-words-list = "doubleclick,euclidian,te,nd"
 
 [tool.interrogate]
 docstring-style = "google"
@@ -243,6 +243,8 @@ ignore = [
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
+# Jupytext exports retain notebook cells and display expressions.
+"nbs/*.py" = ["B018", "E402", "E501", "INP001", "T201"]
 "*.ipynb" = [
   "ANN",  # flake8-annotations
   "ARG001",  # unused-function-argument

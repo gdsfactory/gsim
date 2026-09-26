@@ -490,6 +490,11 @@ def generate_palace_config(
             boundaries["Conductivity"] = conductors
         if pec_attrs:
             boundaries["PEC"] = {"Attributes": sorted(set(pec_attrs))}
+        # Postprocessing-only voltage/impedance paths (mode-V.csv / mode-Z.csv).
+        # These do not load the 2D eigenproblem.
+        mode_postprocessing = (hints or {}).get("_mode_postprocessing")
+        if mode_postprocessing:
+            boundaries["Postprocessing"] = mode_postprocessing
 
     else:
         lumped_ports: list[dict[str, object]] = []

@@ -351,17 +351,12 @@ class RuntimeConfigMixin:
         material_snapshots: Mapping[str, MaterialSnapshot],
     ) -> GaussianBeamConfig:
         """Translate an explicitly positioned public Gaussian beam."""
-        half_size_nm = tuple(value * 500 for value in source.size_um)
-        center_nm = tuple(value * 1000 for value in source.center_um)
+        center_nm = _scale_vector(source.center_um, 1000)
+        half_size_nm = _scale_vector(source.size_um, 500)
+        region_min, region_max = _vector_bounds(center_nm, half_size_nm)
         return GaussianBeamConfig(
-            region_min=tuple(
-                center - half
-                for center, half in zip(center_nm, half_size_nm, strict=True)
-            ),
-            region_max=tuple(
-                center + half
-                for center, half in zip(center_nm, half_size_nm, strict=True)
-            ),
+            region_min=region_min,
+            region_max=region_max,
             aperture_normal=source.aperture_normal,
             propagation_direction=source.propagation_direction,
             e_polarization=source.e_polarization,
@@ -377,19 +372,14 @@ class RuntimeConfigMixin:
         material_snapshots: Mapping[str, MaterialSnapshot],
     ) -> PlaneMonitorConfig:
         """Translate one public plane-monitor definition."""
-        center_nm = tuple(value * 1000 for value in monitor.center_um)
-        half_size_nm = tuple(value * 500 for value in monitor.size_um)
+        center_nm = _scale_vector(monitor.center_um, 1000)
+        half_size_nm = _scale_vector(monitor.size_um, 500)
+        region_min, region_max = _vector_bounds(center_nm, half_size_nm)
         fiber_mode = self._fiber_mode_config(monitor.fiber_mode, material_snapshots)
         return PlaneMonitorConfig(
             name=monitor.name,
-            region_min=tuple(
-                center - half
-                for center, half in zip(center_nm, half_size_nm, strict=True)
-            ),
-            region_max=tuple(
-                center + half
-                for center, half in zip(center_nm, half_size_nm, strict=True)
-            ),
+            region_min=region_min,
+            region_max=region_max,
             normal=monitor.normal,
             flux=monitor.flux,
             wavelengths=(

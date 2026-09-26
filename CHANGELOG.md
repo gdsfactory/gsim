@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- PN-junction depletion model from Sze *Physics of Semiconductor Devices* (`PNJunctionConfig`,
+  `make_pn_junction_profile`): computes built-in voltage, depletion width `W` (abrupt or linearly graded), asymmetric
+  P/N split `x_p`/`x_n`, and capacitance `C_j = eps_s A / W`. The depletion region is represented automatically — meshed
+  as a dielectric strip in high-res mode when `W >= ~1/5` of the flanking doped sections, otherwise applied as a lumped
+  Impedance boundary via `sim.set_pn_junction()`. The 2D TWMZM demo now illustrates both modes.
+- Fix: `build_doped_cross_section()` now registers doping/rib materials on `stack.materials`; previously doped domains
+  silently resolved to eps=1.0 without conductivity in generated Palace configs.
+- Consolidation: `common/stack/junction.py` + `common/stack/doping.py` merged into `common/stack/pn_junction.py`;
+  `test_junction_physics.py`, `test_junction_profile.py` and `test_pn_junction_modes.py` merged into
+  `tests/common/test_pn_junction.py`. Import from `gsim.common.stack.pn_junction` (re-exported at `gsim.common.stack`).
+- 1D Sze-based complex permittivity (`carrier_profile_1d`, `epsilon_eff_relative`, `optical_params`,
+  `junction_epsilon_profile`): depletion-approximation carrier profile plus full Drude plasma dispersion at optical
+  wavelengths, with `Re(eps) -> Permittivity` / `Im(eps) -> Conductivity` mapping for Palace. At `1e18 cm^-3` the
+  quasi-neutral rib carries `Δn ≈ -1e-3` (`σ ≈ 0.5 S/m`) while the depletion slice stays at the Sellmeier background.
+- Segmented optical junction (`make_segmented_junction_profile`): bins each rib half into uniform strips
+  (`p_1..p_N`/`n_1..n_N`, junction-outward), each sampling the 1D permittivity at its centre. The 2D TWMZM demo's
+  optical run now uses 8+8 strips instead of a homogeneous body; `build_optical_cross_section()` accepts per-region
+  `device_materials`/`extra_materials` to support it.
+
 ## 0.1.0
 
 - Electrostatic simulation end-to-end for Palace ([#146](https://github.com/gdsfactory/gsim/pull/146))
