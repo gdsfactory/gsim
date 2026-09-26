@@ -332,6 +332,8 @@ class Simulation:
 # The original artifact-only implementation above remains available while the
 # compatibility window is open, but new imports receive the concern-based API.
 ArtifactSimulation = Simulation
-from gsim.fdtd.workflow import Simulation as Simulation  # noqa: E402
+from gsim.fdtd.workflow import (  # noqa: E402
+    Simulation as Simulation,  # ty: ignore[invalid-assignment]
+)
 
 __all__ = ["ArtifactSimulation", "Simulation"]

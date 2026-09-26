@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from gsim.meep.models.api import PortVerticalOverride
 from gsim.meep.models.config import PortData
 
 if TYPE_CHECKING:
@@ -50,6 +52,9 @@ def extract_port_info(
     source_port: str | None = None,
     *,
     is_3d: bool = True,
+    port_margin: float = 0.0,
+    port_overrides: Mapping[str, PortVerticalOverride] | None = None,
+    y_cut: float | None = None,
 ) -> list[PortData]:
     """Extract port information from a gdsfactory component.
 
@@ -57,23 +62,46 @@ def extract_port_info(
         component: gdsfactory Component with ports
         layer_stack: LayerStack to determine z-coordinates
         source_port: Name of the source port. If None, first port is the source.
-        is_3d: If False, all port z-centers are set to 0 (2D mode).
+        is_3d: Whether Z is active. If False, all port z-centers are set to 0.
+        port_margin: Extra mode-plane margin on each side of the physical port
+            layer in Z. Ignored when Z is collapsed.
+        port_overrides: Explicit per-port Z centers and spans. Each provided
+            field takes precedence over automatic inference.
+        y_cut: When provided for an XZ simulation, discard ports that do not
+            intersect this Y coordinate before resolving their Z geometry.
 
     Returns:
         List of PortData objects ready for JSON serialization
     """
     ports: list[PortData] = []
 
-    z_center = _get_z_center(layer_stack) if is_3d else 0.0
+    if not is_3d and port_overrides:
+        raise ValueError("Port Z overrides require an active Z axis.")
 
-    for i, gf_port in enumerate(component.ports):
+    component_ports = list(component.ports)
+    if y_cut is not None:
+        component_ports = _filter_component_ports_for_xz(component_ports, y_cut)
+
+    for i, gf_port in enumerate(component_ports):
         normal_axis, direction = get_port_normal(gf_port.orientation)
 
         is_source = gf_port.name == source_port if source_port is not None else i == 0
+        port_name = gf_port.name or f"port{i}"
+        if is_3d:
+            z_center, z_span = _resolve_port_vertical_geometry(
+                component,
+                gf_port,
+                layer_stack,
+                port_margin=port_margin,
+                override=(port_overrides or {}).get(port_name),
+            )
+        else:
+            z_center = 0.0
+            z_span = None
 
         ports.append(
             PortData(
-                name=gf_port.name or f"port{i}",
+                name=port_name,
                 center=[
                     float(gf_port.center[0]),
                     float(gf_port.center[1]),
@@ -81,6 +109,7 @@ def extract_port_info(
                 ],
                 orientation=float(gf_port.orientation),
                 width=float(gf_port.width),
+                z_span=z_span,
                 normal_axis=normal_axis,
                 direction=direction,
                 is_source=is_source,
@@ -88,6 +117,153 @@ def extract_port_info(
         )
 
     return ports
+
+
+def _filter_component_ports_for_xz(
+    ports: list[Any],
+    y_cut: float,
+) -> list[Any]:
+    """Filter fabrication ports before XZ vertical-layer inference."""
+    kept: list[Any] = []
+    for port in ports:
+        normal_axis, _ = get_port_normal(port.orientation)
+        if normal_axis != 0:
+            logger.warning(
+                "Dropping port %r for XZ 2D sim (normal_axis=%d != 0)",
+                port.name,
+                normal_axis,
+            )
+            continue
+
+        y_center = float(port.center[1])
+        width = float(port.width)
+        if abs(y_center - y_cut) > width / 2:
+            logger.warning(
+                "Dropping port %r for XZ 2D sim "
+                "(center.y=%.4f, width=%.4f does not intersect y_cut=%.4f)",
+                port.name,
+                y_center,
+                width,
+                y_cut,
+            )
+            continue
+
+        kept.append(port)
+
+    return kept
+
+
+def _port_gds_layer(gf_port: Any) -> tuple[int, int] | None:
+    """Return the concrete fabrication tuple carried by a gdsfactory port."""
+    layer_info = getattr(gf_port, "layer_info", None)
+    if layer_info is None:
+        try:
+            layer_info = gf_port.kcl.get_info(gf_port.layer)
+        except (AttributeError, TypeError, ValueError):
+            return None
+    try:
+        return int(layer_info.layer), int(layer_info.datatype)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _vertical_candidates(
+    layers: list[Any],
+    *,
+    port_margin: float,
+) -> tuple[float | None, float | None, set[tuple[float, float]]]:
+    """Return independently unambiguous center/span values for layers."""
+    extents = {(float(layer.zmin), float(layer.zmax)) for layer in layers}
+    centers = {(zmin + zmax) / 2.0 for zmin, zmax in extents}
+    spans = {(zmax - zmin) + 2 * port_margin for zmin, zmax in extents}
+    z_center = next(iter(centers)) if len(centers) == 1 else None
+    z_span = next(iter(spans)) if len(spans) == 1 else None
+    if z_span is not None and z_span <= 0:
+        z_span = None
+    return z_center, z_span, extents
+
+
+def _resolve_port_vertical_geometry(
+    component: Component,
+    gf_port: Any,
+    layer_stack: LayerStack,
+    *,
+    port_margin: float,
+    override: PortVerticalOverride | None,
+) -> tuple[float, float]:
+    """Resolve one port's source/monitor center and height.
+
+    Port tuples refer to fabrication masks. Call this before physical-layer
+    materialization remaps stack layers to simulation-only GDS tuples.
+    """
+    gds_layer = _port_gds_layer(gf_port)
+    candidates = [
+        layer
+        for layer in layer_stack.layers.values()
+        if gds_layer is not None and tuple(layer.gds_layer) == gds_layer
+    ]
+    resolution_source = f"port layer {gds_layer}"
+
+    if not candidates:
+        # If the component really draws the port mask but the active/cropped
+        # stack does not contain it, an override cannot restore that missing
+        # geometry. This commonly indicates that z_bounds excluded the layer.
+        if gds_layer is not None and _component_draws_layer(component, gds_layer):
+            raise ValueError(
+                f"Port {gf_port.name!r} uses drawn layer {gds_layer}, but that "
+                "layer is absent from the active simulation stack. Expand "
+                "domain.z_bounds or include the layer in the stack."
+            )
+
+        candidates = [
+            layer
+            for layer in layer_stack.layers.values()
+            if _component_draws_layer(component, tuple(layer.gds_layer))
+        ]
+        resolution_source = "drawn simulation layers"
+
+    inferred_z, inferred_z_span, extents = _vertical_candidates(
+        candidates,
+        port_margin=port_margin,
+    )
+    if (
+        not any(tuple(layer.gds_layer) == gds_layer for layer in candidates)
+        and len(extents) == 1
+    ):
+        logger.warning(
+            "Port %r layer %r is absent from the stack; using the unambiguous "
+            "drawn-layer Z extent %s.",
+            gf_port.name,
+            gds_layer,
+            next(iter(extents)),
+        )
+
+    resolved_z = (
+        override.z if override is not None and override.z is not None else inferred_z
+    )
+    resolved_z_span = (
+        override.z_span
+        if override is not None and override.z_span is not None
+        else inferred_z_span
+    )
+    missing_fields = [
+        name
+        for name, value in (("z", resolved_z), ("z_span", resolved_z_span))
+        if value is None
+    ]
+    if missing_fields:
+        candidate_text = (
+            ", ".join(f"[{zmin:g}, {zmax:g}]" for zmin, zmax in sorted(extents))
+            or "none"
+        )
+        raise ValueError(
+            f"Could not infer {', '.join(missing_fields)} for port "
+            f"{gf_port.name!r} from {resolution_source}; candidate Z extents: "
+            f"{candidate_text}. Set sim.port_overrides[{gf_port.name!r}] with "
+            f"the missing field(s)."
+        )
+
+    return cast(float, resolved_z), cast(float, resolved_z_span)
 
 
 def _highest_n_among(layers: Any) -> tuple[Any, float]:

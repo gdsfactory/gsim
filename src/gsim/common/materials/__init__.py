@@ -1,5 +1,9 @@
 """Built-in optical material cards and strict snapshot evaluation."""
 
+from gsim.common.materials.lithium_niobate import (
+    LINBO3_MGO5_GAYER,
+    LINBO3_ZELMON,
+)
 from gsim.common.materials.registry import (
     GSIM_MATERIAL_CARDS,
     find_material_card,
@@ -21,6 +25,8 @@ from gsim.common.materials.snapshots import (
 
 __all__ = [
     "GSIM_MATERIAL_CARDS",
+    "LINBO3_MGO5_GAYER",
+    "LINBO3_ZELMON",
     "SIN_LUKE",
     "SIO2_MALITSON",
     "SI_LI_293K",

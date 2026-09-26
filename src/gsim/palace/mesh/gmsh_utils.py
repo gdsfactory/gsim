@@ -891,6 +891,8 @@ def setup_mesh_refinement(
     sampling: int = 200,
     dist_min: float = 0.0,
     dist_max: float | None = None,
+    distance_id: int = 1,
+    threshold_id: int = 2,
 ) -> int:
     """Set up mesh refinement near boundary lines.
 
@@ -901,28 +903,30 @@ def setup_mesh_refinement(
         sampling: Number of sample points for Distance field evaluation
         dist_min: Distance where SizeMin applies
         dist_max: Distance where SizeMax applies (defaults to max_cellsize)
+        distance_id: Field ID for the Distance field
+        threshold_id: Field ID for the Threshold field
 
     Returns:
         Field ID for the minimum field
     """
     # Distance field from boundary curves
-    gmsh.model.mesh.field.add("Distance", 1)
-    gmsh.model.mesh.field.setNumbers(1, "CurvesList", boundary_line_tags)
-    gmsh.model.mesh.field.setNumber(1, "Sampling", int(sampling))
+    gmsh.model.mesh.field.add("Distance", distance_id)
+    gmsh.model.mesh.field.setNumbers(distance_id, "CurvesList", boundary_line_tags)
+    gmsh.model.mesh.field.setNumber(distance_id, "Sampling", int(sampling))
 
     # Threshold field for gradual size transition
-    gmsh.model.mesh.field.add("Threshold", 2)
-    gmsh.model.mesh.field.setNumber(2, "InField", 1)
-    gmsh.model.mesh.field.setNumber(2, "SizeMin", refined_cellsize)
-    gmsh.model.mesh.field.setNumber(2, "SizeMax", max_cellsize)
-    gmsh.model.mesh.field.setNumber(2, "DistMin", dist_min)
+    gmsh.model.mesh.field.add("Threshold", threshold_id)
+    gmsh.model.mesh.field.setNumber(threshold_id, "InField", distance_id)
+    gmsh.model.mesh.field.setNumber(threshold_id, "SizeMin", refined_cellsize)
+    gmsh.model.mesh.field.setNumber(threshold_id, "SizeMax", max_cellsize)
+    gmsh.model.mesh.field.setNumber(threshold_id, "DistMin", dist_min)
     gmsh.model.mesh.field.setNumber(
-        2,
+        threshold_id,
         "DistMax",
         max_cellsize if dist_max is None else float(dist_max),
     )
 
-    return 2
+    return threshold_id
 
 
 def setup_box_refinement(

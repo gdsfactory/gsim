@@ -179,6 +179,38 @@ def test_build_overlay_resolves_source_and_monitor_offsets():
     assert np.isclose(overlay.sources[0].width, 1.5)
 
 
+def test_build_overlay_uses_exact_xy_inner_bounds():
+    from gsim.common.geometry_model import GeometryModel
+    from gsim.meep.models.config import DomainConfig
+    from gsim.meep.overlay import build_sim_overlay
+
+    geometry_model = GeometryModel(
+        prisms={},
+        bbox=((-20.0, -25.0, 0.0), (20.0, 25.0, 0.22)),
+    )
+    domain = DomainConfig(
+        x_bounds=(-6.0, 8.0),
+        y_bounds=(-4.0, 4.0),
+        z_bounds=(0.0, 1.0),
+        dpml=1.0,
+        margin_x_low=0.0,
+        margin_x_high=0.0,
+        margin_y_low=0.0,
+        margin_y_high=0.0,
+        margin_z_low=0.0,
+        margin_z_high=0.0,
+        port_margin=0.5,
+        extend_ports=0.0,
+        source_port_offset=0.1,
+        distance_source_to_monitors=0.2,
+    )
+
+    overlay = build_sim_overlay(geometry_model, domain, [])
+
+    assert overlay.cell_min == (-7.0, -5.0, -1.0)
+    assert overlay.cell_max == (9.0, 5.0, 2.0)
+
+
 def test_index_plot_is_default_with_material_map_colorbar_and_overlays():
     simulation = _xz_sim_for_index_plot()
     figure, ax = plt.subplots()

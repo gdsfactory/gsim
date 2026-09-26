@@ -337,3 +337,29 @@ def test_run_local_no_args_uses_local_sif_when_no_executable(monkeypatch, tmp_pa
     assert cmd[1] == "run"
     assert Path(cmd[2]) == local_sif.resolve()
     assert captured["cwd"] == output_dir
+
+
+def test_run_local_uses_bundled_resolver_before_path_fallback(monkeypatch, tmp_path):
+    """No explicit executable should still discover the installed runtime."""
+    output_dir = tmp_path / "sim"
+    sim = BoundaryModeSim()
+    _setup_sim(sim, output_dir)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PALACE_SIF", raising=False)
+    monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+    bundled = tmp_path / "bundled-palace"
+    bundled.write_text("#!/bin/sh\nexit 0\n")
+    bundled.chmod(0o755)
+    monkeypatch.setattr("gsim.palace.runtime.resolve_palace_binary", lambda: bundled)
+    monkeypatch.setattr("gsim.palace.runtime.resolve_palace_library_dir", lambda: None)
+    captured = {}
+
+    def run(cmd, **kwargs):
+        captured.update(cmd=cmd, cwd=kwargs["cwd"])
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("subprocess.run", run)
+    result = sim.run_local(num_processes=1, verbose=False)
+    assert isinstance(result, dict)
+    assert Path(captured["cmd"][0]) == bundled
+    assert captured["cwd"] == output_dir

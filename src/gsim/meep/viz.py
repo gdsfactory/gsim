@@ -80,14 +80,11 @@ def build_geometry_model(
         # Default: same logic as build_config
         extend_length = domain_config.extend_ports
         if extend_length == 0.0:
-            extend_length = (
-                max(
-                    domain_config.margin_x_low,
-                    domain_config.margin_x_high,
-                    domain_config.margin_y_low,
-                    domain_config.margin_y_high,
-                )
-                + domain_config.dpml
+            from gsim.meep.domain import automatic_port_extension_length
+
+            extend_length = automatic_port_extension_length(
+                component,
+                domain_config,
             )
 
     lc = LayeredComponentBase(

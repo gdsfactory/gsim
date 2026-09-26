@@ -284,7 +284,7 @@ def test_cpw_via_transition_mesh(mesh_regression, cpw_via_transition_sim):
 
 
 # ---------------------------------------------------------------------------
-# 3. Microstrip — IHP straight_metal with Metal1 ground, via ports
+# 3. Microstrip — IHP straight_metal with Metal1 ground, interlayer ports
 #    Notebook: nbs/palace_microstrip.ipynb
 # ---------------------------------------------------------------------------
 
@@ -313,7 +313,10 @@ def _make_microstrip_sim(tmp_path):
     for port in c.ports:
         assert port.name is not None
         sim.add_port(
-            port.name, from_layer="metal1", to_layer="topmetal2", geometry="via"
+            port.name,
+            from_layer="metal1",
+            to_layer="topmetal2",
+            geometry="interlayer",
         )
     sim.set_driven(fmin=1e9, fmax=100e9, num_points=10)
     return sim
@@ -334,7 +337,7 @@ def test_microstrip_mesh(mesh_regression, microstrip_sim):
 
 
 # ---------------------------------------------------------------------------
-# 4. Branch-line coupler — IHP, 4-port, Metal3 ground + TM2 signal, via ports
+# 4. Branch-line coupler — IHP, 4-port, Metal3 ground + TM2 signal, interlayer ports
 #    Cell inlined from https://github.com/gdsfactory/IHP/pull/99 (not yet in
 #    ihp-gdsfactory 0.2.8).
 # ---------------------------------------------------------------------------
@@ -481,7 +484,10 @@ def _make_branch_line_coupler_sim(tmp_path):
     for port in comp.ports:
         assert port.name is not None
         sim.add_port(
-            port.name, from_layer="metal3", to_layer="topmetal2", geometry="via"
+            port.name,
+            from_layer="metal3",
+            to_layer="topmetal2",
+            geometry="interlayer",
         )
     sim.set_driven(fmin=1e9, fmax=100e9, num_points=10)
     return sim

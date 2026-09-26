@@ -27,8 +27,9 @@ def resolve_physical_groups(
     numeric attribute values corresponding to the requested group names.
 
     Args:
-        source: Path to the simulation output directory (containing
-            ``palace.msh``) or directly to the ``.msh`` file.
+        source: Simulation directory, local ``output/palace`` directory,
+            downloaded cloud ``output`` directory, or a ``.msh`` file.
+            Cloud meshes are read from the corresponding ``input`` directory.
         group_names: Physical group names to resolve (e.g.
             ``["n_rib", "p_rib", "slab90"]``).
 
@@ -40,7 +41,16 @@ def resolve_physical_groups(
 
     path = Path(source)
     if path.suffix != ".msh":
-        path = path / "palace.msh"
+        mesh_roots = [path, path / "input"]
+        if path.name == "output":
+            mesh_roots.append(path.parent / "input")
+        elif path.name == "palace" and path.parent.name == "output":
+            mesh_roots.append(path.parent.parent)
+        candidates = [root / "palace.msh" for root in mesh_roots]
+        path = next(
+            (candidate for candidate in candidates if candidate.is_file()),
+            candidates[0],
+        )
     if not path.exists():
         msg = f"Mesh file not found: {path}"
         raise FileNotFoundError(msg)

@@ -31,9 +31,13 @@ def material_card(
     name: str,
     permittivity: Index | Sellmeier,
     temperature_ref: float | None,
+    *,
+    provenance: Provenance | None = None,
+    optical_info: dict[str, object] | None = None,
+    info: dict[str, object] | None = None,
 ) -> MaterialCard:
     """Build a compact optical material card."""
-    provenance = Provenance(
+    resolved_provenance = provenance or Provenance(
         source="literature",
         label=name,
         maturity="empirical",
@@ -47,13 +51,13 @@ def material_card(
         name=name,
         optical=Regime(
             temperature_ref=temperature_ref,
-            provenance=provenance,
+            provenance=resolved_provenance,
             permittivity=permittivity,
             conductivity=None,
             permeability=None,
             perturbations=[],
-            info={},
+            info=dict(optical_info or {}),
         ),
         rf=None,
-        info={},
+        info=dict(info or {}),
     )

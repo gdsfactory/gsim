@@ -10,7 +10,15 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 # ---------------------------------------------------------------------------
 # Geometry
@@ -37,6 +45,40 @@ class Geometry(BaseModel):
         """Update fields in place. Returns self for chaining."""
         for k, v in kwargs.items():
             setattr(self, k, v)
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Port overrides
+# ---------------------------------------------------------------------------
+
+
+class PortVerticalOverride(BaseModel):
+    """Explicit vertical placement for one waveguide port.
+
+    Either field may be provided. Fields left unset continue to use automatic
+    layer inference, so callers can override only an ambiguous center or span.
+    """
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    z: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Absolute Z center of the port source and monitor in um.",
+    )
+    z_span: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description="Z extent of the port source and monitor in um.",
+    )
+
+    @model_validator(mode="after")
+    def _require_value(self) -> PortVerticalOverride:
+        """Require at least one actual override."""
+        if self.z is None and self.z_span is None:
+            raise ValueError("provide z, z_span, or both")
         return self
 
 
@@ -222,9 +264,13 @@ class Symmetry(BaseModel):
 class Domain(BaseModel):
     """Computational domain sizing: absolute bounds, PML, and symmetries.
 
-    ``z_bounds`` is the sole public control for an active Z axis. ``"auto"``
-    fits the drawn optical geometry with library-owned padding; a numeric pair
-    specifies the exact PML-inner interval in absolute micrometers.
+    ``x_bounds``, ``y_bounds``, and ``z_bounds`` control the PML-inner interval
+    on each active axis. ``"auto"`` keeps automatic sizing; a numeric pair
+    specifies the exact interval in absolute micrometers, with PML outside it.
+
+    Automatic X/Y sizing fits the component bounding box plus ``margin_x`` or
+    ``margin_y``. An explicit bound cannot be combined with an explicitly set
+    margin on the same axis.
 
     ``z_ref`` and ``margin_z`` remain temporarily as input-compatibility fields
     for existing code. They are deprecated and translated to concrete bounds
@@ -233,6 +279,20 @@ class Domain(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid")
 
+    x_bounds: tuple[float, float] | Literal["auto"] = Field(
+        default="auto",
+        description=(
+            "Exact PML-inner X interval in absolute um, or 'auto' to fit the "
+            "component bounding box plus margin_x."
+        ),
+    )
+    y_bounds: tuple[float, float] | Literal["auto"] = Field(
+        default="auto",
+        description=(
+            "Exact PML-inner Y interval in absolute um, or 'auto' to fit the "
+            "component bounding box plus margin_y."
+        ),
+    )
     z_bounds: tuple[float, float] | Literal["auto"] = Field(
         default="auto",
         description=(
@@ -324,35 +384,87 @@ class Domain(BaseModel):
             raise ValueError("margin sides must be >= 0")
         return (float(low), float(high))
 
-    @field_validator("z_bounds", mode="before")
+    @field_validator("x_bounds", "y_bounds", "z_bounds", mode="before")
     @classmethod
-    def _validate_z_bounds(cls, value: Any) -> Any:
+    def _validate_bounds(cls, value: Any, info: Any) -> Any:
         """Accept ``"auto"`` or a finite, increasing absolute interval."""
         if value == "auto":
             return value
+        field_name = info.field_name
+        axis = field_name[0]
         try:
             low, high = value
         except (TypeError, ValueError):
             raise ValueError(
-                "z_bounds must be 'auto' or a (z_min, z_max) pair"
+                f"{field_name} must be 'auto' or an ({axis}_min, {axis}_max) pair"
             ) from None
         low = float(low)
         high = float(high)
         if not math.isfinite(low) or not math.isfinite(high):
-            raise ValueError("z_bounds values must be finite")
+            raise ValueError(f"{field_name} values must be finite")
         if low >= high:
-            raise ValueError("z_bounds requires z_min < z_max")
+            raise ValueError(f"{field_name} requires {axis}_min < {axis}_max")
         return (low, high)
 
     @model_validator(mode="after")
-    def _reject_competing_z_controls(self) -> Domain:
-        """Do not allow deprecated sizing inputs with explicit bounds."""
+    def _reject_competing_bounds_controls(self) -> Domain:
+        """Do not allow bounds and explicitly supplied same-axis margins."""
+        if self.x_bounds != "auto" and "margin_x" in self.model_fields_set:
+            raise ValueError(
+                "Choose domain.x_bounds or domain.margin_x; they cannot be "
+                "combined on the same axis."
+            )
+        if self.y_bounds != "auto" and "margin_y" in self.model_fields_set:
+            raise ValueError(
+                "Choose domain.y_bounds or domain.margin_y; they cannot be "
+                "combined on the same axis."
+            )
         if self.z_bounds != "auto" and self.legacy_z_fields_used():
             raise ValueError(
                 "Choose domain.z_bounds only; deprecated domain.z_ref and "
                 "domain.margin_z cannot be combined with explicit z_bounds."
             )
         return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_active_domain_controls(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, Any]:
+        """Omit inactive or implicit default X/Y margins.
+
+        ``model_fields_set`` distinguishes a margin supplied by a caller from a
+        model default during construction and assignment. Serialization cannot
+        preserve that distinction if it emits an implicit default margin, so
+        leave it out. A margin is also inactive when its axis has authoritative
+        explicit bounds.
+        """
+        data = handler(self)
+        if self.x_bounds != "auto" or "margin_x" not in self.model_fields_set:
+            data.pop("margin_x", None)
+        if self.y_bounds != "auto" or "margin_y" not in self.model_fields_set:
+            data.pop("margin_y", None)
+        return data
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Preflight competing domain controls so failed assignment is atomic."""
+        competing_controls = {
+            "x_bounds",
+            "y_bounds",
+            "z_bounds",
+            "margin_x",
+            "margin_y",
+            "margin_z",
+            "z_ref",
+        }
+        if name in competing_controls and hasattr(self, "__pydantic_fields_set__"):
+            candidate_data = {
+                field_name: getattr(self, field_name)
+                for field_name in self.model_fields_set
+            }
+            candidate_data[name] = value
+            type(self).model_validate(candidate_data)
+        super().__setattr__(name, value)
 
     def legacy_z_fields_used(self) -> tuple[str, ...]:
         """Return deprecated vertical fields explicitly set by the caller."""

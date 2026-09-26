@@ -21,6 +21,7 @@ from gsim.palace.models import (
     MaterialConfig,
     NumericalConfig,
     PortConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 
@@ -74,6 +75,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Port configurations (eigenmode can have ports for Q-factor calculation)
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
 
     # Eigenmode simulation config
     eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)

@@ -49,6 +49,15 @@ def _wavelength_to_um(value: float, unit: str) -> float:
     return float(value) * scale
 
 
+def _temperature_to_kelvin(value: float, unit: str) -> float:
+    """Convert a supported absolute temperature unit to kelvin."""
+    if unit == "K":
+        return float(value)
+    if unit == "degC":
+        return float(value) + 273.15
+    raise MaterialModelError(f"Unsupported temperature unit {unit!r}.")
+
+
 def _validate_wavelength(model: Any, wavelength_um: float, material_name: str) -> None:
     """Require the wavelength to fall within the model's declared range."""
     validity = getattr(model, "validity", None)
@@ -101,8 +110,64 @@ def _interpolate(
     return float(values[-1])
 
 
-def _evaluate_value(value: Any, wavelength_um: float) -> float:
-    """Evaluate a scalar or one-dimensional tabulated optical value."""
+def _wavelength_table_values(
+    value: TabulatedValue,
+    temperature_ref_kelvin: float | None,
+) -> tuple[list[float], Sequence[float]]:
+    """Return a wavelength curve, selecting a table's reference temperature."""
+    table = value.data
+    wavelength_coordinate = table.coords.get("wavelength")
+    if wavelength_coordinate is None:
+        raise MaterialModelError("Optical table is missing wavelength coordinates.")
+    coordinates_um = [
+        _wavelength_to_um(item, wavelength_coordinate.unit)
+        for item in wavelength_coordinate.values
+    ]
+    if tuple(table.dims) == ("wavelength",):
+        return coordinates_um, table.values
+    if tuple(table.dims) != ("wavelength", "temperature"):
+        raise MaterialModelError(
+            "Optical tables must have 'wavelength' or "
+            "('wavelength', 'temperature') dimensions."
+        )
+    if temperature_ref_kelvin is None:
+        raise MaterialModelError(
+            "Temperature-dependent optical tables require a reference temperature."
+        )
+
+    temperature_coordinate = table.coords.get("temperature")
+    if temperature_coordinate is None:
+        raise MaterialModelError("Optical table is missing temperature coordinates.")
+    temperatures_kelvin = [
+        _temperature_to_kelvin(item, temperature_coordinate.unit)
+        for item in temperature_coordinate.values
+    ]
+    temperature_count = len(temperatures_kelvin)
+    if len(table.values) != len(coordinates_um) * temperature_count:
+        raise MaterialModelError(
+            "Temperature-dependent optical table has invalid shape."
+        )
+    reference_values = [
+        _interpolate(
+            temperatures_kelvin,
+            table.values[
+                wavelength_index * temperature_count : (wavelength_index + 1)
+                * temperature_count
+            ],
+            temperature_ref_kelvin,
+            table.interp,
+        )
+        for wavelength_index in range(len(coordinates_um))
+    ]
+    return coordinates_um, reference_values
+
+
+def _evaluate_value(
+    value: Any,
+    wavelength_um: float,
+    temperature_ref_kelvin: float | None,
+) -> float:
+    """Evaluate a scalar or tabulated optical value at its reference temperature."""
     if isinstance(value, ScalarValue):
         if value.unit:
             raise MaterialModelError("Refractive index values must be dimensionless.")
@@ -113,21 +178,16 @@ def _evaluate_value(value: Any, wavelength_um: float) -> float:
             "scalar or table."
         )
     table = value.data
-    if tuple(table.dims) != ("wavelength",):
-        raise MaterialModelError("Optical tables must have one 'wavelength' dimension.")
-    coordinate = table.coords.get("wavelength")
-    if coordinate is None:
-        raise MaterialModelError("Optical table is missing wavelength coordinates.")
-    coordinates_um = [
-        _wavelength_to_um(item, coordinate.unit) for item in coordinate.values
-    ]
     if any(isinstance(item, list) for item in table.values):
         raise MaterialModelError(
             "Tensor optical values are not supported for passive FDTD."
         )
+    coordinates_um, wavelength_values = _wavelength_table_values(
+        value, temperature_ref_kelvin
+    )
     return _interpolate(
         coordinates_um,
-        table.values,
+        wavelength_values,
         wavelength_um,
         table.interp,
     )
@@ -142,6 +202,7 @@ def _evaluate_permittivity(
             f"Material {card.name!r} has no optical permittivity model."
         )
     model = card.optical.permittivity
+    temperature_ref_kelvin = card.optical.temperature_ref
     _validate_wavelength(model, wavelength_um, card.name)
     if isinstance(model, Sellmeier):
         wavelength_squared = wavelength_um**2
@@ -163,14 +224,18 @@ def _evaluate_permittivity(
             raise MaterialModelError(
                 "Tensor refractive indices are not supported for passive FDTD."
             )
-        refractive_index = _evaluate_value(model.n, wavelength_um)
+        refractive_index = _evaluate_value(
+            model.n, wavelength_um, temperature_ref_kelvin
+        )
         if model.k is None:
             return refractive_index, 0.0
         if isinstance(model.k, list):
             raise MaterialModelError(
                 "Tensor extinction coefficients are not supported for passive FDTD."
             )
-        return refractive_index, _evaluate_value(model.k, wavelength_um)
+        return refractive_index, _evaluate_value(
+            model.k, wavelength_um, temperature_ref_kelvin
+        )
     raise MaterialModelError(
         f"Unsupported optical model {type(model).__name__} for material {card.name!r}."
     )

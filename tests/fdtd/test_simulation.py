@@ -67,7 +67,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     resolved = simulation.geometry("straight", settings={"length": 2.0})
 
     assert resolved.materials["Si"].source == "project"
-    assert resolved.materials["Si"].refractive_index == pytest.approx(3.4757)
+    assert resolved.materials["Si"].refractive_index == pytest.approx(3.475687046)
 
     artifacts = simulation.write(tmp_path)
     document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
@@ -76,7 +76,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert document["schema_version"] == 1
     assert document["mesh_file"] == "mesh.msh"
     assert document["length_scale_meters"] == 1e-9
-    assert document["materials"]["Si"]["refractive_index"] == pytest.approx(3.4757)
+    assert document["materials"]["Si"]["refractive_index"] == pytest.approx(3.475687046)
     assert document["materials"]["SiO2"]["refractive_index"] == pytest.approx(
         1.4440236217
     )

@@ -20,6 +20,7 @@ from gsim.palace.models import (
     MeshConfig,
     NumericalConfig,
     PortConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 
@@ -74,6 +75,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: None = None
 
     # Driven simulation config
