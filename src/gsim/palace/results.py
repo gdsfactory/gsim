@@ -793,6 +793,7 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
         roots = [
             base_dir,
             base_dir / "output" / "palace",
+            base_dir / "output",
         ]
         files = {}
         for root in roots:
@@ -990,8 +991,8 @@ def load_fields(
 ):
     """Load the ParaView volume or boundary dataset for a Palace simulation.
 
-    Requires the simulation to have been run with ``save_step >= 1``
-    so that field data was written to disk.
+    Requires ``save_step >= 1`` for driven simulations or ``save >= 1`` for
+    BoundaryMode simulations so that field data was written to disk.
 
     Args:
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
@@ -1046,6 +1047,7 @@ def _find_paraview_dir(
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
+        base_dir / "output",
     ]
     exc_dir: Path | None = None
     for root in search_roots:
@@ -1093,10 +1095,11 @@ def _find_paraview_dir(
 
     import pyvista as pv
 
-    _partition_only = {"Indicator", "Rank"}
+    mesh_metadata_fields = {"Indicator", "Rank", "attribute"}
     for pvtu in candidates:
-        ds = pv.read(str(pvtu))
-        if set(ds.point_data.keys()) != _partition_only:
+        dataset = pv.read(str(pvtu))
+        field_names = set(dataset.point_data) | set(dataset.cell_data)
+        if field_names - mesh_metadata_fields:
             return pvtu
 
     # All cycles are partition-only — return the last one and let the
