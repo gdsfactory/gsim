@@ -33,23 +33,34 @@ class SymmetryEntry(BaseModel):
 class DomainConfig(BaseModel):
     """Resolved simulation domain sizing and PML thickness.
 
-    ``z_bounds`` is the authoritative PML-inner Z interval for new configs.
+    Concrete ``*_bounds`` fields are authoritative PML-inner intervals.
+    ``None`` retains legacy geometry-bbox plus margin sizing on that axis.
     The legacy ``margin_z_low`` / ``margin_z_high`` fields remain readable for
     old generated configs and are omitted when concrete bounds are serialized.
-    Along XY the margins are the per-side gaps between the geometry bounding
-    box and the PML inner edge (``*_low`` = -axis side, ``*_high`` = +axis
-    side).
+    Along automatic X/Y axes the margins are the per-side gaps between the
+    geometry bounding box and the PML inner edge.
 
     Cell size formula:
-        cell_x = bbox_width  + margin_x_low + margin_x_high + 2*dpml
-        cell_y = bbox_height + margin_y_low + margin_y_high + 2*dpml
+        cell_x = x_inner_extent + 2*dpml
+        cell_y = y_inner_extent + 2*dpml
         cell_z = z_extent + 2*dpml  (z-margins baked into z_extent)
-    The cell center is shifted by (margin_*_high - margin_*_low)/2 per axis so
-    asymmetric margins place more room on the intended side.
+    Explicit axes are centered on their interval midpoint. Automatic axes are
+    shifted by (margin_*_high - margin_*_low)/2 so asymmetric margins place
+    more room on the intended side.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
+    x_bounds: tuple[float, float] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Resolved absolute PML-inner X interval in um.",
+    )
+    y_bounds: tuple[float, float] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Resolved absolute PML-inner Y interval in um.",
+    )
     z_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Resolved absolute PML-inner Z interval in um.",
@@ -99,19 +110,21 @@ class DomainConfig(BaseModel):
         "Source-port monitor is placed this far past the source into the device.",
     )
 
-    @field_validator("z_bounds")
+    @field_validator("x_bounds", "y_bounds", "z_bounds")
     @classmethod
-    def _validate_z_bounds(
-        cls, value: tuple[float, float] | None
+    def _validate_bounds(
+        cls, value: tuple[float, float] | None, info: Any
     ) -> tuple[float, float] | None:
         """Require a finite, increasing resolved interval."""
         if value is None:
             return None
+        field_name = info.field_name
+        axis = field_name[0]
         low, high = value
         if not all(math.isfinite(bound) for bound in value):
-            raise ValueError("z_bounds values must be finite")
+            raise ValueError(f"{field_name} values must be finite")
         if low >= high:
-            raise ValueError("z_bounds requires z_min < z_max")
+            raise ValueError(f"{field_name} requires {axis}_min < {axis}_max")
         return (float(low), float(high))
 
 
@@ -316,6 +329,16 @@ class PortData(BaseModel):
     center: list[float] = Field(description="[x, y, z] center coordinates")
     orientation: float = Field(description="Port orientation in degrees")
     width: float = Field(gt=0)
+    z_span: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Per-port Z extent in um. None uses the legacy global "
+            "monitor_z_span fallback."
+        ),
+    )
     normal_axis: int = Field(ge=0, le=1, description="0=x, 1=y")
     direction: Literal["+", "-"] = Field(description="Direction along normal axis")
     is_source: bool = False

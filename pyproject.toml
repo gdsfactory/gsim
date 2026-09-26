@@ -1,6 +1,6 @@
 [project]
 name = "gsim"
-version = "0.4.0"
+version = "0.5.0"
 description = "Electromagnetic simulation for photonics and electronics, powered by GDSFactory."
 readme = "README.md"
 requires-python = "~=3.12.0"
@@ -243,6 +243,8 @@ ignore = [
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
+# Jupytext exports retain notebook cells and display expressions.
+"nbs/*.py" = ["B018", "E402", "E501", "INP001", "T201"]
 "*.ipynb" = [
   "ANN",  # flake8-annotations
   "ARG001",  # unused-function-argument

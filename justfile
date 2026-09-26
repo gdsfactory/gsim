@@ -35,6 +35,7 @@ sync-changelog:
   cp CHANGELOG.md docs/CHANGELOG.md
 
 docs: sync-changelog
+  uv run python scripts/plot_material_indices.py
   uv run zensical build -f docs/zensical.toml
 
 # Run a notebook normally (interactive plots): just nbrun nbs/foo.ipynb

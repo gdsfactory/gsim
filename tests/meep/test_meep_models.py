@@ -615,8 +615,33 @@ class TestPublicDomainZBounds:
         from gsim.meep.models.api import Domain
 
         domain = Domain(z_bounds=(-1.0, 3.0))
+        original = domain.model_copy(deep=True)
+        original_fields_set = domain.model_fields_set.copy()
+
         with pytest.raises(ValidationError, match="cannot be combined"):
             domain.margin_z = (0.2, 0.3)
+
+        assert domain == original
+        assert domain.model_fields_set == original_fields_set
+
+    @pytest.mark.parametrize(
+        ("legacy_field", "legacy_value"),
+        [("margin_z", (0.2, 0.3)), ("z_ref", "core")],
+    )
+    def test_assignment_rejects_bounds_after_legacy_input_transactionally(
+        self, legacy_field, legacy_value
+    ):
+        from gsim.meep.models.api import Domain
+
+        domain = Domain(**{legacy_field: legacy_value})
+        original = domain.model_copy(deep=True)
+        original_fields_set = domain.model_fields_set.copy()
+
+        with pytest.raises(ValidationError, match="cannot be combined"):
+            domain.z_bounds = (-1.0, 3.0)
+
+        assert domain == original
+        assert domain.model_fields_set == original_fields_set
 
     def test_legacy_fields_are_not_dumped(self):
         from gsim.meep.models.api import Domain
@@ -1298,6 +1323,7 @@ class TestOverlay:
                 center=[-2.0, 0.0, 0.11],
                 orientation=0.0,
                 width=0.5,
+                z_span=1.22,
                 normal_axis=0,
                 direction="-",
                 is_source=True,
@@ -1307,13 +1333,14 @@ class TestOverlay:
                 center=[2.0, 0.0, 0.11],
                 orientation=180.0,
                 width=0.5,
+                z_span=1.39,
                 normal_axis=0,
                 direction="+",
                 is_source=False,
             ),
         ]
 
-        overlay = build_sim_overlay(gm, domain_cfg, port_data)
+        overlay = build_sim_overlay(gm, domain_cfg, port_data, z_span=9.0)
 
         # cell_min = geo_min - (margin_x/y + dpml) for xy, - dpml for z
         assert overlay.cell_min[0] == pytest.approx(-3.5)  # -2 - (0.5 + 1.0)
@@ -1326,6 +1353,9 @@ class TestOverlay:
         assert len(overlay.ports) == 2
         assert overlay.ports[0].is_source
         assert not overlay.ports[1].is_source
+        assert [port.z_span for port in overlay.ports] == [1.22, 1.39]
+        assert [source.z_span for source in overlay.sources] == [1.22]
+        assert [monitor.z_span for monitor in overlay.monitors] == [1.22, 1.39]
         assert overlay.dpml == 1.0
 
     def test_build_sim_overlay_with_dielectrics(self):

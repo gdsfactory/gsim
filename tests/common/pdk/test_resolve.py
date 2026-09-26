@@ -113,7 +113,7 @@ def test_resolves_named_component_stack_materials_and_ports() -> None:
     assert set(result.layers) == {"core_key", "oxide"}
     assert set(result.materials) == {"Si", "SiO2"}
     assert result.materials["Si"].source == "project"
-    assert result.materials["Si"].refractive_index == pytest.approx(3.4757)
+    assert result.materials["Si"].refractive_index == pytest.approx(3.475687046)
     assert result.materials["SiO2"].source == "gsim"
     assert result.bounds == ((-0.5, -0.75, -2.0), (3.5, 0.75, 0.22))
     assert result.ports["o1"].normal == (-1, 0, 0)
