@@ -4,27 +4,36 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 import skrf as rf
 from scipy.constants import speed_of_light
 
+from gsim.palace.results import SParam, SParams
+
 NOTEBOOK_DIR = Path(__file__).resolve().parents[2] / "nbs"
 
 
 @pytest.fixture(params=["palace_cpw_waveport.ipynb", "palace_cpw_lumped.ipynb"])
-def extraction_functions(request):
-    """Load the actual extraction cell without launching cloud simulations."""
+def notebook_sources(request):
+    """Read the tutorial cells without launching cloud simulations."""
     notebook_path = NOTEBOOK_DIR / request.param
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    return ["".join(cell["source"]) for cell in notebook["cells"]]
+
+
+@pytest.fixture
+def extraction_functions(notebook_sources):
+    """Load the actual extraction cell without launching cloud simulations."""
     source = next(
-        "".join(cell["source"])
-        for cell in notebook["cells"]
-        if "def extract_modal_parameters(" in "".join(cell["source"])
+        source
+        for source in notebook_sources
+        if "def extract_modal_parameters(" in source
     )
     namespace = {}
-    exec(compile(source, str(notebook_path), "exec"), namespace)  # noqa: S102
+    exec(compile(source, "extraction_cell", "exec"), namespace)  # noqa: S102
     return namespace
 
 
@@ -79,3 +88,33 @@ def test_deembedding_recovers_propagation_of_added_length(
     np.testing.assert_allclose(extracted["neff"], effective_index, rtol=1e-10)
     assert extracted["split_error"] < 1e-10
     assert extracted["reembed_error"] < 1e-10
+
+
+@pytest.mark.parametrize("port_names", [("o1", "o2"), ("p1", "p2")])
+@pytest.mark.parametrize("complete", [True, False])
+def test_checks_full_matrix_with_layout_or_numeric_port_names(
+    notebook_sources, transmission_line, port_names, complete
+):
+    """Accept cloud numeric names but reject an uncomputed output reflection."""
+    medium, _, _, _ = transmission_line
+    network = medium.line(100, unit="um")
+    data = {
+        (to_port, from_port): SParam(network.s_db[:, i, j], network.s_deg[:, i, j])
+        for i, to_port in enumerate(port_names)
+        for j, from_port in enumerate(port_names)
+    }
+    if not complete:
+        del data[port_names[1], port_names[1]]
+    result = SParams(network.f / 1e9, data, list(port_names))
+    source = next(
+        source
+        for source in notebook_sources
+        if source.startswith("# De-embedding requires")
+    )
+    namespace: dict[str, Any] = {"length_results": [result]}
+    if not complete:
+        with pytest.raises(AssertionError, match="both port excitations"):
+            exec(compile(source, "network_cell", "exec"), namespace)  # noqa: S102
+    else:
+        exec(compile(source, "network_cell", "exec"), namespace)  # noqa: S102
+        np.testing.assert_allclose(namespace["networks"][0].s, network.s, atol=1e-12)
