@@ -110,12 +110,24 @@ def test_dual_regime_card_keeps_its_optical_model():
 
 def test_module_cards_and_yaml_preserve_provenance(tmp_path):
     pdk = _pdk()
+    pdk.material_cards["metal"].info = {
+        "composition": "Ti/TiN/AlCu/Ti/TiN",
+        "composition_source_url": "https://doi.org/10.1109/TCPMT.2022.3172502",
+    }
+    # Real PDKs mix RF cards with legacy models containing validity tuples.
+    pdk.layer_stack.layers["nitride"] = LayerLevel(
+        layer=(998, 0), zmin=2, thickness=0.4, material="sin"
+    )
     module = SimpleNamespace(PDK=pdk, LAYER_STACK=pdk.layer_stack)
     stack = extract_from_pdk(module)
     path = tmp_path / "stack.yaml"
     stack.to_yaml(path)
     restored = load_stack_yaml(path)
     assert restored.materials == stack.materials
+    assert restored.materials["metal"]["material_card"]["info"] == (
+        pdk.material_cards["metal"].info
+    )
+    assert restored.materials["sin"]["dispersion_models"]
     assert (
         resolve_palace_materials_at_frequency(restored.materials, 50e9)["sio2"][
             "permittivity"
@@ -215,14 +227,23 @@ def test_diagonal_permittivity_and_conductivity():
     assert props["conductivity"] == [1, 2, 3]
 
 
-def test_ihp_cards_reach_palace_stack():
+def test_ihp_cards_reach_palace_stack(tmp_path):
     ihp = pytest.importorskip("ihp")
     if not hasattr(ihp.PDK, "material_cards"):
         pytest.skip("requires IHP release with RF material cards")
     stack = extract_from_pdk(ihp, include_substrate=True)
+    path = tmp_path / "ihp-stack.yaml"
+    stack.to_yaml(path)
+    restored = load_stack_yaml(path)
+    assert restored.materials == stack.materials
+    stack = restored
     resolved = resolve_palace_materials_at_frequency(stack.materials, 50e9)
     expected = {"metal1": 21.64e6, "via1": 1.66e6, "topmetal2": 30.3e6, "mim": 0.5e6}
     for layer, sigma in expected.items():
-        assert resolved[stack.layers[layer].material]["conductivity"] == sigma
+        name = stack.layers[layer].material
+        assert resolved[name]["conductivity"] == sigma
+        assert resolved[name]["material_card"] == ihp.PDK.material_cards[
+            name
+        ].model_dump(mode="json")
     assert resolved["sio2"]["permittivity"] == 4.1
     assert resolved["silicon"]["conductivity"] == 2

@@ -410,7 +410,9 @@ class MaterialProperties(BaseModel):
         if self.material_axes is not None:
             d["material_axes"] = self.material_axes
         if self.dispersion_models:
-            d["dispersion_models"] = [m.model_dump() for m in self.dispersion_models]
+            d["dispersion_models"] = [
+                m.model_dump(mode="json") for m in self.dispersion_models
+            ]
         return d
 
     def evaluate_at_wavelength(self, wavelength_um: float) -> ResolvedMaterial:
