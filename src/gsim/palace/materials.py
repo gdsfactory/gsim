@@ -44,6 +44,11 @@ def resolve_palace_materials_at_frequency(
     resolved: dict[str, dict] = {}
 
     for name, props in materials.items():
+        # Constant PDK RF cards and explicit overrides are already resolved.
+        # In particular, do not replace a PDK's SiO2 with a generic database fit.
+        if props.get("material_source") in {"pdk_material_card", "override"}:
+            resolved[name] = dict(props)
+            continue
         db_props = get_material_properties(name)
         if db_props is None:
             resolved[name] = dict(props)
