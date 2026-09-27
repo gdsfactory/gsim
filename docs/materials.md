@@ -95,8 +95,8 @@ survive stack YAML export/import. Explicit `sim.set_material(...)` overrides tak
 The RF adapter supports constant scalar or diagonal relative permittivity and conductivity, including dielectric loss
 from `eps_imag / eps_real`. It rejects unsupported dispersion, magnetic models, validity constraints, variation, and
 simultaneous nonzero conductivity and dielectric loss instead of substituting generic values. Materials without RF cards
-retain the legacy behavior. Constant RF cards are used unchanged across a Palace sweep; this does not establish a
-measured validity band.
+retain the legacy behavior. Constant RF cards are used unchanged across an RF sweep; this does not establish a measured
+validity band. A dual-regime card's optical model takes precedence within its explicitly declared wavelength band.
 
 IHP versions publishing RF cards use layer-specific metal, contact, via, and MIM electrode conductivities from the
 [IHP-linked Palace stack](https://github.com/VolkerMuehlhaus/gds2palace_ihp_sg13g2/blob/df29aa608be858f53fbce46f81238b5534812d9b/workflow/SG13G2_200um.xml).

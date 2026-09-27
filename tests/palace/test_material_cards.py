@@ -94,6 +94,20 @@ def test_pdk_card_precedence_and_isolation():
     assert resolved["metal"]["conductivity"] == 21.64e6
 
 
+def test_dual_regime_card_keeps_its_optical_model():
+    from scipy.constants import c
+
+    from gsim.common.materials.sio2_malitson import SIO2_MALITSON
+
+    pdk = _pdk()
+    pdk.material_cards["sio2"].optical = SIO2_MALITSON.optical
+    stack = extract_from_pdk(pdk)
+    optical = resolve_palace_materials_at_frequency(stack.materials, c / 1.55e-6)
+    rf = resolve_palace_materials_at_frequency(stack.materials, 50e9)
+    assert optical["sio2"]["permittivity"] == pytest.approx(2.0852, abs=0.001)
+    assert rf["sio2"]["permittivity"] == 5
+
+
 def test_module_cards_and_yaml_preserve_provenance(tmp_path):
     pdk = _pdk()
     module = SimpleNamespace(PDK=pdk, LAYER_STACK=pdk.layer_stack)
