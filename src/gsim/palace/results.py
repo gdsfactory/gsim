@@ -1022,7 +1022,8 @@ def load_fields(
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
             or a path to the simulation directory.
         excitation: Excitation index (1-based) to load.
-        cycle: ParaView cycle number (``None`` -> last available).
+        cycle: ParaView cycle number (``None`` selects the latest solution
+            cycle, skipping mesh diagnostics).
         boundary: If ``True``, load boundary surface fields
             (``driven_boundary/``) instead of volume fields
             (``driven/``).  Boundary data includes ``J_s_real``,
@@ -1107,8 +1108,9 @@ def _find_paraview_dir(
         return candidates[-1]
 
     # Auto-select last available cycle that contains actual field data.
-    # Palace writes a final cycle with only Indicator/Rank (mesh partition);
-    # skip it and pick the latest cycle with real solution fields.
+    # Palace writes a final cycle with mesh diagnostics. Indicator/Rank may
+    # be point data or cell data, depending on the MFEM version.
+    # Skip these cycles and pick the latest cycle with solution fields.
     candidates = sorted(exc_dir.rglob("*.pvtu"), reverse=True)
     if not candidates:
         msg = (
