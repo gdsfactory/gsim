@@ -187,10 +187,19 @@ def resolve_dielectric_regions(
             )
         )
 
+    # Keep the airbox envelope consistent with ``resolve_mesh_domain_bounds``.
+    # Ports using ``max_size`` or ``full_height`` are built from those domain
+    # bounds, which include both dielectric and layer extents.  If a PDK has a
+    # layer outside its dielectric envelope, omitting it here makes the port
+    # protrude beyond the volume mesh and leaves orphan boundary triangles.
+    for layer in stack.layers.values():
+        z_min_all = min(z_min_all, layer.zmin)
+        z_max_all = max(z_max_all, layer.zmax)
+
     if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-        for layer in stack.layers.values():
-            z_min_all = min(z_min_all, layer.zmin)
-            z_max_all = max(z_max_all, layer.zmax)
+        z_try_min, z_try_max = stack.get_z_range()
+        z_min_all = min(z_min_all, z_try_min)
+        z_max_all = max(z_max_all, z_try_max)
 
     if use_airbox:
         if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
