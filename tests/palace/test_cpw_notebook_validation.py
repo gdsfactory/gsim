@@ -1,4 +1,4 @@
-"""Check the CPW tutorials against transmission lines with known parameters."""
+"""Check the CPW de-embedding tutorial against lines with known parameters."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from gsim.palace.results import SParam, SParams
 NOTEBOOK_DIR = Path(__file__).resolve().parents[2] / "nbs"
 
 
-@pytest.fixture(params=["palace_cpw_waveport.ipynb", "palace_cpw_lumped.ipynb"])
-def notebook_sources(request):
+@pytest.fixture
+def notebook_sources():
     """Read the tutorial cells without launching cloud simulations."""
-    notebook_path = NOTEBOOK_DIR / request.param
+    notebook_path = NOTEBOOK_DIR / "palace_cpw_deembedding.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     return ["".join(cell["source"]) for cell in notebook["cells"]]
 
@@ -111,10 +111,11 @@ def test_checks_full_matrix_with_layout_or_numeric_port_names(
         for source in notebook_sources
         if source.startswith("# De-embedding requires")
     )
-    namespace: dict[str, Any] = {"length_results": [result]}
+    case = ("lumped" if port_names[0] == "o1" else "wave", 100)
+    namespace: dict[str, Any] = {"results_by_case": {case: result}}
     if not complete:
         with pytest.raises(AssertionError, match="both port excitations"):
             exec(compile(source, "network_cell", "exec"), namespace)  # noqa: S102
     else:
         exec(compile(source, "network_cell", "exec"), namespace)  # noqa: S102
-        np.testing.assert_allclose(namespace["networks"][0].s, network.s, atol=1e-12)
+        np.testing.assert_allclose(namespace["networks"][case].s, network.s, atol=1e-12)

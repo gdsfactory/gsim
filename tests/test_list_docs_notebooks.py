@@ -25,6 +25,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/meep_ybranch.ipynb",
     "nbs/palace_cpw_lumped.ipynb",
     "nbs/palace_cpw_waveport.ipynb",
+    "nbs/palace_cpw_deembedding.ipynb",
     "nbs/palace_microstrip.ipynb",
     "nbs/palace_branch_line_coupler.ipynb",
     "nbs/palace_width_sweep.ipynb",
