@@ -60,18 +60,13 @@ def resolve_physical_groups(
         msg = f"No physical groups found in mesh: {path}"
         raise ValueError(msg)
 
-    requested = set(group_names)
-    found: list[int] = []
-    missing = set(requested)
-    for name, (tag, _dim) in m.field_data.items():
-        if name in requested:
-            found.append(int(tag))
-            missing.discard(name)
+    found = {name: int(tag) for name, (tag, _dim) in m.field_data.items()}
+    missing = set(group_names) - found.keys()
     if missing:
         available = sorted(m.field_data.keys())
         msg = f"Physical group(s) not found: {sorted(missing)}. Available: {available}"
         raise ValueError(msg)
-    return found
+    return [found[name] for name in group_names]
 
 
 Axis = Literal["x", "y", "z"]
