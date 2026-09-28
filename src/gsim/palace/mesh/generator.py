@@ -1333,7 +1333,16 @@ def generate_mesh(
         # Add geometry
         logger.info("Adding metals...")
         metal_tags = add_metals(
-            kernel, geometry, stack, planar_conductors, merge_via_distance
+            kernel,
+            geometry,
+            stack,
+            planar_conductors,
+            merge_via_distance,
+            curve_fit_mode=curve_fit_mode,
+            curve_fit_layers=curve_fit_layers,
+            curve_fit_tolerance_um=curve_fit_tolerance_um,
+            curve_fit_min_points=curve_fit_min_points,
+            curve_fit_corner_angle_deg=curve_fit_corner_angle_deg,
         )
 
         # Add PEC blocks if configured

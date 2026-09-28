@@ -273,3 +273,173 @@ def test_generate_palace_config_shaped_dielectric_layer_material(tmp_path) -> No
     assert core_mat is not None
     assert core_mat["Permittivity"] == 12.1
     assert core_mat["LossTan"] == 0.002
+
+
+class _FakeKernel:
+    """Minimal OCC-ish kernel recording polygon surface creation calls."""
+
+    def __init__(self) -> None:
+        self.surface_calls: list[dict[str, object]] = []
+        self.wire_loop_calls: list[dict[str, object]] = []
+
+    def synchronize(self) -> None:
+        return
+
+    def removeAllDuplicates(self) -> None:  # noqa: N802 (gmsh API)
+        return
+
+    def getBoundingBox(self, dim: int, tag: int) -> tuple:  # noqa: N802 (gmsh API)
+        del dim, tag
+        return (0.0, 0.0, 0.0, 1.0, 1.0, 0.0)
+
+    def getEntities(self, dim: int):  # noqa: N802 (gmsh API)
+        del dim
+        return []
+
+    def remove(self, *_args, **_kwargs) -> None:
+        return
+
+
+def test_add_metals_forwards_curve_fit_for_selected_conductor_layers(
+    monkeypatch,
+) -> None:
+    """Conductor layers in curve_fit_layers get spline/bspline surface boundaries."""
+    from gsim.palace.mesh import geometry as mesh_geometry
+    from gsim.palace.mesh.geometry import GeometryData
+
+    stack = LayerStack()
+    stack.layers["CORE"] = Layer(
+        name="CORE",
+        gds_layer=(1, 0),
+        zmin=0.0,
+        zmax=0.0,
+        thickness=0.0,
+        material="aluminum",
+        layer_type="conductor",
+    )
+    stack.layers["OTHER"] = Layer(
+        name="OTHER",
+        gds_layer=(2, 0),
+        zmin=0.0,
+        zmax=0.0,
+        thickness=0.0,
+        material="aluminum",
+        layer_type="conductor",
+    )
+    stack.materials = {"aluminum": {"conductivity": 3.77e7}}
+
+    geometry = GeometryData(
+        polygons=[
+            (1, [0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 1.0], []),
+            (2, [0.0, 2.0, 2.0, 0.0], [0.0, 0.0, 2.0, 2.0], []),
+        ],
+        bbox=(0.0, 0.0, 2.0, 2.0),
+        layer_bboxes={},
+    )
+
+    monkeypatch.setattr(
+        mesh_geometry, "_detect_shaped_dielectric_layers", lambda *_a, **_k: set()
+    )
+    monkeypatch.setattr(mesh_geometry, "_merge_via_polygons", lambda polys, _d: polys)
+
+    kernel = _FakeKernel()
+    captured: list[dict[str, object]] = []
+
+    def _fake_create_polygon_surface(_kernel, _x, _y, _z, **kwargs):
+        captured.append(kwargs)
+        return len(captured)
+
+    monkeypatch.setattr(
+        mesh_geometry.gmsh_utils,
+        "create_polygon_surface",
+        _fake_create_polygon_surface,
+    )
+    monkeypatch.setattr(
+        mesh_geometry.gmsh_utils,
+        "_create_wire_loop",
+        lambda _k, *_a, **kw: captured.append({**kw, "_wire": True}) or 1,
+    )
+
+    mesh_geometry.add_metals(
+        kernel,
+        geometry,
+        stack,
+        planar_conductors=True,
+        curve_fit_mode="bspline",
+        curve_fit_layers=["CORE"],
+        curve_fit_tolerance_um=0.02,
+        curve_fit_min_points=12,
+        curve_fit_corner_angle_deg=30.0,
+    )
+
+    surface_modes = [c.get("loop_mode") for c in captured if not c.get("_wire")]
+    # CORE (layer 1) uses bspline; OTHER (layer 2) falls back to straight lines.
+    assert surface_modes == ["bspline", "line"]
+    for call in captured:
+        if call.get("_wire"):
+            assert call["point_merge_tol"] == 0.02
+            assert call["corner_turn_threshold_deg"] == 30.0
+
+
+class _FakeMeshOpsForStats:
+    """Minimal gmsh mesh stub returning high-order tetrahedra."""
+
+    def getNodes(self):  # noqa: N802 (gmsh API)
+        return ([1, 2, 3, 4, 5, 6], [[0.0, 0.0, 0.0]] * 6, [])
+
+    def getElements(self):  # noqa: N802 (gmsh API)
+        element_types = [2, 11]
+        element_tags = [[10, 11, 12], [100, 101]]
+        return (element_types, element_tags, [])
+
+    def getElementProperties(self, etype):  # noqa: N802 (gmsh API)
+        return {2: ("Triangle 6",), 11: ("Tetrahedron 10",)}[int(etype)]
+
+    def getElementQualities(self, tags, metric):  # noqa: N802 (gmsh API)
+        _ = metric
+        return [0.5 for _ in tags]
+
+
+class _FakeModelForStats:
+    """Minimal gmsh model stub for collect_mesh_stats."""
+
+    def __init__(self) -> None:
+        self.mesh = _FakeMeshOpsForStats()
+
+    def getBoundingBox(self, *_args):  # noqa: N802 (gmsh API)
+        return (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+
+    def getPhysicalGroups(self):  # noqa: N802 (gmsh API)
+        return []
+
+
+class _FakeGmshForStats:
+    def __init__(self) -> None:
+        self.model = _FakeModelForStats()
+
+
+def test_collect_mesh_stats_handles_high_order_tetrahedra(monkeypatch) -> None:
+    """10-node tetrahedra are counted and quality metrics still reported."""
+    from gsim.palace.mesh import config_generator
+
+    monkeypatch.setattr(config_generator, "gmsh", _FakeGmshForStats())
+
+    stats = config_generator.collect_mesh_stats()
+
+    assert stats["nodes"] == 6
+    assert stats["elements"] == 5
+    assert stats["tetrahedra"] == 2
+    assert stats["element_type"] == 11
+    assert stats["quality"]["mean"] == 0.5
+    assert stats["sicn"]["invalid"] == 0
+    assert stats["edge_length"]["min"] == 0.5
+
+
+def test_is_tetrahedron_recognizes_all_orders(monkeypatch) -> None:
+    """Linear and high-order gmsh tetra codes are recognized."""
+    from gsim.palace.mesh import config_generator
+
+    monkeypatch.setattr(config_generator, "gmsh", _FakeGmshForStats())
+    assert config_generator._is_tetrahedron(4) is True
+    assert config_generator._is_tetrahedron(11) is True
+    assert config_generator._is_tetrahedron(2) is False
