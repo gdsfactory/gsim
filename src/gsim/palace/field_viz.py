@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 def resolve_physical_groups(
     source: str | Path,
     group_names: Sequence[str],
+    *,
+    dimension: int | None = None,
 ) -> list[int]:
     """Resolve physical group names to Palace attribute values.
 
@@ -32,6 +34,7 @@ def resolve_physical_groups(
             Cloud meshes are read from the corresponding ``input`` directory.
         group_names: Physical group names to resolve (e.g.
             ``["n_rib", "p_rib", "slab90"]``).
+        dimension: Restrict matches to this Gmsh physical-group dimension.
 
     Returns:
         List of attribute values (integer tags) to use for cell filtering
@@ -60,11 +63,19 @@ def resolve_physical_groups(
         msg = f"No physical groups found in mesh: {path}"
         raise ValueError(msg)
 
-    found = {name: int(tag) for name, (tag, _dim) in m.field_data.items()}
+    found = {
+        name: int(tag)
+        for name, (tag, dim) in m.field_data.items()
+        if dimension is None or int(dim) == dimension
+    }
     missing = set(group_names) - found.keys()
     if missing:
-        available = sorted(m.field_data.keys())
-        msg = f"Physical group(s) not found: {sorted(missing)}. Available: {available}"
+        suffix = f" with dimension {dimension}" if dimension is not None else ""
+        available = sorted(found)
+        msg = (
+            f"Physical group(s) not found{suffix}: {sorted(missing)}. "
+            f"Available: {available}"
+        )
         raise ValueError(msg)
     return [found[name] for name in group_names]
 

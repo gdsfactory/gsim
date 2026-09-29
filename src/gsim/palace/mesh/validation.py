@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
@@ -350,12 +351,18 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
     started = not gmsh.isInitialized()
     if started:
         gmsh.initialize()
+    previous_model = gmsh.model.getCurrent()
+    temporary_model = f"gsim_port_contact_{uuid4().hex}"
+    model_added = False
     try:
-        gmsh.open(str(sim_dir / "palace.msh"))
+        gmsh.model.add(temporary_model)
+        model_added = True
+        gmsh.merge(str(sim_dir / "palace.msh"))
+        surface_groups = gmsh.model.getPhysicalGroups(2)
         groups = {
-            gmsh.model.getPhysicalName(dim, tag): tag
-            for dim, tag in gmsh.model.getPhysicalGroups(2)
+            gmsh.model.getPhysicalName(dim, tag): tag for dim, tag in surface_groups
         }
+        surface_tags = {tag for _, tag in surface_groups}
 
         def nodes(tag: int) -> set[int]:
             found: set[int] = set()
@@ -373,17 +380,27 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
         contacts: dict[int, int] = {}
         for port in ports:
             index = int(port["Index"])
-            prefix = f"P{index}"
-            tags = [
-                tag
-                for name, tag in groups.items()
-                if name == prefix or name.startswith(f"{prefix}_")
-            ]
+            tags = {int(tag) for tag in port.get("Attributes", [])}
+            tags.update(
+                int(tag)
+                for element in port.get("Elements", [])
+                for tag in element.get("Attributes", [])
+            )
             if not tags:
-                raise ValueError(f"mesh has no surface group for lumped port {index}")
+                raise ValueError(f"lumped port {index} has no surface attributes")
+            if missing := tags - surface_tags:
+                raise ValueError(
+                    f"mesh has no surface group for lumped port {index}: "
+                    f"{sorted(missing)}"
+                )
             port_nodes = set().union(*(nodes(tag) for tag in tags))
             contacts[index] = len(port_nodes & conductor_nodes)
     finally:
+        if model_added:
+            gmsh.model.setCurrent(temporary_model)
+            gmsh.model.remove()
+        if previous_model:
+            gmsh.model.setCurrent(previous_model)
         if started:
             gmsh.finalize()
 

@@ -50,7 +50,7 @@ $EndElements
                 },
                 "Boundaries": {
                     "PEC": {"Attributes": [1]},
-                    "LumpedPort": [{"Index": 1}],
+                    "LumpedPort": [{"Index": 1, "Attributes": [2]}],
                 },
             }
         )
@@ -69,11 +69,59 @@ def test_domain_energy_requests_preserve_indices(sim_dir: Path) -> None:
     ]
 
 
+def test_domain_energy_rejects_surface_group(sim_dir: Path) -> None:
+    config_path = sim_dir / "config.json"
+    original = config_path.read_text()
+    with pytest.raises(ValueError, match="dimension 3"):
+        add_domain_energy_postprocessing(sim_dir, ["M1_pec"])
+    assert config_path.read_text() == original
+
+
 def test_lumped_port_contact_rejects_orphan(sim_dir: Path) -> None:
     assert check_lumped_port_contact(sim_dir) == {1: 2}
     path = sim_dir / "config.json"
     config = json.loads(path.read_text())
-    config["Boundaries"]["LumpedPort"].append({"Index": 2})
+    config["Boundaries"]["LumpedPort"].append({"Index": 2, "Attributes": [3]})
     path.write_text(json.dumps(config))
     with pytest.raises(ValueError, match=r"lumped ports \[2\].*share no nodes"):
         check_lumped_port_contact(sim_dir)
+
+
+def test_lumped_port_contact_uses_configured_attributes(sim_dir: Path) -> None:
+    path = sim_dir / "config.json"
+    config = json.loads(path.read_text())
+    config["Boundaries"]["LumpedPort"].extend(
+        [
+            {"Index": 99, "Attributes": [2], "R": 50.0},
+            {"Index": 100, "Elements": [{"Attributes": [2]}]},
+        ]
+    )
+    path.write_text(json.dumps(config))
+    assert check_lumped_port_contact(sim_dir) == {1: 2, 99: 2, 100: 2}
+
+
+def test_lumped_port_contact_preserves_active_gmsh_model(sim_dir: Path) -> None:
+    import gmsh
+
+    gmsh.initialize()
+    try:
+        gmsh.model.add("caller")
+        gmsh.model.geo.addPoint(0, 0, 0, 1, 42)
+        gmsh.model.geo.synchronize()
+        models = gmsh.model.list()
+
+        assert check_lumped_port_contact(sim_dir) == {1: 2}
+        assert gmsh.model.getCurrent() == "caller"
+        assert gmsh.model.list() == models
+        assert gmsh.model.getEntities(0) == [(0, 42)]
+
+        config_path = sim_dir / "config.json"
+        config = json.loads(config_path.read_text())
+        config["Boundaries"]["LumpedPort"].append({"Index": 2, "Attributes": [3]})
+        config_path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="share no nodes"):
+            check_lumped_port_contact(sim_dir)
+        assert gmsh.model.getCurrent() == "caller"
+        assert gmsh.model.list() == models
+    finally:
+        gmsh.finalize()

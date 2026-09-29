@@ -18,6 +18,7 @@ def add_domain_energy_postprocessing(
     preserve existing requests and do not add duplicate domain attributes.
     """
     sim_dir = Path(sim_dir)
+    attributes = resolve_physical_groups(sim_dir, group_names, dimension=3)
     config_path = sim_dir / "config.json"
     config = json.loads(config_path.read_text())
     postprocessing = config["Domains"].setdefault("Postprocessing", {})
@@ -30,9 +31,7 @@ def add_domain_energy_postprocessing(
     }
     next_index = max((int(entry["Index"]) for entry in entries), default=0) + 1
     requested: dict[str, int] = {}
-    for name, attribute in zip(
-        group_names, resolve_physical_groups(sim_dir, group_names), strict=True
-    ):
+    for name, attribute in zip(group_names, attributes, strict=True):
         if attribute not in indices:
             indices[attribute] = next_index
             entries.append({"Index": next_index, "Attributes": [attribute]})
