@@ -299,7 +299,7 @@ def test_write_restores_options_from_existing_gmsh_session(
     tmp_path,
     fdtd_pdk_module,
 ) -> None:
-    import gmsh
+    import rmsh as gmsh
 
     original_options = {
         "Mesh.Algorithm": 6.0,

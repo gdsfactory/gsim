@@ -14,7 +14,7 @@ from gsim.palace.mesh.geometry import build_entities
 @pytest.fixture
 def gmsh_session():
     """Provide an isolated Gmsh session and always release it."""
-    import gmsh
+    import rmsh as gmsh
 
     gmsh.initialize()
     try:

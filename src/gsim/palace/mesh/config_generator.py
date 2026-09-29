@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-import gmsh
+import rmsh as gmsh
 
 from gsim.palace.ports.config import PortType
 

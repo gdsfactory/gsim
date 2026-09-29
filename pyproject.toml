@@ -14,7 +14,6 @@ classifiers = [
 dependencies = [
   "gdsfactory>=9,<10",
   "gdsfactoryplus>=1.8.20,<3",
-  "gmsh",
   "meshio>=5.0.0",
   "nbformat>=4.2.0",
   "nest_asyncio2",
@@ -149,11 +148,11 @@ module = "tests.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = "gmsh"
+module = "rmsh"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = "gmsh.*"
+module = "rmsh.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true

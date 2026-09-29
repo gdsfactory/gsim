@@ -7,7 +7,7 @@ from math import dist
 from pathlib import Path
 from typing import Any
 
-import gmsh
+import rmsh as gmsh
 
 from gsim.common.pdk import ResolvedLayer, ResolvedPassivePcell, ResolvedPort
 from gsim.fdtd.mesh_geometry import GEOMETRY_TOLERANCE_NM, UM_TO_NM

@@ -10,7 +10,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-import gmsh
+import rmsh as gmsh
 
 from . import gmsh_utils
 

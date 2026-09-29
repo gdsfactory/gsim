@@ -6,8 +6,8 @@ import logging
 import math
 from itertools import pairwise
 
-import gmsh
 import numpy as np
+import rmsh as gmsh
 
 logger = logging.getLogger(__name__)
 

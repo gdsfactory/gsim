@@ -147,7 +147,7 @@ def _palace_obb(pts: np.ndarray) -> tuple[np.ndarray, list[np.ndarray], bool]:
 
 def _get_port_vertices(mesh_path: Path, phys_group_tag: int) -> np.ndarray:
     """Load boundary vertices for a surface physical group from a Gmsh mesh."""
-    import gmsh
+    import rmsh as gmsh
 
     gmsh.initialize()
     try:

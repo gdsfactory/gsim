@@ -10,7 +10,7 @@ from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-import gmsh
+import rmsh as gmsh
 
 from . import gmsh_utils
 from .config_generator import (
