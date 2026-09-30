@@ -1070,6 +1070,12 @@ class PalaceSimMixin:
                 if not wp.layer
             )
 
+        if self.simulation_type == "eigenmode" and self.eigenmode.target is None:
+            errors.append(
+                "A positive eigenmode target frequency is required. "
+                "Call set_eigenmode(target=...) with the frequency in Hz."
+            )
+
         # Validate excitation port if specified
         if self.simulation_type == "driven" and self.driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]

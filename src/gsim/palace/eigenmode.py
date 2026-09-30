@@ -148,7 +148,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
         Args:
             num_modes: Number of modes to find
-            target: Target frequency in Hz for mode search
+            target: Positive target frequency in Hz for mode search.
+                Required before meshing or exporting the configuration.
             tolerance: Eigenvalue solver tolerance
             save: Number of eigenmodes to save as ParaView fields (0 = disabled)
             floquet: Enable Floquet periodic boundary setup in config generation

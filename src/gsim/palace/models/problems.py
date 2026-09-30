@@ -175,8 +175,8 @@ class EigenmodeConfig(BaseModel):
     Attributes:
         num_modes: Number of eigenvalues (resonant modes) to compute.
         target: Target frequency in Hz — Palace searches for eigenvalues
-            above this frequency. None = search from DC. Set this near your
-            expected resonance to speed up convergence.
+            above this frequency. Required before meshing or exporting. Set
+            this near your expected resonance to speed up convergence.
         tolerance: Relative convergence tolerance for the eigenvalue solver.
             Tighter tolerance (e.g. 1e-8) gives more accurate frequencies
             and Q-factors at higher cost.
@@ -191,8 +191,11 @@ class EigenmodeConfig(BaseModel):
     )
     target: float | None = Field(
         default=None,
+        gt=0,
+        allow_inf_nan=False,
         description="Target frequency in Hz. Palace searches for modes above "
-        "this value. Set near expected resonance for faster convergence.",
+        "this value. Required before meshing or exporting. Set near expected "
+        "resonance for faster convergence.",
     )
     tolerance: float = Field(
         default=1e-6,
@@ -264,12 +267,16 @@ class EigenmodeConfig(BaseModel):
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
+        if self.target is None:
+            raise ValueError(
+                "A positive eigenmode target frequency is required. "
+                "Call set_eigenmode(target=...) with the frequency in Hz."
+            )
         config: dict = {
             "N": self.num_modes,
             "Tol": self.tolerance,
+            "Target": self.target / 1e9,
         }
-        if self.target is not None:
-            config["Target"] = self.target / 1e9  # Convert to GHz
         if self.save > 0:
             config["Save"] = self.save
         return config
