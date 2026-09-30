@@ -103,6 +103,10 @@ snapshot from meshing. Consumers should accept additional metadata keys so new
 measurements can be added. Allocation rules remain in DataLab; these are sizing
 hints. The current cloud API does not accept a separate metadata parameter, so
 the metadata travels as an input artifact pending that API integration.
+The root-level `metadata.json` name is reserved for these diagnostics. It is
+excluded from the Palace result-cache key so measurements can evolve without
+rerunning identical mesh/config inputs. The full `compute_dir_digest()` includes
+the metadata by default; the cache key is not a complete bundle-integrity hash.
 
 `sim.mesh()` reports **Worst element distortion, κ** in its summary. The value is
 also available in `result.mesh_stats["kappa"]["max"]` and `sim.print_mesh_stats()`.
