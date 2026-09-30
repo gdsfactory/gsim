@@ -109,7 +109,7 @@ class NumericalConfig(BaseModel):
             )
 
         if self.solver_type == "Default" and self.preconditioner != "Default":
-            linear_conf["Preconditioner"] = self.preconditioner
+            linear_conf["Type"] = self.preconditioner
 
         return linear_conf
 
@@ -122,22 +122,8 @@ class NumericalConfig(BaseModel):
         }
 
     def to_palace_config(self) -> dict:
-        """Convert to Palace JSON config format."""
-        solver_config: dict[str, str | int | float] = {
-            "Tolerance": self.tolerance,
-            "MaxIterations": self.max_iterations,
-        }
-
-        if self.solver_type != "Default":
-            solver_config["Type"] = self.solver_type
-
-        if self.preconditioner != "Default":
-            solver_config["Preconditioner"] = self.preconditioner
-
-        return {
-            "Order": self.order,
-            "Solver": solver_config,
-        }
+        """Convert to the Palace ``Solver`` block, like ``to_solver_config``."""
+        return self.to_solver_config()
 
 
 class RefinementConfig(BaseModel):
