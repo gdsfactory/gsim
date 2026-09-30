@@ -109,6 +109,21 @@ class DrivenConfig(BaseModel):
         """Center frequency of the sweep band in Hz."""
         return (self.fmin + self.fmax) / 2
 
+    def _sample_frequencies(self) -> list[float]:
+        """Return the exported sample grid in Hz using Palace's GHz arithmetic."""
+        if self.num_points == 1 or self.fmin == self.fmax:
+            return [self.fmin]
+        min_ghz = self.fmin / 1e9
+        if self.scale == "log":
+            log_min = math.log10(min_ghz)
+            log_span = math.log10(self.fmax / 1e9) - log_min
+            return [
+                10 ** (log_min + index / (self.num_points - 1) * log_span) * 1e9
+                for index in range(self.num_points)
+            ]
+        step_ghz = (self.fmax - self.fmin) / (self.num_points - 1) / 1e9
+        return [(min_ghz + index * step_ghz) * 1e9 for index in range(self.num_points)]
+
     @model_validator(mode="after")
     def validate_frequency_range(self) -> Self:
         """Validate that fmin <= fmax and snap save_fields_at to the sample grid."""
@@ -118,22 +133,34 @@ class DrivenConfig(BaseModel):
         # Palace requires Save frequencies to exactly match the sample grid.
         # Snap to nearest sample point and warn if the shift is significant.
         if self.save_fields_at:
-            freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1)
+            samples = self._sample_frequencies()
             snapped: list[float] = []
             seen: set[int] = set()
             for freq in self.save_fields_at:
-                step_idx = round((freq - self.fmin) / freq_step)
-                step_idx = max(0, min(step_idx, self.num_points - 1))
-                snapped_freq = self.fmin + step_idx * freq_step
-                if abs(snapped_freq - freq) > freq_step * 0.01:
+                if not math.isfinite(freq):
+                    raise ValueError("save_fields_at frequencies must be finite")
+                sample_index, snapped_freq = min(
+                    enumerate(samples), key=lambda sample: abs(sample[1] - freq)
+                )
+                spacing = min(
+                    (
+                        abs(samples[neighbor] - snapped_freq)
+                        for neighbor in (sample_index - 1, sample_index + 1)
+                        if 0 <= neighbor < len(samples)
+                    ),
+                    default=0.0,
+                )
+                if not math.isclose(
+                    snapped_freq, freq, rel_tol=1e-12, abs_tol=spacing * 0.01
+                ):
                     logger.warning(
                         "save_fields_at: %.4g GHz snapped to %.4g GHz "
                         "(nearest sample point)",
                         freq / 1e9,
                         snapped_freq / 1e9,
                     )
-                if step_idx not in seen:
-                    seen.add(step_idx)
+                if sample_index not in seen:
+                    seen.add(sample_index)
                     snapped.append(snapped_freq)
             self.__dict__["save_fields_at"] = snapped
 
@@ -147,16 +174,14 @@ class DrivenConfig(BaseModel):
             "MaxFreq": self.fmax / 1e9,
             "SaveStep": self.save_step,
         }
-        if self.scale == "log":
-            if self.num_points == 1:
-                # Palace's log sampler divides by NSample - 1.
-                sample = {
-                    "Type": "Point",
-                    "Freq": [self.fmin / 1e9],
-                    "SaveStep": self.save_step,
-                }
-            else:
-                sample["NSample"] = self.num_points
+        if self.num_points == 1:
+            sample = {
+                "Type": "Point",
+                "Freq": [self.fmin / 1e9],
+                "SaveStep": self.save_step,
+            }
+        elif self.scale == "log":
+            sample["NSample"] = self.num_points
         else:
             sample["FreqStep"] = (
                 1.0

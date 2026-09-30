@@ -61,16 +61,14 @@ def test_linear_sweep_keeps_frequency_step():
 
 
 def test_single_frequency_linear_sweep():
-    """A zero-width linear sweep retains a positive frequency step."""
+    """A one-point linear request exports an explicit frequency."""
     config = DrivenConfig(fmin=50e9, fmax=50e9, num_points=1).to_palace_config()
 
     assert config["Samples"] == [
         {
-            "Type": "Linear",
-            "MinFreq": 50.0,
-            "MaxFreq": 50.0,
+            "Type": "Point",
+            "Freq": [50.0],
             "SaveStep": 0,
-            "FreqStep": 1.0,
         }
     ]
 
