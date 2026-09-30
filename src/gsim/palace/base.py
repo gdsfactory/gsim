@@ -693,7 +693,10 @@ class PalaceSimMixin:
         if self.stack is not None and self._stack_kwargs.get("_prebuilt"):
             # Apply material overrides
             for name, props in self.materials.items():
-                self.stack.materials[name] = props.to_dict()
+                self.stack.materials[name] = {
+                    **props.to_dict(),
+                    "material_source": "override",
+                }
             return self.stack
 
         from gsim.common.stack import get_stack
@@ -706,7 +709,10 @@ class PalaceSimMixin:
 
         # Apply material overrides
         for name, props in self.materials.items():
-            legacy_stack.materials[name] = props.to_dict()
+            legacy_stack.materials[name] = {
+                **props.to_dict(),
+                "material_source": "override",
+            }
 
         # Keep stack free of synthetic air regions; Palace airboxes are
         # generated explicitly from set_airbox().

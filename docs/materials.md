@@ -85,3 +85,20 @@ print(snapshot.refractive_index)
 ```
 
 Lookup is case-sensitive. A project card with the same name replaces that fallback.
+
+## Palace RF cards
+
+Stack extraction reads `PDK.material_cards` (or a module's `MATERIAL_CARDS`). An RF card matching a layer's exact
+material token takes precedence over the legacy material database. Its resolved properties and full card provenance
+survive stack YAML export/import. Explicit `sim.set_material(...)` overrides take precedence over both.
+
+The RF adapter supports constant scalar or diagonal relative permittivity and conductivity, including dielectric loss
+from `eps_imag / eps_real`. It rejects unsupported dispersion, magnetic models, validity constraints, variation, and
+simultaneous nonzero conductivity and dielectric loss instead of substituting generic values. Materials without RF cards
+retain the legacy behavior. Constant RF cards are used unchanged across an RF sweep; this does not establish a measured
+validity band. A dual-regime card's optical model takes precedence within its explicitly declared wavelength band.
+
+IHP versions publishing RF cards use layer-specific metal, contact, via, and MIM electrode conductivities from the
+[IHP-linked Palace stack](https://github.com/VolkerMuehlhaus/gds2palace_ihp_sg13g2/blob/df29aa608be858f53fbce46f81238b5534812d9b/workflow/SG13G2_200um.xml).
+For example, Metal1 uses 21.64 MS/m and Via1 uses 1.66 MS/m. The substrate card uses 2 S/m (50 ohm cm); it applies when
+the substrate is included. Installing an older IHP version without cards retains the generic material database defaults.

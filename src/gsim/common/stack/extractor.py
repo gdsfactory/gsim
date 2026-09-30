@@ -7,13 +7,17 @@ that can be used for Palace EM simulation.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from gdsfactory.technology import LayerStack as GfLayerStack
+from pdk_schema import MaterialCard
 from pydantic import BaseModel, ConfigDict, Field
 
+from gsim.common.materials.registry import get_project_material_cards
+from gsim.common.materials.rf import apply_rf_material_cards
 from gsim.common.stack._layer_utils import classify_layer_type, get_gds_layer_tuple
 from gsim.common.stack.materials import (
     MATERIALS_DB,
@@ -330,6 +334,7 @@ def extract_layer_stack(
     boundary_margin: float = 30.0,
     include_substrate: bool = False,
     add_oxide_dielectric: bool = True,
+    material_cards: Mapping[str, MaterialCard] | None = None,
 ) -> LayerStack:
     """Extract layer stack from a gdsfactory LayerStack.
 
@@ -343,6 +348,7 @@ def extract_layer_stack(
         include_substrate: Whether to include lossy substrate (default: False)
         add_oxide_dielectric: Add synthetic oxide background dielectric region.
             Set False to rely on dielectric regions/layers provided by the PDK.
+        material_cards: PDK RF cards keyed by exact layer material token.
 
     Returns:
         LayerStack object for Palace simulation
@@ -711,6 +717,8 @@ def extract_layer_stack(
         "add_oxide_dielectric": add_oxide_dielectric,
     }
 
+    stack.materials = apply_rf_material_cards(stack.materials, material_cards or {})
+
     return stack
 
 
@@ -767,6 +775,7 @@ def extract_from_pdk(
     if gf_layer_stack is None:
         raise ValueError(f"Could not find layer stack in PDK: {pdk_module}")
 
+    kwargs.setdefault("material_cards", get_project_material_cards(pdk_module))
     stack = extract_layer_stack(gf_layer_stack, pdk_name=pdk_name, **kwargs)
 
     if output_path:

@@ -11,12 +11,55 @@ to the Palace config JSON.
 
 from __future__ import annotations
 
+from pdk_schema import MaterialCard
 from scipy.constants import c as C0  # noqa: N812
 
+from gsim.common.materials.snapshots import (
+    WavelengthOutOfRangeError,
+    resolve_material_snapshot,
+)
 from gsim.common.stack.materials import (
     get_material_properties,
     resolve_material_at_wavelength,
 )
+
+
+def _resolve_card_optical_band(props: dict, wavelength_um: float) -> dict:
+    """Prefer a card's optical model within its explicitly declared band."""
+    card = MaterialCard.model_validate(props["material_card"])
+    optical = card.optical
+    if optical is None or optical.permittivity is None:
+        return dict(props)
+    model = optical.permittivity
+    validity = model.validity
+    if validity is None or "wavelength" not in (validity.over or {}):
+        return dict(props)
+    try:
+        snapshot = resolve_material_snapshot(
+            card.name, wavelength_um, {card.name: card}
+        )
+    except WavelengthOutOfRangeError:
+        return dict(props)
+    if (
+        optical.conductivity is not None
+        or getattr(model, "conductivity", None) is not None
+    ):
+        raise ValueError(f"{card.name}: optical card conductivity is unsupported")
+    if optical.permeability is not None or optical.perturbations:
+        raise ValueError(
+            f"{card.name}: optical magnetic models/perturbations are unsupported"
+        )
+    n, k = snapshot.refractive_index, snapshot.extinction_coefficient
+    epsilon = n * n - k * k
+    if epsilon <= 0:
+        raise ValueError(f"{card.name}: Palace optical permittivity must be positive")
+    return {
+        **props,
+        "permittivity": epsilon,
+        "loss_tangent": 2 * n * k / epsilon,
+        "conductivity": 0.0,
+        "permeability": 1.0,
+    }
 
 
 def resolve_palace_materials_at_frequency(
@@ -44,6 +87,14 @@ def resolve_palace_materials_at_frequency(
     resolved: dict[str, dict] = {}
 
     for name, props in materials.items():
+        if props.get("material_source") == "override":
+            resolved[name] = dict(props)
+            continue
+        # Constant RF cards are already resolved. Dual-regime cards can select
+        # their own optical model inside its declared wavelength band.
+        if props.get("material_source") == "pdk_material_card":
+            resolved[name] = _resolve_card_optical_band(props, wavelength_um)
+            continue
         db_props = get_material_properties(name)
         if db_props is None:
             resolved[name] = dict(props)
