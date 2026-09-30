@@ -85,3 +85,13 @@ print(snapshot.refractive_index)
 ```
 
 Lookup is case-sensitive. A project card with the same name replaces that fallback.
+
+## Analytic PDK cards
+
+Project cards can use `pdk_schema.AnalyticDispersion` with scalar `n` or `n_squared` output, including AN800's modified
+Sellmeier equations. The resolver converts the simulation wavelength to each declared input unit (`um`, `nm`, or `m`),
+evaluates the stored equation and parameters, and enforces the card's wavelength validity. These models produce a
+lossless snapshot with zero extinction coefficient.
+
+Analytic inputs other than wavelength and `eps_real` output are not supported by the scalar index resolver. Invalid or
+non-real equation results raise `MaterialModelError`; out-of-range wavelengths raise `WavelengthOutOfRangeError`.
