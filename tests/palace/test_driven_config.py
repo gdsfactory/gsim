@@ -60,25 +60,26 @@ def test_linear_sweep_keeps_frequency_step():
     }
 
 
-@pytest.mark.parametrize(
-    ("scale", "sample_type", "sampling"),
-    [
-        ("linear", "Linear", {"FreqStep": 1.0}),
-        ("log", "Log", {"NSample": 1}),
-    ],
-)
-def test_single_frequency_sweep(scale, sample_type, sampling):
-    """A zero-width frequency range exports a valid sample specification."""
-    config = DrivenConfig(
-        fmin=50e9, fmax=50e9, num_points=1, scale=scale
-    ).to_palace_config()
+def test_single_frequency_linear_sweep():
+    """A zero-width linear sweep retains a positive frequency step."""
+    config = DrivenConfig(fmin=50e9, fmax=50e9, num_points=1).to_palace_config()
 
     assert config["Samples"] == [
         {
-            "Type": sample_type,
+            "Type": "Linear",
             "MinFreq": 50.0,
             "MaxFreq": 50.0,
             "SaveStep": 0,
-            **sampling,
+            "FreqStep": 1.0,
         }
     ]
+
+
+@pytest.mark.parametrize("fmax", [1e9, 100e9])
+def test_single_point_log_sweep(fmax):
+    """Avoid Palace's division by zero for logarithmic NSample=1."""
+    config = DrivenConfig(
+        fmin=1e9, fmax=fmax, num_points=1, scale="log", save_step=1
+    ).to_palace_config()
+
+    assert config["Samples"] == [{"Type": "Point", "Freq": [1.0], "SaveStep": 1}]

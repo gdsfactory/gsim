@@ -148,7 +148,15 @@ class DrivenConfig(BaseModel):
             "SaveStep": self.save_step,
         }
         if self.scale == "log":
-            sample["NSample"] = self.num_points
+            if self.num_points == 1:
+                # Palace's log sampler divides by NSample - 1.
+                sample = {
+                    "Type": "Point",
+                    "Freq": [self.fmin / 1e9],
+                    "SaveStep": self.save_step,
+                }
+            else:
+                sample["NSample"] = self.num_points
         else:
             sample["FreqStep"] = (
                 1.0
