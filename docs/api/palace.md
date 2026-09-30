@@ -77,6 +77,15 @@
 
 ## Mesh
 
+`sim.mesh()` reports **Worst element distortion, κ** in its summary. The value is
+also available in `result.mesh_stats["kappa"]["max"]` and `sim.print_mesh_stats()`.
+It uses Palace/MFEM's normalized Jacobian condition number: 1 is an ideal
+equilateral tetrahedron; larger values indicate greater distortion. Curved
+elements are sampled at their centers, so this is not a bound over their interiors.
+Use it alongside SICN's signed validity check and solution convergence; κ alone
+does not measure simulation accuracy. A numerically singular center is displayed
+as infinite and stored as `max=None` with a nonzero `singular_elements` count.
+
 ::: gsim.palace.MeshConfig
     options:
       show_source: false

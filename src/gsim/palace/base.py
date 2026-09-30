@@ -27,7 +27,11 @@ from gsim.palace.models import (
     TwoTerminalPortConfig,
     WavePortConfig,
 )
-from gsim.palace.models.results import SimulationResult, ValidationResult
+from gsim.palace.models.results import (
+    SimulationResult,
+    ValidationResult,
+    format_mesh_distortion,
+)
 
 if TYPE_CHECKING:
     from gdsfactory.component import Component
@@ -1408,7 +1412,8 @@ class PalaceSimMixin:
 
         ordered: list[tuple[int, PortConfig | CPWPortConfig]] = [
             (port.order, port) for port in self.ports
-        ] + [(cpw.order, cpw) for cpw in self.cpw_ports]
+        ]
+        ordered.extend((cpw.order, cpw) for cpw in self.cpw_ports)
 
         for _order, config in sorted(ordered, key=lambda item: item[0]):
             if isinstance(config, PortConfig):
@@ -1547,6 +1552,8 @@ class PalaceSimMixin:
         print(f"  Elements:  {elements:,}")  # noqa: T201
         if tets:
             print(f"  Tetrahedra: {tets:,}")  # noqa: T201
+        if distortion := format_mesh_distortion(stats):
+            print(f"  {distortion}")  # noqa: T201
 
         dom_volumes = groups.get("volumes", {})
         bdr_conductors = groups.get("conductor_surfaces", {})
@@ -1936,6 +1943,8 @@ class PalaceSimMixin:
         stats = result.mesh_stats or {}
         node_count = stats.get("nodes")
         tet_count = stats.get("tetrahedra")
+        if distortion := format_mesh_distortion(stats):
+            logger.info("%s", distortion)
         if node_count is not None and tet_count is not None:
             logger.info(
                 "Mesh: %s nodes \u00b7 %s tets \u00b7 refined=%.3g \u00b5m \u00b7 "

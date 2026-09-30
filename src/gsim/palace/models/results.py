@@ -16,6 +16,20 @@ def _supports_color_output() -> bool:
     return bool(getattr(sys.stdout, "isatty", lambda: False)())
 
 
+def format_mesh_distortion(mesh_stats: dict) -> str | None:
+    """Format the optional Palace/MFEM tet-center shape metric."""
+    distortion = mesh_stats.get("kappa", {})
+    singular = distortion.get("singular_elements", 0)
+    maximum = distortion.get("max")
+    if singular:
+        value = f"infinite ({singular:,} singular tet centers)"
+    elif maximum is not None:
+        value = f"{maximum:.6g}"
+    else:
+        return None
+    return f"Worst element distortion, \u03ba: {value} (tet centers; 1 is ideal)"
+
+
 class ValidationResult(BaseModel):
     """Result of simulation configuration validation.
 
@@ -135,6 +149,9 @@ class SimulationResult(BaseModel):
                     )
                 else:
                     lines.append(f"SICN:       {sicn.get('mean', 0):.3f} (all valid)")
+
+            if distortion := format_mesh_distortion(self.mesh_stats):
+                lines.append(distortion)
 
             # Physical groups
             groups = self.mesh_stats.get("groups", {})

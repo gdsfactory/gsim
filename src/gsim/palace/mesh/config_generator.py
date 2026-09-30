@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import gmsh
 import numpy as np
 
+from gsim.palace.mesh.quality import tetrahedron_distortion
 from gsim.palace.ports.config import PortType
 
 logger = logging.getLogger(__name__)
@@ -755,6 +756,7 @@ def collect_mesh_stats() -> dict:
         - tetrahedra: Tet count
         - quality: Shape quality metrics (gamma)
         - sicn: Signed Inverse Condition Number
+        - kappa: Worst tet-center distortion (Palace/MFEM convention)
         - edge_length: Min/max edge lengths
         - groups: Physical group info
     """
@@ -775,29 +777,46 @@ def collect_mesh_stats() -> dict:
         pass
 
     # Get node count
+    node_tags = coordinates = None
     try:
-        node_tags, _, _ = gmsh.model.mesh.getNodes()
+        node_tags, coordinates, _ = gmsh.model.mesh.getNodes()
         stats["nodes"] = len(node_tags)
     except Exception:
         pass
 
     # Get element counts and collect tet tags for quality
     tet_tags = []
+    tet_blocks = []
     try:
-        element_types, element_tags, _ = gmsh.model.mesh.getElements()
+        element_types, element_tags, element_nodes = gmsh.model.mesh.getElements()
         total_elements = sum(len(tags) for tags in element_tags)
         stats["elements"] = total_elements
 
-        # Count tetrahedra (type 4) and save tags
-        for etype, tags in zip(element_types, element_tags, strict=False):
-            if etype == 4:  # 4-node tetrahedron
-                stats["tetrahedra"] = len(tags)
-                tet_tags = list(tags)
+        # Include both linear and higher-order tetrahedra.
+        for etype, tags, nodes in zip(
+            element_types, element_tags, element_nodes, strict=True
+        ):
+            _, dim, _, _, _, primary_nodes = gmsh.model.mesh.getElementProperties(
+                int(etype)
+            )
+            if dim == 3 and primary_nodes == 4 and len(tags):
+                tet_tags.extend(tags)
+                tet_blocks.append((int(etype), tags, nodes))
+        if tet_tags:
+            stats["tetrahedra"] = len(tet_tags)
     except Exception:
         pass
 
     # Get mesh quality for tetrahedra
     if tet_tags:
+        if node_tags is not None and coordinates is not None:
+            try:
+                stats["kappa"] = tetrahedron_distortion(
+                    tet_blocks, node_tags, coordinates
+                )
+            except Exception:
+                logger.debug("Unable to compute tetrahedron distortion", exc_info=True)
+
         # Gamma: inscribed/circumscribed radius ratio (shape quality)
         try:
             qualities = gmsh.model.mesh.getElementQualities(tet_tags, "gamma")
