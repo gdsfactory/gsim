@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING, Any, Literal
 import gmsh
 import numpy as np
 
+from gsim.palace.mesh.metadata import (
+    tetrahedral_topology,
+    update_field_dofs,
+    write_metadata,
+)
 from gsim.palace.mesh.quality import tetrahedron_distortion
 from gsim.palace.ports.config import PortType
 
@@ -743,7 +748,7 @@ def generate_palace_config(
     return config_path
 
 
-def collect_mesh_stats() -> dict:
+def collect_mesh_stats(*, field_order: int = 2, problem_type: str = "driven") -> dict:
     """Collect mesh statistics from gmsh after mesh generation.
 
     Must be called while gmsh is initialized and the mesh is generated.
@@ -757,6 +762,8 @@ def collect_mesh_stats() -> dict:
         - quality: Shape quality metrics (gamma)
         - sicn: Signed Inverse Condition Number
         - kappa: Worst tet-center distortion (Palace/MFEM convention)
+        - topology: Unique tetrahedral edges and triangular faces
+        - field_dofs: Estimated Field DOFs before Palace preprocessing
         - edge_length: Min/max edge lengths
         - groups: Physical group info
     """
@@ -787,25 +794,49 @@ def collect_mesh_stats() -> dict:
     # Get element counts and collect tet tags for quality
     tet_tags = []
     tet_blocks = []
+    all_volumes_are_tetrahedra = True
     try:
         element_types, element_tags, element_nodes = gmsh.model.mesh.getElements()
         total_elements = sum(len(tags) for tags in element_tags)
         stats["elements"] = total_elements
 
         # Include both linear and higher-order tetrahedra.
+        dimension = 0
+        geometry_orders = set()
+        elements_by_type = {}
         for etype, tags, nodes in zip(
             element_types, element_tags, element_nodes, strict=True
         ):
-            _, dim, _, _, _, primary_nodes = gmsh.model.mesh.getElementProperties(
-                int(etype)
+            name, dim, order, _, _, primary_nodes = (
+                gmsh.model.mesh.getElementProperties(int(etype))
             )
+            if not len(tags):
+                continue
+            elements_by_type[name] = len(tags)
+            if dim > dimension:
+                dimension = dim
+                geometry_orders.clear()
+            if dim == dimension:
+                geometry_orders.add(order)
             if dim == 3 and primary_nodes == 4 and len(tags):
                 tet_tags.extend(tags)
                 tet_blocks.append((int(etype), tags, nodes))
+            elif dim == 3:
+                all_volumes_are_tetrahedra = False
+        stats["dimension"] = dimension
+        stats["geometry_orders"] = sorted(geometry_orders)
+        stats["elements_by_type"] = elements_by_type
         if tet_tags:
             stats["tetrahedra"] = len(tet_tags)
     except Exception:
-        pass
+        all_volumes_are_tetrahedra = False
+
+    if tet_blocks and all_volumes_are_tetrahedra:
+        try:
+            stats["topology"] = tetrahedral_topology(tet_blocks)
+        except Exception:
+            logger.debug("Unable to count tetrahedral topology", exc_info=True)
+    update_field_dofs(stats, field_order=field_order, problem_type=problem_type)
 
     # Get mesh quality for tetrahedra
     if tet_tags:
@@ -957,6 +988,9 @@ def write_config(
 
     # Update the mesh_result with the config path
     mesh_result.config_path = config_path
+    mesh_result.metadata = write_metadata(
+        mesh_result.mesh_stats, mesh_result.output_dir, config_path
+    )
 
     return config_path
 

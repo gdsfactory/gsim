@@ -30,6 +30,7 @@ from gsim.palace.models import (
 from gsim.palace.models.results import (
     SimulationResult,
     ValidationResult,
+    format_field_dofs,
     format_mesh_distortion,
 )
 
@@ -1491,6 +1492,7 @@ class PalaceSimMixin:
             simulation_type=self.simulation_type,
             driven_config=driven_config,
             eigenmode_config=self.eigenmode,
+            numerical_config=self.numerical,
             boundary_mode_config=getattr(self, "boundary_mode", None),
             cross_section=getattr(self, "cross_section", None),
             write_config=write_config,
@@ -1521,13 +1523,14 @@ class PalaceSimMixin:
             config_path=mesh_result.config_path,
             port_info=mesh_result.port_info,
             mesh_stats=mesh_result.mesh_stats,
+            metadata=mesh_result.metadata,
         )
 
     def print_mesh_stats(self) -> None:
         """Print mesh statistics from the last mesh generation.
 
-        Reports node/element counts and estimates solver DOFs based on
-        the solver polynomial order (default 2 for 2D, 1 for 3D).
+        Reports node/element counts and input-mesh Field DOF estimates at the
+        configured field order, before Palace preprocessing and refinement.
         """
         mr = self._last_mesh_result
         if mr is None:
@@ -1554,6 +1557,8 @@ class PalaceSimMixin:
             print(f"  Tetrahedra: {tets:,}")  # noqa: T201
         if distortion := format_mesh_distortion(stats):
             print(f"  {distortion}")  # noqa: T201
+        if field_dofs := format_field_dofs(stats):
+            print(f"  {field_dofs}")  # noqa: T201
 
         dom_volumes = groups.get("volumes", {})
         bdr_conductors = groups.get("conductor_surfaces", {})
@@ -1945,6 +1950,8 @@ class PalaceSimMixin:
         tet_count = stats.get("tetrahedra")
         if distortion := format_mesh_distortion(stats):
             logger.info("%s", distortion)
+        if field_dofs := format_field_dofs(stats):
+            logger.info("%s", field_dofs)
         if node_count is not None and tet_count is not None:
             logger.info(
                 "Mesh: %s nodes \u00b7 %s tets \u00b7 refined=%.3g \u00b5m \u00b7 "

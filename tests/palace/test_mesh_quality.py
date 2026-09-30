@@ -158,7 +158,7 @@ def test_distortion_appears_in_both_mesh_summaries(capsys):
     assert expected in capsys.readouterr().out
 
 
-def test_sim_mesh_logs_distortion_automatically(monkeypatch, tmp_path, caplog):
+def test_sim_mesh_logs_metrics_automatically(monkeypatch, tmp_path, caplog):
     sim = DrivenSim()
     sim.set_output_dir(tmp_path)
     monkeypatch.setattr(
@@ -176,7 +176,12 @@ def test_sim_mesh_logs_distortion_automatically(monkeypatch, tmp_path, caplog):
     result = SimulationResult(
         mesh_path=tmp_path / "mesh.msh",
         output_dir=tmp_path,
-        mesh_stats={"nodes": 4, "tetrahedra": 1, "kappa": {"max": 42.0}},
+        mesh_stats={
+            "nodes": 4,
+            "tetrahedra": 1,
+            "kappa": {"max": 42.0},
+            "field_dofs": {"estimated_field_dofs": 20, "field_order": 2},
+        },
     )
     monkeypatch.setattr(
         DrivenSim, "_generate_mesh_internal", lambda _self, **_kwargs: result
@@ -186,3 +191,6 @@ def test_sim_mesh_logs_distortion_automatically(monkeypatch, tmp_path, caplog):
         sim.mesh()
 
     assert "Worst element distortion, \u03ba: 42" in caplog.text
+    assert (
+        "Estimated Field DOFs: 20 (order 2; before Palace preprocessing)" in caplog.text
+    )

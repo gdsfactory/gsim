@@ -30,6 +30,18 @@ def format_mesh_distortion(mesh_stats: dict) -> str | None:
     return f"Worst element distortion, \u03ba: {value} (tet centers; 1 is ideal)"
 
 
+def format_field_dofs(mesh_stats: dict) -> str | None:
+    """Format the optional input-mesh Field DOF estimate with its scope."""
+    estimate = mesh_stats.get("field_dofs", {})
+    count = estimate.get("estimated_field_dofs")
+    if count is None:
+        return None
+    order = estimate["field_order"]
+    return (
+        f"Estimated Field DOFs: {count:,} (order {order}; before Palace preprocessing)"
+    )
+
+
 class ValidationResult(BaseModel):
     """Result of simulation configuration validation.
 
@@ -81,6 +93,7 @@ class SimulationResult(BaseModel):
         port_groups: Physical group info for ports
         boundary_groups: Physical group info for boundaries
         port_info: Port metadata
+        metadata: Versioned JSON-compatible mesh measurements and sizing hints
     """
 
     model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
@@ -101,6 +114,7 @@ class SimulationResult(BaseModel):
 
     # Mesh statistics
     mesh_stats: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
 
     def __str__(self) -> str:
         """Returns a formatted string summary of the simulation results."""
@@ -152,6 +166,8 @@ class SimulationResult(BaseModel):
 
             if distortion := format_mesh_distortion(self.mesh_stats):
                 lines.append(distortion)
+            if field_dofs := format_field_dofs(self.mesh_stats):
+                lines.append(field_dofs)
 
             # Physical groups
             groups = self.mesh_stats.get("groups", {})
