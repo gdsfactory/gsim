@@ -378,35 +378,44 @@ class TransientConfig(BaseModel):
         excitation: Excitation waveform type
         excitation_freq: Excitation frequency in Hz (for sinusoidal)
         excitation_width: Pulse width in ns (for gaussian)
-        time_step: Time step in ns (None = adaptive)
+        time_step: Required positive time step in ns.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     excitation: Literal["sinusoidal", "gaussian", "ramp", "smoothstep"] = "sinusoidal"
     excitation_freq: float | None = Field(
-        default=None, description="Excitation frequency in Hz"
+        default=None, allow_inf_nan=False, description="Excitation frequency in Hz"
     )
     excitation_width: float | None = Field(
-        default=None, description="Pulse width in ns (for gaussian)"
+        default=None,
+        allow_inf_nan=False,
+        description="Pulse width in ns (for gaussian)",
     )
-    max_time: float = Field(description="Maximum simulation time in ns")
-    time_step: float | None = Field(
-        default=None, description="Time step in ns (None = adaptive)"
+    max_time: float = Field(
+        gt=0, allow_inf_nan=False, description="Maximum simulation time in ns"
+    )
+    time_step: float = Field(
+        gt=0, allow_inf_nan=False, description="Required time step in ns"
     )
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
+        waveforms = {
+            "sinusoidal": "Sinusoidal",
+            "gaussian": "Gaussian",
+            "ramp": "Ramp",
+            "smoothstep": "SmoothStep",
+        }
         config: dict = {
-            "Type": self.excitation.capitalize(),
+            "Excitation": waveforms[self.excitation],
             "MaxTime": self.max_time,
+            "TimeStep": self.time_step,
         }
         if self.excitation_freq is not None:
             config["ExcitationFreq"] = self.excitation_freq / 1e9  # Convert to GHz
         if self.excitation_width is not None:
             config["ExcitationWidth"] = self.excitation_width
-        if self.time_step is not None:
-            config["TimeStep"] = self.time_step
         return config
 
 
