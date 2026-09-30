@@ -20,6 +20,15 @@ Resolution order
 The auto-download is only attempted when ``PALACETOOLKIT_AUTO_DOWNLOAD_BINARY``
 is not disabled, and only on Linux x86_64 (the platform the prebuilt Palace CPU
 wheel is provided for).
+
+A caller that cannot proceed without one asks through
+:func:`require_palace_binary`, which turns "nothing found" into the error a
+user can act on instead of a ``None`` to check.
+
+A resolved binary is not a working one, so the other half of this module is
+:func:`local_abort_report`: what a caller can say to a user when the binary it
+found died. That diagnosis belongs beside the resolution because it is about
+the same thing — the runtime rather than the model.
 """
 
 from __future__ import annotations
@@ -30,15 +39,25 @@ import logging
 import os
 import platform
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
 from contextlib import suppress
 from pathlib import Path
 from urllib.request import Request, urlopen
-from zipfile import ZipFile
+from zipfile import ZipFile, is_zipfile
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "binary_that_ran",
+    "install_palace_runtime",
+    "local_abort_report",
+    "require_palace_binary",
+    "resolve_palace_binary",
+    "resolve_palace_library_dir",
+]
 
 _DEFAULT_BINARY_TAG = "0.17.0"
 _AUTO_DOWNLOAD_ENV = "PALACETOOLKIT_AUTO_DOWNLOAD_BINARY"
@@ -141,14 +160,28 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
     wheel_name = f"palacetoolkit_palace_cpu-{tag}-py3-none-linux_x86_64.whl"
     wheel_path = downloads / wheel_name
 
-    if force or not wheel_path.is_file():
+    def _download_wheel() -> None:
         url = _binary_wheel_url(tag)
-        with suppress(Exception):
+        try:
             discovered = _binary_wheel_url_from_release(tag, timeout=timeout)
+        except Exception as exc:
+            logger.debug("Palace release lookup failed (%s); using %s", exc, url)
+        else:
             if discovered:
                 url = discovered
         with urlopen(url, timeout=timeout) as response:  # noqa: S310
             wheel_path.write_bytes(response.read())
+
+    # A half-written or truncated wheel left by an interrupted download would
+    # otherwise be reused forever, since only its existence was checked.
+    if force or not wheel_path.is_file() or not is_zipfile(wheel_path):
+        _download_wheel()
+    if not is_zipfile(wheel_path):
+        wheel_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Downloaded file for Palace {tag} is not a valid wheel archive; "
+            "the cached copy was discarded. Check the download URL or network."
+        )
 
     with tempfile.TemporaryDirectory(
         prefix="palace-runtime-", dir=_runtime_cache_dir()
@@ -324,6 +357,42 @@ def resolve_palace_binary(
     return None
 
 
+def require_palace_binary(*, hint: str | None = None) -> Path:
+    """Locate a Palace binary, or fail saying how to provide one.
+
+    :func:`resolve_palace_binary` returns ``None`` when it finds
+    nothing, which is the right answer for a caller with a fallback.
+    This is the answer for one without: the same resolution, raising
+    with what a user can do about it.
+
+    It raises ``RuntimeError`` rather than ``ImportError`` and takes no
+    packaging extra, because what is missing is an executable and no
+    ``pip install`` produces it — which is why it lives here and not
+    beside :func:`gsim.common.optional.require_module`.
+
+    Args:
+        hint: The whole message to raise instead of the default one,
+            for a caller that knows a way out of needing Palace at all.
+
+    Returns:
+        Path to a runnable Palace executable.
+
+    Raises:
+        RuntimeError: When no binary is available, naming the ways to
+            provide one.
+    """
+    message = hint or (
+        "No Palace binary was found. Point PALACE_BIN at one, or put 'palace' on PATH."
+    )
+    try:
+        binary = resolve_palace_binary()
+    except Exception as err:  # pragma: no cover - resolver is environment bound
+        raise RuntimeError(message) from err
+    if binary is None:
+        raise RuntimeError(message)
+    return binary
+
+
 def resolve_palace_library_dir() -> Path | None:
     """Return the Palace library directory (for ``LD_LIBRARY_PATH``).
 
@@ -389,3 +458,127 @@ def _binary_is_runnable(
         except Exception:
             continue
     return True  # fallback: just being executable is enough
+
+
+def _death_signal(returncode: int) -> int | None:
+    """The signal a process died on, if its return code says it did.
+
+    Args:
+        returncode: What the process exited with — negative when
+            ``subprocess`` saw the signal itself, 128 + signum when a
+            shell in between reported it.
+
+    Returns:
+        The signal number, or ``None`` for a plain exit code.
+    """
+    if returncode < 0:
+        return -returncode
+    if returncode > 128:
+        return returncode - 128
+    return None
+
+
+def binary_that_ran(
+    err: subprocess.CalledProcessError, requested: str | Path | None
+) -> str | Path:
+    """The Palace executable an aborted run used.
+
+    The caller names it when it resolved one itself; otherwise the
+    command the failed run carries does, since a run that resolved its
+    own binary still has to say which one died.
+
+    Args:
+        err: What the local run raised.
+        requested: The executable the caller asked for, if any.
+
+    Returns:
+        The executable, as a path or as the command's first word.
+    """
+    if requested is not None:
+        return requested
+    cmd = err.cmd
+    if isinstance(cmd, (list, tuple)) and cmd:
+        return str(cmd[0])
+    return str(cmd)
+
+
+def local_abort_report(
+    err: subprocess.CalledProcessError,
+    *,
+    binary: Path | str,
+    output_dir: Path | str | None,
+    wrote_output: bool,
+    during: str,
+    remedy: str | None = None,
+) -> str:
+    """Turn a locally run Palace binary's exit status into something actionable.
+
+    A broken Palace runtime — typically a bundled MPI that cannot start —
+    kills the binary before the solver writes anything, and the bare
+    ``CalledProcessError`` carries an exit status and nothing else. What
+    a user can act on is which binary ran and whether the solver got as
+    far as producing output: a signal death with none means the runtime,
+    not the model, and the fix is a different binary rather than a
+    different problem. A plain nonzero exit is Palace refusing the run on
+    its own terms, so that one is left to say why through its stderr
+    rather than blamed on the runtime.
+
+    This reads a ``CalledProcessError`` and a local run directory, which
+    is why it says ``local``: a run submitted to the cloud fails in its
+    own way and is not covered here.
+
+    Args:
+        err: What the local run raised.
+        binary: The Palace executable that ran.
+        output_dir: Where the run's output would be, named in the report.
+        wrote_output: Whether the run left any solver output, which is
+            what separates a dead runtime from a dead solve.
+        during: What was being run when it died, named in the first
+            sentence — a frequency, a sweep point, a problem name.
+        remedy: A second way out, beyond pointing ``PALACE_BIN`` at a
+            working runtime, phrased as an imperative clause.
+
+    Returns:
+        The report text.
+    """
+    code = err.returncode
+    signum = _death_signal(code)
+    signal_note = ""
+    if signum is not None:
+        try:
+            signal_note = f" ({signal.Signals(signum).name})"
+        except ValueError:
+            signal_note = f" (signal {signum})"
+
+    # MPI closes its error blocks with a line of dashes, so the last
+    # *worded* line is the one that says anything.
+    stderr_note = ""
+    stderr = err.stderr if isinstance(err.stderr, str) else ""
+    if lines := [
+        line for line in stderr.splitlines() if any(c.isalnum() for c in line)
+    ]:
+        stderr_note = f" Its last stderr line: {lines[-1].strip()!r}."
+
+    if wrote_output:
+        diagnosis = (
+            f"It got far enough to write partial solver output (in "
+            f"{output_dir}), so the runtime did start; the solve itself "
+            "died before finishing."
+        )
+    elif signum is not None:
+        diagnosis = (
+            "It was killed before writing any solver output, which means "
+            "the Palace runtime — typically its bundled MPI — failed "
+            "before the solver started, not that the model is wrong."
+        )
+    else:
+        diagnosis = (
+            "It exited before writing any solver output; its stderr "
+            "should say why it refused the run."
+        )
+    way_out = "Point PALACE_BIN at a Palace whose runtime works here"
+    way_out = f"{way_out}, or {remedy}." if remedy else f"{way_out}."
+    return (
+        f"Palace aborted {during} with exit status {code}{signal_note}. "
+        f"The binary that ran is {binary}. {diagnosis}{stderr_note} {way_out}"
+    )

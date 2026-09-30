@@ -24,9 +24,31 @@ dependencies = [
   "trame",
   "trame-vtk",
   "trame-vuetify",
+  # `cadquery-ocp` below 7.9 bundles its own VTK bindings, which shadow the
+  # `vtk` distribution pyvista reads: `import gsim` then dies on "VTK version
+  # must be 9.3.1 or greater", and the mixed VTK segfaults on macOS. 7.9 pins
+  # `vtk==9.6.2`, so resolving vtk any higher falls back to the bundled one.
+  # cadquery arrives through femwell -> meshwell -> cadquery, so this bites
+  # wherever the femwell or modulator extra is installed.
+  "vtk<9.7",
 ]
 
 [project.optional-dependencies]
+# femwell/skfem mode-solving adapter (gsim.femwell).
+femwell = [
+  "femwell>=0.1.11",
+  "scikit-fem>=8.0.0",
+]
+# Full TW-MZM modulator workflow (charge transport + femwell modes).
+modulator = [
+  "devsim>=2.6.0",
+  "femwell>=0.1.11",
+  "scikit-fem>=8.0.0",
+]
+# DEVSIM charge-transport backend (gsim.tcad).
+tcad = [
+  "devsim>=2.6.0",
+]
 # Interactive 3-D visualization (PyVista + trame server rendering) with the
 # extra packages needed for reliable headless and notebook use.
 visualize = [
@@ -149,6 +171,22 @@ module = "tests.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
+module = "meshio"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "scipy.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "femwell.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "skfem.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
 module = "gmsh"
 
 [[tool.mypy.overrides]]
@@ -184,11 +222,13 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short -m 'not cloud and not meep_local'"
+addopts = "--tb=short -m 'not cloud and not meep_local and not tcad_local and not palace_local'"
 markers = [
   "cloud: tests that submit jobs to GDSFactory+ cloud servers (deselected by default; run with `pytest -m cloud`)",
   "sim_smoke_test: smallest cloud sims (one per solver) run automatically per-PR; run with `pytest -m sim_smoke_test`",
   "meep_local: tests requiring a local MEEP installation (deselected by default; run with `pytest -m meep_local`)",
+  "tcad_local: tests requiring a local DEVSIM installation (deselected by default; run with `pytest -m tcad_local`)",
+  "palace_local: tests running the Palace binary locally (deselected by default; run with `pytest -m palace_local`)",
 ]
 norecursedirs = ["scripts"]
 testpaths = ["tests"]
@@ -259,6 +299,9 @@ select = ["ALL"]
   "S101",  # assert
   "SLF001",  # private-member-access
   "T201",  # print
+]
+"samples/*.py" = [
+  "T201",  # print (samples are runnable demonstrations)
 ]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations

@@ -13,13 +13,12 @@ from gsim.common.cross_section import (
     Rect2D,
     RectYZ2D,
     build_doped_cross_section,
-    build_optical_cross_section,
     extract_plane_section,
     extract_xy_polygons,
     extract_xz_rectangles,
     extract_yz_rectangles,
+    parse_plane_spec,
 )
-from gsim.common.stack.pn_junction import make_doping_profile
 
 
 def _layer(
@@ -88,7 +87,6 @@ class TestSimpleWaveguide:
 
     def _build_straight(self):
         """Build a simple straight waveguide polygon on layer (1, 0)."""
-        import gdsfactory as gf
 
         c = gf.Component()
         c.add_polygon(
@@ -133,7 +131,6 @@ class TestPartialEtch:
 
     def _build_component(self):
         """Build a narrow core strip on top of a wider slab layer."""
-        import gdsfactory as gf
 
         c = gf.Component()
         # Core strip: narrow, centered on y=0
@@ -175,6 +172,25 @@ class TestPartialEtch:
         assert layers == {"slab"}  # core polygon does not extend to y=1.0
 
 
+class TestParsePlaneSpec:
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            ("x=0", ("x", 0.0)),
+            (" Y = -1.5 ", ("y", -1.5)),
+            ("z=1e-3", ("z", 1e-3)),
+            ("x=.5", ("x", 0.5)),
+        ],
+    )
+    def test_it_reads_the_axis_and_the_coordinate(self, spec, expected):
+        assert parse_plane_spec(spec) == expected
+
+    @pytest.mark.parametrize("spec", ["x=", "w=0", "0", "x 0", "x=abc", ""])
+    def test_a_spec_naming_no_plane_is_rejected(self, spec):
+        with pytest.raises(ValueError, match="Invalid plane spec"):
+            parse_plane_spec(spec)
+
+
 class TestPolygonWithHole:
     """Donut polygon: outer ring with interior hole."""
 
@@ -186,7 +202,6 @@ class TestPolygonWithHole:
 
     def _build_donut(self):
         """Build a rectangular donut (outer box with a rectangular hole)."""
-        import gdsfactory as gf
 
         outer = gf.Component()
         outer.add_polygon(
@@ -226,8 +241,6 @@ class TestEdgeCaseCut:
         )
 
     def test_cut_on_edge(self):
-        import gdsfactory as gf
-
         c = gf.Component()
         c.add_polygon(
             [(-5, 0.0), (5, 0.0), (5, 1.0), (-5, 1.0)],
@@ -252,8 +265,6 @@ class TestGeneralizedPlaneExtraction:
         )
 
     def _build_rect_component(self):
-        import gdsfactory as gf
-
         c = gf.Component()
         c.add_polygon(
             [(-5, -1), (5, -1), (5, 1), (-5, 1)],
@@ -314,8 +325,6 @@ class TestGeneralizedPlaneExtraction:
 
 
 def _centered_rect(wx: float, wy: float, layer: tuple[int, int]):
-    import gdsfactory as gf
-
     r = gf.Component()
     r << gf.c.rectangle((wx, wy), centered=True, layer=layer)
     return r
@@ -325,8 +334,6 @@ class TestBuildDopedCrossSection:
     """Tests for build_doped_cross_section() using the active PDK stack."""
 
     def _build_component(self):
-        import gdsfactory as gf
-
         LAYER = gf.gpdk.LAYER
         comp = gf.Component()
         wg = comp << _centered_rect(10.0, 0.4, LAYER.WG)
@@ -334,23 +341,33 @@ class TestBuildDopedCrossSection:
         return comp, LAYER
 
     def _doping_result(self, comp, rib_center_y=-20.0):
-        return make_doping_profile(
-            comp,
-            length=10.0,
-            rib_center_y=rib_center_y,
-            rib_width=0.4,
-            profile={"upper": [(2.0, 2e4)], "lower": [(2.0, 2e4)]},
-            sides={
-                "upper": {"base_layer": (23, 0), "name_prefix": "pp_slab_", "sign": 1},
-                "lower": {
-                    "base_layer": (24, 0),
-                    "name_prefix": "npp_slab_",
-                    "sign": -1,
-                },
-            },
-            zmin=0.0,
-            zmax=0.09,
+        """Two doped slab Regions beside the rib, drawn by hand."""
+        from gsim.common.stack.extractor import Layer
+        from gsim.common.stack.materials import make_doped_materials
+
+        sides = {
+            "pp_slab_0": ((23, 0), (rib_center_y + 0.2, rib_center_y + 2.2)),
+            "npp_slab_0": ((24, 0), (rib_center_y - 2.2, rib_center_y - 0.2)),
+        }
+        layer_specs = {}
+        for name, (gds_layer, (y0, y1)) in sides.items():
+            comp.add_polygon(
+                [(-5.0, y0), (5.0, y0), (5.0, y1), (-5.0, y1)], layer=gds_layer
+            )
+            layer_specs[name] = Layer(
+                name=name,
+                gds_layer=gds_layer,
+                zmin=0.0,
+                zmax=0.09,
+                thickness=0.09,
+                material=name,
+                layer_type="dielectric",
+                mesh_resolution="fine",
+            )
+        materials = make_doped_materials(
+            [(name, 2e4) for name in sides], permittivity=11.9
         )
+        return {"layer_specs": layer_specs, "materials": materials}
 
     def test_builds_stack_with_doping_and_rib_layers(self):
         comp, LAYER = self._build_component()
@@ -452,200 +469,3 @@ class TestBuildDopedCrossSection:
         assert "p_rib" not in stack.layers
         assert "pp_slab_0" not in stack.layers
         assert "core" in stack.layers
-
-
-@pytest.fixture
-def doping_sides():
-    return {
-        "upper": {"base_layer": (23, 0), "name_prefix": "pp_slab_", "sign": 1},
-        "lower": {"base_layer": (24, 0), "name_prefix": "npp_slab_", "sign": -1},
-    }
-
-
-def _doping_profile():
-    return {
-        "upper": [(2.0, 2e4), (2.0, 8e4)],
-        "lower": [(2.0, 2e4), (2.0, 8e4)],
-    }
-
-
-def test_make_doping_profile_basic(doping_sides):
-    comp = gf.Component()
-    result = make_doping_profile(
-        comp,
-        length=10.0,
-        rib_center_y=-20.0,
-        rib_width=0.4,
-        profile=_doping_profile(),
-        sides=doping_sides,
-        zmin=0.0,
-        zmax=0.09,
-    )
-
-    expected = {"pp_slab_0", "pp_slab_1", "npp_slab_0", "npp_slab_1"}
-    assert set(result["layer_specs"]) == expected
-    assert set(result["materials"]) == set(result["layer_specs"])
-
-    upper = result["centres"]["upper"]
-    lower = result["centres"]["lower"]
-    rib_upper_edge = -20.0 + 0.4 / 2
-    rib_lower_edge = -20.0 - 0.4 / 2
-    assert upper[0] == pytest.approx(rib_upper_edge + 2.0 / 2)
-    assert upper[1] == pytest.approx(rib_upper_edge + 2.0 + 2.0 / 2)
-    assert lower[0] == pytest.approx(rib_lower_edge - 2.0 / 2)
-    assert lower[1] == pytest.approx(rib_lower_edge - 2.0 - 2.0 / 2)
-
-
-def test_make_doping_profile_layer_spec(doping_sides):
-    comp = gf.Component()
-    result = make_doping_profile(
-        comp,
-        length=10.0,
-        rib_center_y=0.0,
-        rib_width=1.0,
-        profile=_doping_profile(),
-        sides=doping_sides,
-        zmin=0.0,
-        zmax=0.09,
-    )
-
-    layer = result["layer_specs"]["pp_slab_0"]
-    assert layer.gds_layer == (23, 0)
-    assert layer.zmin == 0.0
-    assert layer.zmax == 0.09
-    assert layer.thickness == 0.09
-    assert layer.material == "pp_slab_0"
-
-    assert result["layer_specs"]["pp_slab_1"].gds_layer == (23, 1)
-    assert result["layer_specs"]["npp_slab_0"].gds_layer == (24, 0)
-
-
-def test_make_doping_profile_materials(doping_sides):
-    comp = gf.Component()
-    result = make_doping_profile(
-        comp,
-        length=10.0,
-        rib_center_y=0.0,
-        rib_width=1.0,
-        profile=_doping_profile(),
-        sides=doping_sides,
-        zmin=0.0,
-        zmax=0.09,
-    )
-    assert result["materials"]["pp_slab_0"].conductivity == 2e4
-    assert result["materials"]["pp_slab_1"].conductivity == 8e4
-    assert result["materials"]["npp_slab_1"].conductivity == 8e4
-
-
-def test_make_doping_profile_empty_side(doping_sides):
-    comp = gf.Component()
-    result = make_doping_profile(
-        comp,
-        length=10.0,
-        rib_center_y=0.0,
-        rib_width=1.0,
-        profile={"upper": [], "lower": [(1.0, 1e4)]},
-        sides=doping_sides,
-        zmin=0.0,
-        zmax=0.09,
-    )
-    assert "pp_slab_0" not in result["layer_specs"]
-    assert "npp_slab_0" in result["layer_specs"]
-    assert result["centres"]["upper"] == []
-
-
-def test_make_doping_profile_geometry_added(doping_sides):
-    comp = gf.Component()
-    make_doping_profile(
-        comp,
-        length=10.0,
-        rib_center_y=0.0,
-        rib_width=1.0,
-        profile=_doping_profile(),
-        sides=doping_sides,
-        zmin=0.0,
-        zmax=0.09,
-    )
-    total = len(comp.get_polygons())
-    assert total == 4
-
-
-class TestBuildOpticalCrossSection:
-    """Tests for build_optical_cross_section() — all-Si device in uniform cladding."""
-
-    def _component(self):
-        import gdsfactory as gf
-
-        LAYER = gf.gpdk.LAYER
-        comp = gf.Component()
-        wg = comp << _centered_rect(10.0, 0.4, LAYER.WG)
-        wg.y = -20.0
-        comp << _centered_rect(10.0, 100.0, LAYER.SLAB90)
-        p = comp << gf.c.rectangle((10.0, 0.2), layer=LAYER.P)
-        p.y = -19.9
-        n = comp << gf.c.rectangle((10.0, 0.2), layer=LAYER.N)
-        n.y = -20.1
-        return comp, LAYER
-
-    def _device_layers(self, LAYER):
-        return {
-            "core": (LAYER.WG, 0.0, 0.22),
-            "slab": (LAYER.SLAB90, 0.0, 0.09),
-            "p_rib": (LAYER.P, 0.0, 0.22),
-            "n_rib": (LAYER.N, 0.0, 0.22),
-        }
-
-    def test_builds_all_dielectric_stack(self):
-        comp, LAYER = self._component()
-        stack, section = build_optical_cross_section(
-            comp,
-            axis="x",
-            value=0.0,
-            device_layers=self._device_layers(LAYER),
-            substrate_thickness=2.0,
-            cladding_top=2.0,
-            verbose=False,
-        )
-
-        assert set(stack.layers) == {"core", "slab", "p_rib", "n_rib"}
-
-        # Every device region is plain silicon — no Drude-doped materials.
-        for layer in stack.layers.values():
-            assert layer.material == "si"
-            assert layer.layer_type == "dielectric"
-
-        # PN junction shares the rib's z-extent.
-        assert stack.layers["p_rib"].gds_layer == tuple(LAYER.P)
-        assert stack.layers["n_rib"].gds_layer == tuple(LAYER.N)
-        assert stack.layers["p_rib"].zmax == pytest.approx(0.22)
-
-        # Uniform cladding: a single SiO2 dielectric spanning the whole domain.
-        assert len(stack.dielectrics) == 1
-        oxide = stack.dielectrics[0]
-        assert oxide["name"] == "oxide"
-        assert oxide["material"] == "sio2"
-        assert oxide["zmin"] == pytest.approx(-2.0)
-        assert oxide["zmax"] == pytest.approx(2.0)
-
-        # Materials DB populated so Palace can resolve them.
-        assert "si" in stack.materials
-        assert "sio2" in stack.materials
-
-        layer_names = {r.layer_name for r in section}
-        assert {"core", "slab", "p_rib", "n_rib"} <= layer_names
-        assert all(r.material == "si" for r in section)
-
-    def test_uniform_cladding_ranges(self):
-        comp, LAYER = self._component()
-        stack, _ = build_optical_cross_section(
-            comp,
-            axis="x",
-            value=0.0,
-            device_layers=self._device_layers(LAYER),
-            substrate_thickness=3.0,
-            cladding_top=1.5,
-            verbose=False,
-        )
-        oxide = stack.dielectrics[0]
-        assert oxide["zmin"] == pytest.approx(-3.0)
-        assert oxide["zmax"] == pytest.approx(1.5)

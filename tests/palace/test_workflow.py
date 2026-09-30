@@ -116,13 +116,13 @@ class TestDrivenSimWorkflow:
         assert mesh_path.stat().st_size > 0
 
     def test_mesh_has_physical_groups(self, driven_sim):
-        groups = driven_sim._last_mesh_result.groups
+        groups = driven_sim.mesh_groups
         assert len(groups["volumes"]) > 0
         assert "P1" in groups["port_surfaces"]
         assert "P2" in groups["port_surfaces"]
 
     def test_mesh_has_absorbing_boundary(self, driven_sim):
-        groups = driven_sim._last_mesh_result.groups
+        groups = driven_sim.mesh_groups
         assert "absorbing" in groups["boundary_surfaces"]
 
     def test_write_config_creates_json(self, driven_sim):

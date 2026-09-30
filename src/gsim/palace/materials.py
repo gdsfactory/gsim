@@ -13,10 +13,7 @@ from __future__ import annotations
 
 from scipy.constants import c as C0  # noqa: N812
 
-from gsim.common.stack.materials import (
-    get_material_properties,
-    resolve_material_at_wavelength,
-)
+from gsim.common.stack.materials import resolve_stack_material
 
 
 def resolve_palace_materials_at_frequency(
@@ -44,18 +41,13 @@ def resolve_palace_materials_at_frequency(
     resolved: dict[str, dict] = {}
 
     for name, props in materials.items():
-        db_props = get_material_properties(name)
-        if db_props is None:
-            resolved[name] = dict(props)
-            continue
-
-        evaluated = resolve_material_at_wavelength(name, wavelength_um)
-        if evaluated is not None and evaluated.behavior == "conductive":
-            resolved[name] = dict(props)
-            continue
-
-        evaluated = resolve_material_at_wavelength(name, wavelength_um)
-        if evaluated is None:
+        # The stack entry is authoritative and the database is behind it
+        # (gsim.common.stack.materials.resolve_stack_material); what is
+        # Palace's own is what happens next — a conductive material is
+        # left to the config generator, and an entry nothing resolves
+        # stays exactly as the stack wrote it.
+        evaluated = resolve_stack_material(name, props, wavelength_um)
+        if evaluated is None or evaluated.behavior == "conductive":
             resolved[name] = dict(props)
             continue
 

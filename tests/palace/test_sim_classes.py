@@ -10,11 +10,9 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
-from gsim.common import LayerStack
 from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -195,14 +193,23 @@ class TestBoundaryModeSimValidation:
         assert not result.valid
         assert any("supports only x/y" in e for e in result.errors)
 
-    def test_port_api_rejected_for_boundarymode(self):
-        """BoundaryMode native 2D does not accept explicit port definitions."""
+    @pytest.mark.parametrize(
+        ("method", "kwargs"),
+        [
+            ("add_port", {"layer": "metal1"}),
+            ("add_cpw_port", {"layer": "metal1", "s_width": 2.0, "gap_width": 1.0}),
+            ("add_wave_port", {"layer": "metal1"}),
+            ("add_terminal", {"layer": "metal1"}),
+        ],
+    )
+    def test_port_api_rejected_for_boundarymode(self, method, kwargs):
+        """BoundaryMode native 2D takes no 3D excitation ports at all."""
         sim = BoundaryModeSim()
         sim.set_cross_section("x=0")
-        sim.add_wave_port("o1", layer="metal1")
-        result = sim.validate_config()
-        assert not result.valid
-        assert any("cross_section-only native 2D" in e for e in result.errors)
+        with pytest.raises(ValueError, match="cross_section-only native 2D"):
+            getattr(sim, method)("o1", **kwargs)
+        assert not hasattr(sim, "ports")
+        assert not hasattr(sim, "wave_ports")
 
     def test_set_boundary_mode_updates_model(self):
         """set_boundary_mode should populate BoundaryModeConfig fields."""
@@ -226,78 +233,74 @@ class TestBoundaryModeSimValidation:
         assert cfg.solver_type == "SLEPc"
 
 
-class TestBoundaryModePostprocessing:
-    """BoundaryMode voltage/impedance postprocessing path derivation."""
+class TestModePaths:
+    """The postprocessing paths a boundary-mode solve declares for itself."""
 
-    @staticmethod
-    def _stack() -> LayerStack:
-        return cast(
-            LayerStack,
-            SimpleNamespace(
-                layers={
-                    "metal1": SimpleNamespace(zmin=1.1, zmax=2.1),
-                    "p_rib": SimpleNamespace(zmin=0.0, zmax=0.22),
-                }
-            ),
-        )
-
-    def test_cpw_gap_paths_auto_derived(self):
-        """A CPW port yields one voltage path per gap in cross-section coords."""
+    def test_a_declared_path_is_reported_under_its_index(self):
         sim = BoundaryModeSim()
         sim.set_cross_section("x=0")
-        sim.add_cpw_port(
-            "input",
-            layer="metal1",
-            s_width=20.0,
-            gap_width=20.0,
-            center=(0.0, 0.0),
-            orientation=0.0,
-        )
-        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
-        assert len(post["Impedance"]) == 2
-        assert len(post["Voltage"]) == 2
-        assert post["Impedance"][0]["VoltagePath"] == [[10.0, 1.6], [30.0, 1.6]]
-        assert post["Impedance"][1]["VoltagePath"] == [[-10.0, 1.6], [-30.0, 1.6]]
-        assert post["Voltage"][0]["Index"] == 1
 
-    def test_single_port_explicit_path_projected_from_3d(self):
-        """3D layout path points are projected onto an x-normal cross-section."""
-        sim = BoundaryModeSim()
-        sim.set_cross_section("x=0")
-        sim.add_port(
-            "junction",
-            voltage_path=[[1.0, -19.8, 0.11], [1.0, -20.2, 0.11]],
+        first = sim.add_impedance_path(
+            "line",
+            voltage=[[-20.6, 0.25], [-19.4, 0.25]],
+            current=[[-22.7, -0.1], [-20.5, -0.1], [-20.5, 0.6], [-22.7, 0.6]],
             nsamples=200,
         )
-        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
-        entry = post["Impedance"][0]
-        assert entry["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
-        assert entry["NSamples"] == 200
-        # Same path is also reported to the Voltage postprocessing section.
-        assert post["Voltage"][0]["VoltagePath"] == entry["VoltagePath"]
+        second = sim.add_impedance_path("gap", voltage=[[-19.8, 0.11], [-20.2, 0.11]])
 
-    def test_single_port_auto_derived_across_width(self):
-        """A single lumped port derives a path across its width at layer mid-z."""
-        sim = BoundaryModeSim()
-        sim.set_cross_section("x=0")
-        sim.add_port(
-            "junction",
-            layer="p_rib",
-            width=0.4,
-            center=(0.0, -20.0),
-            orientation=180.0,
-        )
-        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
-        assert post["Impedance"][0]["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+        assert (first, second) == (1, 2)
+        post = sim.mode_postprocessing()
+        assert [entry["Index"] for entry in post["Impedance"]] == [1, 2]
+        assert post["Impedance"][0]["VoltagePath"] == [[-20.6, 0.25], [-19.4, 0.25]]
+        assert post["Impedance"][0]["NSamples"] == 200
+        assert len(post["Impedance"][0]["CurrentPath"]) == 4
+        # A path without a loop asks for the voltage alone.
+        assert "CurrentPath" not in post["Impedance"][1]
+        # The same paths feed the Voltage section under the same indices.
+        assert post["Voltage"][1]["VoltagePath"] == post["Impedance"][1]["VoltagePath"]
+        assert post["Voltage"][0]["Index"] == 1
 
-    def test_voltage_path_allows_missing_layer(self):
-        """A postprocessing port with an explicit path does not require a layer."""
+    def test_redeclaring_a_name_keeps_its_index(self):
         sim = BoundaryModeSim()
+        sim.add_impedance_path("line", voltage=[[0.0, 0.0], [1.0, 0.0]])
+        sim.add_impedance_path("other", voltage=[[0.0, 1.0], [1.0, 1.0]])
+
+        assert sim.add_impedance_path("line", voltage=[[0.0, 0.5], [1.0, 0.5]]) == 1
+        assert len(sim.mode_paths) == 2
+        assert sim.mode_paths[0].voltage_path == [[0.0, 0.5], [1.0, 0.5]]
+
+    def test_no_path_means_no_postprocessing_block(self):
+        assert BoundaryModeSim().mode_postprocessing() == {}
+
+    def test_layout_coordinates_are_refused(self):
+        """Paths are (h, v) on the cross-section; nothing is projected."""
+        sim = BoundaryModeSim()
+        with pytest.raises(ValueError, match="cross-section coordinates"):
+            sim.add_impedance_path(
+                "line", voltage=[[1.0, -19.8, 0.11], [1.0, -20.2, 0.11]]
+            )
+
+    def test_the_block_reaches_the_written_config(self, tmp_path, monkeypatch):
+        """``write_config`` emits the paths as ``Boundaries.Postprocessing``."""
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_write(**kwargs):
+            captured.update(kwargs)
+            return tmp_path / "config.json"
+
+        monkeypatch.setattr("gsim.palace.mesh.generator.write_config", fake_write)
+        sim = BoundaryModeSim()
+        sim.set_output_dir(tmp_path)
         sim.set_cross_section("x=0")
-        sim.add_port("junction", voltage_path=[[-19.8, 0.11], [-20.2, 0.11]])
-        # Only the (expected) missing geometry error remains, no layer error.
-        errors = sim.validate_config().errors
-        assert not any("require 'layer'" in e for e in errors)
+        sim.add_impedance_path("line", voltage=[[0.0, 0.0], [1.0, 0.0]])
+        sim._last_mesh_result = SimpleNamespace(groups={"volumes": {}}, mesh_stats={})
+        monkeypatch.setattr(sim, "_resolve_stack", lambda: None)
+        sim.write_config(photonic=True, validate_mesh=False)
+
+        block = captured["hints"]["_mode_postprocessing"]
+        assert block["Impedance"][0]["VoltagePath"] == [[0.0, 0.0], [1.0, 0.0]]
 
 
 class TestMixinMethods:
@@ -748,6 +751,7 @@ class TestResolvePalaceBinary:
         with pytest.MonkeyPatch().context() as mp:
             mp.delenv("PALACE_BIN", raising=False)
             mp.delenv("PALACE_EXECUTABLE", raising=False)
+            mp.setattr("gsim.palace.runtime.shutil.which", lambda _: None)
             result = resolve_palace_binary()
             assert result is None
 
@@ -837,6 +841,7 @@ class TestResolvePalaceBinary:
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
             mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
             mp.setattr("gsim.palace.runtime._cached_binary", lambda: None)
+            mp.setattr("gsim.palace.runtime.shutil.which", lambda _: None)
             mp.setattr("gsim.palace.runtime._is_linux_x86_64", lambda: True)
             mp.setattr("gsim.palace.runtime._auto_download_enabled", lambda: True)
             mp.setattr(
@@ -891,6 +896,88 @@ class TestInstallPalaceRuntime:
             mp.setattr(rt, "_is_linux_x86_64", lambda: False)
             with pytest.raises(RuntimeError):
                 rt.install_palace_runtime()
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_corrupt_cached_wheel_is_refetched(self, tmp_path: Path) -> None:
+        """A truncated wheel in the download cache must not brick the install."""
+        import io
+        import zipfile
+
+        import gsim.palace.runtime as rt
+
+        tag = "0.9.9"
+        cache_dir = tmp_path / "cache"
+        wheel_buf = io.BytesIO()
+        with zipfile.ZipFile(wheel_buf, "w") as zf:
+            zf.writestr("palacetoolkit_palace_cpu/bin/palace", "#!/bin/sh\nexit 0\n")
+            zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
+        wheel_buf.seek(0)
+        downloads: list[str] = []
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                downloads.append("hit")
+                return wheel_buf.getvalue()
+
+        wheel_name = f"palacetoolkit_palace_cpu-{tag}-py3-none-linux_x86_64.whl"
+        corrupt = cache_dir / "downloads" / wheel_name
+        corrupt.parent.mkdir(parents=True)
+        corrupt.write_bytes(b"PK\x03\x04 truncated")
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(rt, "_runtime_cache_dir", lambda: cache_dir)
+            mp.setattr(rt, "_binary_tag", lambda: tag)
+            mp.setattr(rt, "_is_linux_x86_64", lambda: True)
+            mp.setattr(
+                rt, "_binary_wheel_url", lambda t: "https://example.invalid/x.whl"
+            )
+            mp.setattr(rt, "_binary_wheel_url_from_release", lambda t, timeout: None)
+            mp.setattr(rt, "urlopen", lambda *a, **k: _FakeResponse())
+
+            result = rt.install_palace_runtime(force=False)
+
+        assert downloads, "corrupt cached wheel was not re-downloaded"
+        assert result.is_file()
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_undecodable_download_clears_the_cache(self, tmp_path: Path) -> None:
+        """A download that is still not a zip fails loudly and drops the file."""
+        import gsim.palace.runtime as rt
+
+        tag = "0.9.9"
+        cache_dir = tmp_path / "cache"
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"<html>404</html>"
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(rt, "_runtime_cache_dir", lambda: cache_dir)
+            mp.setattr(rt, "_binary_tag", lambda: tag)
+            mp.setattr(rt, "_is_linux_x86_64", lambda: True)
+            mp.setattr(
+                rt, "_binary_wheel_url", lambda t: "https://example.invalid/x.whl"
+            )
+            mp.setattr(rt, "_binary_wheel_url_from_release", lambda t, timeout: None)
+            mp.setattr(rt, "urlopen", lambda *a, **k: _FakeResponse())
+
+            with pytest.raises(RuntimeError, match="not a valid wheel"):
+                rt.install_palace_runtime(force=False)
+
+        wheel_name = f"palacetoolkit_palace_cpu-{tag}-py3-none-linux_x86_64.whl"
+        assert not (cache_dir / "downloads" / wheel_name).exists()
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_downloads_and_extracts_runtime(self, tmp_path: Path) -> None:

@@ -75,6 +75,9 @@ jobs:
           nbs/palace_*.ipynb)
             uv pip install ihp-gdsfactory==0.2.8
             ;;
+          nbs/tcad_twmzm.ipynb)
+            uv pip install '.[modulator]'
+            ;;
         esac
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim

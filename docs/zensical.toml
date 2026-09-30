@@ -26,6 +26,7 @@ nav = [
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
+  { "TCAD for Modulators" = [{ "TCAD TW-MZM" = "nbs/tcad_twmzm.md" }] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Reference" = [
     { "Materials" = "materials.md" },
@@ -33,6 +34,7 @@ nav = [
     { "Palace" = "api/palace.md" },
     { "Meep" = "api/meep.md" },
     { "Common" = "api/common.md" },
+    { "Modulator" = "api/modulator.md" },
     { "Cloud" = "api/cloud.md" }
   ] }
 ]

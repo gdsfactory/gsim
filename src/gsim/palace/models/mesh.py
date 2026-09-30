@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MeshConfig(BaseModel):
@@ -24,6 +24,10 @@ class MeshConfig(BaseModel):
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
+        refinement_boxes: Boxes of a native-2D cross-section mesh held to an
+            element size, each ``(h_min, h_max, z_min, z_max, size)`` in um.
+            Refinement lines size the elements on them only, and the size
+            grows at once with the distance; a box holds it over an area
         show_gui: Show gmsh GUI during meshing
         preview_only: Generate preview only, don't save mesh
     """
@@ -57,6 +61,13 @@ class MeshConfig(BaseModel):
     high_order_elements: bool = False
     high_order_order: int = Field(default=2, ge=2, le=6)
     high_order_optimize: bool = True
+    refinement_boxes: list[tuple[float, float, float, float, float]] = Field(
+        default_factory=list,
+        description=(
+            "Native-2D meshes only: (h_min, h_max, z_min, z_max, size) boxes "
+            "on the cross-section (um) inside which elements keep to size."
+        ),
+    )
     show_gui: bool = False
     preview_only: bool = False
 
@@ -69,6 +80,21 @@ class MeshConfig(BaseModel):
     def effective_margin_y(self) -> float:
         """Resolved Y margin (margin_y if set, else margin)."""
         return self.margin_y if self.margin_y is not None else self.margin
+
+    @field_validator("refinement_boxes")
+    @classmethod
+    def validate_refinement_boxes(
+        cls, boxes: list[tuple[float, float, float, float, float]]
+    ) -> list[tuple[float, float, float, float, float]]:
+        """Every box spans an area and has a size to hold it to."""
+        for box in boxes:
+            h_min, h_max, z_min, z_max, size = box
+            if size <= 0.0 or h_max <= h_min or z_max <= z_min:
+                raise ValueError(
+                    "A refinement box needs an ascending extent and a positive "
+                    f"size, got {box}."
+                )
+        return boxes
 
     @model_validator(mode="after")
     def set_default_boundary_conditions(self) -> Self:

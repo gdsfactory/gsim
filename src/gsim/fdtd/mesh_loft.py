@@ -88,8 +88,10 @@ def _align_offset_ring(
     base_x, base_y = base_coordinates[0]
     best_shift = min(
         range(len(offset_coordinates)),
-        key=lambda index: (base_x - offset_coordinates[index][0]) ** 2
-        + (base_y - offset_coordinates[index][1]) ** 2,
+        key=lambda index: (
+            (base_x - offset_coordinates[index][0]) ** 2
+            + (base_y - offset_coordinates[index][1]) ** 2
+        ),
     )
     aligned_coordinates = [
         offset_coordinates[(index + best_shift) % len(offset_coordinates)]

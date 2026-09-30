@@ -159,10 +159,9 @@ def test_disconnected_polygons_are_lofted_independently(monkeypatch) -> None:
     monkeypatch.setattr(
         mesh_loft,
         "_add_lofted_layer_volumes",
-        lambda _kernel, polygon_layer, _sections: lofted_geometries.append(
-            polygon_layer.geometry
-        )
-        or [len(lofted_geometries)],
+        lambda _kernel, polygon_layer, _sections: (
+            lofted_geometries.append(polygon_layer.geometry) or [len(lofted_geometries)]
+        ),
     )
 
     volume_tags = mesh_loft.add_layer_volumes(

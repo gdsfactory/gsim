@@ -11,9 +11,10 @@ aligned 2D slices from 3D layer extrusions.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from gsim.common.stack import Layer, LayerStack, get_stack, make_doped_materials
 
@@ -21,6 +22,38 @@ if TYPE_CHECKING:
     import gdsfactory as gf
 
 logger = logging.getLogger(__name__)
+
+_PLANE_SPEC_RE = re.compile(
+    r"^\s*([xXyYzZ])\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$"
+)
+
+
+def parse_plane_spec(spec: str) -> tuple[Literal["x", "y", "z"], float]:
+    """Split a ``"x=<value>"`` plane spec into its axis and coordinate.
+
+    The one reading of the string a user names a Cross-section with,
+    shared by everything that takes one: the axis is ``x``, ``y`` or
+    ``z`` in either case, and the coordinate is a number — a bare
+    ``"x="`` names no plane and is rejected here rather than by whatever
+    tries to use it.
+
+    Args:
+        spec: The plane spec, ``"<axis>=<value>"`` with whitespace
+            anywhere around the parts.
+
+    Returns:
+        ``(axis, value)``, the axis lowercased.
+
+    Raises:
+        ValueError: When the spec names no axis or carries no number.
+    """
+    match = _PLANE_SPEC_RE.match(spec)
+    if match is None:
+        raise ValueError(
+            "Invalid plane spec. Use 'x=<value>', 'y=<value>', or 'z=<value>'"
+        )
+    axis = cast(Literal["x", "y", "z"], match.group(1).lower())
+    return axis, float(match.group(2))
 
 
 @dataclass(frozen=True)
@@ -232,10 +265,9 @@ def build_doped_cross_section(
     """Assemble a doped ``LayerStack`` and extract a 2D plane section from it.
 
     Builds the base PDK stack, optionally overrides the ``metal1`` electrodes,
-    registers the gradient-doping layers/materials produced by
-    :func:`gsim.common.stack.pn_junction.make_doping_profile` plus any additional rib
-    doping layers (e.g. a PN junction), and slices the component at the requested
-    plane.
+    registers the doped layers and materials handed in as ``doping`` (the
+    shape a Staircase resolves itself through) plus any additional rib
+    doping layers, and slices the component at the requested plane.
 
     Args:
         component: gdsfactory component the cross-section is extracted from.
@@ -243,8 +275,9 @@ def build_doped_cross_section(
         value: Plane coordinate in um.
         substrate_thickness: Thickness below z=0 in um.
         include_substrate: Include the lossy silicon substrate.
-        doping: Output of ``make_doping_profile`` (keys ``layer_specs`` and
-            ``materials``), or ``None`` to skip gradient doping.
+        doping: Doped Regions to register: a mapping with ``layer_specs``
+            (name to ``Layer``) and ``materials`` (name to material
+            properties), or ``None`` to register none.
         metal1: ``(zmin, thickness)`` override for the ``metal1`` layer, or
             ``None`` to keep the PDK value.
         rib_layers: Sequence of ``(name, gds_layer, sigma)`` for extra rib doping
@@ -322,140 +355,6 @@ def build_doped_cross_section(
         logger.info("Stack: %s", stack.pdk_name)
         logger.info("Layers: %s", sorted(stack.layers.keys()))
         logger.info("Cross materials: %s", sorted(materials.keys()))
-        logger.info("Dielectrics: %s", stack.dielectrics)
-        logger.info("")
-        logger.info(
-            "Cross-section %s=%s intersects %s layer regions:",
-            axis,
-            value,
-            len(section),
-        )
-        for r in section:
-            lo = getattr(r, "y0", getattr(r, "x0", None))
-            hi = getattr(r, "y1", getattr(r, "x1", None))
-            zlo = getattr(r, "zmin", None)
-            zhi = getattr(r, "zmax", None)
-            if zlo is None:
-                logger.info("  %-12s material=%-10s", r.layer_name, r.material)
-            else:
-                logger.info(
-                    "  %-12s material=%-10s y=[%8.3f, %8.3f]  z=[%6.3f, %6.3f]",
-                    r.layer_name,
-                    r.material,
-                    lo,
-                    hi,
-                    zlo,
-                    zhi,
-                )
-
-    return stack, section
-
-
-def build_optical_cross_section(
-    component: gf.Component,
-    *,
-    axis: Literal["x", "y", "z"],
-    value: float,
-    device_layers: Mapping[str, tuple[tuple[int, int], float, float]],
-    substrate_thickness: float = 2.0,
-    cladding_top: float = 2.0,
-    device_material: str = "si",
-    cladding_material: str = "sio2",
-    device_materials: Mapping[str, str] | None = None,
-    extra_materials: Mapping[str, Any] | None = None,
-    mesh_resolution: str | float = "fine",
-    verbose: bool = True,
-) -> tuple[LayerStack, list[Rect2D] | list[RectYZ2D] | list[PolygonXY2D]]:
-    """Assemble a minimal all-dielectric ``LayerStack`` and extract a plane section.
-
-    Builds a photonic ``LayerStack`` for a simplified device — e.g. a rib +
-    slab + PN junction made of a single semiconductor — sitting in a uniform
-    cladding background. Unlike :func:`build_doped_cross_section`, no
-    electrodes, vias, or graded doping are registered. A single ``oxide``
-    dielectric slab (the cladding material) spans the full stack z-range, so the
-    simulation domain is a uniform cladding with only the drawn device embedded
-    in it.
-
-    By default every device region shares ``device_material`` (homogeneous
-    body). Pass ``device_materials`` to map individual regions to their own
-    materials (e.g. per-strip free-carrier permittivities from
-    :func:`gsim.common.stack.pn_junction.make_segmented_junction_profile`)
-    and ``extra_materials`` to register those ``MaterialProperties`` on the
-    stack.
-
-    Args:
-        component: gdsfactory component the cross-section is extracted from.
-        axis: Cross-section normal axis.
-        value: Plane coordinate in um.
-        device_layers: Mapping of ``name -> (gds_layer, zmin, zmax)`` for every
-            patterned device region (e.g. ``{"core": ((1, 0), 0.0, 0.22)}``).
-        substrate_thickness: Cladding thickness below z=0 in um.
-        cladding_top: Cladding thickness above z=0 in um.
-        device_material: Default material name for all device regions.
-        cladding_material: Material name of the uniform background (default
-            ``"sio2"``).
-        device_materials: Optional per-region material override
-            (``{region_name: material_name}``); regions absent from the
-            mapping use ``device_material``.
-        extra_materials: Optional ``{material_name: MaterialProperties}``
-            (or plain dicts) merged into ``stack.materials`` after the
-            database lookup, so custom per-region materials resolve
-            downstream.
-        mesh_resolution: Mesh resolution assigned to the device ``Layer`` specs.
-        verbose: Print the assembled stack and the extracted section.
-
-    Returns:
-        ``(stack, section)`` with the populated ``LayerStack`` (device layers +
-        uniform cladding dielectric + materials) and the list of ``Rect2D`` /
-        ``RectYZ2D`` / ``PolygonXY2D`` regions at the plane.
-    """
-    from gsim.common.stack.extractor import Layer, LayerStack
-    from gsim.common.stack.materials import get_material_properties
-
-    stack = LayerStack(pdk_name="optical")
-
-    per_region = device_materials or {}
-    for name, (gds_layer, zmin, zmax) in device_layers.items():
-        stack.layers[name] = Layer(
-            name=name,
-            gds_layer=gds_layer,
-            zmin=zmin,
-            zmax=zmax,
-            thickness=zmax - zmin,
-            material=per_region.get(name, device_material),
-            layer_type="dielectric",
-            mesh_resolution=mesh_resolution,
-        )
-
-    stack.dielectrics.append(
-        {
-            "name": "oxide",
-            "zmin": -substrate_thickness,
-            "zmax": cladding_top,
-            "material": cladding_material,
-        }
-    )
-
-    for material in {device_material, cladding_material} | set(per_region.values()):
-        props = get_material_properties(material)
-        if props is not None:
-            stack.materials[material] = props.to_dict()
-
-    for name, mat in (extra_materials or {}).items():
-        stack.materials[name] = mat.to_dict() if hasattr(mat, "to_dict") else mat
-
-    section = extract_plane_section(
-        component.copy(),
-        stack,
-        axis=axis,
-        value=value,
-    )
-
-    if verbose:
-        logger.info("Stack: %s", stack.pdk_name)
-        logger.info("Layers: %s", sorted(stack.layers.keys()))
-        logger.info("Device material: %s", device_material)
-        logger.info("Cladding material: %s", cladding_material)
         logger.info("Dielectrics: %s", stack.dielectrics)
         logger.info("")
         logger.info(
@@ -709,9 +608,9 @@ __all__ = [
     "Rect2D",
     "RectYZ2D",
     "build_doped_cross_section",
-    "build_optical_cross_section",
     "extract_plane_section",
     "extract_xy_polygons",
     "extract_xz_rectangles",
     "extract_yz_rectangles",
+    "parse_plane_spec",
 ]
