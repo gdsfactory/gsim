@@ -5,8 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-rf = pytest.importorskip("skrf")
-
 
 def line_matrix(gamma, length_m, impedance_ratio=1):
     argument = gamma * length_m
@@ -29,6 +27,8 @@ def lumped_matrix(series, shunt):
 
 def network_from_matrix(frequency_hz, matrix):
     """Use explicit ABCD-to-S equations, independent of skrf matrix conversion."""
+    import skrf as rf
+
     a, b = matrix[:, 0, 0], matrix[:, 0, 1]
     c, d = matrix[:, 1, 0], matrix[:, 1, 1]
     denominator = a + b + c + d
@@ -54,6 +54,8 @@ class AnalyticalLines:
         )
 
     def isolated_reflect(self, offset_m=50e-6):
+        import skrf as rf
+
         left = network_from_matrix(self.frequency_hz, self.left)
         right = network_from_matrix(self.frequency_hz, self.right)
         # Imperfect unknown common termination; launches intentionally differ.
@@ -76,6 +78,7 @@ class AnalyticalLines:
 
 @pytest.fixture
 def analytical_lines():
+    pytest.importorskip("skrf")
     frequency_hz = np.linspace(35e9, 100e9, 66)
     omega = 2 * np.pi * frequency_hz
     inductance = 400e-9
