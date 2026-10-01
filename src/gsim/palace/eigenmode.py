@@ -21,6 +21,7 @@ from gsim.palace.models import (
     MaterialConfig,
     NumericalConfig,
     PortConfig,
+    RefinementConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
@@ -83,6 +84,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Material overrides and numerical config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)

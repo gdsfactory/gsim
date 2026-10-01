@@ -203,3 +203,38 @@ class TestBoundaryModeFrequencyResolution:
             absorbing_boundary=False,
         )
         assert self._material_permittivity(config_path) == pytest.approx(12.1)
+
+    def test_boundarymode_postprocessing_hint_emitted(self, tmp_path):
+        """Postprocessing voltage/impedance paths land under Boundaries."""
+        postprocessing = {
+            "Impedance": [
+                {
+                    "Index": 1,
+                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
+                    "NSamples": 200,
+                }
+            ],
+            "Voltage": [
+                {
+                    "Index": 1,
+                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
+                    "NSamples": 200,
+                }
+            ],
+        }
+        boundary = BoundaryModeConfig(freq=50e9, num_modes=2, save=1)
+        config_path = generate_palace_config(
+            groups=self._groups(),
+            ports=[],
+            port_info=[],
+            stack=self._stack_with_core(),
+            output_path=tmp_path,
+            model_name="palace",
+            fmax=100e9,
+            simulation_type="boundarymode",
+            boundary_mode_config=boundary,
+            absorbing_boundary=False,
+            hints={"_mode_postprocessing": postprocessing},
+        )
+        config = json.loads(config_path.read_text())
+        assert config["Boundaries"]["Postprocessing"] == postprocessing

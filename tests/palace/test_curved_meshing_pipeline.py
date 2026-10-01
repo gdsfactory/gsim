@@ -185,7 +185,9 @@ def test_generate_mesh_forwards_curve_fit_and_decimation(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         mesh_generator, "_setup_mesh_fields", lambda *_args, **_kwargs: None
     )
-    monkeypatch.setattr(mesh_generator, "collect_mesh_stats", lambda: {"nodes": 1})
+    monkeypatch.setattr(
+        mesh_generator, "collect_mesh_stats", lambda **_kwargs: {"nodes": 1}
+    )
 
     stack = LayerStack()
     result = mesh_generator.generate_mesh(

@@ -16,6 +16,32 @@ def _supports_color_output() -> bool:
     return bool(getattr(sys.stdout, "isatty", lambda: False)())
 
 
+def format_mesh_distortion(mesh_stats: dict) -> str | None:
+    """Format the optional Palace/MFEM tet-center shape metric."""
+    distortion = mesh_stats.get("kappa", {})
+    singular = distortion.get("singular_elements", 0)
+    maximum = distortion.get("max")
+    if singular:
+        value = f"infinite ({singular:,} singular tet centers)"
+    elif maximum is not None:
+        value = f"{maximum:.6g}"
+    else:
+        return None
+    return f"Worst element distortion, \u03ba: {value} (tet centers; 1 is ideal)"
+
+
+def format_field_dofs(mesh_stats: dict) -> str | None:
+    """Format the optional input-mesh Field DOF estimate with its scope."""
+    estimate = mesh_stats.get("field_dofs", {})
+    count = estimate.get("estimated_field_dofs")
+    if count is None:
+        return None
+    order = estimate["field_order"]
+    return (
+        f"Estimated Field DOFs: {count:,} (order {order}; before Palace preprocessing)"
+    )
+
+
 class ValidationResult(BaseModel):
     """Result of simulation configuration validation.
 
@@ -54,6 +80,37 @@ class ValidationResult(BaseModel):
         return "\n".join(lines)
 
 
+def mesh_identity_lines(stats: dict) -> list[str]:
+    """Describe the mesh hash and the mesher settings recorded in mesh stats.
+
+    Returns no lines when the stats carry no hash.
+    """
+    digest = stats.get("mesh_hash")
+    if not digest:
+        return []
+    versions = stats.get("versions", {})
+    lines = [
+        f"{'Mesh hash:':<12}{digest[:23]}  "
+        f"(gmsh {versions.get('gmsh', '?')}, gsim {versions.get('gsim', '?')})"
+    ]
+    options = stats.get("gmsh_options", {})
+    mesher = []
+    if "Mesh.Algorithm" in options:
+        mesher.append(f"2D algorithm {options['Mesh.Algorithm']:g}")
+    if "Mesh.Algorithm3D" in options:
+        mesher.append(f"3D algorithm {options['Mesh.Algorithm3D']:g}")
+    if "General.NumThreads" in options:
+        limits = "/".join(
+            f"{options.get(f'Mesh.MaxNumThreads{d}D', 0):g}" for d in (1, 2, 3)
+        )
+        mesher.append(
+            f"threads {options['General.NumThreads']:g} (1D/2D/3D limits {limits})"
+        )
+    if mesher:
+        lines.append(f"{'Mesher:':<12}{', '.join(mesher)}")
+    return lines
+
+
 class SimulationResult(BaseModel):
     """Result from running a Palace simulation.
 
@@ -67,6 +124,7 @@ class SimulationResult(BaseModel):
         port_groups: Physical group info for ports
         boundary_groups: Physical group info for boundaries
         port_info: Port metadata
+        metadata: Versioned JSON-compatible mesh measurements and sizing hints
     """
 
     model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
@@ -87,6 +145,7 @@ class SimulationResult(BaseModel):
 
     # Mesh statistics
     mesh_stats: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
 
     def __str__(self) -> str:
         """Returns a formatted string summary of the simulation results."""
@@ -136,6 +195,14 @@ class SimulationResult(BaseModel):
                 else:
                     lines.append(f"SICN:       {sicn.get('mean', 0):.3f} (all valid)")
 
+            if distortion := format_mesh_distortion(self.mesh_stats):
+                lines.append(distortion)
+            if field_dofs := format_field_dofs(self.mesh_stats):
+                lines.append(field_dofs)
+
+            # Identity of the mesh: hash and the mesher that made it
+            lines.extend(mesh_identity_lines(self.mesh_stats))
+
             # Physical groups
             groups = self.mesh_stats.get("groups", {})
             if groups:
@@ -170,4 +237,5 @@ class SimulationResult(BaseModel):
 __all__ = [
     "SimulationResult",
     "ValidationResult",
+    "mesh_identity_lines",
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import gdsfactory as gf
 import pytest
 
-from gsim.palace import PortGeometry
+from gsim.palace import DrivenSim, PortGeometry
 from gsim.palace.ports import (
     configure_gap_port,
     configure_interlayer_port,
@@ -64,3 +64,11 @@ def test_configure_via_port_warns_and_preserves_behavior() -> None:
     assert port.info["palace_type"] == "lumped"
     assert port.info["from_layer"] == "metal1"
     assert port.info["to_layer"] == "topmetal2"
+
+
+@pytest.mark.parametrize("voltage_path", [None, [[0.0, 0.0], [1.0, 0.0]]])
+def test_gap_port_requires_layer_even_with_voltage_path(voltage_path) -> None:
+    """A postprocessing path cannot replace a gap port's conductor layer."""
+    sim = DrivenSim()
+    with pytest.raises(ValueError, match="Gap ports require 'layer'"):
+        sim.add_port("feed", geometry="gap", voltage_path=voltage_path)

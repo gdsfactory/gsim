@@ -89,6 +89,30 @@ def volumetric_sim(tmp_path_factory):
     return _make_sim(component, tmp_path, planar_conductors=False, layer="metal1")
 
 
+def test_mesh_metadata_is_written_and_refreshed_for_config(volumetric_sim):
+    sim = volumetric_sim
+    mesh_result = sim._last_mesh_result
+    path = mesh_result.output_dir / "metadata.json"
+    metadata = json.loads(path.read_text())
+    assert metadata["schema_version"] == 1
+    assert metadata["mesh"]["field_dofs"]["estimated_field_dofs"] > 0
+    assert metadata["mesh"]["kappa"]["max"] >= 1
+    original_numerical = sim.numerical
+    try:
+        sim.set_numerical(order=3)
+        sim.write_config()
+        updated = json.loads(path.read_text())
+        assert updated["simulation"]["field_order"] == 3
+        assert (
+            updated["mesh"]["field_dofs"]["estimated_field_dofs"]
+            > metadata["mesh"]["field_dofs"]["estimated_field_dofs"]
+        )
+        assert mesh_result.metadata == updated
+    finally:
+        sim.numerical = original_numerical
+        sim.write_config()
+
+
 @pytest.fixture(scope="module")
 def planar_sim(tmp_path_factory):
     """Mesh once with planar conductors, share across tests."""

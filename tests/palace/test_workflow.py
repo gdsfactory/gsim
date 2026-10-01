@@ -570,11 +570,11 @@ class TestNumericalConfig:
         config = json.loads(config_path.read_text())
 
         linear = config["Solver"]["Linear"]
-        assert linear["Type"] == "Default"
+        assert linear["Type"] == "AMS"
         assert linear["KSPType"] == "GMRES"
         assert linear["Tol"] == 2e-7
         assert linear["MaxIts"] == 777
-        assert linear["Preconditioner"] == "AMS"
+        assert "Preconditioner" not in linear
         assert config["Solver"]["Order"] == 3
         assert config["Solver"]["Device"] == "CPU"
 

@@ -8,13 +8,20 @@ This module provides:
 from __future__ import annotations
 
 import itertools
+import json
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
 from gsim.palace.models.results import ValidationResult
 
-__all__ = ["PortGeometryError", "check_lumped_port_geometry", "validate_mesh"]
+__all__ = [
+    "PortGeometryError",
+    "check_lumped_port_contact",
+    "check_lumped_port_geometry",
+    "validate_mesh",
+]
 
 
 class PortGeometryError(ValueError):
@@ -318,6 +325,91 @@ def check_lumped_port_geometry(
             )
 
     return errors
+
+
+def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
+    """Count mesh nodes shared by each lumped port and a conductor surface.
+
+    A valid rectangular port can survive meshing after its metal lead was
+    consumed by a boolean cut. This check catches that disconnected case.
+    It does not prove that the port touches the intended conductor island.
+    """
+    sim_dir = Path(sim_dir)
+    boundaries = json.loads((sim_dir / "config.json").read_text())["Boundaries"]
+    ports = boundaries.get("LumpedPort", [])
+    if not ports:
+        raise ValueError("config.json has no lumped ports")
+
+    conductor_attributes = set(boundaries.get("PEC", {}).get("Attributes", []))
+    for boundary in boundaries.get("Conductivity", []):
+        conductor_attributes.update(boundary.get("Attributes", []))
+    if not conductor_attributes:
+        raise ValueError("config.json has no conductor surface attributes")
+
+    import gmsh
+
+    started = not gmsh.isInitialized()
+    if started:
+        gmsh.initialize()
+    previous_model = gmsh.model.getCurrent()
+    temporary_model = f"gsim_port_contact_{uuid4().hex}"
+    model_added = False
+    try:
+        gmsh.model.add(temporary_model)
+        model_added = True
+        gmsh.merge(str(sim_dir / "palace.msh"))
+        surface_groups = gmsh.model.getPhysicalGroups(2)
+        groups = {
+            gmsh.model.getPhysicalName(dim, tag): tag for dim, tag in surface_groups
+        }
+        surface_tags = {tag for _, tag in surface_groups}
+
+        def nodes(tag: int) -> set[int]:
+            found: set[int] = set()
+            for entity in gmsh.model.getEntitiesForPhysicalGroup(2, tag):
+                _, _, blocks = gmsh.model.mesh.getElements(2, int(entity))
+                for block in blocks:
+                    found.update(int(node) for node in block)
+            return found
+
+        conductor_nodes: set[int] = set()
+        for name, tag in groups.items():
+            if tag in conductor_attributes or name.endswith("_pec"):
+                conductor_nodes.update(nodes(tag))
+
+        contacts: dict[int, int] = {}
+        for port in ports:
+            index = int(port["Index"])
+            tags = {int(tag) for tag in port.get("Attributes", [])}
+            tags.update(
+                int(tag)
+                for element in port.get("Elements", [])
+                for tag in element.get("Attributes", [])
+            )
+            if not tags:
+                raise ValueError(f"lumped port {index} has no surface attributes")
+            if missing := tags - surface_tags:
+                raise ValueError(
+                    f"mesh has no surface group for lumped port {index}: "
+                    f"{sorted(missing)}"
+                )
+            port_nodes = set().union(*(nodes(tag) for tag in tags))
+            contacts[index] = len(port_nodes & conductor_nodes)
+    finally:
+        if model_added:
+            gmsh.model.setCurrent(temporary_model)
+            gmsh.model.remove()
+        if previous_model:
+            gmsh.model.setCurrent(previous_model)
+        if started:
+            gmsh.finalize()
+
+    orphaned = [index for index, count in contacts.items() if count == 0]
+    if orphaned:
+        raise ValueError(
+            f"lumped ports {orphaned} share no nodes with conductor surfaces"
+        )
+    return contacts
 
 
 def validate_mesh(sim) -> ValidationResult:

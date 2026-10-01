@@ -58,6 +58,46 @@ class PortConfig(BaseModel):
         "Positive = away from boundary, into conductor.",
     )
 
+    # BoundaryMode postprocessing (2D voltage/impedance paths). These paths do
+    # not affect the 2D eigenproblem; Palace uses them only to post-process the
+    # mode voltage (mode-V.csv) and characteristic impedance (mode-Z.csv).
+    voltage_path: list[list[float]] | None = Field(
+        default=None,
+        description="Open signal->ground coordinate path (um) for BoundaryMode "
+        "voltage/impedance postprocessing. Points may be 2D (cross-section "
+        "coordinates h, v) or 3D (layout x, y, z).",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) port center (um). Used to auto-derive a "
+        "BoundaryMode voltage path when voltage_path is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    width: float | None = Field(
+        default=None,
+        gt=0,
+        description="Port width (um). Used to auto-derive a BoundaryMode "
+        "voltage path when voltage_path is not given.",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def normalize_legacy_geometry(cls, data: Any) -> Any:
@@ -74,8 +114,12 @@ class PortConfig(BaseModel):
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
         """Validate layer configuration based on geometry type."""
-        if self.geometry in ("inplane", "gap") and self.layer is None:
-            raise ValueError("Inplane and gap ports require 'layer' to be specified")
+        if (
+            self.geometry == "inplane"
+            and self.layer is None
+            and self.voltage_path is None
+        ):
+            raise ValueError("Inplane ports require 'layer' to be specified")
         if self.geometry == "interlayer" and (
             self.from_layer is None or self.to_layer is None
         ):
@@ -83,6 +127,8 @@ class PortConfig(BaseModel):
                 "Interlayer ports require both 'from_layer' and 'to_layer'"
             )
         if self.geometry == "gap":
+            if self.layer is None:
+                raise ValueError("Gap ports require 'layer' to be specified")
             if self.from_layer is not None or self.to_layer is not None:
                 raise ValueError("Gap ports use a single conductor layer")
             if self.length is not None:
@@ -139,6 +185,39 @@ class CPWPortConfig(BaseModel):
 
     impedance: float = Field(default=50.0, gt=0)
     excited: bool = True
+
+    # BoundaryMode postprocessing (2D voltage/impedance paths).
+    voltage_paths: list[list[list[float]]] | None = Field(
+        default=None,
+        description="Explicit open signal->ground coordinate paths (um) for "
+        "BoundaryMode postprocessing, one per CPW gap. Points may be 2D "
+        "(cross-section coordinates h, v) or 3D (layout x, y, z). When omitted "
+        "and a port center is available, the two gap paths are auto-derived.",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) signal-center (um). Used to auto-derive "
+        "BoundaryMode gap voltage paths when voltage_paths is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
 
 
 class TerminalConfig(BaseModel):
@@ -226,6 +305,21 @@ class WavePortConfig(BaseModel):
         mode: Mode number to excite
         offset: De-embedding distance in um
         excited: Whether this port is excited
+        eigensolver_type: Palace SolverType for this port's 2D mode
+            eigenproblem ("Default", "SLEPc" or "ARPACK"). None uses
+            Palace's own default.
+        eigensolver_tol: Palace EigenTol (eigenvalue solver relative
+            tolerance) for this port's mode solve. None uses Palace's
+            own default.
+        eigensolver_ksp_tol: Palace KSPTol (linear solver tolerance used
+            inside the eigenvalue iteration) for this port's mode solve.
+            None uses Palace's own default.
+        eigensolver_max_size: Palace MaxSize (eigensolver subspace
+            dimension) for this port's mode solve - unrelated to the
+            `max_size` domain-filling flag above. None lets Palace pick
+            its own default (max(2 x Mode, Mode + 15)).
+        eigensolver_verbose: Palace Verbose level for this port's mode
+            solve. None uses Palace's own default.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -251,6 +345,30 @@ class WavePortConfig(BaseModel):
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
     excited: bool = True
+    eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = Field(
+        default=None,
+        description="Palace SolverType for this port's 2D mode eigenproblem",
+    )
+    eigensolver_tol: float | None = Field(
+        default=None, gt=0, description="Palace EigenTol for this port's mode solve"
+    )
+    eigensolver_ksp_tol: float | None = Field(
+        default=None, gt=0, description="Palace KSPTol for this port's mode solve"
+    )
+    eigensolver_max_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Palace MaxSize (eigensolver subspace dimension) for this "
+            "port's mode solve - unrelated to the max_size domain-filling "
+            "flag above"
+        ),
+    )
+    eigensolver_verbose: int | None = Field(
+        default=None,
+        ge=0,
+        description="Palace Verbose level for this port's mode solve",
+    )
 
 
 class TwoTerminalPortConfig(BaseModel):

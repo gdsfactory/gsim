@@ -14,10 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
+from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.models import (
     ElectrostaticConfig,
     MaterialConfig,
     NumericalConfig,
+    RefinementConfig,
     TerminalConfig,
     WavePortConfig,
 )
@@ -82,6 +84,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Material overrides and numerical config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -144,6 +147,36 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         """
         self.electrostatic = ElectrostaticConfig(
             save_fields=save_fields,
+        )
+
+    # -------------------------------------------------------------------------
+    # Results
+    # -------------------------------------------------------------------------
+
+    def load_capacitance(
+        self, results: dict[str, Path] | str | Path
+    ) -> CapacitanceMatrices:
+        """Load the capacitance matrices of a run, labelled with the terminals.
+
+        The terminal names are the ones given to :meth:`add_terminal`, in the
+        order they were added, which is Palace's terminal order.
+
+        Args:
+            results: The results dict that ``run()`` returns, or the output
+                directory of the simulation.
+
+        Returns:
+            The Maxwell and mutual capacitance matrices, with checks; see
+            :class:`~gsim.palace.capacitance.CapacitanceMatrices`.
+
+        Example:
+            >>> cap = sim.load_capacitance(sim.run())
+            >>> cap.between("T1", "T2")  # plate to plate, in F
+            >>> cap.to_ground("T1")  # to the substrate, in F
+            >>> assert not cap.problems()
+        """
+        return load_capacitance(
+            results, terminal_names=[terminal.name for terminal in self.terminals]
         )
 
 

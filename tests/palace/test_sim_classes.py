@@ -6,16 +6,15 @@ the ``gsim.palace.runtime`` binary resolver (``resolve_palace_binary`` etc.).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
+from typing import cast
 
 import pytest
 
+from gsim.common import LayerStack
 from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -227,6 +226,80 @@ class TestBoundaryModeSimValidation:
         assert cfg.solver_type == "SLEPc"
 
 
+class TestBoundaryModePostprocessing:
+    """BoundaryMode voltage/impedance postprocessing path derivation."""
+
+    @staticmethod
+    def _stack() -> LayerStack:
+        return cast(
+            LayerStack,
+            SimpleNamespace(
+                layers={
+                    "metal1": SimpleNamespace(zmin=1.1, zmax=2.1),
+                    "p_rib": SimpleNamespace(zmin=0.0, zmax=0.22),
+                }
+            ),
+        )
+
+    def test_cpw_gap_paths_auto_derived(self):
+        """A CPW port yields one voltage path per gap in cross-section coords."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_cpw_port(
+            "input",
+            layer="metal1",
+            s_width=20.0,
+            gap_width=20.0,
+            center=(0.0, 0.0),
+            orientation=0.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert len(post["Impedance"]) == 2
+        assert len(post["Voltage"]) == 2
+        assert post["Impedance"][0]["VoltagePath"] == [[10.0, 1.6], [30.0, 1.6]]
+        assert post["Impedance"][1]["VoltagePath"] == [[-10.0, 1.6], [-30.0, 1.6]]
+        assert post["Voltage"][0]["Index"] == 1
+
+    def test_single_port_explicit_path_projected_from_3d(self):
+        """3D layout path points are projected onto an x-normal cross-section."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            voltage_path=[[1.0, -19.8, 0.11], [1.0, -20.2, 0.11]],
+            nsamples=200,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        entry = post["Impedance"][0]
+        assert entry["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+        assert entry["NSamples"] == 200
+        # Same path is also reported to the Voltage postprocessing section.
+        assert post["Voltage"][0]["VoltagePath"] == entry["VoltagePath"]
+
+    def test_single_port_auto_derived_across_width(self):
+        """A single lumped port derives a path across its width at layer mid-z."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            layer="p_rib",
+            width=0.4,
+            center=(0.0, -20.0),
+            orientation=180.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert post["Impedance"][0]["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+
+    def test_voltage_path_allows_missing_layer(self):
+        """A postprocessing port with an explicit path does not require a layer."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port("junction", voltage_path=[[-19.8, 0.11], [-20.2, 0.11]])
+        # Only the (expected) missing geometry error remains, no layer error.
+        errors = sim.validate_config().errors
+        assert not any("require 'layer'" in e for e in errors)
+
+
 class TestMixinMethods:
     """Test mixin methods work on all simulation classes."""
 
@@ -266,6 +339,42 @@ class TestMixinMethods:
                 "z_below": 80.0,
                 "material": "air",
             }
+
+    def test_airbox_lateral_margin_reaches_the_mesher_once(self):
+        """``set_airbox(margin_x=N)`` must give N um of air, not 2N.
+
+        The mesher applies ``margin_x`` to the design bbox and then adds
+        ``airbox_margin_x`` on top of that already-expanded extent, so the two
+        must sum to the requested margin. Sending the request in both places
+        doubled every lateral airbox margin.
+        """
+        for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim, BoundaryModeSim]:
+            sim = cls()
+            sim.set_airbox(margin_x=50.0, margin_y=30.0, z_above=100.0, z_below=80.0)
+            domain_x, domain_y = sim._resolve_domain_margins(MeshConfig.default())
+            airbox_cfg = sim._airbox_config
+            assert domain_x + airbox_cfg["margin_x"] == 50.0
+            assert domain_y + airbox_cfg["margin_y"] == 30.0
+
+    def test_airbox_does_not_write_back_into_mesh_config(self):
+        """The airbox config is the only source of the lateral margin.
+
+        ``set_airbox()`` used to copy its lateral margins into ``mesh_config``,
+        which is what made it possible to apply them twice.
+        """
+        sim = DrivenSim()
+        sim.mesh_config = MeshConfig.default()
+        sim.set_airbox(margin_x=50.0, margin_y=30.0)
+        assert sim.mesh_config.margin_x is None
+        assert sim.mesh_config.margin_y is None
+
+    def test_domain_margin_falls_back_to_mesh_config(self):
+        """Without ``set_airbox()`` the mesh config still sizes the domain."""
+        sim = DrivenSim()
+        mesh_config = MeshConfig.default()
+        mesh_config.margin_x = 40.0
+        mesh_config.margin_y = 20.0
+        assert sim._resolve_domain_margins(mesh_config) == (40.0, 20.0)
 
     def test_set_airbox_material(self):
         """set_airbox(material=...) stores a custom background material."""
@@ -418,20 +527,29 @@ class TestMixinMethods:
         assert captured["material"] == "sio2"
         assert captured["margin_y"] == 50.0
 
-    def test_set_airbox_margin_y_zero_reaches_generate_mesh(
+    def test_set_airbox_margins_reach_generate_mesh_exactly_once(
         self, monkeypatch, tmp_path
     ):
-        """set_airbox(margin_y=0) must propagate to meshing domain extents."""
+        """set_airbox margins must reach meshing intact, and only once.
+
+        The mesher applies ``margin_*`` to the design bbox and then adds
+        ``airbox_margin_*`` on top, so the pair must sum to what was requested.
+        An explicit ``margin_y=0`` must also survive rather than being replaced
+        by the mesh config's own margin.
+        """
         captured: dict[str, float] = {}
 
         def _fake_generate_mesh(**kwargs):
             captured["margin_x"] = kwargs["margin_x"]
             captured["margin_y"] = kwargs["margin_y"]
+            captured["airbox_margin_x"] = kwargs["airbox_margin_x"]
+            captured["airbox_margin_y"] = kwargs["airbox_margin_y"]
             return SimpleNamespace(
                 mesh_path=tmp_path / "palace.msh",
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -463,8 +581,8 @@ class TestMixinMethods:
             write_config=False,
         )
 
-        assert captured["margin_x"] == 50.0
-        assert captured["margin_y"] == 0.0
+        assert captured["margin_x"] + captured["airbox_margin_x"] == 50.0
+        assert captured["margin_y"] + captured["airbox_margin_y"] == 0.0
 
     def test_curved_mesh_options_reach_generate_mesh(self, monkeypatch, tmp_path):
         """Curve-fit, decimation, and verbosity options must be forwarded."""
@@ -477,6 +595,7 @@ class TestMixinMethods:
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -495,6 +614,7 @@ class TestMixinMethods:
             curve_fit_min_points=12,
             curve_fit_corner_angle_deg=30.0,
         )
+        sim.set_numerical(order=3)
 
         sim._generate_mesh_internal(
             output_dir=tmp_path / "sim",
@@ -515,6 +635,7 @@ class TestMixinMethods:
         assert captured["curve_fit_corner_angle_deg"] == 30.0
         assert captured["decimate_tolerance"] == 0.005
         assert captured["verbosity"] == 7
+        assert captured["numerical_config"] is sim.numerical
 
     def test_set_material(self):
         """Test set_material works on all sim classes."""
@@ -601,35 +722,34 @@ def _mock_gcloud(monkeypatch: pytest.MonkeyPatch) -> None:
         "print_job_summary",
         "run_simulation",
     ):
-        setattr(gcloud, name, lambda *a, **kw: None)  # noqa: ARG005
+        setattr(gcloud, name, lambda *a, **kw: None)
     gcloud.RunResult = type("RunResult", (), {})  # ty: ignore[unresolved-attribute]
     monkeypatch.setitem(sys.modules, "gsim.gcloud", gcloud)
 
 
 @pytest.fixture
-def _no_palacetoolkit(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
-    """Ensure palacetoolkit_palace_cpu is unavailable during the test."""
-    if "palacetoolkit_palace_cpu" in sys.modules:
-        old = sys.modules["palacetoolkit_palace_cpu"]
-        monkeypatch.delitem(sys.modules, "palacetoolkit_palace_cpu", raising=False)
-        yield
-        sys.modules["palacetoolkit_palace_cpu"] = old
-    else:
-        yield
+def _no_local_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate gsim's own cached/downloaded runtime during resolver tests."""
+    import gsim.palace.runtime as rt
+
+    monkeypatch.setattr(rt, "_cached_binary", lambda: None)
+    monkeypatch.setattr(rt, "_cached_library_dir", lambda: None)
+    monkeypatch.setattr(rt, "_is_linux_x86_64", lambda: False)
+    monkeypatch.setattr(rt, "_auto_download_enabled", lambda: False)
+    monkeypatch.setattr(rt, "_palace_cpu_available", lambda: False)
+    monkeypatch.setattr(rt, "_palace_toolkit_available", lambda: False)
 
 
 class TestResolvePalaceBinary:
-    @pytest.mark.usefixtures("_mock_gcloud", "_no_palacetoolkit")
+    @pytest.mark.usefixtures("_mock_gcloud", "_no_local_runtime")
     def test_returns_none_when_nothing_found(self) -> None:
         from gsim.palace.runtime import resolve_palace_binary
 
         with pytest.MonkeyPatch().context() as mp:
             mp.delenv("PALACE_BIN", raising=False)
             mp.delenv("PALACE_EXECUTABLE", raising=False)
-            with mp.context() as mp2:
-                mp2.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
-                result = resolve_palace_binary()
-                assert result is None
+            result = resolve_palace_binary()
+            assert result is None
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_uses_palace_bin_env(self) -> None:
@@ -639,7 +759,7 @@ class TestResolvePalaceBinary:
 
         with pytest.MonkeyPatch().context() as mp:
             mp.setenv("PALACE_BIN", str(fake_bin))
-            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda _: True)
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda *a, **k: True)
             mp.setattr("pathlib.Path.is_file", lambda _: True)
             result = resolve_palace_binary()
             assert result is not None
@@ -658,10 +778,75 @@ class TestResolvePalaceBinary:
         with pytest.MonkeyPatch().context() as mp:
             mp.setitem(sys.modules, "palacetoolkit_palace_cpu", _FakePalaceCPU())
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
-            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda _: True)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._cached_binary", lambda: None)
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda *a, **k: True)
             mp.setattr("pathlib.Path.is_file", lambda _: True)
             result = resolve_palace_binary()
             assert result is not None
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_delegates_to_palacetoolkit_package(self) -> None:
+        from gsim.palace.runtime import resolve_palace_binary
+
+        fake_ptk_bin = Path("/opt/palacetoolkit/runtime/bin/palace")
+
+        import types
+
+        ptk = types.ModuleType("palacetoolkit")
+        ptk.__path__ = []  # type: ignore[attr-defined]
+        ptk_runtime = types.ModuleType("palacetoolkit.palace_runtime")
+        setattr(ptk_runtime, "resolve_palace_binary", lambda: fake_ptk_bin)  # noqa: B010
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: True)
+            mp.setattr("gsim.palace.runtime._cached_binary", lambda: None)
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda *a, **k: True)
+            mp.setattr("pathlib.Path.is_file", lambda _: True)
+            mp.setitem(sys.modules, "palacetoolkit", ptk)
+            mp.setitem(sys.modules, "palacetoolkit.palace_runtime", ptk_runtime)
+            result = resolve_palace_binary()
+            assert result is not None
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_uses_gsim_cached_runtime(self) -> None:
+        from gsim.palace.runtime import resolve_palace_binary
+
+        fake_bin = Path("/home/user/.cache/palacetoolkit/runtime/bin/palace")
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.delenv("PALACE_BIN", raising=False)
+            mp.delenv("PALACE_EXECUTABLE", raising=False)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._cached_binary", lambda: fake_bin)
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda *a, **k: True)
+            result = resolve_palace_binary()
+            assert result is not None
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_downloads_runtime_when_missing(self) -> None:
+        from gsim.palace.runtime import resolve_palace_binary
+
+        fake_downloaded = Path("/home/user/.cache/palacetoolkit/runtime/bin/palace")
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.delenv("PALACE_BIN", raising=False)
+            mp.delenv("PALACE_EXECUTABLE", raising=False)
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._cached_binary", lambda: None)
+            mp.setattr("gsim.palace.runtime._is_linux_x86_64", lambda: True)
+            mp.setattr("gsim.palace.runtime._auto_download_enabled", lambda: True)
+            mp.setattr(
+                "gsim.palace.runtime.install_palace_runtime",
+                lambda **k: fake_downloaded,
+            )
+            mp.setattr("gsim.palace.runtime._cached_library_dir", lambda: None)
+            mp.setattr("gsim.palace.runtime._binary_is_runnable", lambda *a, **k: True)
+            result = resolve_palace_binary()
+            assert result == fake_downloaded.resolve()
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_prefer_bundled_skips_env(self) -> None:
@@ -670,18 +855,96 @@ class TestResolvePalaceBinary:
         with pytest.MonkeyPatch().context() as mp:
             mp.setenv("PALACE_BIN", "/usr/bin/palace")
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._cached_binary", lambda: None)
+            mp.setattr("gsim.palace.runtime._auto_download_enabled", lambda: False)
             result = resolve_palace_binary(prefer_bundled=True)
             assert result is None
 
 
-class TestResolvePalaceLibraryDir:
-    @pytest.mark.usefixtures("_mock_gcloud", "_no_palacetoolkit")
-    def test_returns_none_without_palacetoolkit(self) -> None:
-        from gsim.palace.runtime import resolve_palace_library_dir
+class TestInstallPalaceRuntime:
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_returns_cached_binary_when_present(self, tmp_path: Path) -> None:
+        import gsim.palace.runtime as rt
+
+        tag = "0.17.0"
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(rt, "_runtime_cache_dir", lambda: tmp_path)
+            mp.setattr(rt, "_binary_tag", lambda: tag)
+            prefix = tmp_path / f"palace-cpu-v{tag}"
+            (prefix / "bin").mkdir(parents=True)
+            (prefix / "lib").mkdir(parents=True)
+            bin_palace = prefix / "bin" / "palace"
+            bin_palace.write_text("#!/bin/sh\nexit 0\n")
+            bin_palace.chmod(0o755)
+            result = rt.install_palace_runtime(force=False)
+            assert result == bin_palace
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_raises_on_non_linux_x86_64(self, tmp_path: Path) -> None:
+        import gsim.palace.runtime as rt
 
         with pytest.MonkeyPatch().context() as mp:
-            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
-            assert resolve_palace_library_dir() is None
+            # Use an empty cache dir so the fallthrough to the platform guard
+            # is deterministic regardless of what is cached on the host.
+            mp.setattr(rt, "_runtime_cache_dir", lambda: tmp_path)
+            mp.setattr(rt, "_is_linux_x86_64", lambda: False)
+            with pytest.raises(RuntimeError):
+                rt.install_palace_runtime()
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_downloads_and_extracts_runtime(self, tmp_path: Path) -> None:
+        import io
+        import zipfile
+
+        import gsim.palace.runtime as rt
+
+        tag = "0.9.9"
+        cache_dir = tmp_path / "cache"
+
+        # Build a fake wheel in memory: payload with bin/palace and lib/libfoo.so
+        wheel_buf = io.BytesIO()
+        with zipfile.ZipFile(wheel_buf, "w") as zf:
+            zf.writestr("palacetoolkit_palace_cpu/bin/palace", "#!/bin/sh\nexit 0\n")
+            zf.writestr("palacetoolkit_palace_cpu/bin/palace-x86_64.bin", "x")
+            zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
+        wheel_buf.seek(0)
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return wheel_buf.getvalue()
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(rt, "_runtime_cache_dir", lambda: cache_dir)
+            mp.setattr(rt, "_binary_tag", lambda: tag)
+            mp.setattr(rt, "_is_linux_x86_64", lambda: True)
+            mp.setattr(
+                rt, "_binary_wheel_url", lambda t: "https://example.invalid/x.whl"
+            )
+            mp.setattr(rt, "_binary_wheel_url_from_release", lambda t, timeout: None)
+            mp.setattr(rt, "urlopen", lambda *a, **k: _FakeResponse())
+
+            result = rt.install_palace_runtime(force=False)
+
+            prefix = cache_dir / f"palace-cpu-v{tag}"
+            assert result == prefix / "bin" / "palace"
+            assert (prefix / "bin" / "palace").is_file()
+            assert (prefix / "lib" / "libfoo.so").is_file()
+            assert os.access(result, os.X_OK)
+
+
+class TestResolvePalaceLibraryDir:
+    @pytest.mark.usefixtures("_mock_gcloud", "_no_local_runtime")
+    def test_returns_none_without_runtime(self) -> None:
+        from gsim.palace.runtime import resolve_palace_library_dir
+
+        assert resolve_palace_library_dir() is None
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_delegates_to_palacetoolkit(self) -> None:
@@ -697,7 +960,43 @@ class TestResolvePalaceLibraryDir:
         with pytest.MonkeyPatch().context() as mp:
             mp.setitem(sys.modules, "palacetoolkit_palace_cpu", _FakePalaceCPU())
             mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: True)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
             mp.setattr("pathlib.Path.is_dir", lambda _: True)
+            result = resolve_palace_library_dir()
+            assert result is not None
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_uses_gsim_cached_library_dir(self) -> None:
+        from gsim.palace.runtime import resolve_palace_library_dir
+
+        fake_lib = Path("/home/user/.cache/palacetoolkit/runtime/lib")
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._cached_library_dir", lambda: fake_lib)
+            result = resolve_palace_library_dir()
+            assert result == fake_lib.resolve()
+
+    @pytest.mark.usefixtures("_mock_gcloud")
+    def test_delegates_to_palacetoolkit_package(self) -> None:
+        from gsim.palace.runtime import resolve_palace_library_dir
+
+        fake_lib = Path("/opt/palacetoolkit/runtime/lib")
+
+        import types
+
+        ptk = types.ModuleType("palacetoolkit")
+        ptk.__path__ = []  # type: ignore[attr-defined]
+        ptk_runtime = types.ModuleType("palacetoolkit.palace_runtime")
+        setattr(ptk_runtime, "resolve_palace_library_dir", lambda: fake_lib)  # noqa: B010
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr("gsim.palace.runtime._palace_cpu_available", lambda: False)
+            mp.setattr("gsim.palace.runtime._palace_toolkit_available", lambda: True)
+            mp.setattr("pathlib.Path.is_dir", lambda _: True)
+            mp.setitem(sys.modules, "palacetoolkit", ptk)
+            mp.setitem(sys.modules, "palacetoolkit.palace_runtime", ptk_runtime)
             result = resolve_palace_library_dir()
             assert result is not None
 
@@ -705,11 +1004,13 @@ class TestResolvePalaceLibraryDir:
 class TestPalacetoolkitAvailable:
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_true_when_installed(self) -> None:
-        from gsim.palace.runtime import _palace_cpu_available
+        from gsim.palace.runtime import (
+            _palace_cpu_available,
+            _palace_toolkit_available,
+        )
 
-        # Since we mocked gcloud but not palacetoolkit_palace_cpu, if it's
-        # actually installed on the system, this will be True. We can't force
-        # it to be True via mock here without patching importlib, which is
-        # fragile.  Instead we just verify the function runs.
-        result = _palace_cpu_available()
-        assert isinstance(result, bool)
+        # If either package is actually installed on the system, this will be
+        # True. We can't force it via mock here without patching importlib,
+        # which is fragile. Instead we just verify the functions run.
+        assert isinstance(_palace_cpu_available(), bool)
+        assert isinstance(_palace_toolkit_available(), bool)

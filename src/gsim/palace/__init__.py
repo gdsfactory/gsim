@@ -55,6 +55,9 @@ from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
 from gsim.palace.boundarymode import BoundaryModeSim
+
+# Capacitance matrices of electrostatic runs
+from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
@@ -93,6 +96,7 @@ from gsim.palace.mesh import (
     MeshResult,
     generate_mesh,
 )
+from gsim.palace.mesh.validation import check_lumped_port_contact
 
 # Models (new submodule)
 from gsim.palace.models import (
@@ -130,6 +134,7 @@ from gsim.palace.ports import (
     configure_via_port,
     extract_ports,
 )
+from gsim.palace.postprocessing import add_domain_energy_postprocessing
 
 # Results utilities
 from gsim.palace.results import (
@@ -137,11 +142,17 @@ from gsim.palace.results import (
     SParams,
     get_port_map,
     load_fields,
+    load_refinement_history,
     load_sparams,
+    refinement_convergence,
 )
 
-# Runtime / binary resolution (optional palace-toolkit-cpu dependency)
-from gsim.palace.runtime import resolve_palace_binary, resolve_palace_library_dir
+# Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
+from gsim.palace.runtime import (
+    install_palace_runtime,
+    resolve_palace_binary,
+    resolve_palace_library_dir,
+)
 from gsim.viz import (
     close_interactive_view,
     close_interactive_views,
@@ -158,6 +169,7 @@ __all__ = [
     "BoundaryModeConfig",
     "BoundaryModeSim",
     "CPWPortConfig",
+    "CapacitanceMatrices",
     "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSim",
@@ -193,7 +205,9 @@ __all__ = [
     "VolumeFieldData",
     "WavePortConfig",
     "activate_vector_component",
+    "add_domain_energy_postprocessing",
     "build_selector_context",
+    "check_lumped_port_contact",
     "close_interactive_view",
     "close_interactive_views",
     "configure_cpw_port",
@@ -214,10 +228,13 @@ __all__ = [
     "get_material_properties",
     "get_port_map",
     "get_stack",
+    "install_palace_runtime",
     "interactive_mode",
     "load_boundary_field_data",
+    "load_capacitance",
     "load_field_context",
     "load_fields",
+    "load_refinement_history",
     "load_sparams",
     "load_stack_yaml",
     "load_volume_field_data",
@@ -233,6 +250,7 @@ __all__ = [
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "refinement_convergence",
     "resolve_boundary_type_attributes",
     "resolve_entity_attributes",
     "resolve_palace_binary",

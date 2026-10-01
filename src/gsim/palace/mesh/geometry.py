@@ -102,6 +102,46 @@ class DielectricRegion:
     zmax: float
 
 
+def _resolve_stack_z_extent(
+    stack: LayerStack,
+    use_airbox: bool,
+) -> tuple[float, float]:
+    """Resolve the z-envelope of the meshed dielectric/airbox volumes.
+
+    Mirrors :func:`resolve_dielectric_regions`: non-air-like dielectrics define
+    the envelope (air-like ones are replaced by the explicit airbox), falling
+    back to layer extents and finally ``stack.get_z_range()``. Sharing this
+    keeps :func:`resolve_mesh_domain_bounds` (used to clip ``max_size`` ports)
+    in exact agreement with the volumes actually created by
+    :func:`add_dielectrics`.
+    """
+    z_min = math.inf
+    z_max = -math.inf
+    for dielectric in stack.dielectrics:
+        dielectric_name = str(dielectric.get("name", "dielectric"))
+        material = str(dielectric["material"])
+        if use_airbox and is_air_like_material(
+            stack, material, dielectric_name=dielectric_name
+        ):
+            continue
+        d_zmin = float(dielectric["zmin"])
+        d_zmax = float(dielectric["zmax"])
+        if d_zmax <= d_zmin:
+            continue
+        z_min = min(z_min, d_zmin)
+        z_max = max(z_max, d_zmax)
+
+    if not (math.isfinite(z_min) and math.isfinite(z_max)):
+        for layer in stack.layers.values():
+            z_min = min(z_min, layer.zmin)
+            z_max = max(z_max, layer.zmax)
+
+    if not (math.isfinite(z_min) and math.isfinite(z_max)):
+        z_min, z_max = stack.get_z_range()
+
+    return z_min, z_max
+
+
 def resolve_dielectric_regions(
     geometry: GeometryData,
     stack: LayerStack,
@@ -137,9 +177,6 @@ def resolve_dielectric_regions(
     xmax_air = xmax0 + margin_x
     ymax_air = ymax0 + margin_y
 
-    z_min_all = math.inf
-    z_max_all = -math.inf
-
     use_airbox = any(
         m > 0.0
         for m in (
@@ -149,6 +186,8 @@ def resolve_dielectric_regions(
             airbox_z_below,
         )
     )
+
+    z_min_all, z_max_all = _resolve_stack_z_extent(stack, use_airbox)
 
     regions: list[DielectricRegion] = []
     for dielectric in stack.dielectrics:
@@ -165,9 +204,6 @@ def resolve_dielectric_regions(
         d_zmax = float(dielectric["zmax"])
         if d_zmax <= d_zmin:
             continue
-
-        z_min_all = min(z_min_all, d_zmin)
-        z_max_all = max(z_max_all, d_zmax)
 
         xmin = xmin_air if is_air_like else xmin0
         ymin = ymin_air if is_air_like else ymin0
@@ -529,6 +565,37 @@ def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
     return None
 
 
+def get_layer_infos(stack: LayerStack, gds_layer: int) -> list[dict]:
+    """Get ALL layer infos from stack matching a GDS layer number.
+
+    A single GDS layer may back more than one stack ``LayerLevel`` (e.g. the
+    IHP MIM capacitor: ``mim_diel`` dielectric + ``mim`` top-plate conductor
+    both live on ``MIMdrawing``). Each must be meshed at its own z-height, so
+    return every matching layer in stack order rather than only the first.
+
+    Args:
+        stack: LayerStack with layer definitions
+        gds_layer: GDS layer number
+
+    Returns:
+        List of layer-info dicts (possibly empty).
+    """
+    infos = []
+    for name, layer in stack.layers.items():
+        if layer.gds_layer[0] == gds_layer:
+            infos.append(
+                {
+                    "name": name,
+                    "zmin": layer.zmin,
+                    "zmax": layer.zmax,
+                    "thickness": layer.zmax - layer.zmin,
+                    "material": layer.material,
+                    "type": layer.layer_type,
+                }
+            )
+    return infos
+
+
 def add_metals(
     kernel,
     geometry: GeometryData,
@@ -581,178 +648,183 @@ def add_metals(
 
     # Process each layer
     for layernum, polys in polygons_by_layer.items():
-        layer_info = get_layer_info(stack, layernum)
-        if layer_info is None:
+        layer_infos = get_layer_infos(stack, layernum)
+        if not layer_infos:
             continue
+        for layer_info in layer_infos:
+            layer_name = layer_info["name"]
+            layer_type = layer_info["type"]
+            zmin = layer_info["zmin"]
+            thickness = layer_info["thickness"]
+            is_shaped_dielectric = layer_name in shaped_dielectric_names
 
-        layer_name = layer_info["name"]
-        layer_type = layer_info["type"]
-        zmin = layer_info["zmin"]
-        thickness = layer_info["thickness"]
-        is_shaped_dielectric = layer_name in shaped_dielectric_names
-
-        if layer_type not in ("conductor", "via") and not is_shaped_dielectric:
-            continue
-
-        # Snap via z-range so it does not sliver into an adjacent conductor
-        if layer_type == "via":
-            zmin, zmax = _snap_via_z_range(stack, layer_name, zmin, zmin + thickness)
-            thickness = zmax - zmin
-
-        if layer_name not in metal_tags:
-            metal_tags[layer_name] = {
-                "volumes": [],
-                "surfaces_xy": [],
-                "surfaces_z": [],
-            }
-
-        if is_shaped_dielectric:
-            shaped_dielectric_names.add(layer_name)
-
-        # Merge nearby via polygons before creating gmsh surfaces
-        if layer_type == "via":
-            polys = _merge_via_polygons(polys, merge_via_distance)
-
-        # Create surfaces for all polygons on this layer
-        surfaces = []
-        for pts_x, pts_y, holes in polys:
-            surfacetag = gmsh_utils.create_polygon_surface(
-                kernel, pts_x, pts_y, zmin, holes=holes
-            )
-            if surfacetag is not None:
-                surfaces.append(surfacetag)
-
-        if not surfaces:
-            continue
-
-        min_volume_thickness = 0.05  # um — thinner volumes can't mesh as 3D
-        is_planar = (
-            planar_conductors or thickness == 0 or thickness < min_volume_thickness
-        )
-
-        if is_shaped_dielectric:
-            # Shaped dielectric: extrude as solid 3D volume (like a via)
-            # but keep the full volume (no shell extraction). The volume
-            # carries dielectric permittivity in the Palace config.
-            if thickness == 0 or thickness < min_volume_thickness:
-                logger.warning(
-                    "Shaped dielectric layer '%s' too thin for 3D meshing "
-                    "(%.3f um < %.3f um), skipping shaped extrusion",
-                    layer_name,
-                    thickness,
-                    min_volume_thickness,
-                )
+            if layer_type not in ("conductor", "via") and not is_shaped_dielectric:
                 continue
-            # Fuse overlapping same-layer surfaces before extrusion
-            if len(surfaces) > 1:
-                dimtags = [(2, s) for s in surfaces]
-                fused, _ = kernel.fuse(
-                    [dimtags[0]],
-                    dimtags[1:],
-                    removeObject=True,
-                    removeTool=True,
-                )
-                kernel.synchronize()
-                surfaces = [t for d, t in fused if d == 2]
 
-            logger.info(
-                "Shaped dielectric layer '%s': 3D volume "
-                "(material=%s, thickness=%.3f um)",
-                layer_name,
-                layer_info["material"],
-                thickness,
-            )
-            for surfacetag in surfaces:
-                result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
-                volumetag = result[1][1]
-                metal_tags[layer_name]["volumes"].append(volumetag)
-        elif layer_type == "conductor" and is_planar:
-            # Zero/thin-thickness or explicitly planar -> 2D PEC surface
-            metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
-            # Also create explicit wire loops for mesh refinement.  Embedded
-            # planar surfaces lose their boundary curves after boolean
-            # fragmentation, so the conductor edges cannot drive refinement.
-            # Adding independent line loops at the conductor z-height gives
-            # gmsh explicit curves to refine around the metal perimeter.
+            # Snap via z-range so it does not sliver into an adjacent conductor
+            if layer_type == "via":
+                zmin, zmax = _snap_via_z_range(
+                    stack, layer_name, zmin, zmin + thickness
+                )
+                thickness = zmax - zmin
+
+            if layer_name not in metal_tags:
+                metal_tags[layer_name] = {
+                    "volumes": [],
+                    "surfaces_xy": [],
+                    "surfaces_z": [],
+                }
+
+            if is_shaped_dielectric:
+                shaped_dielectric_names.add(layer_name)
+
+            # Merge nearby via polygons before creating gmsh surfaces
+            if layer_type == "via":
+                polys = _merge_via_polygons(polys, merge_via_distance)
+
+            # Create surfaces for all polygons on this layer
+            surfaces = []
             for pts_x, pts_y, holes in polys:
-                loop_tag = gmsh_utils._create_wire_loop(  # noqa: SLF001
-                    kernel, list(pts_x), list(pts_y), zmin
+                surfacetag = gmsh_utils.create_polygon_surface(
+                    kernel, pts_x, pts_y, zmin, holes=holes
                 )
-                if loop_tag is not None:
-                    metal_tags[layer_name].setdefault("refinement_lines", []).append(
-                        loop_tag
-                    )
-                for hx, hy in holes:
-                    hole_loop = gmsh_utils._create_wire_loop(  # noqa: SLF001
-                        kernel, list(hx), list(hy), zmin
-                    )
-                    if hole_loop is not None:
-                        metal_tags[layer_name].setdefault(
-                            "refinement_lines", []
-                        ).append(hole_loop)
-        elif layer_type == "via":
-            # Decide between 3D volume (with conductivity) and 2D PEC fallback
-            material_name = layer_info["material"]
-            mat_props = stack.materials.get(material_name, {})
-            conductivity = mat_props.get("conductivity", 0.0)
-            via_too_thin = thickness == 0 or thickness < min_volume_thickness
+                if surfacetag is not None:
+                    surfaces.append(surfacetag)
 
-            if via_too_thin:
-                logger.warning(
-                    "Via layer '%s' too thin for 3D meshing "
-                    "(%.3f um < %.3f um), falling back to 2D PEC surface",
-                    layer_name,
-                    thickness,
-                    min_volume_thickness,
-                )
-                metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
-            elif conductivity <= 0:
-                logger.warning(
-                    "Via layer '%s' has no conductivity for material '%s', "
-                    "falling back to 2D PEC surface",
-                    layer_name,
-                    material_name,
-                )
-                metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
-            else:
-                # Extrude via as 3D volume with finite conductivity
+            if not surfaces:
+                continue
+
+            # um — thinner volumes can't mesh as 3D. Lowered from 0.05 so the
+            # IHP MIM 40 nm (0.04 um) high-k dielectric is meshed as a solid
+            # volume rather than being dropped (see gdsfactory/IHP#188).
+            min_volume_thickness = 0.02
+            is_planar = (
+                planar_conductors or thickness == 0 or thickness < min_volume_thickness
+            )
+
+            if is_shaped_dielectric:
+                # Shaped dielectric: extrude as solid 3D volume (like a via)
+                # but keep the full volume (no shell extraction). The volume
+                # carries dielectric permittivity in the Palace config.
+                if thickness == 0 or thickness < min_volume_thickness:
+                    logger.warning(
+                        "Shaped dielectric layer '%s' too thin for 3D meshing "
+                        "(%.3f um < %.3f um), skipping shaped extrusion",
+                        layer_name,
+                        thickness,
+                        min_volume_thickness,
+                    )
+                    continue
+                # Fuse overlapping same-layer surfaces before extrusion
+                if len(surfaces) > 1:
+                    dimtags = [(2, s) for s in surfaces]
+                    fused, _ = kernel.fuse(
+                        [dimtags[0]],
+                        dimtags[1:],
+                        removeObject=True,
+                        removeTool=True,
+                    )
+                    kernel.synchronize()
+                    surfaces = [t for d, t in fused if d == 2]
+
                 logger.info(
-                    "Via layer '%s': 3D volume (material=%s, "
-                    "\u03c3=%.2e S/m, thickness=%.3f um)",
+                    "Shaped dielectric layer '%s': 3D volume "
+                    "(material=%s, thickness=%.3f um)",
                     layer_name,
-                    material_name,
-                    conductivity,
+                    layer_info["material"],
                     thickness,
                 )
                 for surfacetag in surfaces:
                     result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
                     volumetag = result[1][1]
                     metal_tags[layer_name]["volumes"].append(volumetag)
-        elif thickness > 0:
-            # Fuse overlapping same-layer surfaces before extrusion so that
-            # overlapping polygons (e.g. ground planes and spines in a GSG
-            # electrode) become a single merged surface per layer.
-            if len(surfaces) > 1:
-                dimtags = [(2, s) for s in surfaces]
-                fused, _ = kernel.fuse(
-                    [dimtags[0]],
-                    dimtags[1:],
-                    removeObject=True,
-                    removeTool=True,
-                )
-                kernel.synchronize()
-                surfaces = [t for d, t in fused if d == 2]
+            elif layer_type == "conductor" and is_planar:
+                # Zero/thin-thickness or explicitly planar -> 2D PEC surface
+                metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+                # Also create explicit wire loops for mesh refinement.  Embedded
+                # planar surfaces lose their boundary curves after boolean
+                # fragmentation, so the conductor edges cannot drive refinement.
+                # Adding independent line loops at the conductor z-height gives
+                # gmsh explicit curves to refine around the metal perimeter.
+                for pts_x, pts_y, holes in polys:
+                    loop_tag = gmsh_utils._create_wire_loop(  # noqa: SLF001
+                        kernel, list(pts_x), list(pts_y), zmin
+                    )
+                    if loop_tag is not None:
+                        metal_tags[layer_name].setdefault(
+                            "refinement_lines", []
+                        ).append(loop_tag)
+                    for hx, hy in holes:
+                        hole_loop = gmsh_utils._create_wire_loop(  # noqa: SLF001
+                            kernel, list(hx), list(hy), zmin
+                        )
+                        if hole_loop is not None:
+                            metal_tags[layer_name].setdefault(
+                                "refinement_lines", []
+                            ).append(hole_loop)
+            elif layer_type == "via":
+                # Decide between 3D volume (with conductivity) and 2D PEC fallback
+                material_name = layer_info["material"]
+                mat_props = stack.materials.get(material_name, {})
+                conductivity = mat_props.get("conductivity", 0.0)
+                via_too_thin = thickness == 0 or thickness < min_volume_thickness
 
-            for surfacetag in surfaces:
-                result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
-                volumetag = result[1][1]
-
-                if layer_type == "via":
-                    # Keep vias as volumes
-                    metal_tags[layer_name]["volumes"].append(volumetag)
+                if via_too_thin:
+                    logger.warning(
+                        "Via layer '%s' too thin for 3D meshing "
+                        "(%.3f um < %.3f um), falling back to 2D PEC surface",
+                        layer_name,
+                        thickness,
+                        min_volume_thickness,
+                    )
+                    metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
+                elif conductivity <= 0:
+                    logger.warning(
+                        "Via layer '%s' has no conductivity for material '%s', "
+                        "falling back to 2D PEC surface",
+                        layer_name,
+                        material_name,
+                    )
+                    metal_tags[layer_name]["surfaces_xy"].extend(surfaces)
                 else:
-                    # Defer shell extraction until after removeAllDuplicates
-                    _conductor_volumes.setdefault(layer_name, []).append(volumetag)
+                    # Extrude via as 3D volume with finite conductivity
+                    logger.info(
+                        "Via layer '%s': 3D volume (material=%s, "
+                        "\u03c3=%.2e S/m, thickness=%.3f um)",
+                        layer_name,
+                        material_name,
+                        conductivity,
+                        thickness,
+                    )
+                    for surfacetag in surfaces:
+                        result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
+                        volumetag = result[1][1]
+                        metal_tags[layer_name]["volumes"].append(volumetag)
+            elif thickness > 0:
+                # Fuse overlapping same-layer surfaces before extrusion so that
+                # overlapping polygons (e.g. ground planes and spines in a GSG
+                # electrode) become a single merged surface per layer.
+                if len(surfaces) > 1:
+                    dimtags = [(2, s) for s in surfaces]
+                    fused, _ = kernel.fuse(
+                        [dimtags[0]],
+                        dimtags[1:],
+                        removeObject=True,
+                        removeTool=True,
+                    )
+                    kernel.synchronize()
+                    surfaces = [t for d, t in fused if d == 2]
+
+                for surfacetag in surfaces:
+                    result = kernel.extrude([(2, surfacetag)], 0, 0, thickness)
+                    volumetag = result[1][1]
+
+                    if layer_type == "via":
+                        # Keep vias as volumes
+                        metal_tags[layer_name]["volumes"].append(volumetag)
+                    else:
+                        # Defer shell extraction until after removeAllDuplicates
+                        _conductor_volumes.setdefault(layer_name, []).append(volumetag)
 
     # Record bounding boxes of BOTH via and conductor volumes BEFORE
     # removeAllDuplicates. That call renumbers ALL entity tags globally —
@@ -1011,27 +1083,6 @@ def resolve_mesh_domain_bounds(
     xmax_air = xmax0 + margin_x
     ymax_air = ymax0 + margin_y
 
-    # Robust stack z-envelope: include dielectric and layer extents.
-    z_min_all = math.inf
-    z_max_all = -math.inf
-    for dielectric in stack.dielectrics:
-        z_min_all = min(z_min_all, dielectric["zmin"])
-        z_max_all = max(z_max_all, dielectric["zmax"])
-
-    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-        z_try_min, z_try_max = stack.get_z_range()
-        z_min_all = min(z_min_all, z_try_min)
-        z_max_all = max(z_max_all, z_try_max)
-
-    if stack.layers:
-        z_min_layers = min(layer.zmin for layer in stack.layers.values())
-        z_max_layers = max(layer.zmax for layer in stack.layers.values())
-        z_min_all = min(z_min_all, z_min_layers)
-        z_max_all = max(z_max_all, z_max_layers)
-
-    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
-        raise ValueError("Cannot resolve stack z extents for domain bounds")
-
     use_airbox = any(
         m > 0.0
         for m in (
@@ -1041,6 +1092,17 @@ def resolve_mesh_domain_bounds(
             airbox_z_below,
         )
     )
+
+    # Derive the stack z-envelope from the SAME rule used to build the mesh
+    # volumes. Adding raw layer extents here can place a max_size port outside
+    # the actual meshed domain when a layer extends beyond the dielectric
+    # envelope (e.g. gpdk ``box``/``undercut`` at z=-3 vs ``oxide`` at z=-2).
+    # The port surface then has orphan boundary faces and Palace aborts with
+    # "MFEM abort: (r,c,f) = ...".
+    z_min_all, z_max_all = _resolve_stack_z_extent(stack, use_airbox)
+
+    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+        raise ValueError("Cannot resolve stack z extents for domain bounds")
 
     if use_airbox:
         return (
@@ -1890,4 +1952,5 @@ __all__ = [
     "extract_geometry",
     "extract_pec_polygons",
     "get_layer_info",
+    "get_layer_infos",
 ]

@@ -141,22 +141,30 @@ class DrivenConfig(BaseModel):
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
-        freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
-
-        if self.fmax == self.fmin:
-            freq_step = 1.0
-        else:
-            freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
-        config: dict = {
-            "Samples": [
-                {
-                    "Type": "Linear" if self.scale == "linear" else "Log",
-                    "MinFreq": self.fmin / 1e9,
-                    "MaxFreq": self.fmax / 1e9,
-                    "FreqStep": freq_step,
+        sample: dict[str, object] = {
+            "Type": "Linear" if self.scale == "linear" else "Log",
+            "MinFreq": self.fmin / 1e9,
+            "MaxFreq": self.fmax / 1e9,
+            "SaveStep": self.save_step,
+        }
+        if self.scale == "log":
+            if self.num_points == 1:
+                # Palace's log sampler divides by NSample - 1.
+                sample = {
+                    "Type": "Point",
+                    "Freq": [self.fmin / 1e9],
                     "SaveStep": self.save_step,
                 }
-            ],
+            else:
+                sample["NSample"] = self.num_points
+        else:
+            sample["FreqStep"] = (
+                1.0
+                if self.fmax == self.fmin
+                else (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
+            )
+        config: dict = {
+            "Samples": [sample],
             "AdaptiveTol": max(0, self.adaptive_tol),
         }
         if self.adaptive_tol > 0:
