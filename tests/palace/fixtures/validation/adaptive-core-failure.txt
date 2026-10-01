@@ -1,0 +1,30 @@
+Adding excitation index 1 (1/2):
+
+GMRES solver did NOT converge in 400 iterations (avg. reduction factor: 9.661e-01)
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.030e-06 (norm(b) = 1.002e+01)!
+
+Adaptive sampling converged with 7 frequency samples:
+ n = 14, error = 1.908e-02, tol = 2.000e-02, memory = 2/2
+ Sampled frequencies (GHz): 1.000e-01, 1.000e+02, 7.772e+01, 3.228e+01,
+                            5.460e+01, 1.006e+01, 5.577e+01
+ Sample errors: inf, inf, 5.494e-02, 9.518e-03, 3.717e-02,
+                2.379e-03, 1.908e-02
+
+Adding excitation index 2 (2/2):
+
+Adaptive sampling converged with 9 frequency samples:
+ n = 32, error = 1.729e-02, tol = 2.000e-02, memory = 2/2
+ Sampled frequencies (GHz): 1.000e-01, 1.000e+02, 7.775e+01, 3.224e+01,
+                            5.459e+01, 1.017e+01, 5.578e+01, 6.925e+01,
+                            5.361e+01
+ Sample errors: inf, inf, 3.108e-02, 2.290e-02, 3.568e-02,
+                1.016e-02, 2.086e-02, 1.525e-02, 1.729e-02
+ Total offline phase elapsed time: 2.44e+02 s
+
+Beginning fast frequency sweep online phase
+
+Calculating boundary modes at wave ports for ω/2π = 1.000e-01 GHz (1.677e-03)
+ Port 1, mode 1: kₙ = 3.587e+00-3.389e-04i m⁻¹
+ Port 2, mode 1: kₙ = 3.587e+00-3.390e-04i m⁻¹
