@@ -12,7 +12,7 @@ from gsim.palace.validation import validate_solution
 output = Path("run/output/palace")
 config = json.loads(Path("run/config.json").read_text())
 report = validate_solution(
-    (output / "palace.log").read_text(),
+    (output / "palace.log").read_text(encoding="utf-8"),
     metadata=json.loads((output / "palace.json").read_text()),
     estimator_disabled=config["Solver"]["Linear"].get("EstimatorMaxIts") == 0,
     expected_excitations=[1, 2],  # Require these adaptive training outcomes.

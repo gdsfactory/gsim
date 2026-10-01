@@ -21,7 +21,7 @@ ZERO_PAIR = (
 
 def test_disabled_estimator_and_wrong_mode_are_independent():
     report = validate_solution(
-        (FIXTURES / "disabled-estimator.txt").read_text(),
+        (FIXTURES / "disabled-estimator.txt").read_text(encoding="utf-8"),
         estimator_disabled=True,
         exit_code=0,
         metadata={"GitTag": "cfa430a"},
@@ -44,7 +44,7 @@ def test_disabled_estimator_and_wrong_mode_are_independent():
 
 
 def test_disabled_requires_explicit_evidence():
-    log = (FIXTURES / "disabled-estimator.txt").read_text()
+    log = (FIXTURES / "disabled-estimator.txt").read_text(encoding="utf-8")
     report = validate_solution(log)
     assert report.core.status == "passed"
     assert report.estimator.status == "failed"
@@ -52,7 +52,7 @@ def test_disabled_requires_explicit_evidence():
 
 
 def test_offline_estimator_pair_and_missing_excitation():
-    log = (FIXTURES / "offline-disabled-estimator.txt").read_text()
+    log = (FIXTURES / "offline-disabled-estimator.txt").read_text(encoding="utf-8")
     report = validate_solution(
         log, estimator_disabled=True, expected_excitations=[1, 2]
     )
@@ -64,7 +64,9 @@ def test_offline_estimator_pair_and_missing_excitation():
 
 
 def test_adaptive_convergence_does_not_hide_core_failure():
-    report = validate_solution((FIXTURES / "adaptive-core-failure.txt").read_text())
+    report = validate_solution(
+        (FIXTURES / "adaptive-core-failure.txt").read_text(encoding="utf-8")
+    )
     assert report.core.status == "failed"
     assert [item.excitation for item in report.adaptive] == [1, 2]
     assert [item.sample_count for item in report.adaptive] == [7, 9]
