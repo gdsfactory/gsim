@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gsim.palace.models import EigenmodeConfig
@@ -22,7 +22,7 @@ def periodic_boundary_config(
     an expected period, because that expectation must be checked against it.
     """
     axis = (periodic_axis or "").lower()
-    if axis not in {"x", "y", "z"}:
+    if axis not in ("x", "y", "z"):
         raise ValueError(
             "Floquet eigenmode requires a periodic axis set in mesh(). "
             "Use mesh(periodic_axis='x') or mesh(periodic_axis='y')."
@@ -69,7 +69,7 @@ def periodic_boundary_config(
             f"along the periodic {axis} axis."
         )
     wave_vector = eigenmode_config.compute_floquet_wave_vector(
-        periodic_axis=cast(Literal["x", "y", "z"], axis),
+        periodic_axis=axis,
         periodic_length=periodic_translation[axis_index],
     )
     return {
