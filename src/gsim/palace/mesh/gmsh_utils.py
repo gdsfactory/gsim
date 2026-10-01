@@ -1018,6 +1018,7 @@ def set_periodic_mesh(
         - donor_phys_groups: Physical-group tag(s) for donor surfaces
         - receiver_phys_groups: Physical-group tag(s) for receiver surfaces
         - direction: Normalized periodic axis ('x' or 'y')
+        - translation: Donor-to-receiver translation in mesh units
     """
     direction = direction.lower()
     if direction not in {"x", "y"}:
@@ -1196,6 +1197,7 @@ def set_periodic_mesh(
         "donor_phys_groups": [donor_pg] if donor_pg > 0 else [],
         "receiver_phys_groups": [receiver_pg] if receiver_pg > 0 else [],
         "direction": direction,
+        "translation": (dx, dy, dz),
     }
 
 

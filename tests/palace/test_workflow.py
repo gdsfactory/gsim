@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 
 import gdsfactory as gf
+import meshio
+import numpy as np
 import pytest
 
 from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim
@@ -321,7 +323,8 @@ class TestEigenmodeSimWorkflow:
         result = eigenmode_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
 
-    def test_config_has_floquet_periodic_boundary(self, tmp_path, cpw_component):
+    @pytest.mark.parametrize("axis", ["x", "y"])
+    def test_config_has_floquet_periodic_boundary(self, tmp_path, cpw_component, axis):
         """Floquet in eigenmode emits Palace Periodic boundary section."""
         sim = EigenmodeSim()
         sim.set_output_dir(str(tmp_path / "palace-sim-floquet"))
@@ -331,10 +334,10 @@ class TestEigenmodeSimWorkflow:
             num_modes=5,
             target=50e9,
             floquet=True,
-            phi_target=1.57,
+            phi_target=-1.57,
             n_eff_guess=2.2,
         )
-        sim.mesh(preset="coarse", periodic_axis="x")
+        sim.mesh(preset="coarse", periodic_axis=axis)
         sim.write_config()
 
         assert sim._output_dir is not None
@@ -343,13 +346,30 @@ class TestEigenmodeSimWorkflow:
         periodic = config["Boundaries"]["Periodic"]
 
         assert len(periodic["FloquetWaveVector"]) == 3
-        assert periodic["FloquetWaveVector"][0] > 0
-        assert periodic["FloquetWaveVector"][1] == pytest.approx(0.0)
-        assert periodic["FloquetWaveVector"][2] == pytest.approx(0.0)
-        assert len(periodic["BoundaryPairs"]) == 1
+        mesh = meshio.read(Path(sim._output_dir) / "palace.msh")
+        axis_index = "xy".index(axis)
         pair = periodic["BoundaryPairs"][0]
+        triangles = mesh.get_cells_type("triangle")
+        attributes = mesh.get_cell_data("gmsh:physical", "triangle")
+        donor_nodes = np.unique(triangles[np.isin(attributes, pair["DonorAttributes"])])
+        receiver_nodes = np.unique(
+            triangles[np.isin(attributes, pair["ReceiverAttributes"])]
+        )
+        mesh_period = (
+            mesh.points[receiver_nodes, axis_index].mean()
+            - mesh.points[donor_nodes, axis_index].mean()
+        )
+        expected_vector = [0.0, 0.0, 0.0]
+        expected_vector[axis_index] = -1.57 / mesh_period
+        assert periodic["FloquetWaveVector"] == pytest.approx(expected_vector)
+        assert len(periodic["BoundaryPairs"]) == 1
         assert len(pair["DonorAttributes"]) > 0
         assert len(pair["ReceiverAttributes"]) > 0
+        assert pair["Translation"][axis_index] == pytest.approx(mesh_period)
+
+        sim.eigenmode.periodic_length = mesh_period / 2
+        with pytest.raises(ValueError, match="does not match the mesh translation"):
+            sim.write_config()
 
 
 # ---------------------------------------------------------------------------

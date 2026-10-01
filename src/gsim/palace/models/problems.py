@@ -15,7 +15,6 @@ import math
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from scipy.constants import c as C0  # noqa: N812
 
 logger = logging.getLogger(__name__)
 
@@ -221,13 +220,21 @@ class EigenmodeConfig(BaseModel):
     )
     phi_target: float = Field(
         default=math.pi / 2,
+        allow_inf_nan=False,
+        description="Signed Bloch phase per cell in radians; zero and +/-pi are valid.",
+    )
+    periodic_length: float | None = Field(
+        default=None,
         gt=0,
-        description="Target Bloch phase advance per cell (radians).",
+        allow_inf_nan=False,
+        description="Expected cell length in mesh units (um for generated meshes). "
+        "If supplied, must match the measured donor-to-receiver translation.",
     )
     n_eff_guess: float = Field(
         default=2.0,
         gt=0,
-        description="Initial effective-index estimate used for Floquet k-vector setup.",
+        description="Deprecated compatibility field; does not affect the wave vector.",
+        deprecated="The Floquet wave vector now uses the actual mesh period.",
     )
 
     @model_validator(mode="after")
@@ -243,32 +250,40 @@ class EigenmodeConfig(BaseModel):
     def compute_floquet_wave_vector(
         self,
         *,
-        periodic_axis: Literal["x", "y"],
-        l0: float = 1e-6,
+        periodic_axis: Literal["x", "y", "z"],
+        periodic_length: float | None = None,
     ) -> list[float]:
         """Compute Palace Floquet wave vector [kx, ky, kz] in rad / mesh-unit.
 
-        Uses a practical initialization:
-            d_mesh = round(phi * c0 / (2*pi*f_target*n_eff*L0))
-            k = phi / d_mesh
-        where L0 is Palace's mesh-unit scale (default 1e-6 m).
+        The length must be supplied explicitly here or on this config. Config
+        generation passes the measured mesh translation, and checks it against
+        ``self.periodic_length`` when set. Target frequency and effective-index
+        estimates never determine the period. No rounding or unit scaling is
+        applied: k = phi_target / periodic_length.
+
+        Palace's convention is E(receiver) = exp(-i * phi_target) * E(donor).
         """
-        if self.target is None:
+        if periodic_axis not in {"x", "y", "z"}:
+            raise ValueError("periodic_axis must be 'x', 'y', or 'z'.")
+        if periodic_length is None:
+            periodic_length = self.periodic_length
+        if periodic_length is None:
             raise ValueError(
-                "Cannot compute Floquet wave vector without eigenmode target frequency."
+                "Floquet requires an actual periodic_length in mesh units; "
+                "it cannot be inferred from target frequency or n_eff_guess."
             )
-
-        d_mesh = (
-            self.phi_target * C0 / (2 * math.pi * self.target * self.n_eff_guess * l0)
-        )
-        d_mesh_rounded = max(1, round(d_mesh))
-        k_component = self.phi_target / d_mesh_rounded
-
-        if periodic_axis == "x":
-            return [k_component, 0.0, 0.0]
-        if periodic_axis == "y":
-            return [0.0, k_component, 0.0]
-        raise ValueError(f"periodic_axis must be 'x' or 'y', got {periodic_axis!r}")
+        if not math.isfinite(periodic_length) or periodic_length <= 0:
+            raise ValueError("periodic_length must be finite and positive.")
+        if self.periodic_length is not None and not math.isclose(
+            periodic_length, self.periodic_length, rel_tol=1e-8, abs_tol=1e-6
+        ):
+            raise ValueError(
+                f"periodic_length={self.periodic_length} does not match the mesh "
+                f"translation length {periodic_length} (mesh units)."
+            )
+        wave_vector = [0.0, 0.0, 0.0]
+        wave_vector["xyz".index(periodic_axis)] = self.phi_target / periodic_length
+        return wave_vector
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
