@@ -372,8 +372,8 @@ class SParam:
 
     def __init__(self, db: NDArray, deg: NDArray) -> None:
         """Create from dB magnitude and degree phase arrays."""
-        self._db = db
-        self._deg = deg
+        self._db = np.asarray(db, dtype=float)
+        self._deg = np.asarray(deg, dtype=float)
 
     @property
     def db(self) -> NDArray:
@@ -755,6 +755,8 @@ def load_sparams(
 
     Raises:
         FileNotFoundError: If ``port-S.csv`` cannot be found.
+        ValueError: If a numeric CSV cell is malformed. Negative infinity is
+            accepted for dB magnitudes and represents exact zero transmission.
     """
     import pandas as pd
 
@@ -771,12 +773,17 @@ def load_sparams(
 
     port_map = _load_port_map(base_dir, csv_path, port_info_path)
 
-    df = pd.read_csv(csv_path)
+    # Preserve cells verbatim until numeric validation, including padded -inf.
+    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
     df.columns = df.columns.str.strip()
 
     # Extract frequency
     freq_col = next((c for c in df.columns if c.startswith("f")), None)
-    freq = df[freq_col].to_numpy() if freq_col else np.arange(len(df))
+    freq = (
+        _numeric_csv_column(df[freq_col], csv_path, freq_col)
+        if freq_col
+        else np.arange(len(df), dtype=float)
+    )
 
     # Parse S-parameter columns into SParam objects
     # Group by (i, j) pair — each pair has a dB and deg column
@@ -786,7 +793,9 @@ def load_sparams(
         if parsed is None:
             continue
         i, j, kind = parsed
-        raw.setdefault((i, j), {})[kind] = df[col].to_numpy()
+        raw.setdefault((i, j), {})[kind] = _numeric_csv_column(
+            df[col], csv_path, col, allow_negative_infinity=kind == "db"
+        )
 
     # Build port name list (ordered by index)
     all_indices = set()
@@ -966,6 +975,36 @@ def get_port_map(source: str | Path | dict) -> dict[int, str]:
 # -----------------------------------------------------------------------
 
 
+def _numeric_csv_column(
+    cells,
+    csv_path: Path,
+    column: str,
+    *,
+    allow_negative_infinity: bool = False,
+) -> NDArray:
+    """Parse numeric cells, reporting the source of invalid solver output."""
+    values = []
+    for row, cell in enumerate(cells, start=2):
+        try:
+            value = float(cell)
+        except (TypeError, ValueError) as exc:
+            msg = (
+                f"Invalid numeric value {cell!r} in {csv_path}, "
+                f"row {row}, column {column!r}"
+            )
+            raise ValueError(msg) from exc
+        if not np.isfinite(value) and not (
+            allow_negative_infinity and np.isneginf(value)
+        ):
+            msg = (
+                f"Invalid numeric value {cell!r} in {csv_path}, "
+                f"row {row}, column {column!r}"
+            )
+            raise ValueError(msg)
+        values.append(value)
+    return np.asarray(values, dtype=float)
+
+
 def _parse_sparam_col(col: str) -> tuple[int, int, str] | None:
     """Parse a Palace S-parameter column header.
 
@@ -1098,21 +1137,26 @@ def load_fields(
     *,
     excitation: int = 1,
     cycle: int | None = None,
+    mode: int | None = None,
     boundary: bool = False,
 ):
     """Load the ParaView volume or boundary dataset for a Palace simulation.
 
     Requires ``save_step >= 1`` for driven simulations or ``save >= 1`` for
-    BoundaryMode simulations so that field data was written to disk.
+    Eigenmode or BoundaryMode simulations so that field data was written to disk.
 
     Args:
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
             or a path to the simulation directory.
         excitation: Excitation index (1-based) to load.
-        cycle: ParaView cycle number (``None`` -> last available).
+        cycle: Exact ParaView cycle number, including metadata-only cycles.
+            Defaults to the last cycle containing solution fields.
+        mode: One-based Eigenmode or BoundaryMode mode number. Selects the
+            corresponding cycle and requires solution fields. Mutually exclusive
+            with ``cycle``.
         boundary: If ``True``, load boundary surface fields
-            (``driven_boundary/``) instead of volume fields
-            (``driven/``).  Boundary data includes ``J_s_real``,
+            (for example, ``eigenmode_boundary/``) instead of volume fields.
+            Boundary data includes ``J_s_real``,
             ``Q_s_real``, etc.
 
     Returns:
@@ -1122,6 +1166,7 @@ def load_fields(
 
     Raises:
         FileNotFoundError: If paraview output is missing.
+        ValueError: If selectors conflict or no solution fields are available.
 
     Example::
 
@@ -1131,8 +1176,16 @@ def load_fields(
     """
     import pyvista as pv
 
+    if mode is not None:
+        if cycle is not None:
+            raise ValueError("Specify mode or cycle, not both")
+        if mode < 1:
+            raise ValueError("mode must be a one-based positive integer")
+
     _, base_dir = _resolve_source(source, require_csv=False)
-    pvtu_path = _find_paraview_dir(base_dir, excitation, cycle, boundary=boundary)
+    pvtu_path = _find_paraview_dir(
+        base_dir, excitation, cycle, boundary=boundary, mode=mode
+    )
     return pv.read(str(pvtu_path))
 
 
@@ -1142,6 +1195,7 @@ def _find_paraview_dir(
     cycle: int | None,
     *,
     boundary: bool = False,
+    mode: int | None = None,
 ) -> Path:
     """Locate the ``.pvtu`` file for the requested excitation and cycle.
 
@@ -1150,11 +1204,14 @@ def _find_paraview_dir(
     - Single-excitation (lumped ports): ``paraview/driven/CycleNNNNNN/`` (no subdir)
     Both are searched, with the explicit ``excitation_N`` folder taking priority.
     """
-    subdirs = (
-        ["driven_boundary", "boundarymode_boundary"]
-        if boundary
-        else ["driven", "boundarymode"]
+    solvers = (
+        ["eigenmode", "boundarymode"]
+        if mode is not None
+        else ["driven", "boundarymode", "eigenmode"]
     )
+    subdirs = [f"{solver}_boundary" if boundary else solver for solver in solvers]
+    if mode is not None:
+        cycle = mode
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
@@ -1171,7 +1228,7 @@ def _find_paraview_dir(
 
             # Layout 2: flat — Cycle dirs sit directly under the solver folder
             flat = root / "paraview" / subdir
-            if flat.is_dir() and any(flat.iterdir()):
+            if flat.is_dir() and any(flat.glob("Cycle*")):
                 exc_dir = flat
                 break
 
@@ -1181,7 +1238,7 @@ def _find_paraview_dir(
     if exc_dir is None:
         msg = (
             f"ParaView output not found for excitation {excitation}. "
-            "Ensure the simulation was run with save_step >= 1."
+            "Ensure the simulation was run with save_step >= 1 or save >= 1."
         )
         raise FileNotFoundError(msg)
 
@@ -1191,7 +1248,10 @@ def _find_paraview_dir(
         if not candidates:
             msg = f"No .pvtu files found in {pvtu_dir}"
             raise FileNotFoundError(msg)
-        return candidates[-1]
+        selected = candidates[-1]
+        if mode is not None and not _has_solution_fields(selected):
+            raise ValueError(f"Mode {mode} has no solution fields in {selected}")
+        return selected
 
     # Auto-select last available cycle that contains actual field data.
     # Palace writes a final cycle with only Indicator/Rank (mesh partition);
@@ -1200,19 +1260,21 @@ def _find_paraview_dir(
     if not candidates:
         msg = (
             f"No .pvtu files found under {exc_dir}. "
-            "Ensure the simulation was run with save_step >= 1."
+            "Ensure the simulation was run with save_step >= 1 or save >= 1."
         )
         raise FileNotFoundError(msg)
 
-    import pyvista as pv
-
-    mesh_metadata_fields = {"Indicator", "Rank", "attribute"}
     for pvtu in candidates:
-        dataset = pv.read(str(pvtu))
-        field_names = set(dataset.point_data) | set(dataset.cell_data)
-        if field_names - mesh_metadata_fields:
+        if _has_solution_fields(pvtu):
             return pvtu
 
-    # All cycles are partition-only — return the last one and let the
-    # caller surface the "field not found" error with context.
-    return candidates[0]
+    raise ValueError(f"No solution fields found in ParaView cycles under {exc_dir}")
+
+
+def _has_solution_fields(pvtu: Path) -> bool:
+    """Distinguish physical fields from Palace's partition/error metadata."""
+    import pyvista as pv
+
+    dataset = pv.read(str(pvtu))
+    field_names = set(dataset.point_data) | set(dataset.cell_data)
+    return bool(field_names - {"Indicator", "Rank", "attribute"})
