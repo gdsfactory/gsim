@@ -1,5 +1,29 @@
 # Palace API
 
+## Numeric wave-port boundaries
+
+The default `waveport_boundary="pec"` approximates finite conductivity, impedance
+and absorbing boundaries as PEC **inside the port eigenproblem**. Choose
+`"inherit"` to retain those physical conditions when solving the port mode:
+
+```python
+from gsim.palace import DrivenSim
+
+sim = DrivenSim()
+sim.set_driven(f=50e9, waveport_boundary="inherit")
+# After geometry/ports are configured and the mesh is generated:
+# config = json.loads(sim.write_config().read_text())
+# "WavePortPEC" not in config["Boundaries"]
+```
+
+Only the generated `Boundaries.WavePortPEC` override changes. The physical 3D
+conductivity, impedance and absorbing boundaries remain identical. Lumped ports
+are unaffected. This controls a modeling approximation; it does not fix Palace
+mode selection or establish lossy S-parameter normalization accuracy. Check the
+port fields and solver convergence for the chosen Palace runtime.
+
+Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
+
 ## Simulation Classes
 
 ::: gsim.palace.DrivenSim

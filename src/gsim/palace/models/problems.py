@@ -49,6 +49,9 @@ class DrivenConfig(BaseModel):
         reference_impedance: Reference impedance for S-parameter normalization
             in Ohms. Standard is 50 Ohm.
         excitation_port: Name of port to excite. None = first port.
+        waveport_boundary: ``"pec"`` replaces Robin boundaries by PEC in the
+            numeric port eigenproblem (default). ``"inherit"`` retains their
+            physical conductivity, impedance and absorbing conditions.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -92,6 +95,14 @@ class DrivenConfig(BaseModel):
 
     excitation_port: str | None = Field(
         default=None, description="Port to excite (None = first port)"
+    )
+
+    waveport_boundary: Literal["pec", "inherit"] = Field(
+        default="pec",
+        description="Boundary treatment in numeric wave-port eigenproblems. "
+        "'pec' preserves the default PEC approximation; 'inherit' retains "
+        "conductivity, impedance and absorbing boundaries. The 3D problem "
+        "keeps its physical boundaries in both cases.",
     )
 
     save_step: int = Field(
