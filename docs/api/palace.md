@@ -77,6 +77,35 @@
         - run
         - load_capacitance
 
+## Floquet eigenmodes
+
+Set the signed cell phase in radians. The wave vector uses the measured donor-to-receiver mesh translation; the eigenvalue
+search frequency does not determine the cell length. An optional `periodic_length` in mesh units (micrometers for generated
+meshes) checks that the periodic faces have the expected separation:
+
+```python
+from gsim.palace import EigenmodeSim
+
+sim = EigenmodeSim()
+sim.set_eigenmode(target=40e9, floquet=True, phi_target=-0.4, periodic_length=100.0)
+sim.eigenmode.compute_floquet_wave_vector(periodic_axis="x")
+# [-0.004, 0.0, 0.0] rad/um
+```
+
+After setting geometry and stack, `sim.mesh(periodic_axis="x")` records the actual translation. `sim.write_config()` writes
+it as `Boundaries.Periodic.BoundaryPairs[0].Translation`, and computes `FloquetWaveVector` from that measured length. A length
+mismatch raises `ValueError`; omit `periodic_length` to use the measured value without an expected-length check. Domain
+padding can change the separation of periodic faces.
+
+Zero, negative phases, and the Brillouin-zone endpoints `+/-pi` are supported without wrapping. With
+[Palace's phase convention](https://awslabs.github.io/palace/stable/guide/boundaries/#Periodic-boundary), the receiver field is
+`exp(-1j * phi_target)` times the donor field. The GDS mesher supports periodic axes `x` and `y`; the wave-vector helper and
+config generation also support `z` for supplied mesh metadata.
+
+`n_eff_guess` is retained as a deprecated compatibility argument and no longer affects the result. Direct calls to
+`compute_floquet_wave_vector()` now require an explicit length on the config or as a `periodic_length` argument; the old `l0`
+argument and frequency-based length estimate are removed. Old mesh results without translation metadata must be regenerated.
+
 ## Capacitance
 
 ::: gsim.palace.CapacitanceMatrices

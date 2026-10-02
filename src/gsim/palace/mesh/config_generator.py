@@ -8,11 +8,12 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import gmsh
 import numpy as np
 
+from gsim.palace.mesh.floquet import periodic_boundary_config
 from gsim.palace.mesh.gmsh_utils import gmsh_options, mesh_hash
 from gsim.palace.mesh.metadata import (
     tetrahedral_topology,
@@ -145,6 +146,7 @@ def generate_palace_config(
     electrostatic_config: ElectrostaticConfig | None = None,
     terminals: list[TerminalConfig] | None = None,
     refinement_config: RefinementConfig | None = None,
+    periodic_translation: tuple[float, float, float] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -162,6 +164,7 @@ def generate_palace_config(
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add absorbing (PML) boundary
         periodic_axis: Optional periodic axis identifier
+        periodic_translation: Actual donor-to-receiver translation in mesh units
         hints: Additional config hints merged into the JSON
         refinement_config: Optional RefinementConfig for adaptive mesh
             refinement. Defaults to AMR off.
@@ -658,47 +661,9 @@ def generate_palace_config(
         and eigenmode_config is not None
         and eigenmode_config.floquet
     ):
-        axis = (periodic_axis or "").lower()
-        if axis not in {"x", "y"}:
-            raise ValueError(
-                "Floquet eigenmode requires a periodic axis set in mesh(). "
-                "Use mesh(periodic_axis='x') or mesh(periodic_axis='y')."
-            )
-
-        donor_info = groups["boundary_surfaces"].get("periodic_donor")
-        receiver_info = groups["boundary_surfaces"].get("periodic_receiver")
-        if donor_info is None or receiver_info is None:
-            raise ValueError(
-                "Floquet enabled but periodic donor/receiver boundaries were not "
-                "found in the generated mesh."
-            )
-
-        donor_pg = donor_info.get("phys_group")
-        receiver_pg = receiver_info.get("phys_group")
-        periodic_donor_attrs = donor_pg if isinstance(donor_pg, list) else [donor_pg]
-        periodic_receiver_attrs = (
-            receiver_pg if isinstance(receiver_pg, list) else [receiver_pg]
+        boundaries["Periodic"] = periodic_boundary_config(
+            groups, eigenmode_config, periodic_axis, periodic_translation
         )
-
-        if not periodic_donor_attrs or not periodic_receiver_attrs:
-            raise ValueError("Floquet periodic boundary attributes are empty.")
-
-        axis_lit: Literal["x", "y"] = "x" if axis == "x" else "y"
-
-        floquet_vector = eigenmode_config.compute_floquet_wave_vector(
-            periodic_axis=axis_lit,
-            l0=model_l0,
-        )
-
-        boundaries["Periodic"] = {
-            "FloquetWaveVector": floquet_vector,
-            "BoundaryPairs": [
-                {
-                    "DonorAttributes": sorted(periodic_donor_attrs),
-                    "ReceiverAttributes": sorted(periodic_receiver_attrs),
-                }
-            ],
-        }
 
     # Process impedance boundaries from hints (interface-based or attribute-based)
     impedance_entries = _resolve_impedance_boundaries(hints, groups)
@@ -997,6 +962,7 @@ def write_config(
         boundary_mode_config=boundary_mode_config,
         absorbing_boundary=absorbing_boundary,
         periodic_axis=mesh_result.periodic_axis,
+        periodic_translation=mesh_result.periodic_translation,
         hints=hints,
         electrostatic_config=electrostatic_config,
         terminals=terminals,

@@ -142,6 +142,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         save: int = 0,
         floquet: bool = False,
         phi_target: float = math.pi / 2,
+        periodic_length: float | None = None,
         n_eff_guess: float = 2.0,
     ) -> None:
         """Configure eigenmode simulation.
@@ -154,8 +155,14 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             save: Number of eigenmodes to save as ParaView fields (0 = disabled)
             floquet: Enable Floquet periodic boundary setup in config generation
                 (requires mesh(periodic_axis=...)).
-            phi_target: Bloch phase advance per cell in radians (Floquet only).
-            n_eff_guess: Initial effective-index guess for Floquet k-vector setup.
+            phi_target: Signed Bloch phase per cell in radians (Floquet only).
+                Zero and +/-pi are valid. The wave vector is phase / mesh period.
+                Palace applies E(receiver) = exp(-i * phi_target) * E(donor).
+            periodic_length: Optional expected period in mesh units (um). Must
+                match the measured mesh translation, including domain padding.
+                Omit to use the measured period directly.
+            n_eff_guess: Deprecated compatibility argument, ignored. Target
+                frequency controls the eigenvalue search, not the wave vector.
 
         Example:
             >>> sim.set_eigenmode(num_modes=10, target=50e9)
@@ -167,6 +174,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             save=save,
             floquet=floquet,
             phi_target=phi_target,
+            periodic_length=periodic_length,
             n_eff_guess=n_eff_guess,
         )
 
