@@ -1,5 +1,8 @@
 # Palace API
 
+See [result validation](../palace-validation.md) for independent solver,
+adaptive sampling, mode identity, and provenance checks.
+
 ## Simulation Classes
 
 ::: gsim.palace.DrivenSim
