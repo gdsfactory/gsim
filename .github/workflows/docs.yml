@@ -67,7 +67,7 @@ jobs:
         uv sync --no-default-groups --group docs
         case "$NOTEBOOK" in
           nbs/palace_qpdk_resonator.ipynb)
-            uv pip install qpdk==0.3.8
+            uv pip install qpdk==0.4.0
             ;;
           nbs/palace_inductor.ipynb)
             uv sync --no-default-groups --group docs --group palace-inductor
