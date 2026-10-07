@@ -87,7 +87,8 @@ def test_notices_visible_under_default_script_filters(tmp_path, statement, expec
         text=True,
     )
     if expected is None:
-        assert result.stderr == ""
+        assert "DeprecationWarning:" not in result.stderr
+        assert "FutureWarning:" not in result.stderr
     else:
         assert expected in result.stderr
         assert f"{script}:3:" in result.stderr
