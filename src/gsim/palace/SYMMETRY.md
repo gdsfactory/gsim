@@ -86,8 +86,15 @@ Lumped ports with R on each line:
 - A half model cannot show mode conversion (`S_dc`, `S_cd` are zero by construction), and its energies and DOFs are
   halved (ratios such as Q are not).
 
-The plane is also recorded in `port_information.json` (a `symmetry` block and a per-port flag) so that results can be
-interpreted later.
+`SParams.symmetry` carries the plane from `port_information.json` and `repr` shows it in one line. Helpers in
+`gsim.palace.symmetry`:
+
+- `mixed_mode_from_halves(even, odd)`: checks that both are matching PMC/PEC half models (same plane, ports,
+  frequencies, port R) and returns `{"cc", "dd", "z_ref_cc", "z_ref_dd"}`.
+- `combine_even_odd(even, odd, mirror_names=None)`: single-ended 2N-port result for lumped ports, with
+  `S_ij = (cc_ij + dd_ij)/2` and `S_ij' = (cc_ij - dd_ij)/2` (default mirror names `f"{name}_mirror"`). Wave ports
+  raise: a full model with wave ports is modal.
+- `full_model_impedance(z_half, kind)`.
 
 ## Not verified
 
