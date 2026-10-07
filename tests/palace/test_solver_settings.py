@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 
 import pytest
@@ -183,6 +184,14 @@ def test_numerical_serialization_retains_old_flat_format():
         "order": 3,
         "tolerance": 1e-8,
     }
+    assert list(numerical.model_dump()) == [
+        "order",
+        "tolerance",
+        "max_iterations",
+        "solver_type",
+        "preconditioner",
+        "device",
+    ]
     with pytest.warns(DeprecationWarning, match="numerical constructor.*solver"):
         sim = pa.EigenmodeSim.model_validate(
             {"numerical": numerical.model_dump(), "eigenmode": {"target": 4e9}}
@@ -190,3 +199,23 @@ def test_numerical_serialization_retains_old_flat_format():
     assert sim.solver.order == 3
     assert sim.solver.linear.tolerance == 1e-8
     assert sim.solver.eigenmode.target == 4e9
+
+
+def test_palace_solver_serialization_preserves_cache_inputs():
+    """Equivalent settings must keep the original config bytes for cache hits."""
+    expected = (
+        '{"Linear": {"Type": "AMS", "KSPType": "GMRES", "Tol": 1e-08, '
+        '"MaxIts": 123}, "Order": 3, "Device": "CPU"}'
+    )
+    solver = pa.SolverConfig(
+        order=3,
+        linear=pa.LinearSolverConfig(
+            tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+        ),
+    )
+    with pytest.warns(DeprecationWarning, match="NumericalConfig.*SolverConfig"):
+        numerical = pa.NumericalConfig(
+            order=3, tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+        )
+    assert json.dumps(solver.to_solver_config()) == expected
+    assert json.dumps(numerical.to_solver_config()) == expected

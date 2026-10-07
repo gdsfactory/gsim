@@ -181,9 +181,9 @@ class SolverConfig(BaseModel):
     def to_solver_config(self) -> dict[str, object]:
         """Convert common settings to Palace's ``Solver`` block."""
         return {
+            "Linear": self.to_linear_solver_config(),
             "Order": self.order,
             "Device": self.device,
-            "Linear": self.to_linear_solver_config(),
         }
 
     def to_palace_config(self) -> dict[str, Any]:

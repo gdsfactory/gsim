@@ -27,7 +27,6 @@ class NumericalConfig(BaseModel):
 
     # Reuse the canonical fields, including their defaults and validation.
     order: int = deepcopy(SolverConfig.model_fields["order"])
-    device: Literal["CPU", "GPU"] = deepcopy(SolverConfig.model_fields["device"])
     tolerance: float = deepcopy(LinearSolverConfig.model_fields["tolerance"])
     max_iterations: int = deepcopy(LinearSolverConfig.model_fields["max_iterations"])
     solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = deepcopy(
@@ -36,6 +35,7 @@ class NumericalConfig(BaseModel):
     preconditioner: Literal["Default", "AMS", "BoomerAMG"] = deepcopy(
         LinearSolverConfig.model_fields["preconditioner"]
     )
+    device: Literal["CPU", "GPU"] = deepcopy(SolverConfig.model_fields["device"])
 
     def __init__(self, **data: Any) -> None:
         """Construct legacy settings and warn about their replacement."""
@@ -54,9 +54,9 @@ class NumericalConfig(BaseModel):
     def to_solver_config(self) -> dict[str, object]:
         """Convert to the legacy Palace ``Solver`` block."""
         return {
+            "Linear": self.to_linear_solver_config(),
             "Order": self.order,
             "Device": self.device,
-            "Linear": self.to_linear_solver_config(),
         }
 
     def to_palace_config(self) -> dict[str, object]:
