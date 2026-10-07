@@ -82,6 +82,7 @@ adaptive sampling, mode identity, and provenance checks.
         - set_material
         - set_numerical
         - add_terminal
+        - nets
         - add_pec
         - mesh
         - plot_mesh
@@ -165,6 +166,26 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
     options:
       show_source: false
 
+## Nets
+
+::: gsim.palace.Nets
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - net_at
+
+::: gsim.palace.Net
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - layers
+
+::: gsim.palace.extract_nets
+    options:
+      show_source: false
+
 ## Stack
 
 ::: gsim.palace.LayerStack
@@ -178,3 +199,9 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
       show_source: false
       inherited_members: false
       members: false
+
+## Transmission-line analysis
+
+See [Transmission-line analysis](../transmission_line_analysis.md) for using
+`load_sparams(...).to_skrf()` with scikit-rf's multiline TRL calibration,
+physical impedance normalization and independent-length checks.

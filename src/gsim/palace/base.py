@@ -151,6 +151,42 @@ def _recommend_parallel(
     return max(1, recommended), num_threads
 
 
+# Printed by Palace's ``palace`` launcher script when its MPI launcher (``mpirun``
+# unless ``--launcher`` is given) is not on PATH.
+_MPI_LAUNCHER_MISSING = "Could not locate MPI launcher"
+_FAILURE_OUTPUT_TAIL_LINES = 200
+
+
+def _captured_lines(*streams: str | None) -> list[str]:
+    """Split captured process output into lines, skipping empty streams."""
+    lines: list[str] = []
+    for stream in streams:
+        if stream:
+            lines.extend(stream.splitlines())
+    return lines
+
+
+def _palace_failure_message(returncode: int, output_lines: list[str]) -> str:
+    """Describe a failed Palace run from its exit code and the end of its output.
+
+    When the output shows that the ``palace`` launcher script could not find
+    ``mpirun``, the message also says how to fix that.
+    """
+    message = f"Palace simulation failed with return code {returncode}"
+    tail = "\n".join(output_lines[-_FAILURE_OUTPUT_TAIL_LINES:])
+    if tail.strip():
+        message += f"\n\nOutput (tail):\n{tail}"
+    if any(_MPI_LAUNCHER_MISSING in line for line in output_lines):
+        message += (
+            "\n\nPalace's launcher script could not find `mpirun`. Install an MPI "
+            "runtime that provides it (for example `sudo apt install openmpi-bin` "
+            "on Ubuntu), or run with use_apptainer=True. The prebuilt Palace "
+            "runtime that gsim installs includes the MPI libraries but not "
+            "`mpirun`."
+        )
+    return message
+
+
 class PalaceSimMixin:
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -744,6 +780,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides.
 
@@ -829,6 +868,9 @@ class PalaceSimMixin:
             mesh_config.high_order_elements = existing_config.high_order_elements
             mesh_config.high_order_order = existing_config.high_order_order
             mesh_config.high_order_optimize = existing_config.high_order_optimize
+            mesh_config.algorithm_3d = existing_config.algorithm_3d
+            mesh_config.threads = existing_config.threads
+            mesh_config.surface_threads = existing_config.surface_threads
 
         # Preserve planar_conductors from sim.mesh_config if not
         # explicitly provided via sim.mesh(planar_conductors=...)
@@ -873,6 +915,12 @@ class PalaceSimMixin:
             mesh_config.high_order_order = high_order_order
         if high_order_optimize is not None:
             mesh_config.high_order_optimize = high_order_optimize
+        if algorithm_3d is not None:
+            mesh_config.algorithm_3d = algorithm_3d
+        if threads is not None:
+            mesh_config.threads = threads
+        if surface_threads is not None:
+            mesh_config.surface_threads = surface_threads
         mesh_config.show_gui = show_gui
 
         return mesh_config
@@ -1069,6 +1117,12 @@ class PalaceSimMixin:
                 f"Wave port '{wp.name}': 'layer' is required"
                 for wp in self.wave_ports
                 if not wp.layer
+            )
+
+        if self.simulation_type == "eigenmode" and self.eigenmode.target is None:
+            errors.append(
+                "A positive eigenmode target frequency is required. "
+                "Call set_eigenmode(target=...) with the frequency in Hz."
             )
 
         # Validate excitation port if specified
@@ -1510,6 +1564,9 @@ class PalaceSimMixin:
             high_order_elements=mesh_config.high_order_elements,
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
+            algorithm_3d=mesh_config.algorithm_3d,
+            threads=mesh_config.threads,
+            surface_threads=mesh_config.surface_threads,
             verbosity=gmsh_verbosity,
             decimate_tolerance=decimate_tolerance,
         )
@@ -1632,6 +1689,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
         decimate_tolerance: float | None = None,
     ) -> None:
         """Preview the mesh without running simulation.
@@ -1664,6 +1724,10 @@ class PalaceSimMixin:
             high_order_elements: Enable high-order geometric mesh elements.
             high_order_order: Polynomial order for high-order elements.
             high_order_optimize: Run gmsh high-order optimization after meshing.
+            algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
+            threads: Threads for 3D meshing (see ``MeshConfig``).
+            surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
+                differs from run to run.
             decimate_tolerance: Relative tolerance for polygon decimation
                 (None = no decimation; typical 0.001-0.01).
 
@@ -1708,6 +1772,9 @@ class PalaceSimMixin:
             high_order_elements=high_order_elements,
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
+            algorithm_3d=algorithm_3d,
+            threads=threads,
+            surface_threads=surface_threads,
         )
 
         # Resolve stack
@@ -1755,6 +1822,9 @@ class PalaceSimMixin:
                 high_order_elements=mesh_config.high_order_elements,
                 high_order_order=mesh_config.high_order_order,
                 high_order_optimize=mesh_config.high_order_optimize,
+                algorithm_3d=mesh_config.algorithm_3d,
+                threads=mesh_config.threads,
+                surface_threads=mesh_config.surface_threads,
                 decimate_tolerance=decimate_tolerance,
             )
 
@@ -1793,6 +1863,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
     ) -> SimulationResult:
         """Generate the mesh for Palace simulation.
 
@@ -1840,6 +1913,10 @@ class PalaceSimMixin:
             high_order_elements: Enable high-order geometric mesh elements.
             high_order_order: Polynomial order for high-order elements.
             high_order_optimize: Run gmsh high-order optimization after meshing.
+            algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
+            threads: Threads for 3D meshing (see ``MeshConfig``).
+            surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
+                differs from run to run.
 
         Returns:
             SimulationResult with mesh path
@@ -1888,6 +1965,9 @@ class PalaceSimMixin:
             high_order_elements=high_order_elements,
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
+            algorithm_3d=algorithm_3d,
+            threads=threads,
+            surface_threads=surface_threads,
         )
 
         if merge_via_distance is not None:
@@ -2652,22 +2732,26 @@ class PalaceSimMixin:
                     returncode = process.wait()
 
                 if returncode != 0:
-                    tail = "\n".join(streamed_lines[-200:])
-                    error_msg = (
-                        f"Palace simulation failed with return code {returncode}"
+                    raise RuntimeError(
+                        _palace_failure_message(returncode, streamed_lines)
                     )
-                    if tail:
-                        error_msg += f"\n\nOutput (tail):\n{tail}"
-                    raise RuntimeError(error_msg)
             else:
-                result = subprocess.run(  # noqa: S603
-                    cmd,
-                    cwd=output_dir,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    env=_run_env,
-                )
+                try:
+                    result = subprocess.run(  # noqa: S603
+                        cmd,
+                        cwd=output_dir,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=_run_env,
+                    )
+                except subprocess.CalledProcessError as e:
+                    # Same message as the verbose path: without the captured
+                    # output a failure only says "exit status 1".
+                    output_lines = _captured_lines(e.stdout, e.stderr)
+                    raise RuntimeError(
+                        _palace_failure_message(e.returncode, output_lines)
+                    ) from e
                 if result.stdout:
                     logger.debug(result.stdout)
                 if result.stderr:

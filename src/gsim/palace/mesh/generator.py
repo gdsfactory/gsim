@@ -1060,6 +1060,57 @@ def _collect_fine_size_requests(
     return requests
 
 
+_ALGORITHM_3D = {"delaunay": 1, "hxt": 10}
+
+
+def apply_mesher_options(
+    *,
+    algorithm_3d: Literal["delaunay", "hxt"],
+    threads: int,
+    surface_threads: int,
+) -> None:
+    """Set the Gmsh 3D algorithm and thread counts for the meshing that follows.
+
+    Threading decides which mesh Gmsh produces, so these are set explicitly
+    right after Gmsh is initialized and recorded in the mesh stats (gsim#283).
+    In the tests behind that issue, on two machines:
+
+    - Delaunay with ``surface_threads=1`` gave the same mesh for any number of
+      3D threads, without meshing any faster.
+    - Delaunay with ``surface_threads > 1`` meshed faster but gave a different
+      mesh on every run, also with ``Mesh.Reproducible`` and a fixed seed.
+    - HXT gave a different mesh for each thread count. On the Windows machine
+      it repeated itself at a fixed count; that is not confirmed on the other.
+
+    A warning is logged for the combinations that do not keep the mesh.
+
+    Args:
+        algorithm_3d: 3D meshing algorithm.
+        threads: Threads for 3D meshing (``General.NumThreads`` and
+            ``Mesh.MaxNumThreads3D``).
+        surface_threads: Threads for 1D and 2D meshing.
+    """
+    if surface_threads > 1:
+        logger.warning(
+            "Parallel surface meshing (surface_threads=%d) gives a different mesh "
+            "on every run; use surface_threads=1 when the mesh must be "
+            "reproducible (gsim#283).",
+            surface_threads,
+        )
+    if algorithm_3d == "hxt" and threads > 1:
+        logger.warning(
+            "The HXT mesh depends on the number of threads (threads=%d); use "
+            "Delaunay with surface_threads=1 for a mesh that does not depend on "
+            "it (gsim#283).",
+            threads,
+        )
+    gmsh.option.setNumber("Mesh.Algorithm3D", _ALGORITHM_3D[algorithm_3d])
+    gmsh.option.setNumber("General.NumThreads", threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads1D", surface_threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads2D", surface_threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads3D", threads)
+
+
 def generate_mesh(
     component,
     stack: LayerStack,
@@ -1100,6 +1151,9 @@ def generate_mesh(
     high_order_optimize: bool = True,
     verbosity: int = 3,
     decimate_tolerance: float | None = None,
+    algorithm_3d: Literal["delaunay", "hxt"] = "delaunay",
+    threads: int = 1,
+    surface_threads: int = 1,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1147,6 +1201,10 @@ def generate_mesh(
         decimate_tolerance: Relative tolerance for polygon decimation
             (None = no decimation; typical 0.001-0.01)
         verbosity: Sets gmsh verbosity level
+        algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt"
+        threads: Threads for 3D meshing
+        surface_threads: Threads for 1D and 2D meshing; above 1 the mesh
+            differs from run to run
 
     Returns:
         MeshResult with paths and metadata
@@ -1162,9 +1220,12 @@ def generate_mesh(
     logger.info("  Polygons: %s", len(geometry.polygons))
     logger.info("  Bbox: %s", geometry.bbox)
 
-    # Initialize gmsh
-    gmsh.initialize()
+    # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
+    gmsh.initialize(readConfigFiles=False)
     gmsh.option.setNumber("General.Verbosity", verbosity)
+    apply_mesher_options(
+        algorithm_3d=algorithm_3d, threads=threads, surface_threads=surface_threads
+    )
 
     if "palace_mesh" in gmsh.model.list():
         gmsh.model.setCurrent("palace_mesh")
@@ -1339,7 +1400,16 @@ def generate_mesh(
         # Add geometry
         logger.info("Adding metals...")
         metal_tags = add_metals(
-            kernel, geometry, stack, planar_conductors, merge_via_distance
+            kernel,
+            geometry,
+            stack,
+            planar_conductors,
+            merge_via_distance,
+            curve_fit_mode=curve_fit_mode,
+            curve_fit_layers=curve_fit_layers,
+            curve_fit_tolerance_um=curve_fit_tolerance_um,
+            curve_fit_min_points=curve_fit_min_points,
+            curve_fit_corner_angle_deg=curve_fit_corner_angle_deg,
         )
 
         # Add PEC blocks if configured

@@ -24,6 +24,15 @@ class MeshConfig(BaseModel):
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
+        algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt". In the
+            800 um CPW tests behind gsim#283 HXT gave a different mesh and was
+            slower than Delaunay at every thread count.
+        threads: Threads for 3D meshing. With Delaunay and ``surface_threads=1``
+            the mesh does not depend on it, and it did not speed meshing up in
+            those tests either. With HXT the mesh depends on the thread count.
+        surface_threads: Threads for 1D and 2D (surface) meshing. Values above 1
+            are faster but gave a different mesh on every run, so keep 1 when
+            the mesh must be reproducible.
         show_gui: Show gmsh GUI during meshing
         preview_only: Generate preview only, don't save mesh
     """
@@ -57,6 +66,9 @@ class MeshConfig(BaseModel):
     high_order_elements: bool = False
     high_order_order: int = Field(default=2, ge=2, le=6)
     high_order_optimize: bool = True
+    algorithm_3d: Literal["delaunay", "hxt"] = "delaunay"
+    threads: int = Field(default=1, ge=1)
+    surface_threads: int = Field(default=1, ge=1)
     show_gui: bool = False
     preview_only: bool = False
 

@@ -193,7 +193,7 @@ def generate_palace_config(
         solver_driven = {
             "Samples": [
                 {
-                    "Type": "Driven",
+                    "Type": "Linear",
                     "MinFreq": 1.0,  # 1 GHz
                     "MaxFreq": fmax / 1e9,
                     "FreqStep": freq_step,
@@ -207,13 +207,11 @@ def generate_palace_config(
         solver_eigenmode = eigenmode_config.to_palace_config()
     else:
         # Legacy behavior - compute from fmax
-        solver_eigenmode = (
-            {
-                "N": 10,
-                "Tol": 1.0e-6,
-                "Target": fmax,
-            },
-        )
+        solver_eigenmode = {
+            "N": 10,
+            "Tol": 1.0e-6,
+            "Target": fmax / 1e9,
+        }
 
     if boundary_mode_config is not None:
         solver_boundarymode = boundary_mode_config.to_palace_config()
@@ -597,10 +595,20 @@ def generate_palace_config(
                                 "Excitation": port_idx if port.excited else False,
                                 "Attributes": [port_group["phys_group"]],
                             }
-                            if port.impedance:
-                                eigenmode_entry["R"] = port.impedance
+                            # A port carrying reactive elements (e.g. a lumped
+                            # Josephson junction modelled as L/C) is a pure
+                            # reactive termination. The default 50 Ohm impedance
+                            # must not be emitted in parallel with it, otherwise
+                            # it would load the junction. Only emit R from the
+                            # default impedance when the port is purely
+                            # resistive, unless a resistance is set explicitly.
+                            has_reactive = (
+                                port.inductance is not None and port.inductance > 0
+                            ) or (port.capacitance is not None and port.capacitance > 0)
                             if port.resistance is not None:
                                 eigenmode_entry["R"] = port.resistance
+                            elif port.impedance and not has_reactive:
+                                eigenmode_entry["R"] = port.impedance
                             if port.inductance is not None and port.inductance > 0:
                                 eigenmode_entry["L"] = port.inductance
                             if port.capacitance is not None and port.capacitance > 0:
@@ -754,12 +762,17 @@ def collect_mesh_stats(*, field_order: int = 2, problem_type: str = "driven") ->
 
     Must be called while gmsh is initialized and the mesh is generated.
 
+    Handles both linear (4-node) and high-order (10/20-node) tetrahedra, so
+    quality/SICN/edge-length metrics are still reported when the mesh was
+    promoted to high-order elements.
+
     Returns:
         Dict with mesh statistics including:
         - bbox: Bounding box coordinates
         - nodes: Number of nodes
         - elements: Total element count
         - tetrahedra: Tet count
+        - element_type: gmsh element type code of the (first) tetrahedra block
         - quality: Shape quality metrics (gamma)
         - sicn: Signed Inverse Condition Number
         - kappa: Worst tet-center distortion (Palace/MFEM convention)
@@ -823,6 +836,7 @@ def collect_mesh_stats(*, field_order: int = 2, problem_type: str = "driven") ->
             if dim == dimension:
                 geometry_orders.add(order)
             if dim == 3 and primary_nodes == 4 and len(tags):
+                stats.setdefault("element_type", int(etype))
                 tet_tags.extend(tags)
                 tet_blocks.append((int(etype), tags, nodes))
             elif dim == 3:
