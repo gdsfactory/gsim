@@ -115,6 +115,10 @@ select an exact ParaView cycle instead, including metadata cycles. Omit both
 selectors to load the last cycle containing solution fields, skipping final
 `Indicator`, `Rank`, or `attribute` arrays. `mode` and `cycle` are mutually
 exclusive. For driven output, `excitation=N` selects the excitation directory.
+A missing excitation now raises `FileNotFoundError` instead of selecting another
+excitation. Metadata-only output raises `ValueError` by default; explicit `cycle=N`
+still permits inspecting that metadata. Mode/cycle selection was also checked
+against saved Palace Floquet run `palace-552ac5e8`, in addition to synthetic tests.
 
 `load_sparams` converts frequency, dB magnitude, and degree phase columns to
 floating-point arrays. A whitespace-padded `-inf` dB value remains negative
@@ -140,8 +144,10 @@ with TemporaryDirectory() as directory:
     assert parameters.to_skrf().s[0, 1, 0] == 0j
 ```
 
-Malformed numeric cells report the CSV path, row, and column. Phase and frequency
-must be finite; dB magnitudes also allow negative infinity.
+Malformed numeric cells reject the entire CSV, including otherwise valid rows.
+Errors report the path, column and one-based **data row**, excluding the header
+and blank lines. NaN, positive infinity and empty numeric cells raise `ValueError`;
+phase and frequency must be finite, while dB magnitudes permit negative infinity.
 
 ## Mesh
 

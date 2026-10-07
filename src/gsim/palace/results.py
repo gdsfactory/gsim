@@ -984,13 +984,13 @@ def _numeric_csv_column(
 ) -> NDArray:
     """Parse numeric cells, reporting the source of invalid solver output."""
     values = []
-    for row, cell in enumerate(cells, start=2):
+    for row, cell in enumerate(cells, start=1):
         try:
             value = float(cell)
         except (TypeError, ValueError) as exc:
             msg = (
                 f"Invalid numeric value {cell!r} in {csv_path}, "
-                f"row {row}, column {column!r}"
+                f"data row {row}, column {column!r}"
             )
             raise ValueError(msg) from exc
         if not np.isfinite(value) and not (
@@ -998,7 +998,7 @@ def _numeric_csv_column(
         ):
             msg = (
                 f"Invalid numeric value {cell!r} in {csv_path}, "
-                f"row {row}, column {column!r}"
+                f"data row {row}, column {column!r}"
             )
             raise ValueError(msg)
         values.append(value)

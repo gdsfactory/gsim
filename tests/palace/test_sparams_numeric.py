@@ -70,7 +70,7 @@ def test_malformed_numeric_cells_report_context(
         load_sparams(tmp_path)
     message = str(error.value)
     assert str(csv_path) in message
-    assert "row 3" in message
+    assert "data row 2" in message
     assert column in message
     assert repr(value) in message
 
@@ -79,3 +79,16 @@ def test_sparam_coerces_numeric_arrays() -> None:
     parameter = SParam(db=np.array([" -inf "]), deg=np.array([" 90.0 "]))
     assert parameter.db.dtype.kind == parameter.deg.dtype.kind == "f"
     assert parameter.mag[0] == parameter.complex[0] == 0
+
+
+@pytest.mark.parametrize("separator", ["", "\n", "\n\n"])
+def test_bad_middle_row_rejects_file_with_data_row_context(tmp_path, separator):
+    csv_path = tmp_path / "port-S.csv"
+    csv_path.write_text(
+        "f (GHz), |S[2][1]| (dB), arg(S[2][1]) (deg.)\n"
+        f"1,-20,0\n{separator}2,nan,0\n3,-10,0\n"
+    )
+    with pytest.raises(
+        ValueError, match=r"data row 2, column '\|S\[2\]\[1\]\| \(dB\)'"
+    ):
+        load_sparams(tmp_path)
