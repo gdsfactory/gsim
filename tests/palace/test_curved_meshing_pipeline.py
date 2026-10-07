@@ -68,9 +68,10 @@ class _FakeGmsh:
         self.cleared = False
         self.finalized = False
         self.writes: list[str] = []
+        self.initialize_kwargs: dict[str, object] = {}
 
-    def initialize(self) -> None:
-        return
+    def initialize(self, **kwargs: object) -> None:
+        self.initialize_kwargs = kwargs
 
     def clear(self) -> None:
         self.cleared = True
