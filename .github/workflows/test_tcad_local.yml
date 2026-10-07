@@ -1,0 +1,70 @@
+name: TCAD Local Tests
+# The tcad_local tests run a real DEVSIM solve. The tcad extra brings DEVSIM
+# its BLAS/LAPACK through devsim-openblas, so a plain `uv sync` is enough on
+# every OS: this is the check that a pip install of gsim[tcad] still solves.
+#
+# `devsim` runs the gsim.tcad solves (well under a minute) on every change
+# that can affect them. `modulator` runs the whole TW-MZM workflow on real
+# charge solves, which takes about half an hour on four cores, so it runs
+# weekly and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+  - cron: "0 3 * * 1"
+  push:
+    branches:
+    - main
+  pull_request:
+    paths:
+    - src/gsim/common/**
+    - src/gsim/modulator/**
+    - src/gsim/tcad/**
+    - tests/_helpers.py
+    - tests/modulator/**
+    - tests/tcad/**
+    - pyproject.toml
+    - .github/workflows/test_tcad_local.yml
+jobs:
+  devsim:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v6
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+    - name: Install UV
+      uses: astral-sh/setup-uv@v6
+    - name: Create environment
+      run: uv sync --dev --all-extras
+    - name: Run DEVSIM tests
+      run: uv run pytest tests/tcad -m tcad_local
+  modulator:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v6
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
+    - name: Install UV
+      uses: astral-sh/setup-uv@v6
+    - name: Create environment
+      run: uv sync --dev --all-extras
+    - name: Run TW-MZM workflow tests
+      run: uv run pytest tests -m "tcad_local and not palace_local and not cloud" -n auto --durations=10

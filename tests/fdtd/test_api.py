@@ -152,10 +152,9 @@ def test_run_without_wait_uses_fine_grained_cloud_lifecycle(
     monkeypatch.setattr(
         gcloud,
         "upload",
-        lambda _directory, job_type, **kwargs: calls.append(
-            ("upload", job_type, kwargs["input_hash"])
-        )
-        or "job-123",
+        lambda _directory, job_type, **kwargs: (
+            calls.append(("upload", job_type, kwargs["input_hash"])) or "job-123"
+        ),
     )
     monkeypatch.setattr(
         gcloud,

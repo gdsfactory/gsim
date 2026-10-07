@@ -24,11 +24,14 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Iterable
-from typing import Literal, cast
+from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from scipy.constants import c as C0  # noqa: N812
+
+if TYPE_CHECKING:
+    from gsim.common.stack.extractor import LayerStack
 
 
 class ValidityRange(BaseModel):
@@ -1119,6 +1122,73 @@ def resolve_material_at_wavelength(
         stacklevel=2,
     )
     return None
+
+
+def region_material_map(stack: LayerStack, regions: list[str]) -> dict[str, str]:
+    """Map mesh region (physical-group) names to stack material names.
+
+    A meshed region either is a layer of the stack, in which case it
+    carries that layer's material, or it is not — a background medium
+    like ``sio2`` or ``air``, or a generated Strip region — and then its
+    own name is the material name. That fallback is the same
+    stack-entry-wins-then-fall-back shape as
+    :func:`resolve_stack_material` below, one level up: a region names a
+    material, then the material names its properties.
+
+    Args:
+        stack: The layer stack the mesh was generated from.
+        regions: 2D physical-group names on the mesh.
+
+    Returns:
+        ``{region_name: material_name}``.
+    """
+    mapping: dict[str, str] = {}
+    for region in regions:
+        layer = stack.layers.get(region)
+        mapping[region] = layer.material if layer is not None else region
+    return mapping
+
+
+def resolve_stack_material(
+    name: str,
+    entry: MaterialProperties | Mapping[str, Any] | None,
+    wavelength_um: float,
+) -> ResolvedMaterial | None:
+    """Resolve one stack material, its own entry taking precedence.
+
+    The rule both Backends read a meshed region's material by. The stack
+    entry is authoritative: it either carries a full database record —
+    dispersion models included — or the plain scalars a user supplied,
+    and evaluating it as an override is what keeps those intact. The
+    database is the fallback, for a material the stack names without
+    describing, and for an entry that is no valid
+    :class:`MaterialProperties` record at all.
+
+    What each Backend does with the answer stays its own: femwell raises
+    naming the region, Palace skips a conductive material and leaves an
+    unresolvable entry as it was.
+
+    Args:
+        name: Material name, as the stack and the database know it.
+        entry: The stack's entry for it — a record, a mapping of
+            properties, or ``None`` when the stack only names it.
+        wavelength_um: Wavelength to evaluate the properties at.
+
+    Returns:
+        The evaluated properties, or ``None`` when neither the entry nor
+        the database resolves the material.
+    """
+    overrides: dict[str, MaterialProperties] | None = None
+    if isinstance(entry, MaterialProperties):
+        overrides = {name: entry}
+    elif entry is not None:
+        try:
+            overrides = {name: MaterialProperties.model_validate(entry)}
+        except ValidationError:
+            overrides = None
+    if overrides is None and get_material_properties(name) is None:
+        return None
+    return resolve_material_at_wavelength(name, wavelength_um, overrides=overrides)
 
 
 def should_enable_dispersion(

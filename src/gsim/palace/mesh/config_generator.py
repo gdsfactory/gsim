@@ -663,6 +663,28 @@ def generate_palace_config(
             "Order": 2,
         }
 
+    if (hints or {}).get("_metallic_boundaries"):
+        # A metallic window: the outer wall of the domain carries a
+        # perfect-conductor condition, so the solve is a shielded one.
+        # Without it Palace assigns its own default to an unconditioned
+        # outer boundary, which is PMC — the opposite wall.
+        outer = groups["boundary_surfaces"].get("absorbing")
+        if outer is None:
+            raise ValueError(
+                "metallic_boundaries asks for a perfect-conductor outer "
+                "wall, but the mesh carries no outer-boundary physical "
+                "group to put it on."
+            )
+        if "Absorbing" in boundaries:
+            raise ValueError(
+                "metallic_boundaries and absorbing_boundary both claim the "
+                "outer wall; turn one of them off."
+            )
+        outer_pg = outer["phys_group"]
+        outer_attrs = outer_pg if isinstance(outer_pg, list) else [outer_pg]
+        existing = boundaries.get("PEC", {}).get("Attributes", [])
+        boundaries["PEC"] = {"Attributes": sorted({*existing, *outer_attrs})}
+
     if (
         simulation_type == "eigenmode"
         and eigenmode_config is not None

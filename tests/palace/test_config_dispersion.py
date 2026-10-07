@@ -102,6 +102,19 @@ class TestResolvePalaceMaterialsAtFrequency:
         resolve_palace_materials_at_frequency(materials, 5e9)
         assert materials["SiO2"]["permittivity"] == original_permittivity
 
+    def test_user_override_scalars_win_over_database(self):
+        # set_material() replaces the stack entry with plain scalars (no
+        # dispersion models); resolution must respect them instead of
+        # re-deriving from MATERIALS_DB (which would drop conductivity and
+        # restore the Sellmeier permittivity).
+        materials = {
+            "si": {"type": "dielectric", "permittivity": 11.9, "conductivity": 5e3}
+        }
+        freq_hz = C0 / (1.55e-6)
+        resolved = resolve_palace_materials_at_frequency(materials, freq_hz)
+        assert resolved["si"]["permittivity"] == pytest.approx(11.9)
+        assert resolved["si"]["conductivity"] == pytest.approx(5e3)
+
     def test_sapphire_anisotropic_resolved(self):
         materials = {"sapphire": MATERIALS_DB["sapphire"].to_dict()}
         freq_hz = C0 / (1.55e-6)

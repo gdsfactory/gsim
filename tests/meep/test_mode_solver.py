@@ -1001,9 +1001,11 @@ class TestSimulationSolveModesCache:
         monkeypatch.setattr(
             gcloud,
             "wait_for_results",
-            lambda job_id, **_kwargs: expected_result
-            if job_id == "cached-job"
-            else pytest.fail("unexpected job id"),
+            lambda job_id, **_kwargs: (
+                expected_result
+                if job_id == "cached-job"
+                else pytest.fail("unexpected job id")
+            ),
         )
 
         result = simulation.solve_modes(check_cache=True, verbose="quiet")
