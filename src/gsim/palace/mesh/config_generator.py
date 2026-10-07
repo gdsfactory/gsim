@@ -184,6 +184,15 @@ def generate_palace_config(
     ):
         raise ValueError(f"Unsupported simulation type: {simulation_type}")
 
+    sym = groups.get("boundary_surfaces", {}).get("symmetry")
+    if sym is not None and simulation_type not in ("driven", "eigenmode"):
+        # Palace >= 0.16.1 treats PMC/ZeroCharge and PEC/Ground as exclusive,
+        # so the plane would need a different mapping for these solvers.
+        raise ValueError(
+            "Symmetry planes are only supported for driven and eigenmode "
+            f"simulations, not {simulation_type!r}."
+        )
+
     # Use driven_config if provided, otherwise fall back to legacy parameters
     if driven_config is not None:
         solver_driven = driven_config.to_palace_config()
@@ -663,6 +672,26 @@ def generate_palace_config(
             "Order": 2,
         }
 
+    # Symmetry plane: PMC (even/common mode) or PEC (odd/differential mode).
+    # Never absorbing.
+    plane_attrs: list[int] = []
+    if sym is not None:
+        plane_pg = sym["phys_group"]
+        plane_attrs = sorted(plane_pg if isinstance(plane_pg, list) else [plane_pg])
+        if set(plane_attrs) & set(
+            boundaries.get("Absorbing", {}).get("Attributes", [])
+        ):
+            raise ValueError(
+                "Symmetry plane attributes must not be in the absorbing boundary"
+            )
+        if sym["kind"] == "pmc":
+            boundaries["PMC"] = {"Attributes": plane_attrs}
+        else:
+            merged = set(plane_attrs) | set(
+                boundaries.get("PEC", {}).get("Attributes", [])
+            )
+            boundaries["PEC"] = {"Attributes": sorted(merged)}
+
     if (
         simulation_type == "eigenmode"
         and eigenmode_config is not None
@@ -733,6 +762,13 @@ def generate_palace_config(
             waveport_pec_attrs.update(cond_entry.get("Attributes", []))
         for imp_entry in boundaries.get("Impedance", []):
             waveport_pec_attrs.update(imp_entry.get("Attributes", []))
+        # A PMC plane must stay natural (PMC) in the port eigenproblem, or the
+        # port would return the opposite-symmetry mode. This is the last step
+        # so a change to the Robin rule above (#310) cannot pull it in.
+        # A PEC plane is not listed: it is a PEC attribute already.
+        # Palace's port mode solve makes only PEC and WavePortPEC attributes
+        # Dirichlet; any other attribute on the port edge is natural (PMC).
+        waveport_pec_attrs -= set(plane_attrs)
         if waveport_pec_attrs:
             boundaries["WavePortPEC"] = {"Attributes": sorted(waveport_pec_attrs)}
 
@@ -750,7 +786,23 @@ def generate_palace_config(
 
     # Write port information file
     port_info_path = output_path / "port_information.json"
-    port_info_struct = {"ports": port_info, "unit": 1e-6, "name": model_name}
+    port_info_struct: dict[str, Any] = {
+        "ports": port_info,
+        "unit": 1e-6,
+        "name": model_name,
+    }
+    if sym is not None:
+        port_info_struct["ports"] = [
+            {**p, "cut_by_symmetry_plane": p.get("cut_by_symmetry_plane", False)}
+            for p in port_info
+        ]
+        port_info_struct["symmetry"] = {
+            "axis": sym["axis"],
+            "position": sym["position"],
+            "kind": sym["kind"],
+            "keep": sym["keep"],
+            "mode": "even" if sym["kind"] == "pmc" else "odd",
+        }
     with port_info_path.open("w") as f:
         json.dump(port_info_struct, f, indent=4)
 

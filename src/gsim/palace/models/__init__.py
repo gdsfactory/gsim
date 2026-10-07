@@ -38,6 +38,7 @@ from gsim.palace.models.problems import (
 )
 from gsim.palace.models.results import SimulationResult, ValidationResult
 from gsim.palace.models.stack import MaterialConfig
+from gsim.palace.models.symmetry import SymmetryPlaneConfig
 
 __all__ = [
     "BoundaryModeConfig",
@@ -56,6 +57,7 @@ __all__ = [
     "PortConfig",
     "RefinementConfig",
     "SimulationResult",
+    "SymmetryPlaneConfig",
     "TerminalConfig",
     "TransientConfig",
     "TwoTerminalPortConfig",

@@ -89,7 +89,7 @@ def test_generate_mesh_forwards_curve_fit_and_decimation(monkeypatch, tmp_path) 
 
     monkeypatch.setattr(mesh_generator, "gmsh", fake_gmsh)
 
-    def _fake_extract_geometry(_component, _stack, decimate_tolerance=None):
+    def _fake_extract_geometry(_component, _stack, decimate_tolerance=None, **_kwargs):
         captured["decimate_tolerance"] = decimate_tolerance
         return SimpleNamespace(polygons=[object()], bbox=(0.0, 0.0, 10.0, 10.0))
 
