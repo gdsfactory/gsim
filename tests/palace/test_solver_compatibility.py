@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -80,7 +81,9 @@ def test_complete_config_matches_main_baseline(
     # Recorded through the old API on main at 0950c7f. Byte comparison also
     # protects key ordering, which participates in the cloud input hash.
     reference = Path(__file__).with_suffix("") / f"{group}.txt"
-    assert output.read_bytes() == reference.read_bytes().removesuffix(b"\n")
+    # The JSON writer uses native line endings, including CRLF on Windows.
+    expected = reference.read_text().removesuffix("\n").replace("\n", os.linesep)
+    assert output.read_bytes() == expected.encode()
 
 
 @pytest.mark.parametrize(("sim_class", "group", "problem"), CASES)
