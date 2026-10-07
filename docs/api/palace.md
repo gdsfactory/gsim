@@ -22,6 +22,11 @@ are unaffected. This controls a modeling approximation; it does not fix Palace
 mode selection or establish lossy S-parameter normalization accuracy. Check the
 port fields and solver convergence for the chosen Palace runtime.
 
+The policies differ only when absorbing, conductivity or impedance boundaries
+exist; without these Robin terms, both omit `WavePortPEC`. A later `set_driven()`
+call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
+updating other sweep options if you want to retain it.
+
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
 ## Simulation Classes

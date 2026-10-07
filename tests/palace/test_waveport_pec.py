@@ -167,3 +167,29 @@ class TestWavePortPEC:
         groups["boundary_surfaces"] = {"absorbing": {"phys_group": 8}}
         config = _generate(tmp_path, groups, _wave_ports())
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8]}
+
+    @pytest.mark.parametrize("source", ["absorbing", "conductivity"])
+    def test_inherit_with_one_robin_source(self, tmp_path, source):
+        groups = _groups(
+            conductors=source == "conductivity", absorbing=source == "absorbing"
+        )
+        default = _generate(tmp_path, groups, _wave_ports(), driven=DrivenConfig())
+        inherited = _generate(
+            tmp_path,
+            groups,
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="inherit"),
+        )
+        expected = [8, 12] if source == "absorbing" else [4, 5]
+        assert default["Boundaries"].pop("WavePortPEC") == {"Attributes": expected}
+        assert inherited == default
+
+    def test_inherit_does_not_change_lumped_ports(self, tmp_path):
+        default = _generate(tmp_path, _groups(), _lumped_ports(), driven=DrivenConfig())
+        inherited = _generate(
+            tmp_path,
+            _groups(),
+            _lumped_ports(),
+            driven=DrivenConfig(waveport_boundary="inherit"),
+        )
+        assert inherited == default
