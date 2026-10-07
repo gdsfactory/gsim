@@ -10,9 +10,11 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from gsim.common import LayerStack
 from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -34,12 +36,24 @@ class TestDrivenSimValidation:
         with pytest.raises(ValueError):
             sim.add_port("o1", geometry="inplane")  # No layer specified
 
-    def test_via_port_requires_layers(self):
-        """Test that add_port raises for via port without layers."""
+    def test_interlayer_port_requires_layers(self):
+        """Test that add_port raises for interlayer port without layers."""
         sim = DrivenSim()
         # PortConfig validates eagerly at creation time
         with pytest.raises(ValueError):
-            sim.add_port("o1", geometry="via")  # No from_layer/to_layer
+            sim.add_port("o1", geometry="interlayer")
+
+    def test_via_port_warns_and_normalizes(self):
+        """The legacy via name remains functional as an interlayer alias."""
+        sim = DrivenSim()
+        with pytest.warns(DeprecationWarning, match="use 'interlayer'"):
+            sim.add_port(
+                "o1",
+                from_layer="metal1",
+                to_layer="topmetal2",
+                geometry="via",
+            )
+        assert sim.ports[0].geometry == "interlayer"
 
     def test_cpw_port_requires_layer(self):
         """Test validation catches CPW port without layer."""
@@ -48,6 +62,12 @@ class TestDrivenSimValidation:
         result = sim.validate_config()
         assert not result.valid
         assert any("'layer' is required" in e for e in result.errors)
+
+    def test_cpw_port_uses_canonical_geometry_name(self):
+        """The dedicated CPW config exposes the canonical geometry name."""
+        sim = DrivenSim()
+        sim.add_cpw_port("P1", layer="metal1", s_width=10, gap_width=6)
+        assert sim.cpw_ports[0].geometry == "cpw"
 
     def test_no_ports_warning(self):
         """Test validation warns when no ports configured."""
@@ -206,6 +226,80 @@ class TestBoundaryModeSimValidation:
         assert cfg.solver_type == "SLEPc"
 
 
+class TestBoundaryModePostprocessing:
+    """BoundaryMode voltage/impedance postprocessing path derivation."""
+
+    @staticmethod
+    def _stack() -> LayerStack:
+        return cast(
+            LayerStack,
+            SimpleNamespace(
+                layers={
+                    "metal1": SimpleNamespace(zmin=1.1, zmax=2.1),
+                    "p_rib": SimpleNamespace(zmin=0.0, zmax=0.22),
+                }
+            ),
+        )
+
+    def test_cpw_gap_paths_auto_derived(self):
+        """A CPW port yields one voltage path per gap in cross-section coords."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_cpw_port(
+            "input",
+            layer="metal1",
+            s_width=20.0,
+            gap_width=20.0,
+            center=(0.0, 0.0),
+            orientation=0.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert len(post["Impedance"]) == 2
+        assert len(post["Voltage"]) == 2
+        assert post["Impedance"][0]["VoltagePath"] == [[10.0, 1.6], [30.0, 1.6]]
+        assert post["Impedance"][1]["VoltagePath"] == [[-10.0, 1.6], [-30.0, 1.6]]
+        assert post["Voltage"][0]["Index"] == 1
+
+    def test_single_port_explicit_path_projected_from_3d(self):
+        """3D layout path points are projected onto an x-normal cross-section."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            voltage_path=[[1.0, -19.8, 0.11], [1.0, -20.2, 0.11]],
+            nsamples=200,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        entry = post["Impedance"][0]
+        assert entry["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+        assert entry["NSamples"] == 200
+        # Same path is also reported to the Voltage postprocessing section.
+        assert post["Voltage"][0]["VoltagePath"] == entry["VoltagePath"]
+
+    def test_single_port_auto_derived_across_width(self):
+        """A single lumped port derives a path across its width at layer mid-z."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port(
+            "junction",
+            layer="p_rib",
+            width=0.4,
+            center=(0.0, -20.0),
+            orientation=180.0,
+        )
+        post = sim._build_boundarymode_postprocessing(self._stack(), sim.cross_section)
+        assert post["Impedance"][0]["VoltagePath"] == [[-19.8, 0.11], [-20.2, 0.11]]
+
+    def test_voltage_path_allows_missing_layer(self):
+        """A postprocessing port with an explicit path does not require a layer."""
+        sim = BoundaryModeSim()
+        sim.set_cross_section("x=0")
+        sim.add_port("junction", voltage_path=[[-19.8, 0.11], [-20.2, 0.11]])
+        # Only the (expected) missing geometry error remains, no layer error.
+        errors = sim.validate_config().errors
+        assert not any("require 'layer'" in e for e in errors)
+
+
 class TestMixinMethods:
     """Test mixin methods work on all simulation classes."""
 
@@ -245,6 +339,42 @@ class TestMixinMethods:
                 "z_below": 80.0,
                 "material": "air",
             }
+
+    def test_airbox_lateral_margin_reaches_the_mesher_once(self):
+        """``set_airbox(margin_x=N)`` must give N um of air, not 2N.
+
+        The mesher applies ``margin_x`` to the design bbox and then adds
+        ``airbox_margin_x`` on top of that already-expanded extent, so the two
+        must sum to the requested margin. Sending the request in both places
+        doubled every lateral airbox margin.
+        """
+        for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim, BoundaryModeSim]:
+            sim = cls()
+            sim.set_airbox(margin_x=50.0, margin_y=30.0, z_above=100.0, z_below=80.0)
+            domain_x, domain_y = sim._resolve_domain_margins(MeshConfig.default())
+            airbox_cfg = sim._airbox_config
+            assert domain_x + airbox_cfg["margin_x"] == 50.0
+            assert domain_y + airbox_cfg["margin_y"] == 30.0
+
+    def test_airbox_does_not_write_back_into_mesh_config(self):
+        """The airbox config is the only source of the lateral margin.
+
+        ``set_airbox()`` used to copy its lateral margins into ``mesh_config``,
+        which is what made it possible to apply them twice.
+        """
+        sim = DrivenSim()
+        sim.mesh_config = MeshConfig.default()
+        sim.set_airbox(margin_x=50.0, margin_y=30.0)
+        assert sim.mesh_config.margin_x is None
+        assert sim.mesh_config.margin_y is None
+
+    def test_domain_margin_falls_back_to_mesh_config(self):
+        """Without ``set_airbox()`` the mesh config still sizes the domain."""
+        sim = DrivenSim()
+        mesh_config = MeshConfig.default()
+        mesh_config.margin_x = 40.0
+        mesh_config.margin_y = 20.0
+        assert sim._resolve_domain_margins(mesh_config) == (40.0, 20.0)
 
     def test_set_airbox_material(self):
         """set_airbox(material=...) stores a custom background material."""
@@ -397,20 +527,29 @@ class TestMixinMethods:
         assert captured["material"] == "sio2"
         assert captured["margin_y"] == 50.0
 
-    def test_set_airbox_margin_y_zero_reaches_generate_mesh(
+    def test_set_airbox_margins_reach_generate_mesh_exactly_once(
         self, monkeypatch, tmp_path
     ):
-        """set_airbox(margin_y=0) must propagate to meshing domain extents."""
+        """set_airbox margins must reach meshing intact, and only once.
+
+        The mesher applies ``margin_*`` to the design bbox and then adds
+        ``airbox_margin_*`` on top, so the pair must sum to what was requested.
+        An explicit ``margin_y=0`` must also survive rather than being replaced
+        by the mesh config's own margin.
+        """
         captured: dict[str, float] = {}
 
         def _fake_generate_mesh(**kwargs):
             captured["margin_x"] = kwargs["margin_x"]
             captured["margin_y"] = kwargs["margin_y"]
+            captured["airbox_margin_x"] = kwargs["airbox_margin_x"]
+            captured["airbox_margin_y"] = kwargs["airbox_margin_y"]
             return SimpleNamespace(
                 mesh_path=tmp_path / "palace.msh",
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -442,8 +581,8 @@ class TestMixinMethods:
             write_config=False,
         )
 
-        assert captured["margin_x"] == 50.0
-        assert captured["margin_y"] == 0.0
+        assert captured["margin_x"] + captured["airbox_margin_x"] == 50.0
+        assert captured["margin_y"] + captured["airbox_margin_y"] == 0.0
 
     def test_curved_mesh_options_reach_generate_mesh(self, monkeypatch, tmp_path):
         """Curve-fit, decimation, and verbosity options must be forwarded."""
@@ -456,6 +595,7 @@ class TestMixinMethods:
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -474,6 +614,7 @@ class TestMixinMethods:
             curve_fit_min_points=12,
             curve_fit_corner_angle_deg=30.0,
         )
+        sim.set_numerical(order=3)
 
         sim._generate_mesh_internal(
             output_dir=tmp_path / "sim",
@@ -494,6 +635,7 @@ class TestMixinMethods:
         assert captured["curve_fit_corner_angle_deg"] == 30.0
         assert captured["decimate_tolerance"] == 0.005
         assert captured["verbosity"] == 7
+        assert captured["numerical_config"] is sim.numerical
 
     def test_set_material(self):
         """Test set_material works on all sim classes."""

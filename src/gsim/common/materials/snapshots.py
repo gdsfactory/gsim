@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import pairwise
 from math import isfinite, sqrt
+from numbers import Real
 from typing import Any
 
-from pdk_schema import Index, MaterialCard, ScalarValue, Sellmeier, TabulatedValue
+import sympy as sp
+from pdk_schema import (
+    AnalyticDispersion,
+    Index,
+    MaterialCard,
+    ScalarValue,
+    Sellmeier,
+    TabulatedValue,
+)
 
 from gsim.common.materials.registry import MaterialSource, find_material_card
 
@@ -193,6 +203,52 @@ def _evaluate_value(
     )
 
 
+@lru_cache(maxsize=128)
+def _compile_analytic_equation(model_json: str) -> Callable[..., float]:
+    """Compile a validated scalar equation, caching by complete model contents."""
+    model = AnalyticDispersion.model_validate_json(model_json)
+    return sp.lambdify(
+        [*model.inputs, *model.parameters], model.to_sympy(), modules="math"
+    )
+
+
+def _analytic_result_to_index(result: object, output: str) -> float:
+    """Validate a real analytic result and convert index-squared to an index."""
+    if isinstance(result, bool) or not isinstance(result, Real) or not isfinite(result):
+        raise ValueError("Expected a finite real scalar")
+    return sqrt(result) if output == "n_squared" else float(result)
+
+
+def _evaluate_analytic_index(
+    model: AnalyticDispersion,
+    wavelength_um: float,
+    material_name: str,
+) -> float:
+    """Evaluate a lossless scalar index equation with wavelength inputs."""
+    if model.output not in {"n", "n_squared"}:
+        raise MaterialModelError(
+            f"Analytic material {material_name!r} must output n or n_squared, "
+            f"not {model.output!r}."
+        )
+    inputs = {}
+    for symbol, axis in model.inputs.items():
+        if axis.quantity != "wavelength":
+            raise MaterialModelError(
+                f"Analytic material {material_name!r} only supports wavelength "
+                f"inputs, not {axis.quantity!r}."
+            )
+        inputs[symbol] = wavelength_um / _wavelength_to_um(1.0, axis.unit)
+    try:
+        evaluate = _compile_analytic_equation(model.model_dump_json())
+        result = evaluate(**inputs, **model.parameters)
+        return _analytic_result_to_index(result, model.output)
+    except (ArithmeticError, TypeError, ValueError) as error:
+        raise MaterialModelError(
+            f"Cannot evaluate analytic material {material_name!r} at "
+            f"{wavelength_um:g} um: {error}"
+        ) from error
+
+
 def _evaluate_permittivity(
     card: MaterialCard, wavelength_um: float
 ) -> tuple[float, float]:
@@ -204,6 +260,8 @@ def _evaluate_permittivity(
     model = card.optical.permittivity
     temperature_ref_kelvin = card.optical.temperature_ref
     _validate_wavelength(model, wavelength_um, card.name)
+    if isinstance(model, AnalyticDispersion):
+        return _evaluate_analytic_index(model, wavelength_um, card.name), 0.0
     if isinstance(model, Sellmeier):
         wavelength_squared = wavelength_um**2
         index_squared = (

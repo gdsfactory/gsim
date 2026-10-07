@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import gmsh
+import numpy as np
 
+from gsim.palace.mesh.gmsh_utils import gmsh_options, mesh_hash
+from gsim.palace.mesh.metadata import (
+    tetrahedral_topology,
+    update_field_dofs,
+    write_metadata,
+)
+from gsim.palace.mesh.quality import tetrahedron_distortion
 from gsim.palace.ports.config import PortType
 
 logger = logging.getLogger(__name__)
@@ -24,6 +32,7 @@ if TYPE_CHECKING:
         EigenmodeConfig,
         ElectrostaticConfig,
         NumericalConfig,
+        RefinementConfig,
     )
     from gsim.palace.models.ports import TerminalConfig
     from gsim.palace.ports.config import PalacePort
@@ -135,6 +144,7 @@ def generate_palace_config(
     hints: dict[str, Any] | None = None,
     electrostatic_config: ElectrostaticConfig | None = None,
     terminals: list[TerminalConfig] | None = None,
+    refinement_config: RefinementConfig | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -153,11 +163,17 @@ def generate_palace_config(
         absorbing_boundary: Whether to add absorbing (PML) boundary
         periodic_axis: Optional periodic axis identifier
         hints: Additional config hints merged into the JSON
+        refinement_config: Optional RefinementConfig for adaptive mesh
+            refinement. Defaults to AMR off.
 
     Returns:
         Path to the generated config.json
     """
+    from gsim.palace.models import RefinementConfig
     from gsim.palace.ports.config import PortGeometry
+
+    if refinement_config is None:
+        refinement_config = RefinementConfig()
 
     if simulation_type not in (
         "driven",
@@ -177,7 +193,7 @@ def generate_palace_config(
         solver_driven = {
             "Samples": [
                 {
-                    "Type": "Driven",
+                    "Type": "Linear",
                     "MinFreq": 1.0,  # 1 GHz
                     "MaxFreq": fmax / 1e9,
                     "FreqStep": freq_step,
@@ -191,13 +207,11 @@ def generate_palace_config(
         solver_eigenmode = eigenmode_config.to_palace_config()
     else:
         # Legacy behavior - compute from fmax
-        solver_eigenmode = (
-            {
-                "N": 10,
-                "Tol": 1.0e-6,
-                "Target": fmax,
-            },
-        )
+        solver_eigenmode = {
+            "N": 10,
+            "Tol": 1.0e-6,
+            "Target": fmax / 1e9,
+        }
 
     if boundary_mode_config is not None:
         solver_boundarymode = boundary_mode_config.to_palace_config()
@@ -260,11 +274,7 @@ def generate_palace_config(
         "Model": {
             "Mesh": f"{model_name}.msh",
             "L0": model_l0,  # um
-            "Refinement": {
-                "UniformLevels": 0,
-                "Tol": 1e-2,
-                "MaxIts": 0,
-            },
+            "Refinement": refinement_config.to_palace_config(),
         },
         "Solver": solver_conf,
     }
@@ -490,6 +500,11 @@ def generate_palace_config(
             boundaries["Conductivity"] = conductors
         if pec_attrs:
             boundaries["PEC"] = {"Attributes": sorted(set(pec_attrs))}
+        # Postprocessing-only voltage/impedance paths (mode-V.csv / mode-Z.csv).
+        # These do not load the 2D eigenproblem.
+        mode_postprocessing = (hints or {}).get("_mode_postprocessing")
+        if mode_postprocessing:
+            boundaries["Postprocessing"] = mode_postprocessing
 
     else:
         lumped_ports: list[dict[str, object]] = []
@@ -508,8 +523,8 @@ def generate_palace_config(
                 port_group = groups["port_surfaces"][port_key]
 
                 if port.multi_element:
-                    # Multi-element port (CPW)
-                    if port_group.get("type") == "cpw":
+                    # Multi-element port (CPW or two-terminal EDGE)
+                    if port_group.get("type") in ("cpw", "two_terminal"):
                         elements = [
                             {
                                 "Attributes": [elem["phys_group"]],
@@ -530,7 +545,8 @@ def generate_palace_config(
                     if port.port_type == PortType.LUMPED:
                         direction = (
                             "Z"
-                            if port.geometry == PortGeometry.VIA
+                            if port.geometry
+                            in (PortGeometry.INTERLAYER, PortGeometry.VIA)
                             else port.direction.upper()
                         )
 
@@ -600,15 +616,24 @@ def generate_palace_config(
                             lumped_ports.append(eigenmode_entry)
 
                     elif port.port_type == PortType.WAVEPORT:
-                        wave_ports.append(
-                            {
-                                "Index": port_idx,
-                                "Mode": port.mode,
-                                "Offset": port.offset,
-                                "Excitation": port_idx if port.excited else False,
-                                "Attributes": [port_group["phys_group"]],
-                            }
-                        )
+                        wave_port_entry: dict[str, object] = {
+                            "Index": port_idx,
+                            "Mode": port.mode,
+                            "Offset": port.offset,
+                            "Excitation": port_idx if port.excited else False,
+                            "Attributes": [port_group["phys_group"]],
+                        }
+                        if port.eigensolver_type is not None:
+                            wave_port_entry["SolverType"] = port.eigensolver_type
+                        if port.eigensolver_tol is not None:
+                            wave_port_entry["EigenTol"] = port.eigensolver_tol
+                        if port.eigensolver_ksp_tol is not None:
+                            wave_port_entry["KSPTol"] = port.eigensolver_ksp_tol
+                        if port.eigensolver_max_size is not None:
+                            wave_port_entry["MaxSize"] = port.eigensolver_max_size
+                        if port.eigensolver_verbose is not None:
+                            wave_port_entry["Verbose"] = port.eigensolver_verbose
+                        wave_ports.append(wave_port_entry)
             port_idx += 1
 
         # Assign unique indices to passive reactive ports now that all primary
@@ -732,18 +757,7 @@ def generate_palace_config(
     return config_path
 
 
-def _is_tetrahedron(element_type: int) -> bool:
-    """Return True when a gmsh element type is a tetrahedron of any order."""
-    try:
-        name = gmsh.model.mesh.getElementProperties(int(element_type))[0]
-    except Exception:
-        # Fall back to the known gmsh element-type codes:
-        # 4 = 4-node, 11 = 10-node, 29 = 20-node tetrahedron.
-        return int(element_type) in {4, 11, 29}
-    return str(name).startswith("Tetrahedron")
-
-
-def collect_mesh_stats() -> dict:
+def collect_mesh_stats(*, field_order: int = 2, problem_type: str = "driven") -> dict:
     """Collect mesh statistics from gmsh after mesh generation.
 
     Must be called while gmsh is initialized and the mesh is generated.
@@ -761,8 +775,14 @@ def collect_mesh_stats() -> dict:
         - element_type: gmsh element type code of the (first) tetrahedra block
         - quality: Shape quality metrics (gamma)
         - sicn: Signed Inverse Condition Number
+        - kappa: Worst tet-center distortion (Palace/MFEM convention)
+        - topology: Unique tetrahedral edges and triangular faces
+        - field_dofs: Estimated Field DOFs before Palace preprocessing
         - edge_length: Min/max edge lengths
         - groups: Physical group info
+        - mesh_hash: Hash of the mesh that ignores node and element numbering
+        - versions: gsim and Gmsh versions
+        - gmsh_options: Effective Gmsh options that shape the mesh
     """
     stats = {}
 
@@ -781,33 +801,71 @@ def collect_mesh_stats() -> dict:
         pass
 
     # Get node count
+    node_tags = coordinates = None
     try:
-        node_tags, _, _ = gmsh.model.mesh.getNodes()
+        node_tags, coordinates, _ = gmsh.model.mesh.getNodes()
         stats["nodes"] = len(node_tags)
     except Exception:
         pass
 
     # Get element counts and collect tet tags for quality
     tet_tags = []
+    tet_blocks = []
+    all_volumes_are_tetrahedra = True
     try:
-        element_types, element_tags, _ = gmsh.model.mesh.getElements()
+        element_types, element_tags, element_nodes = gmsh.model.mesh.getElements()
         total_elements = sum(len(tags) for tags in element_tags)
         stats["elements"] = total_elements
 
-        # Collect tetrahedra of any order (4/10/20-node) for quality metrics.
-        tet_count = 0
-        for etype, tags in zip(element_types, element_tags, strict=False):
-            if _is_tetrahedron(etype):
+        # Include both linear and higher-order tetrahedra.
+        dimension = 0
+        geometry_orders = set()
+        elements_by_type = {}
+        for etype, tags, nodes in zip(
+            element_types, element_tags, element_nodes, strict=True
+        ):
+            name, dim, order, _, _, primary_nodes = (
+                gmsh.model.mesh.getElementProperties(int(etype))
+            )
+            if not len(tags):
+                continue
+            elements_by_type[name] = len(tags)
+            if dim > dimension:
+                dimension = dim
+                geometry_orders.clear()
+            if dim == dimension:
+                geometry_orders.add(order)
+            if dim == 3 and primary_nodes == 4 and len(tags):
                 stats.setdefault("element_type", int(etype))
-                tet_count += len(tags)
                 tet_tags.extend(tags)
-        if tet_count:
-            stats["tetrahedra"] = tet_count
+                tet_blocks.append((int(etype), tags, nodes))
+            elif dim == 3:
+                all_volumes_are_tetrahedra = False
+        stats["dimension"] = dimension
+        stats["geometry_orders"] = sorted(geometry_orders)
+        stats["elements_by_type"] = elements_by_type
+        if tet_tags:
+            stats["tetrahedra"] = len(tet_tags)
     except Exception:
-        pass
+        all_volumes_are_tetrahedra = False
+
+    if tet_blocks and all_volumes_are_tetrahedra:
+        try:
+            stats["topology"] = tetrahedral_topology(tet_blocks)
+        except Exception:
+            logger.debug("Unable to count tetrahedral topology", exc_info=True)
+    update_field_dofs(stats, field_order=field_order, problem_type=problem_type)
 
     # Get mesh quality for tetrahedra
     if tet_tags:
+        if node_tags is not None and coordinates is not None:
+            try:
+                stats["kappa"] = tetrahedron_distortion(
+                    tet_blocks, node_tags, coordinates
+                )
+            except Exception:
+                logger.debug("Unable to compute tetrahedron distortion", exc_info=True)
+
         # Gamma: inscribed/circumscribed radius ratio (shape quality)
         try:
             qualities = gmsh.model.mesh.getElementQualities(tet_tags, "gamma")
@@ -846,12 +904,29 @@ def collect_mesh_stats() -> dict:
         except Exception:
             pass
 
-    # Get physical groups with tags
+    # Get physical groups with tags and the elements each one holds
     try:
         groups = {"volumes": [], "surfaces": []}
         for dim, tag in gmsh.model.getPhysicalGroups():
             name = gmsh.model.getPhysicalName(dim, tag)
-            entry = {"name": name, "tag": tag}
+            group_tags = np.concatenate(
+                [
+                    tags
+                    for entity in gmsh.model.getEntitiesForPhysicalGroup(dim, tag)
+                    for tags in gmsh.model.mesh.getElements(dim, entity)[1]
+                ]
+                or [np.empty(0, dtype=np.uint64)]
+            )
+            entry = {"name": name, "tag": tag, "elements": len(group_tags)}
+            if len(group_tags):
+                entry["edge_length"] = {
+                    "min": float(
+                        min(gmsh.model.mesh.getElementQualities(group_tags, "minEdge"))
+                    ),
+                    "max": float(
+                        max(gmsh.model.mesh.getElementQualities(group_tags, "maxEdge"))
+                    ),
+                }
             if dim == 3:
                 groups["volumes"].append(entry)
             elif dim == 2:
@@ -859,6 +934,21 @@ def collect_mesh_stats() -> dict:
         stats["groups"] = groups
     except Exception:
         pass
+
+    # Identify the mesh independently of node and element numbering, and record
+    # what produced it, so meshes from different runs and hosts can be compared.
+    try:
+        import gsim
+
+        stats["versions"] = {"gsim": gsim.__version__, "gmsh": gmsh.__version__}
+        stats["gmsh_options"] = gmsh_options()
+    except Exception:
+        pass
+    try:
+        if digest := mesh_hash():
+            stats["mesh_hash"] = digest
+    except Exception as error:
+        logger.warning("Could not hash the mesh: %s", error)
 
     return stats
 
@@ -876,6 +966,7 @@ def write_config(
     hints: dict[str, Any] | None = None,
     electrostatic_config: ElectrostaticConfig | None = None,
     terminals: list[TerminalConfig] | None = None,
+    refinement_config: RefinementConfig | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -925,10 +1016,14 @@ def write_config(
         hints=hints,
         electrostatic_config=electrostatic_config,
         terminals=terminals,
+        refinement_config=refinement_config,
     )
 
     # Update the mesh_result with the config path
     mesh_result.config_path = config_path
+    mesh_result.metadata = write_metadata(
+        mesh_result.mesh_stats, mesh_result.output_dir, config_path
+    )
 
     return config_path
 

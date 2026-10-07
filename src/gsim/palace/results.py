@@ -29,6 +29,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,11 @@ class ModeMetrics(TypedDict):
     k_n: complex
     n_eff: complex
     eta_eff: complex
+
+
+_MODE_Z_COL_RE = re.compile(r"^(Z_PV|Z_VI|L_PV|C_PV|L_VI|C_VI)\[(\d+)\]")
+_MODE_V_RE_COL_RE = re.compile(r"^Re\{V\[(\d+)\]\}")
+_MODE_V_IM_COL_RE = re.compile(r"^Im\{V\[(\d+)\]\}")
 
 
 class PalaceTextResults:
@@ -66,6 +73,10 @@ class PalaceTextResults:
         self.json_data = json_data
         self.text_data = text_data
         self.modes = self._parse_modes()
+        # BoundaryMode postprocessing results (mode-Z.csv / mode-V.csv):
+        # {index: {mode: metrics}}.
+        self.mode_impedance = self._parse_mode_impedance()
+        self.mode_voltages = self._parse_mode_voltages()
 
     @staticmethod
     def _to_float(value: object) -> float:
@@ -142,6 +153,90 @@ class PalaceTextResults:
 
         return modes
 
+    def _parse_mode_impedance(self) -> dict[int, dict[int, dict[str, float]]]:
+        """Parse ``mode-Z.csv`` into ``{index: {mode: metrics}}``.
+
+        Palace writes one row per mode with columns such as
+        ``Z_PV[1] (Ohm)``, ``Z_VI[1] (Ohm)``, ``L_PV[1] (H/m)`` and
+        ``C_PV[1] (F/m)`` for each postprocessing impedance index.
+        """
+        rows = self.csv_tables.get("mode-Z.csv", [])
+        result: dict[int, dict[int, dict[str, float]]] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            for column, raw_value in row.items():
+                match = _MODE_Z_COL_RE.match(column)
+                if match is None:
+                    continue
+                quantity, index = match.group(1), int(match.group(2))
+                value = self._to_float(raw_value)
+                if not np.isfinite(value):
+                    continue
+                result.setdefault(index, {}).setdefault(mode_id, {})[quantity] = value
+
+        return result
+
+    def _parse_mode_voltages(self) -> dict[int, dict[int, complex]]:
+        """Parse ``mode-V.csv`` into ``{index: {mode: complex voltage}}``."""
+        rows = self.csv_tables.get("mode-V.csv", [])
+        re_parts: dict[int, dict[int, float]] = {}
+        im_parts: dict[int, dict[int, float]] = {}
+
+        for idx, raw_row in enumerate(rows, start=1):
+            row = {
+                str(k).strip(): str(v).strip()
+                for k, v in raw_row.items()
+                if k is not None
+            }
+            mode_id_raw = self._to_float(row.get("m"))
+            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
+
+            for column, raw_value in row.items():
+                value = self._to_float(raw_value)
+                re_match = _MODE_V_RE_COL_RE.match(column)
+                im_match = _MODE_V_IM_COL_RE.match(column)
+                if re_match is not None and np.isfinite(value):
+                    index = int(re_match.group(1))
+                    re_parts.setdefault(index, {})[mode_id] = value
+                elif im_match is not None and np.isfinite(value):
+                    index = int(im_match.group(1))
+                    im_parts.setdefault(index, {})[mode_id] = value
+
+        result: dict[int, dict[int, complex]] = {}
+        for index, modes in re_parts.items():
+            for mode_id, re_val in modes.items():
+                im_val = im_parts.get(index, {}).get(mode_id, 0.0)
+                result.setdefault(index, {})[mode_id] = complex(re_val, im_val)
+        return result
+
+    def characteristic_impedance(
+        self, *, index: int = 1, mode: int = 1, quantity: str = "Z_PV"
+    ) -> float | None:
+        """Return a characteristic-impedance quantity from ``mode-Z.csv``.
+
+        Args:
+            index: Postprocessing impedance index (``Z_PV[i]``).
+            mode: Mode number (the ``m`` column).
+            quantity: One of ``"Z_PV"``, ``"Z_VI"``, ``"L_PV"``, ``"C_PV"``,
+                ``"L_VI"``, ``"C_VI"``.
+
+        Returns:
+            The value, or ``None`` when unavailable.
+        """
+        return self.mode_impedance.get(index, {}).get(mode, {}).get(quantity)
+
+    def mode_voltage(self, *, index: int = 1, mode: int = 1) -> complex | None:
+        """Return the complex mode voltage from ``mode-V.csv``."""
+        return self.mode_voltages.get(index, {}).get(mode)
+
     @overload
     def __getitem__(self, key: Literal["modes"]) -> dict[int, ModeMetrics]: ...
 
@@ -170,6 +265,19 @@ class PalaceTextResults:
             mode_id = int(key.split("_", 1)[1])
             return self.modes[mode_id]
         raise KeyError(key)
+
+    @property
+    def error_indicators(self) -> dict[str, float] | None:
+        """Norm, minimum, maximum and mean of Palace's error indicator.
+
+        Read from ``error-indicators.csv``; None when Palace did not write it.
+        """
+        rows = self.csv_tables.get("error-indicators.csv")
+        if not rows:
+            return None
+        row = {str(k).strip(): v for k, v in rows[-1].items()}
+        columns = {"norm": "Norm", "min": "Minimum", "max": "Maximum", "mean": "Mean"}
+        return {key: self._to_float(row.get(column)) for key, column in columns.items()}
 
     def keys(self) -> list[str]:
         """Return available result file names."""
@@ -216,6 +324,21 @@ class PalaceTextResults:
                 f"n_eff = {self._format_complex(mode['n_eff'])}, "
                 f"eta_eff ~= {self._format_complex(mode['eta_eff'], sci=False)}"
             )
+
+        for index in sorted(self.mode_impedance):
+            for mode_id in sorted(self.mode_impedance[index]):
+                metrics = self.mode_impedance[index][mode_id]
+                parts = [f"{name} = {value:.6g}" for name, value in metrics.items()]
+                lines.append(f"  Z[{index}] mode {mode_id}: " + ", ".join(parts))
+
+        for index in sorted(self.mode_voltages):
+            for mode_id in sorted(self.mode_voltages[index]):
+                voltage = self.mode_voltages[index][mode_id]
+                lines.append(
+                    f"  V[{index}] mode {mode_id}: "
+                    f"{self._format_complex(voltage, sci=False)} V"
+                )
+
         return "\n".join(lines)
 
     def print(self, *, max_rows: int = 8, max_lines: int = 12) -> None:
@@ -357,6 +480,30 @@ class SParams:
             cols[f"S_{to_p}_{from_p}_db"] = sp.db
             cols[f"S_{to_p}_{from_p}_deg"] = sp.deg
         return pd.DataFrame(cols)
+
+    def to_skrf(self, z0: float = 50.0):
+        """Convert to a scikit-rf Network object.
+
+        Args:
+            z0: Reference impedance in ohms (default 50).
+
+        Returns:
+            skrf.Network with frequency in Hz and S-parameters in (f, i, j) order.
+        """
+        import numpy as np
+        import skrf as rf
+
+        n = len(self._port_names)
+        f_hz = self._freq * 1e9
+        S = np.zeros((len(f_hz), n, n), dtype=complex)
+        for i, pi in enumerate(self._port_names):
+            for j, pj in enumerate(self._port_names):
+                if (pi, pj) in self._data:
+                    S[:, i, j] = self._data[(pi, pj)].complex
+                elif (pj, pi) in self._data:
+                    # assume reciprocity: S_ij = S_ji
+                    S[:, i, j] = self._data[(pj, pi)].complex
+        return rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
 
     def _filtered_entries(self, full: bool) -> list[tuple[str, SParam]]:
         """Return ``[(label, SParam), ...]`` filtered by excitation port."""
@@ -685,6 +832,7 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
         roots = [
             base_dir,
             base_dir / "output" / "palace",
+            base_dir / "output",
         ]
         files = {}
         for root in roots:
@@ -730,6 +878,78 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
         json_data=json_data,
         text_data=text_data,
     )
+
+
+def load_refinement_history(source: str | Path) -> list[PalaceTextResults]:
+    """Load the results of every adaptive mesh refinement pass, oldest first.
+
+    With ``SaveAdaptIterations``, Palace keeps the output of pass X in an
+    ``iterationX`` subdirectory and writes the last pass at the top level of
+    its output directory. A run without refinement gives a single pass.
+
+    Args:
+        source: Simulation path, or Palace output directory.
+
+    Returns:
+        One :class:`PalaceTextResults` per pass, the final one last.
+    """
+    base = Path(source)
+    passes: list[Path] = []
+    for root in (base, base / "output" / "palace", base / "output"):
+        passes = sorted(
+            (
+                d
+                for d in root.glob("iteration*")
+                if d.is_dir() and d.name.removeprefix("iteration").isdigit()
+            ),
+            key=lambda d: int(d.name.removeprefix("iteration")),
+        )
+        if passes:
+            break
+    return [load_text_results(d) for d in passes] + [load_text_results(base)]
+
+
+def refinement_convergence(
+    history: list[PalaceTextResults],
+    metric: Callable[[PalaceTextResults], float],
+) -> list[dict[str, float | int | None]]:
+    """Tabulate Palace's error estimate and a chosen metric, pass by pass.
+
+    Palace stops refining on its own error estimate, which does not mean that
+    a given quantity (a frequency, an S-parameter, a capacitance) has
+    converged. This lists both for each pass of :func:`load_refinement_history`.
+
+    The relative change of the metric between two passes is not its error:
+    if the changes shrink by a factor r per pass, the error left after the
+    last pass is roughly the last change times r / (1 - r).
+
+    Args:
+        history: Passes from :func:`load_refinement_history`.
+        metric: Function returning the quantity of interest for one pass.
+
+    Returns:
+        One row per pass with ``pass``, ``error_norm``, ``value`` and
+        ``relative_change``: None for the first pass, NaN after a pass where
+        the metric was zero.
+    """
+    table: list[dict[str, float | int | None]] = []
+    previous = None
+    for number, results in enumerate(history, start=1):
+        value = metric(results)
+        indicators = results.error_indicators or {}
+        change = None
+        if previous is not None:
+            change = (value - previous) / abs(previous) if previous else float("nan")
+        table.append(
+            {
+                "pass": number,
+                "error_norm": indicators.get("norm"),
+                "value": value,
+                "relative_change": change,
+            }
+        )
+        previous = value
+    return table
 
 
 def get_port_map(source: str | Path | dict) -> dict[int, str]:
@@ -882,8 +1102,8 @@ def load_fields(
 ):
     """Load the ParaView volume or boundary dataset for a Palace simulation.
 
-    Requires the simulation to have been run with ``save_step >= 1``
-    so that field data was written to disk.
+    Requires ``save_step >= 1`` for driven simulations or ``save >= 1`` for
+    BoundaryMode simulations so that field data was written to disk.
 
     Args:
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
@@ -938,6 +1158,7 @@ def _find_paraview_dir(
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
+        base_dir / "output",
     ]
     exc_dir: Path | None = None
     for root in search_roots:
@@ -985,10 +1206,11 @@ def _find_paraview_dir(
 
     import pyvista as pv
 
-    _partition_only = {"Indicator", "Rank"}
+    mesh_metadata_fields = {"Indicator", "Rank", "attribute"}
     for pvtu in candidates:
-        ds = pv.read(str(pvtu))
-        if set(ds.point_data.keys()) != _partition_only:
+        dataset = pv.read(str(pvtu))
+        field_names = set(dataset.point_data) | set(dataset.cell_data)
+        if field_names - mesh_metadata_fields:
             return pvtu
 
     # All cycles are partition-only — return the last one and let the

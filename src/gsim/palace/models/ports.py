@@ -9,7 +9,8 @@ This module contains Pydantic models for port definitions:
 
 from __future__ import annotations
 
-from typing import Literal, Self
+import warnings
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,20 +18,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class PortConfig(BaseModel):
     """Configuration for a single-element lumped port.
 
-    Lumped ports can be inplane (horizontal, on single layer) or
-    via (vertical, between two layers).
+    Lumped ports can be inplane, gap, or interlayer. CPW ports use
+    :class:`CPWPortConfig` because they require two gap elements.
 
     Attributes:
         name: Port name (must match component port name)
         layer: Target layer for inplane ports
-        from_layer: Bottom layer for via ports
-        to_layer: Top layer for via ports
+        from_layer: First conductor layer for interlayer ports
+        to_layer: Second conductor layer for interlayer ports
         length: Port extent along direction (um)
         offset: Shift port inward along the waveguide (um).
             Positive = away from boundary, into conductor.
         impedance: Port impedance (Ohms)
         excited: Whether this port is excited
-        geometry: Port geometry type ("inplane" or "via")
+        geometry: Lumped-port surface geometry. ``"via"`` remains as a deprecated
+            alias for ``"interlayer"``.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -49,22 +51,90 @@ class PortConfig(BaseModel):
         default=None, ge=0, description="Capacitance in F"
     )
     excited: bool = True
-    geometry: Literal["inplane", "via"] = "inplane"
+    geometry: Literal["inplane", "gap", "interlayer", "via"] = "inplane"
     offset: float = Field(
         default=0.0,
         description="Shift port inward along the waveguide (um). "
         "Positive = away from boundary, into conductor.",
     )
 
+    # BoundaryMode postprocessing (2D voltage/impedance paths). These paths do
+    # not affect the 2D eigenproblem; Palace uses them only to post-process the
+    # mode voltage (mode-V.csv) and characteristic impedance (mode-Z.csv).
+    voltage_path: list[list[float]] | None = Field(
+        default=None,
+        description="Open signal->ground coordinate path (um) for BoundaryMode "
+        "voltage/impedance postprocessing. Points may be 2D (cross-section "
+        "coordinates h, v) or 3D (layout x, y, z).",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) port center (um). Used to auto-derive a "
+        "BoundaryMode voltage path when voltage_path is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    width: float | None = Field(
+        default=None,
+        gt=0,
+        description="Port width (um). Used to auto-derive a BoundaryMode "
+        "voltage path when voltage_path is not given.",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_geometry(cls, data: Any) -> Any:
+        """Normalize deprecated geometry names before field validation."""
+        if isinstance(data, dict) and data.get("geometry") == "via":
+            warnings.warn(
+                "Port geometry 'via' is deprecated; use 'interlayer' instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            return {**data, "geometry": "interlayer"}
+        return data
+
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
         """Validate layer configuration based on geometry type."""
-        if self.geometry == "inplane" and self.layer is None:
+        if (
+            self.geometry == "inplane"
+            and self.layer is None
+            and self.voltage_path is None
+        ):
             raise ValueError("Inplane ports require 'layer' to be specified")
-        if self.geometry == "via" and (
+        if self.geometry == "interlayer" and (
             self.from_layer is None or self.to_layer is None
         ):
-            raise ValueError("Via ports require both 'from_layer' and 'to_layer'")
+            raise ValueError(
+                "Interlayer ports require both 'from_layer' and 'to_layer'"
+            )
+        if self.geometry == "gap":
+            if self.layer is None:
+                raise ValueError("Gap ports require 'layer' to be specified")
+            if self.from_layer is not None or self.to_layer is not None:
+                raise ValueError("Gap ports use a single conductor layer")
+            if self.length is not None:
+                raise ValueError(
+                    "Gap ports use GDS port width as the gap span; omit length"
+                )
         return self
 
 
@@ -92,6 +162,7 @@ class CPWPortConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     name: str = Field(description="Port name matching component port")
+    geometry: Literal["cpw"] = "cpw"
     layer: str = Field(description="Target conductor layer")
     s_width: float = Field(gt=0, description="Signal conductor width (um)")
     gap_width: float = Field(
@@ -114,6 +185,39 @@ class CPWPortConfig(BaseModel):
 
     impedance: float = Field(default=50.0, gt=0)
     excited: bool = True
+
+    # BoundaryMode postprocessing (2D voltage/impedance paths).
+    voltage_paths: list[list[list[float]]] | None = Field(
+        default=None,
+        description="Explicit open signal->ground coordinate paths (um) for "
+        "BoundaryMode postprocessing, one per CPW gap. Points may be 2D "
+        "(cross-section coordinates h, v) or 3D (layout x, y, z). When omitted "
+        "and a port center is available, the two gap paths are auto-derived.",
+    )
+    current_path: list[list[float]] | None = Field(
+        default=None,
+        description="Closed-loop coordinate path (um) for the BoundaryMode "
+        "current line integral (impedance postprocessing only).",
+    )
+    nsamples: int = Field(
+        default=100,
+        ge=1,
+        description="Number of samples for the BoundaryMode line integrals.",
+    )
+    center: tuple[float, float] | None = Field(
+        default=None,
+        description="Explicit (x, y) signal-center (um). Used to auto-derive "
+        "BoundaryMode gap voltage paths when voltage_paths is not given.",
+    )
+    orientation: float = Field(
+        default=0.0,
+        description="Port orientation in degrees (0 = +x).",
+    )
+    order: int = Field(
+        default=0,
+        description="Declaration order across lumped and CPW ports. Used to "
+        "index BoundaryMode postprocessing entries deterministically.",
+    )
 
 
 class TerminalConfig(BaseModel):
@@ -199,6 +303,21 @@ class WavePortConfig(BaseModel):
         mode: Mode number to excite
         offset: De-embedding distance in um
         excited: Whether this port is excited
+        eigensolver_type: Palace SolverType for this port's 2D mode
+            eigenproblem ("Default", "SLEPc" or "ARPACK"). None uses
+            Palace's own default.
+        eigensolver_tol: Palace EigenTol (eigenvalue solver relative
+            tolerance) for this port's mode solve. None uses Palace's
+            own default.
+        eigensolver_ksp_tol: Palace KSPTol (linear solver tolerance used
+            inside the eigenvalue iteration) for this port's mode solve.
+            None uses Palace's own default.
+        eigensolver_max_size: Palace MaxSize (eigensolver subspace
+            dimension) for this port's mode solve - unrelated to the
+            `max_size` domain-filling flag above. None lets Palace pick
+            its own default (max(2 x Mode, Mode + 15)).
+        eigensolver_verbose: Palace Verbose level for this port's mode
+            solve. None uses Palace's own default.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -217,6 +336,54 @@ class WavePortConfig(BaseModel):
     mode: int = Field(default=1, ge=1, description="Mode number to excite")
     offset: float = Field(default=0.0, ge=0, description="De-embedding distance in um")
     excited: bool = True
+    eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = Field(
+        default=None,
+        description="Palace SolverType for this port's 2D mode eigenproblem",
+    )
+    eigensolver_tol: float | None = Field(
+        default=None, gt=0, description="Palace EigenTol for this port's mode solve"
+    )
+    eigensolver_ksp_tol: float | None = Field(
+        default=None, gt=0, description="Palace KSPTol for this port's mode solve"
+    )
+    eigensolver_max_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Palace MaxSize (eigensolver subspace dimension) for this "
+            "port's mode solve - unrelated to the max_size domain-filling "
+            "flag above"
+        ),
+    )
+    eigensolver_verbose: int | None = Field(
+        default=None,
+        ge=0,
+        description="Palace Verbose level for this port's mode solve",
+    )
+
+
+class TwoTerminalPortConfig(BaseModel):
+    """Configuration for a two-terminal lumped port (single Palace port, two elements).
+
+    Both terminals are combined into one Palace LumpedPort with two EDGE-geometry
+    elements (vertical surfaces spanning the conductor thickness), collapsing the
+    simulation to a true 1-port S11 measurement on a coplanar device.
+
+    Attributes:
+        plus_port: GDS port name for the + (excitation) terminal
+        minus_port: GDS port name for the - (reference) terminal
+        layer: Conductor layer containing both terminals (e.g., "metal1")
+        impedance: Port impedance in Ohms
+        excited: Whether this port is excited
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    plus_port: str = Field(description="GDS port name for the + terminal")
+    minus_port: str = Field(description="GDS port name for the - terminal")
+    layer: str = Field(description="Conductor layer containing both terminals")
+    impedance: float = Field(default=50.0, gt=0)
+    excited: bool = True
 
 
 __all__ = [
@@ -224,5 +391,6 @@ __all__ = [
     "ImpedanceBoundaryConfig",
     "PortConfig",
     "TerminalConfig",
+    "TwoTerminalPortConfig",
     "WavePortConfig",
 ]

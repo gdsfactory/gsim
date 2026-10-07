@@ -31,6 +31,7 @@ from .geometry import (
     resolve_mesh_domain_bounds,
 )
 from .groups import assign_physical_groups
+from .metadata import write_metadata
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
@@ -150,6 +151,7 @@ class MeshResult:
     config_path: Path | None = None
     port_info: list = field(default_factory=list)
     mesh_stats: dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     # Data needed for deferred config generation
     groups: dict = field(default_factory=dict)
     output_dir: Path | None = None
@@ -601,7 +603,9 @@ def _generate_native_boundarymode_groups(
                 except Exception:
                     filtered_curves.add(ctag)
                     continue
-                adj_surfaces = set(adj[1]) if len(adj) > 1 else set()
+                # getAdjacencies returns (upward, downward); for a curve the
+                # upward adjacencies (index 0) are the adjacent surfaces.
+                adj_surfaces = set(adj[0]) if len(adj) > 0 else set()
                 if not adj_surfaces:
                     filtered_curves.add(ctag)
                     continue
@@ -983,6 +987,130 @@ def _setup_mesh_fields(
         gmsh_utils.finalize_mesh_fields(field_ids)
 
 
+def _fine_size_targets(
+    groups: dict,
+    stack,
+    refined_mesh_size: float,
+) -> dict[str, float]:
+    """Map volume names to requested fine mesh sizes (no gmsh needed).
+
+    Volumes whose stack ``Layer`` carries a numeric ``mesh_resolution``
+    smaller than the global ``refined_mesh_size`` (e.g. the PN-junction
+    depletion strip, whose width can be far below the mesh target)
+    request dedicated refinement. Returns ``{volume_name: size_um}``.
+    """
+    layers = getattr(stack, "layers", {}) or {}
+    targets: dict[str, float] = {}
+    for name in groups.get("volumes", {}):
+        resolution = getattr(layers.get(name), "mesh_resolution", None)
+        if isinstance(resolution, bool) or not isinstance(resolution, (int, float)):
+            continue
+        size_um = float(resolution)
+        if 0.0 < size_um < refined_mesh_size:
+            targets[name] = size_um
+    return targets
+
+
+def _collect_fine_size_requests(
+    groups: dict,
+    stack,
+    refined_mesh_size: float,
+) -> list[tuple[list[int], float]]:
+    """Collect per-volume fine mesh-size requests for native 2D meshing.
+
+    Only curves shared with another dielectric volume (the registered
+    ``interface_surfaces``) are refined — domain-wall curves are excluded
+    so the fine zone never leaks onto the simulation boundary.
+
+    Requires an active gmsh session; returns ``[]`` when gmsh is not
+    initialized. Each entry is ``(curve_tags, size_um)``.
+    """
+    if not gmsh.isInitialized():
+        return []
+    targets = _fine_size_targets(groups, stack, refined_mesh_size)
+
+    internal_curves: set[int] = set()
+    for iface in groups.get("interface_surfaces", {}).values():
+        for tag in iface.get("tags", []):
+            internal_curves.add(int(tag))
+    if not internal_curves:
+        return []
+
+    requests: list[tuple[list[int], float]] = []
+    for name, vol_info in groups.get("volumes", {}).items():
+        if name not in targets:
+            continue
+        size_um = targets[name]
+        curves: set[int] = set()
+        for stag in vol_info.get("tags", []):
+            try:
+                boundary = gmsh.model.getBoundary(
+                    [(2, int(stag))],
+                    combined=False,
+                    oriented=False,
+                    recursive=False,
+                )
+            except Exception:
+                continue
+            for dim, ctag in boundary:
+                if dim == 1 and int(ctag) in internal_curves:
+                    curves.add(int(ctag))
+        if curves:
+            requests.append((sorted(curves), size_um))
+    return requests
+
+
+_ALGORITHM_3D = {"delaunay": 1, "hxt": 10}
+
+
+def apply_mesher_options(
+    *,
+    algorithm_3d: Literal["delaunay", "hxt"],
+    threads: int,
+    surface_threads: int,
+) -> None:
+    """Set the Gmsh 3D algorithm and thread counts for the meshing that follows.
+
+    Threading decides which mesh Gmsh produces, so these are set explicitly
+    right after Gmsh is initialized and recorded in the mesh stats (gsim#283).
+    In the tests behind that issue, on two machines:
+
+    - Delaunay with ``surface_threads=1`` gave the same mesh for any number of
+      3D threads, without meshing any faster.
+    - Delaunay with ``surface_threads > 1`` meshed faster but gave a different
+      mesh on every run, also with ``Mesh.Reproducible`` and a fixed seed.
+    - HXT gave a different mesh for each thread count. On the Windows machine
+      it repeated itself at a fixed count; that is not confirmed on the other.
+
+    A warning is logged for the combinations that do not keep the mesh.
+
+    Args:
+        algorithm_3d: 3D meshing algorithm.
+        threads: Threads for 3D meshing (``General.NumThreads`` and
+            ``Mesh.MaxNumThreads3D``).
+        surface_threads: Threads for 1D and 2D meshing.
+    """
+    if surface_threads > 1:
+        logger.warning(
+            "Parallel surface meshing (surface_threads=%d) gives a different mesh "
+            "on every run; use surface_threads=1 when the mesh must be "
+            "reproducible (gsim#283).",
+            surface_threads,
+        )
+    if algorithm_3d == "hxt" and threads > 1:
+        logger.warning(
+            "The HXT mesh depends on the number of threads (threads=%d); use "
+            "Delaunay with surface_threads=1 for a mesh that does not depend on "
+            "it (gsim#283).",
+            threads,
+        )
+    gmsh.option.setNumber("Mesh.Algorithm3D", _ALGORITHM_3D[algorithm_3d])
+    gmsh.option.setNumber("General.NumThreads", threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads1D", surface_threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads2D", surface_threads)
+    gmsh.option.setNumber("Mesh.MaxNumThreads3D", threads)
+
+
 def generate_mesh(
     component,
     stack: LayerStack,
@@ -1023,6 +1151,9 @@ def generate_mesh(
     high_order_optimize: bool = True,
     verbosity: int = 3,
     decimate_tolerance: float | None = None,
+    algorithm_3d: Literal["delaunay", "hxt"] = "delaunay",
+    threads: int = 1,
+    surface_threads: int = 1,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1070,6 +1201,10 @@ def generate_mesh(
         decimate_tolerance: Relative tolerance for polygon decimation
             (None = no decimation; typical 0.001-0.01)
         verbosity: Sets gmsh verbosity level
+        algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt"
+        threads: Threads for 3D meshing
+        surface_threads: Threads for 1D and 2D meshing; above 1 the mesh
+            differs from run to run
 
     Returns:
         MeshResult with paths and metadata
@@ -1088,6 +1223,9 @@ def generate_mesh(
     # Initialize gmsh
     gmsh.initialize()
     gmsh.option.setNumber("General.Verbosity", verbosity)
+    apply_mesher_options(
+        algorithm_3d=algorithm_3d, threads=threads, surface_threads=surface_threads
+    )
 
     if "palace_mesh" in gmsh.model.list():
         gmsh.model.setCurrent("palace_mesh")
@@ -1136,16 +1274,63 @@ def generate_mesh(
                     for tag in info.get("tags", [])
                 }
             )
+            # Per-volume fine-size requests (e.g. the PN-junction depletion
+            # strip): each gets its own Threshold field keyed to the
+            # requested size so narrow features mesh with several
+            # well-shaped elements across instead of slivers.
+            fine_requests = _collect_fine_size_requests(
+                groups, stack, refined_mesh_size
+            )
+            field_ids: list[int] = []
+            next_field_id = 1
             if refinement_lines:
                 aggressive_size = max(refined_mesh_size * 0.5, 1e-4)
-                field_id = gmsh_utils.setup_mesh_refinement(
-                    refinement_lines,
-                    aggressive_size,
-                    max_mesh_size,
-                    sampling=400,
-                    dist_max=max_mesh_size * 0.5,
+                field_ids.append(
+                    gmsh_utils.setup_mesh_refinement(
+                        refinement_lines,
+                        aggressive_size,
+                        max_mesh_size,
+                        sampling=400,
+                        dist_max=max_mesh_size * 0.5,
+                        distance_id=next_field_id,
+                        threshold_id=next_field_id + 1,
+                    )
                 )
-                gmsh_utils.finalize_mesh_fields([field_id])
+                next_field_id += 2
+            for curve_tags, size_um in fine_requests:
+                total_length = 0.0
+                for ctag in curve_tags:
+                    try:
+                        bb = gmsh.model.getBoundingBox(1, int(ctag))
+                        total_length += math.hypot(bb[3] - bb[0], bb[4] - bb[1])
+                    except Exception:
+                        pass
+                sampling = (
+                    min(20000, max(400, math.ceil(total_length / (size_um / 4.0))))
+                    if total_length > 0
+                    else 2000
+                )
+                logger.info(
+                    "Fine mesh request: %d curves at %.4g um (sampling %d)",
+                    len(curve_tags),
+                    size_um,
+                    sampling,
+                )
+                field_ids.append(
+                    gmsh_utils.setup_mesh_refinement(
+                        curve_tags,
+                        size_um,
+                        max_mesh_size,
+                        sampling=sampling,
+                        dist_min=2.0 * size_um,
+                        dist_max=max(1.0, 40.0 * size_um),
+                        distance_id=next_field_id,
+                        threshold_id=next_field_id + 1,
+                    )
+                )
+                next_field_id += 2
+            if field_ids:
+                gmsh_utils.finalize_mesh_fields(field_ids)
             else:
                 gmsh.option.setNumber("Mesh.MeshSizeMin", refined_mesh_size)
                 gmsh.option.setNumber("Mesh.MeshSizeMax", max_mesh_size)
@@ -1169,7 +1354,10 @@ def generate_mesh(
                     with contextlib.suppress(Exception):
                         gmsh.model.mesh.optimize("HighOrder")
 
-            mesh_stats = collect_mesh_stats()
+            mesh_stats = collect_mesh_stats(
+                field_order=numerical_config.order if numerical_config else 2,
+                problem_type=simulation_type,
+            )
 
             gmsh.option.setNumber("Mesh.Binary", 0)
             gmsh.option.setNumber("Mesh.SaveAll", 0)
@@ -1199,6 +1387,7 @@ def generate_mesh(
                 config_path=config_path,
                 port_info=[],
                 mesh_stats=mesh_stats,
+                metadata=write_metadata(mesh_stats, output_dir, config_path),
                 groups=groups,
                 output_dir=output_dir,
                 model_name=model_name,
@@ -1421,7 +1610,10 @@ def generate_mesh(
                     )
 
         # Collect mesh statistics
-        mesh_stats = collect_mesh_stats()
+        mesh_stats = collect_mesh_stats(
+            field_order=numerical_config.order if numerical_config else 2,
+            problem_type=simulation_type,
+        )
 
         # Save mesh
         gmsh.option.setNumber("Mesh.Binary", 0)
@@ -1462,6 +1654,7 @@ def generate_mesh(
         config_path=config_path,
         port_info=port_info,
         mesh_stats=mesh_stats,
+        metadata=write_metadata(mesh_stats, output_dir, config_path),
         groups=groups,
         output_dir=output_dir,
         model_name=model_name,

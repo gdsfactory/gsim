@@ -478,7 +478,7 @@ class TestValidationErrors:
         sim.set_output_dir(str(tmp_path / "test"))
         sim.set_geometry(_make_cpw_component())
         sim.set_stack(air_above=300.0)
-        sim.set_eigenmode(num_modes=5)
+        sim.set_eigenmode(num_modes=5, target=5e9)
         result = sim.validate_config()
         assert result.valid, f"Validation failed: {result}"
 
@@ -570,11 +570,11 @@ class TestNumericalConfig:
         config = json.loads(config_path.read_text())
 
         linear = config["Solver"]["Linear"]
-        assert linear["Type"] == "Default"
+        assert linear["Type"] == "AMS"
         assert linear["KSPType"] == "GMRES"
         assert linear["Tol"] == 2e-7
         assert linear["MaxIts"] == 777
-        assert linear["Preconditioner"] == "AMS"
+        assert "Preconditioner" not in linear
         assert config["Solver"]["Order"] == 3
         assert config["Solver"]["Device"] == "CPU"
 

@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 def resolve_physical_groups(
     source: str | Path,
     group_names: Sequence[str],
+    *,
+    dimension: int | None = None,
 ) -> list[int]:
     """Resolve physical group names to Palace attribute values.
 
@@ -27,10 +29,12 @@ def resolve_physical_groups(
     numeric attribute values corresponding to the requested group names.
 
     Args:
-        source: Path to the simulation output directory (containing
-            ``palace.msh``) or directly to the ``.msh`` file.
+        source: Simulation directory, local ``output/palace`` directory,
+            downloaded cloud ``output`` directory, or a ``.msh`` file.
+            Cloud meshes are read from the corresponding ``input`` directory.
         group_names: Physical group names to resolve (e.g.
             ``["n_rib", "p_rib", "slab90"]``).
+        dimension: Restrict matches to this Gmsh physical-group dimension.
 
     Returns:
         List of attribute values (integer tags) to use for cell filtering
@@ -40,7 +44,16 @@ def resolve_physical_groups(
 
     path = Path(source)
     if path.suffix != ".msh":
-        path = path / "palace.msh"
+        mesh_roots = [path, path / "input"]
+        if path.name == "output":
+            mesh_roots.append(path.parent / "input")
+        elif path.name == "palace" and path.parent.name == "output":
+            mesh_roots.append(path.parent.parent)
+        candidates = [root / "palace.msh" for root in mesh_roots]
+        path = next(
+            (candidate for candidate in candidates if candidate.is_file()),
+            candidates[0],
+        )
     if not path.exists():
         msg = f"Mesh file not found: {path}"
         raise FileNotFoundError(msg)
@@ -50,18 +63,21 @@ def resolve_physical_groups(
         msg = f"No physical groups found in mesh: {path}"
         raise ValueError(msg)
 
-    requested = set(group_names)
-    found: list[int] = []
-    missing = set(requested)
-    for name, (tag, _dim) in m.field_data.items():
-        if name in requested:
-            found.append(int(tag))
-            missing.discard(name)
+    found = {
+        name: int(tag)
+        for name, (tag, dim) in m.field_data.items()
+        if dimension is None or int(dim) == dimension
+    }
+    missing = set(group_names) - found.keys()
     if missing:
-        available = sorted(m.field_data.keys())
-        msg = f"Physical group(s) not found: {sorted(missing)}. Available: {available}"
+        suffix = f" with dimension {dimension}" if dimension is not None else ""
+        available = sorted(found)
+        msg = (
+            f"Physical group(s) not found{suffix}: {sorted(missing)}. "
+            f"Available: {available}"
+        )
         raise ValueError(msg)
-    return found
+    return [found[name] for name in group_names]
 
 
 Axis = Literal["x", "y", "z"]

@@ -18,13 +18,14 @@ from __future__ import annotations
 from gsim.palace.models.cross_section import CrossSectionPlaneConfig
 from gsim.palace.models.geometry import GeometryConfig
 from gsim.palace.models.mesh import MeshConfig
-from gsim.palace.models.numerical import NumericalConfig
+from gsim.palace.models.numerical import NumericalConfig, RefinementConfig
 from gsim.palace.models.pec import PECBlockConfig
 from gsim.palace.models.ports import (
     CPWPortConfig,
     ImpedanceBoundaryConfig,
     PortConfig,
     TerminalConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 from gsim.palace.models.problems import (
@@ -53,9 +54,11 @@ __all__ = [
     "NumericalConfig",
     "PECBlockConfig",
     "PortConfig",
+    "RefinementConfig",
     "SimulationResult",
     "TerminalConfig",
     "TransientConfig",
+    "TwoTerminalPortConfig",
     "ValidationResult",
     "WavePortConfig",
 ]

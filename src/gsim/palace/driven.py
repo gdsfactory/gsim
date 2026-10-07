@@ -20,6 +20,8 @@ from gsim.palace.models import (
     MeshConfig,
     NumericalConfig,
     PortConfig,
+    RefinementConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 
@@ -74,6 +76,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: None = None
 
     # Driven simulation config
@@ -87,6 +90,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     # Material overrides and numerical config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)

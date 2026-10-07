@@ -6,6 +6,9 @@ import builtins
 import json
 from types import SimpleNamespace
 
+import gmsh
+import pytest
+
 from gsim.common import Layer, LayerStack
 from gsim.palace.mesh import generator as mesh_generator
 from gsim.palace.mesh.config_generator import generate_palace_config
@@ -185,7 +188,9 @@ def test_generate_mesh_forwards_curve_fit_and_decimation(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         mesh_generator, "_setup_mesh_fields", lambda *_args, **_kwargs: None
     )
-    monkeypatch.setattr(mesh_generator, "collect_mesh_stats", lambda: {"nodes": 1})
+    monkeypatch.setattr(
+        mesh_generator, "collect_mesh_stats", lambda **_kwargs: {"nodes": 1}
+    )
 
     stack = LayerStack()
     result = mesh_generator.generate_mesh(
@@ -381,65 +386,34 @@ def test_add_metals_forwards_curve_fit_for_selected_conductor_layers(
             assert call["corner_turn_threshold_deg"] == 30.0
 
 
-class _FakeMeshOpsForStats:
-    """Minimal gmsh mesh stub returning high-order tetrahedra."""
-
-    def getNodes(self):  # noqa: N802 (gmsh API)
-        return ([1, 2, 3, 4, 5, 6], [[0.0, 0.0, 0.0]] * 6, [])
-
-    def getElements(self):  # noqa: N802 (gmsh API)
-        element_types = [2, 11]
-        element_tags = [[10, 11, 12], [100, 101]]
-        return (element_types, element_tags, [])
-
-    def getElementProperties(self, etype):  # noqa: N802 (gmsh API)
-        return {2: ("Triangle 6",), 11: ("Tetrahedron 10",)}[int(etype)]
-
-    def getElementQualities(self, tags, metric):  # noqa: N802 (gmsh API)
-        _ = metric
-        return [0.5 for _ in tags]
-
-
-class _FakeModelForStats:
-    """Minimal gmsh model stub for collect_mesh_stats."""
-
-    def __init__(self) -> None:
-        self.mesh = _FakeMeshOpsForStats()
-
-    def getBoundingBox(self, *_args):  # noqa: N802 (gmsh API)
-        return (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-
-    def getPhysicalGroups(self):  # noqa: N802 (gmsh API)
-        return []
-
-
-class _FakeGmshForStats:
-    def __init__(self) -> None:
-        self.model = _FakeModelForStats()
-
-
-def test_collect_mesh_stats_handles_high_order_tetrahedra(monkeypatch) -> None:
-    """10-node tetrahedra are counted and quality metrics still reported."""
+@pytest.mark.parametrize(("geometry_order", "element_type"), [(1, 4), (2, 11), (3, 29)])
+def test_collect_mesh_stats_handles_high_order_tetrahedra(
+    geometry_order, element_type
+) -> None:
+    """Tetrahedra of every order retain quality and field DOF statistics."""
     from gsim.palace.mesh import config_generator
 
-    monkeypatch.setattr(config_generator, "gmsh", _FakeGmshForStats())
+    gmsh.initialize()
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("high_order_stats")
+        gmsh.model.occ.addBox(0, 0, 0, 1, 1, 1)
+        gmsh.model.occ.synchronize()
+        gmsh.option.setNumber("Mesh.MeshSizeMin", 0.5)
+        gmsh.option.setNumber("Mesh.MeshSizeMax", 0.5)
+        gmsh.model.mesh.generate(3)
+        linear_stats = config_generator.collect_mesh_stats(field_order=3)
+        gmsh.model.mesh.setOrder(geometry_order)
 
-    stats = config_generator.collect_mesh_stats()
+        stats = config_generator.collect_mesh_stats(field_order=3)
 
-    assert stats["nodes"] == 6
-    assert stats["elements"] == 5
-    assert stats["tetrahedra"] == 2
-    assert stats["element_type"] == 11
-    assert stats["quality"]["mean"] == 0.5
-    assert stats["sicn"]["invalid"] == 0
-    assert stats["edge_length"]["min"] == 0.5
-
-
-def test_is_tetrahedron_recognizes_all_orders(monkeypatch) -> None:
-    """Linear and high-order gmsh tetra codes are recognized."""
-    from gsim.palace.mesh import config_generator
-
-    monkeypatch.setattr(config_generator, "gmsh", _FakeGmshForStats())
-    assert config_generator._is_tetrahedron(4) is True
-    assert config_generator._is_tetrahedron(11) is True
-    assert config_generator._is_tetrahedron(2) is False
+        assert stats["tetrahedra"] == linear_stats["tetrahedra"] > 0
+        assert stats["element_type"] == element_type
+        assert stats["geometry_orders"] == [geometry_order]
+        assert stats["quality"]["mean"] > 0
+        assert stats["sicn"]["invalid"] == 0
+        assert stats["edge_length"]["min"] > 0
+        assert stats["topology"] == linear_stats["topology"]
+        assert stats["field_dofs"] == linear_stats["field_dofs"]
+    finally:
+        gmsh.finalize()

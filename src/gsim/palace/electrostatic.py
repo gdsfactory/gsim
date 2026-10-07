@@ -8,19 +8,24 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
+from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.models import (
     ElectrostaticConfig,
     MaterialConfig,
     NumericalConfig,
+    RefinementConfig,
     TerminalConfig,
     WavePortConfig,
 )
+
+if TYPE_CHECKING:
+    from gsim.palace.mesh.nets import Nets
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +70,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     driven: None = None
     ports: None = None
     cpw_ports: None = None
+    two_terminal_ports: None = None
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
     # Composed objects (from common)
     geometry: Geometry | None = None
@@ -81,6 +87,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Material overrides and numerical config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -124,6 +131,37 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             )
         )
 
+    def nets(self) -> Nets:
+        """Find the electrically connected conductor shapes of the geometry.
+
+        Metal that touches on one layer, and metal on different layers that a
+        via joins, is one net; disconnected electrodes stay separate even when
+        they share a layer. Electrical ports name the nets they sit on.
+
+        A terminal still selects every shape on its layer, so two disconnected
+        electrodes on one layer end up as a single terminal (gsim#273). This
+        shows how many electrodes each layer holds.
+
+        Returns:
+            The nets, in the order their first shape appears in the layout.
+
+        Raises:
+            ValueError: If no geometry has been set.
+
+        Example:
+            >>> print(sim.nets())
+        """
+        from gsim.palace.mesh.geometry import extract_geometry
+        from gsim.palace.mesh.nets import extract_nets
+
+        component = self.component
+        if component is None:
+            msg = "No component set. Call set_geometry(component) first."
+            raise ValueError(msg)
+        stack = self._resolve_stack()
+        ports = [port for port in component.ports if port.port_type == "electrical"]
+        return extract_nets(extract_geometry(component, stack), stack, ports)
+
     # -------------------------------------------------------------------------
     # Electrostatic configuration
     # -------------------------------------------------------------------------
@@ -143,6 +181,36 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         """
         self.electrostatic = ElectrostaticConfig(
             save_fields=save_fields,
+        )
+
+    # -------------------------------------------------------------------------
+    # Results
+    # -------------------------------------------------------------------------
+
+    def load_capacitance(
+        self, results: dict[str, Path] | str | Path
+    ) -> CapacitanceMatrices:
+        """Load the capacitance matrices of a run, labelled with the terminals.
+
+        The terminal names are the ones given to :meth:`add_terminal`, in the
+        order they were added, which is Palace's terminal order.
+
+        Args:
+            results: The results dict that ``run()`` returns, or the output
+                directory of the simulation.
+
+        Returns:
+            The Maxwell and mutual capacitance matrices, with checks; see
+            :class:`~gsim.palace.capacitance.CapacitanceMatrices`.
+
+        Example:
+            >>> cap = sim.load_capacitance(sim.run())
+            >>> cap.between("T1", "T2")  # plate to plate, in F
+            >>> cap.to_ground("T1")  # to the substrate, in F
+            >>> assert not cap.problems()
+        """
+        return load_capacitance(
+            results, terminal_names=[terminal.name for terminal in self.terminals]
         )
 
 

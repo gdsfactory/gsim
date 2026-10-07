@@ -6,7 +6,7 @@ electromagnetic simulations using the Palace solver with gdsfactory components.
 Features:
     - Problem-specific simulation classes (DrivenSim, EigenmodeSim, ElectrostaticSim)
     - Layer stack extraction from PDK
-    - Port configuration (inplane, via, CPW)
+    - Lumped-port geometry (inplane, gap, interlayer, CPW)
     - Mesh generation with quality presets
     - Palace config file generation
 
@@ -55,6 +55,9 @@ from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
 from gsim.palace.boundarymode import BoundaryModeSim
+
+# Capacitance matrices of electrostatic runs
+from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
@@ -93,6 +96,8 @@ from gsim.palace.mesh import (
     MeshResult,
     generate_mesh,
 )
+from gsim.palace.mesh.nets import Net, Nets, extract_nets
+from gsim.palace.mesh.validation import check_lumped_port_contact
 
 # Models (new submodule)
 from gsim.palace.models import (
@@ -111,6 +116,7 @@ from gsim.palace.models import (
     SimulationResult,
     TerminalConfig,
     TransientConfig,
+    TwoTerminalPortConfig,
     ValidationResult,
     WavePortConfig,
 )
@@ -122,10 +128,14 @@ from gsim.palace.ports import (
     PortGeometry,
     PortType,
     configure_cpw_port,
+    configure_gap_port,
     configure_inplane_port,
+    configure_interlayer_port,
+    configure_two_terminal_port,
     configure_via_port,
     extract_ports,
 )
+from gsim.palace.postprocessing import add_domain_energy_postprocessing
 
 # Results utilities
 from gsim.palace.results import (
@@ -133,7 +143,9 @@ from gsim.palace.results import (
     SParams,
     get_port_map,
     load_fields,
+    load_refinement_history,
     load_sparams,
+    refinement_convergence,
 )
 
 # Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
@@ -158,6 +170,7 @@ __all__ = [
     "BoundaryModeConfig",
     "BoundaryModeSim",
     "CPWPortConfig",
+    "CapacitanceMatrices",
     "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSim",
@@ -174,6 +187,8 @@ __all__ = [
     "MaterialProperties",
     "MeshConfig",
     "MeshResult",
+    "Net",
+    "Nets",
     "NumericalConfig",
     "PECBlockConfig",
     "PalacePort",
@@ -188,20 +203,27 @@ __all__ = [
     "StackLayer",
     "TerminalConfig",
     "TransientConfig",
+    "TwoTerminalPortConfig",
     "ValidationResult",
     "VolumeFieldData",
     "WavePortConfig",
     "activate_vector_component",
+    "add_domain_energy_postprocessing",
     "build_selector_context",
+    "check_lumped_port_contact",
     "close_interactive_view",
     "close_interactive_views",
     "configure_cpw_port",
+    "configure_gap_port",
     "configure_inplane_port",
+    "configure_interlayer_port",
+    "configure_two_terminal_port",
     "configure_via_port",
     "extract_axis_slice",
     "extract_boundary_cells",
     "extract_from_pdk",
     "extract_layer_stack",
+    "extract_nets",
     "extract_plane_slice",
     "extract_ports",
     "extract_slice_contours",
@@ -213,8 +235,10 @@ __all__ = [
     "install_palace_runtime",
     "interactive_mode",
     "load_boundary_field_data",
+    "load_capacitance",
     "load_field_context",
     "load_fields",
+    "load_refinement_history",
     "load_sparams",
     "load_stack_yaml",
     "load_volume_field_data",
@@ -230,6 +254,7 @@ __all__ = [
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "refinement_convergence",
     "resolve_boundary_type_attributes",
     "resolve_entity_attributes",
     "resolve_palace_binary",

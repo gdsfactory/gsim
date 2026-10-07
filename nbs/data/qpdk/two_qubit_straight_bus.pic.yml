@@ -1,0 +1,116 @@
+# Two-qubit, straight-bus variant of QPDK's qubit_test_chip.pic.yml.
+# https://github.com/gdsfactory/quantum-rf-pdk/tree/main/qpdk/samples
+instances:
+  input_cap1:
+    component: interdigital_capacitor
+    settings: {}
+  input_cap2:
+    component: interdigital_capacitor
+    settings: {}
+  launcher_in:
+    component: launcher
+    settings: {}
+  launcher_out:
+    component: launcher
+    settings: {}
+  launcher_top:
+    component: launcher
+    settings: {}
+  qubit1:
+    component: transmon_with_resonator_and_probeline
+    settings:
+      resonator_length: 5000
+  qubit2:
+    component: transmon_with_resonator_and_probeline
+    settings:
+      resonator_length: 4600
+      resonator_meanders: 3
+      probeline_coupling_length: 400
+  tee_top:
+    component: tee
+    settings: {}
+  tee_top_straight_1:
+    component: straight_open
+    settings: {}
+  tee_top_straight_2:
+    component: straight_open
+    settings: {}
+connections:
+  tee_top_straight_1,o1: tee_top,o1
+  tee_top_straight_2,o1: tee_top,o3
+routes:
+  flux_line_top:
+    links:
+      tee_top,o2: launcher_top,o1
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+  probeline_cap1_to_qubit1:
+    links:
+      input_cap1,o2: qubit1,coupling_o1
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+  probeline_input:
+    links:
+      launcher_in,o1: input_cap1,o1
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+  probeline_output:
+    links:
+      input_cap2,o1: launcher_out,o1
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+  probeline_qubit1_to_qubit2:
+    links:
+      qubit1,coupling_o2: qubit2,coupling_o1
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+  probeline_qubit2_to_cap2:
+    links:
+      qubit2,coupling_o2: input_cap2,o2
+    routing_strategy: route_bundle_cpw
+    settings:
+      auto_taper: false
+nets: []
+ports:
+  o1: launcher_in,waveport
+  o2: launcher_out,waveport
+placements:
+  input_cap1:
+    x: 800.0
+    y: 399.0
+  input_cap2:
+    x: 4315.0
+    y: 399.0
+    rotation: 180
+  launcher_in:
+    x: 0.0
+    y: 399.0
+  launcher_out:
+    x: 5115.0
+    y: 399.0
+    rotation: 180
+  launcher_top:
+    x: 3000
+    y: 3000
+    rotation: -90
+  qubit1:
+    x: 0
+    y: 0
+    dx: 2385
+    dy: 1625
+    rotation: 0
+  qubit2:
+    x: 0.0
+    y: 0.0
+    dx: 3615.0
+    dy: 1625.0
+    rotation: 0
+  tee_top:
+    x: 3000
+    y: 1775
+    rotation: 0

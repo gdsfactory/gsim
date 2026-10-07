@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import logging
 import math
 from itertools import pairwise
@@ -891,6 +893,8 @@ def setup_mesh_refinement(
     sampling: int = 200,
     dist_min: float = 0.0,
     dist_max: float | None = None,
+    distance_id: int = 1,
+    threshold_id: int = 2,
 ) -> int:
     """Set up mesh refinement near boundary lines.
 
@@ -901,28 +905,30 @@ def setup_mesh_refinement(
         sampling: Number of sample points for Distance field evaluation
         dist_min: Distance where SizeMin applies
         dist_max: Distance where SizeMax applies (defaults to max_cellsize)
+        distance_id: Field ID for the Distance field
+        threshold_id: Field ID for the Threshold field
 
     Returns:
         Field ID for the minimum field
     """
     # Distance field from boundary curves
-    gmsh.model.mesh.field.add("Distance", 1)
-    gmsh.model.mesh.field.setNumbers(1, "CurvesList", boundary_line_tags)
-    gmsh.model.mesh.field.setNumber(1, "Sampling", int(sampling))
+    gmsh.model.mesh.field.add("Distance", distance_id)
+    gmsh.model.mesh.field.setNumbers(distance_id, "CurvesList", boundary_line_tags)
+    gmsh.model.mesh.field.setNumber(distance_id, "Sampling", int(sampling))
 
     # Threshold field for gradual size transition
-    gmsh.model.mesh.field.add("Threshold", 2)
-    gmsh.model.mesh.field.setNumber(2, "InField", 1)
-    gmsh.model.mesh.field.setNumber(2, "SizeMin", refined_cellsize)
-    gmsh.model.mesh.field.setNumber(2, "SizeMax", max_cellsize)
-    gmsh.model.mesh.field.setNumber(2, "DistMin", dist_min)
+    gmsh.model.mesh.field.add("Threshold", threshold_id)
+    gmsh.model.mesh.field.setNumber(threshold_id, "InField", distance_id)
+    gmsh.model.mesh.field.setNumber(threshold_id, "SizeMin", refined_cellsize)
+    gmsh.model.mesh.field.setNumber(threshold_id, "SizeMax", max_cellsize)
+    gmsh.model.mesh.field.setNumber(threshold_id, "DistMin", dist_min)
     gmsh.model.mesh.field.setNumber(
-        2,
+        threshold_id,
         "DistMax",
         max_cellsize if dist_max is None else float(dist_max),
     )
 
-    return 2
+    return threshold_id
 
 
 def setup_box_refinement(
@@ -1191,3 +1197,133 @@ def set_periodic_mesh(
         "receiver_phys_groups": [receiver_pg] if receiver_pg > 0 else [],
         "direction": direction,
     }
+
+
+# ---------------------------------------------------------------------------
+# Mesh identity: a hash that ignores numbering, and the options that shaped it
+# ---------------------------------------------------------------------------
+
+# Gmsh options that decide which mesh comes out. They are recorded next to the
+# mesh hash so a hash can be read together with the settings behind it.
+_RECORDED_OPTIONS = (
+    "General.NumThreads",
+    "Mesh.MaxNumThreads1D",
+    "Mesh.MaxNumThreads2D",
+    "Mesh.MaxNumThreads3D",
+    "Mesh.Algorithm",
+    "Mesh.Algorithm3D",
+    "Mesh.Reproducible",
+    "Mesh.RandomSeed",
+    "Mesh.RandomFactor",
+    "Mesh.MeshSizeMin",
+    "Mesh.MeshSizeMax",
+    "Mesh.MeshSizeFromPoints",
+    "Mesh.MeshSizeFromCurvature",
+    "Mesh.MeshSizeExtendFromBoundary",
+    "Mesh.ElementOrder",
+    "Mesh.SecondOrderLinear",
+    "Mesh.Optimize",
+)
+
+# Node positions are compared to this resolution, in um: far below any physical
+# feature, and far above the floating-point noise that different hosts add to
+# the same mesh.
+MESH_HASH_RESOLUTION_UM = 1e-4
+
+
+def gmsh_options() -> dict[str, float]:
+    """Return the effective value of the Gmsh options that shape the mesh.
+
+    Options that the installed Gmsh does not have are left out.
+    """
+    options: dict[str, float] = {}
+    for name in _RECORDED_OPTIONS:
+        with contextlib.suppress(Exception):
+            options[name] = gmsh.option.getNumber(name)
+    return options
+
+
+def _mix64(x: np.ndarray) -> np.ndarray:
+    """Scramble a uint64 array (the SplitMix64 finalizer); wraps modulo 2**64."""
+    x = x + np.uint64(0x9E3779B97F4A7C15)
+    x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return x ^ (x >> np.uint64(31))
+
+
+def mesh_hash(resolution_um: float = MESH_HASH_RESOLUTION_UM) -> str | None:
+    """Hash the current Gmsh mesh, ignoring how nodes and elements are numbered.
+
+    Gmsh does not keep node or element IDs fixed from run to run, so a hash of
+    the ``.msh`` file cannot tell "the same mesh, renumbered" from "a different
+    mesh". This hash is built from what Palace reads instead: where the nodes
+    are, which nodes make up each element, and which physical group each
+    element belongs to, identified by name.
+
+    Each node is hashed from its position rounded to ``resolution_um``. Each
+    element is hashed from the set of its nodes, and the elements of each
+    (dimension, group name, element type) are sorted before the final hash, so
+    no ID and no element order enters it. Only elements in physical groups
+    count, as in the ``.msh`` file gsim writes.
+
+    Two meshes hash equal when their nodes fall in the same cells of a grid of
+    ``resolution_um`` and their groups hold the same elements. The order of the
+    nodes inside an element (its orientation) and the physical group tag numbers
+    are ignored.
+
+    The grid makes the hash blind to the floating-point noise that a host or a
+    file round trip adds to the coordinates, except when a coordinate lies
+    within that noise of a cell boundary. That happens with a probability of
+    about half the noise over the resolution per coordinate: for a noise of
+    1e-13 um and the default resolution, 5e-10, which is 0.15 % for a mesh of a
+    million nodes and 1.5 % for ten million. A hash that differs while the
+    element counts agree can therefore be this and not a different mesh; two
+    runs that are bit-for-bit the same always hash equal.
+
+    Node tags index a lookup table, so a mesh with huge node tags takes memory
+    in proportion to the largest one; the meshes gsim makes number their nodes
+    from 1.
+
+    Must be called while Gmsh is initialized and the mesh is generated. It also
+    works on a ``.msh`` file opened with ``gmsh.open()``: Gmsh writes 16
+    significant digits, far finer than the resolution, so the file gives the
+    hash that was recorded when it was meshed.
+
+    Args:
+        resolution_um: Node positions are compared to this resolution, in the
+            units of the model (um in gsim).
+
+    Returns:
+        ``"sha256:<hex>"``, or None when no element belongs to a physical group.
+    """
+    node_tags, coords, _ = gmsh.model.mesh.getNodes(returnParametricCoord=False)
+    if len(node_tags) == 0:
+        return None
+    grid = np.rint(coords.reshape(-1, 3) / resolution_um).astype(np.int64)
+    grid = grid.view(np.uint64)
+    node_hash = _mix64(grid[:, 0] ^ _mix64(grid[:, 1] ^ _mix64(grid[:, 2])))
+    row_of_tag = np.empty(int(node_tags.max()) + 1, dtype=np.int64)
+    row_of_tag[node_tags.astype(np.int64)] = np.arange(len(node_tags))
+
+    blocks: dict[tuple[int, str, int], list[np.ndarray]] = {}
+    for dim, group in gmsh.model.getPhysicalGroups():
+        name = gmsh.model.getPhysicalName(dim, group) or f"#{group}"
+        for entity in gmsh.model.getEntitiesForPhysicalGroup(dim, group):
+            types, _, nodes_by_type = gmsh.model.mesh.getElements(dim, entity)
+            for element_type, nodes in zip(types, nodes_by_type, strict=True):
+                per_element = gmsh.model.mesh.getElementProperties(element_type)[3]
+                hashes = node_hash[row_of_tag[nodes.astype(np.int64)]]
+                # The node hashes are already scrambled, so their sum modulo
+                # 2**64 identifies the set of nodes of an element.
+                blocks.setdefault((dim, name, int(element_type)), []).append(
+                    hashes.reshape(-1, per_element).sum(axis=1, dtype=np.uint64)
+                )
+    if not blocks:
+        return None
+
+    digest = hashlib.sha256(f"gsim-mesh-hash-v1|{resolution_um!r}|".encode())
+    for key in sorted(blocks):
+        elements = np.sort(np.concatenate(blocks[key]))
+        digest.update("|".join(map(str, (*key, len(elements)))).encode() + b"|")
+        digest.update(elements.astype("<u8").tobytes())
+    return f"sha256:{digest.hexdigest()}"

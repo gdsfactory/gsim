@@ -19,6 +19,8 @@ from gsim.palace.mesh.geometry import (
     add_ports,
     get_layer_info,
     get_layer_infos,
+    resolve_dielectric_regions,
+    resolve_mesh_domain_bounds,
 )
 from gsim.palace.ports.config import PalacePort, PortGeometry, PortType
 
@@ -288,6 +290,41 @@ def test_add_ports_waveport_max_size_uses_3d_domain_bounds(monkeypatch) -> None:
     assert port_info[0]["zmax"] == 40.0
     assert port_info[0]["ymin"] == -60.0
     assert port_info[0]["ymax"] == 80.0
+
+
+def test_domain_bounds_match_airbox_when_layer_exceeds_dielectrics() -> None:
+    """max_size ports must be clipped to the actual meshed airbox.
+
+    Regression: gpdk defines ``box``/``undercut`` layers down to z=-3 while the
+    only dielectric (``oxide``) starts at z=-2. Including the raw layer extent
+    in the port domain bounds pushed the wave-port surface 1 um below the
+    meshed volume, producing orphan boundary faces and an MFEM abort.
+    """
+    geometry = GeometryData(polygons=[], bbox=(0.0, 0.0, 10.0, 20.0), layer_bboxes={})
+    stack = LayerStack(
+        dielectrics=[{"name": "oxide", "zmin": -2.0, "zmax": 5.2, "material": "sio2"}],
+        layers={"box": _mk_layer("box", -3.0, 0.0, "dielectric")},
+        materials={"sio2": {"type": "dielectric", "permittivity": 3.9}},
+    )
+    kwargs = {
+        "margin_x": 0.0,
+        "margin_y": 50.0,
+        "airbox_z_above": 100.0,
+        "airbox_z_below": 100.0,
+    }
+
+    bounds = resolve_mesh_domain_bounds(geometry, stack, **kwargs)
+    airbox = next(
+        region
+        for region in resolve_dielectric_regions(geometry, stack, **kwargs)
+        if region.material == "airbox"
+    )
+
+    assert bounds[2] == pytest.approx(airbox.zmin)
+    assert bounds[5] == pytest.approx(airbox.zmax)
+    # The z=-3 layer must not drag the domain below the oxide envelope (-2).
+    assert bounds[2] == pytest.approx(-102.0)
+    assert bounds[5] == pytest.approx(105.2)
 
 
 def _mk_layer(

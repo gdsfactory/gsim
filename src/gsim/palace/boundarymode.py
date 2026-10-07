@@ -17,7 +17,9 @@ from gsim.palace.models import (
     MeshConfig,
     NumericalConfig,
     PortConfig,
+    RefinementConfig,
     TerminalConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 from gsim.palace.models.results import ValidationResult
@@ -51,12 +53,14 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: list[TerminalConfig] = Field(default_factory=list)
 
     # Mesh and solver config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     absorbing_boundary: bool = False
 
     # Stack configuration (stored as kwargs until resolved)
@@ -135,10 +139,10 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
                 "Use set_cross_section('x=<value>') or set_cross_section('y=<value>')."
             )
 
-        if self.ports or self.cpw_ports or self.wave_ports:
+        if self.wave_ports:
             errors.append(
                 "Boundary mode uses cross_section-only native 2D meshing. "
-                "add_port(), add_cpw_port(), and add_wave_port() are not supported."
+                "add_wave_port() is not supported."
             )
 
         return ValidationResult(

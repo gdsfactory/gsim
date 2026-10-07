@@ -21,6 +21,8 @@ from gsim.palace.models import (
     MaterialConfig,
     NumericalConfig,
     PortConfig,
+    RefinementConfig,
+    TwoTerminalPortConfig,
     WavePortConfig,
 )
 
@@ -74,6 +76,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Port configurations (eigenmode can have ports for Q-factor calculation)
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
+    two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
 
     # Eigenmode simulation config
     eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
@@ -81,6 +84,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Material overrides and numerical config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -144,7 +148,8 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
 
         Args:
             num_modes: Number of modes to find
-            target: Target frequency in Hz for mode search
+            target: Positive target frequency in Hz for mode search.
+                Required before meshing or exporting the configuration.
             tolerance: Eigenvalue solver tolerance
             save: Number of eigenmodes to save as ParaView fields (0 = disabled)
             floquet: Enable Floquet periodic boundary setup in config generation
