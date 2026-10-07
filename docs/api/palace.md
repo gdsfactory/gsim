@@ -84,6 +84,25 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 
 Calling `set_numerical()` without an explicit order now uses **2**, matching the
 constructor and `set_solver()`. Pass `order=1` to retain the previous setter behavior.
+Such calls emit a temporary `FutureWarning` explaining this change. Explicit-order
+calls emit the usual API deprecation warning. The new grouped API emits neither.
+
+Update individual controls directly to preserve other settings:
+
+```python
+sim.solver.order = 1
+sim.solver.linear.tolerance = 1e-8
+```
+
+`sim.set_solver(...)` replaces the common controls with the supplied values and
+their defaults, preserving the existing problem group, such as the eigenmode
+target. Assigning `sim.solver = ...` replaces the entire solver configuration,
+including its problem group; a new eigenmode group defaults to `target=None`.
+
+`sim.numerical` is a deprecated alias for `sim.solver`, so its `model_dump()` uses
+the grouped format. `NumericalConfig(**sim.numerical.model_dump())` accepts that
+format and copies the six common numerical controls into a flat legacy model.
+For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings.
 
 ::: gsim.palace.SolverConfig
     options:

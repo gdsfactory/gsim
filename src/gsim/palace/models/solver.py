@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import warnings
+from pathlib import Path
 from typing import Any, Literal
 
+import pydantic
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gsim.palace.models.problems import (
@@ -14,13 +17,24 @@ from gsim.palace.models.problems import (
     ElectrostaticConfig,
 )
 
+_WARNING_SKIP_PREFIXES = (
+    str(Path(__file__).resolve().parents[2]) + os.sep,
+    str(Path(pydantic.__file__).resolve().parent) + os.sep,
+)
 
-def warn_legacy_solver_setting(previous: str, replacement: str) -> None:
+
+def warn_legacy_solver_setting(
+    previous: str,
+    replacement: str,
+    *,
+    detail: str = "",
+    category: type[Warning] = DeprecationWarning,
+) -> None:
     """Warn at the caller of a legacy solver accessor or setter."""
     warnings.warn(
-        f"{previous} is deprecated; use {replacement} instead.",
-        DeprecationWarning,
-        stacklevel=3,
+        f"{previous} is deprecated; use {replacement} instead. {detail}".rstrip(),
+        category,
+        skip_file_prefixes=_WARNING_SKIP_PREFIXES,
     )
 
 

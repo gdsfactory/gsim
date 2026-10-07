@@ -8,7 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gsim.palace.models.solver import (
     LinearSolverConfig,
@@ -41,6 +41,19 @@ class NumericalConfig(BaseModel):
         """Construct legacy settings and warn about their replacement."""
         warn_legacy_solver_setting("NumericalConfig", "SolverConfig")
         super().__init__(**data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_grouped_linear_settings(cls, values: Any) -> Any:
+        """Retain numerical values when copying a grouped solver dump."""
+        if not isinstance(values, dict) or "linear" not in values:
+            return values
+        values = values.copy()
+        linear = LinearSolverConfig.model_validate(values.pop("linear"))
+        linear_values = linear.model_dump(exclude_unset=True)
+        if overlap := values.keys() & linear_values.keys():
+            raise ValueError(f"Linear settings supplied twice: {sorted(overlap)}")
+        return {**values, **linear_values}
 
     def to_linear_solver_config(self) -> dict[str, object]:
         """Convert to the legacy Palace ``Solver.Linear`` block."""

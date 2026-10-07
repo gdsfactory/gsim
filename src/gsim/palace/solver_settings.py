@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
@@ -21,6 +22,12 @@ from gsim.palace.models.solver import (
 
 _DEFAULT_SOLVER = SolverConfig()
 _PROBLEM_GROUPS = ("driven", "eigenmode", "electrostatic", "boundary_mode")
+
+
+class _UnsetOrder(Enum):
+    """Distinguish an omitted legacy order from an explicit choice."""
+
+    DEFAULT = "default"
 
 
 class SolverSettingsMixin:
@@ -100,7 +107,7 @@ class SolverSettingsMixin:
     def set_numerical(
         self,
         *,
-        order: int = _DEFAULT_SOLVER.order,
+        order: int | _UnsetOrder = _UnsetOrder.DEFAULT,
         tolerance: float = _DEFAULT_SOLVER.linear.tolerance,
         max_iterations: int = _DEFAULT_SOLVER.linear.max_iterations,
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = (
@@ -111,8 +118,25 @@ class SolverSettingsMixin:
         ),
         device: Literal["CPU", "GPU"] = _DEFAULT_SOLVER.device,
     ) -> None:
-        """Deprecated alias for set_solver, with the same order-2 defaults."""
-        warn_legacy_solver_setting("set_numerical()", "set_solver()")
+        """Deprecated alias for set_solver, with the same order-2 defaults.
+
+        Omitting order emits a visible migration warning because this setter
+        previously defaulted to order 1. Pass order=1 to retain that behavior.
+        """
+        if isinstance(order, _UnsetOrder):
+            # Temporary notice for the changed default in the legacy setter.
+            warn_legacy_solver_setting(
+                "set_numerical()",
+                "set_solver()",
+                detail=(
+                    "Omitting order now uses order=2; previously it used order=1. "
+                    "Pass order=1 to preserve the previous field order."
+                ),
+                category=FutureWarning,
+            )
+            order = _DEFAULT_SOLVER.order
+        else:
+            warn_legacy_solver_setting("set_numerical()", "set_solver()")
         self.set_solver(
             order=order,
             tolerance=tolerance,

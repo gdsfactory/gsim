@@ -47,7 +47,6 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_terminal("T1", layer="topmetal2")
         >>> sim.add_terminal("T2", layer="topmetal2")
-        >>> sim.solver.electrostatic.save_fields = 0
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> results = sim.run()  # dict[str, Path]

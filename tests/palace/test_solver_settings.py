@@ -161,7 +161,7 @@ def test_legacy_settings_warn_with_replacements():
         sim = pa.EigenmodeSim.model_validate({"numerical": numerical})
     with pytest.warns(DeprecationWarning, match=r"sim.numerical.*sim.solver"):
         assert sim.numerical.order == 1
-    with pytest.warns(DeprecationWarning, match=r"set_numerical\(\).*set_solver\(\)"):
+    with pytest.warns(FutureWarning, match=r"set_numerical\(\).*set_solver\(\)"):
         sim.set_numerical()
     assert sim.solver.order == 2
     with pytest.warns(DeprecationWarning, match=r"sim.eigenmode.*sim.solver.eigenmode"):
