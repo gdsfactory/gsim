@@ -151,6 +151,42 @@ def _recommend_parallel(
     return max(1, recommended), num_threads
 
 
+# Printed by Palace's ``palace`` launcher script when its MPI launcher (``mpirun``
+# unless ``--launcher`` is given) is not on PATH.
+_MPI_LAUNCHER_MISSING = "Could not locate MPI launcher"
+_FAILURE_OUTPUT_TAIL_LINES = 200
+
+
+def _captured_lines(*streams: str | None) -> list[str]:
+    """Split captured process output into lines, skipping empty streams."""
+    lines: list[str] = []
+    for stream in streams:
+        if stream:
+            lines.extend(stream.splitlines())
+    return lines
+
+
+def _palace_failure_message(returncode: int, output_lines: list[str]) -> str:
+    """Describe a failed Palace run from its exit code and the end of its output.
+
+    When the output shows that the ``palace`` launcher script could not find
+    ``mpirun``, the message also says how to fix that.
+    """
+    message = f"Palace simulation failed with return code {returncode}"
+    tail = "\n".join(output_lines[-_FAILURE_OUTPUT_TAIL_LINES:])
+    if tail.strip():
+        message += f"\n\nOutput (tail):\n{tail}"
+    if any(_MPI_LAUNCHER_MISSING in line for line in output_lines):
+        message += (
+            "\n\nPalace's launcher script could not find `mpirun`. Install an MPI "
+            "runtime that provides it (for example `sudo apt install openmpi-bin` "
+            "on Ubuntu), or run with use_apptainer=True. The prebuilt Palace "
+            "runtime that gsim installs includes the MPI libraries but not "
+            "`mpirun`."
+        )
+    return message
+
+
 class PalaceSimMixin:
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -2696,22 +2732,26 @@ class PalaceSimMixin:
                     returncode = process.wait()
 
                 if returncode != 0:
-                    tail = "\n".join(streamed_lines[-200:])
-                    error_msg = (
-                        f"Palace simulation failed with return code {returncode}"
+                    raise RuntimeError(
+                        _palace_failure_message(returncode, streamed_lines)
                     )
-                    if tail:
-                        error_msg += f"\n\nOutput (tail):\n{tail}"
-                    raise RuntimeError(error_msg)
             else:
-                result = subprocess.run(  # noqa: S603
-                    cmd,
-                    cwd=output_dir,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    env=_run_env,
-                )
+                try:
+                    result = subprocess.run(  # noqa: S603
+                        cmd,
+                        cwd=output_dir,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=_run_env,
+                    )
+                except subprocess.CalledProcessError as e:
+                    # Same message as the verbose path: without the captured
+                    # output a failure only says "exit status 1".
+                    output_lines = _captured_lines(e.stdout, e.stderr)
+                    raise RuntimeError(
+                        _palace_failure_message(e.returncode, output_lines)
+                    ) from e
                 if result.stdout:
                     logger.debug(result.stdout)
                 if result.stderr:

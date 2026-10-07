@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import io
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Self, cast
+
+import pytest
 
 from gsim.palace import BoundaryModeSim, DrivenSim
 from gsim.palace.base import _recommend_parallel
@@ -363,3 +367,159 @@ def test_run_local_uses_bundled_resolver_before_path_fallback(monkeypatch, tmp_p
     assert isinstance(result, dict)
     assert Path(captured["cmd"][0]) == bundled
     assert captured["cwd"] == output_dir
+
+
+# What Palace's ``palace`` launcher script prints when ``mpirun`` is not on PATH.
+_LAUNCHER_ERROR = (
+    "Error: Could not locate MPI launcher, try specifying a value for --launcher"
+)
+
+
+class _FakePopen:
+    """Replays a finished Palace process for the verbose (streaming) path."""
+
+    def __init__(self, output: str, returncode: int) -> None:
+        self.stdout = io.StringIO(output)
+        self._returncode = returncode
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        return False
+
+    def wait(self) -> int:
+        return self._returncode
+
+
+def _failing_sim(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    verbose: bool,
+    returncode: int,
+    stdout: str | None,
+    stderr: str | None = "",
+) -> BoundaryModeSim:
+    """A configured sim whose next Palace launch exits with ``returncode``."""
+    _setup_local_palace(monkeypatch, tmp_path)
+    monkeypatch.delenv("PALACE_SIF", raising=False)
+    monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+    if verbose:
+        # The verbose path merges stderr into stdout, so replay one stream.
+        output = (stdout or "") + (stderr or "")
+        monkeypatch.setattr(
+            "subprocess.Popen", lambda *_args, **_kwargs: _FakePopen(output, returncode)
+        )
+    else:
+
+        def _fail(cmd, **_kwargs):
+            raise subprocess.CalledProcessError(
+                returncode, cmd, output=stdout, stderr=stderr
+            )
+
+        monkeypatch.setattr("subprocess.run", _fail)
+    sim = BoundaryModeSim()
+    sim._last_mesh_result = _mesh_result(50_000)
+    _setup_sim(sim, tmp_path / "sim")
+    return sim
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_run_local_explains_missing_mpi_launcher(monkeypatch, tmp_path, verbose):
+    """A missing mpirun is named and explained, not reported as a bare exit code."""
+    sim = _failing_sim(
+        monkeypatch,
+        tmp_path,
+        verbose=verbose,
+        returncode=1,
+        stdout=f"{_LAUNCHER_ERROR}\n",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        sim.run_local(verbose=verbose)
+
+    message = str(excinfo.value)
+    assert "return code 1" in message
+    assert _LAUNCHER_ERROR in message
+    assert "mpirun" in message
+    assert "openmpi-bin" in message
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_run_local_other_failures_get_no_mpi_hint(monkeypatch, tmp_path, verbose):
+    """Any other failure shows its output but no misleading MPI advice."""
+    sim = _failing_sim(
+        monkeypatch,
+        tmp_path,
+        verbose=verbose,
+        returncode=139,
+        stdout="Segmentation fault (core dumped)\n",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        sim.run_local(verbose=verbose)
+
+    message = str(excinfo.value)
+    assert "return code 139" in message
+    assert "Segmentation fault (core dumped)" in message
+    assert "openmpi-bin" not in message
+
+
+def test_run_local_quiet_failure_keeps_stderr_and_cause(monkeypatch, tmp_path):
+    """verbose=False raises RuntimeError with stderr, chained to the process error."""
+    sim = _failing_sim(
+        monkeypatch,
+        tmp_path,
+        verbose=False,
+        returncode=1,
+        stdout="",
+        stderr="MPI_ABORT was invoked on rank 0\n",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        sim.run_local(verbose=False)
+
+    assert "MPI_ABORT was invoked on rank 0" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, subprocess.CalledProcessError)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr"),
+    [(None, None), ("", ""), ("  \n\n", "")],
+    ids=["none", "empty", "blank"],
+)
+def test_run_local_quiet_failure_without_output(monkeypatch, tmp_path, stdout, stderr):
+    """No captured output gives just the exit code, with no empty sections."""
+    sim = _failing_sim(
+        monkeypatch,
+        tmp_path,
+        verbose=False,
+        returncode=2,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        sim.run_local(verbose=False)
+
+    assert str(excinfo.value) == "Palace simulation failed with return code 2"
+
+
+def test_run_local_failure_keeps_only_the_output_tail(monkeypatch, tmp_path):
+    """Long logs are cut to their last 200 lines, where the error usually is."""
+    sim = _failing_sim(
+        monkeypatch,
+        tmp_path,
+        verbose=False,
+        returncode=1,
+        stdout="\n".join(f"line {i}" for i in range(500)),
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        sim.run_local(verbose=False)
+
+    lines = str(excinfo.value).splitlines()
+    assert "line 300" in lines
+    assert "line 499" in lines
+    assert "line 299" not in lines
