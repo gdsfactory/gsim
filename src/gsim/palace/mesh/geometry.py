@@ -588,6 +588,11 @@ def add_metals(
     stack: LayerStack,
     planar_conductors: bool = False,
     merge_via_distance: float = 2.0,
+    curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
+    curve_fit_layers: list[str] | None = None,
+    curve_fit_tolerance_um: float = 0.0,
+    curve_fit_min_points: int = 8,
+    curve_fit_corner_angle_deg: float = 45.0,
 ) -> dict:
     """Add metal, via, and shaped-dielectric geometries to gmsh.
 
@@ -608,6 +613,17 @@ def add_metals(
         merge_via_distance: Max gap between vias to merge (um). Nearby
             via polygons within this distance are combined into a single
             polygon before meshing, drastically reducing mesh complexity.
+        curve_fit_mode: Boundary curve mode (line/spline/bspline). Applied
+            only to layers listed in ``curve_fit_layers``; other layers
+            keep straight-line boundaries.
+        curve_fit_layers: Layer names where spline/bspline fitting is
+            allowed. This covers conductor, via and shaped-dielectric
+            layers, so curved metal geometries (e.g. CPW bends) are
+            represented with analytic curves before meshing.
+        curve_fit_tolerance_um: Point merge tolerance before curve fitting.
+        curve_fit_min_points: Minimum contour points to attempt curve fitting.
+        curve_fit_corner_angle_deg: Turn-angle threshold for corner detection
+            during spline/bspline segmentation.
 
     Returns:
         Dict with layer_name -> {"volumes": [...], "surfaces_xy": [...],
@@ -617,6 +633,7 @@ def add_metals(
     """
     # layer_name -> {"volumes": [], "surfaces_xy": [], "surfaces_z": []}
     metal_tags: dict[str, dict[str, list]] = {}
+    curve_layers = set(curve_fit_layers or [])
     # Detect shaped-dielectric layers once (replaces thickness heuristic)
     shaped_dielectric_names = _detect_shaped_dielectric_layers(geometry, stack)
 
@@ -668,11 +685,27 @@ def add_metals(
             if layer_type == "via":
                 polys = _merge_via_polygons(polys, merge_via_distance)
 
-            # Create surfaces for all polygons on this layer
+            # Create surfaces for all polygons on this layer. Conductor, via
+            # and shaped-dielectric contours can be curve-fitted (spline /
+            # bspline) when their layer is selected, so curved metal edges
+            # (e.g. CPW bends) are represented analytically before meshing.
+            surface_loop_mode = (
+                curve_fit_mode
+                if curve_fit_mode != "line" and layer_name in curve_layers
+                else "line"
+            )
             surfaces = []
             for pts_x, pts_y, holes in polys:
                 surfacetag = gmsh_utils.create_polygon_surface(
-                    kernel, pts_x, pts_y, zmin, holes=holes
+                    kernel,
+                    pts_x,
+                    pts_y,
+                    zmin,
+                    holes=holes,
+                    loop_mode=surface_loop_mode,
+                    fit_tolerance_um=curve_fit_tolerance_um,
+                    min_points_for_curve_fit=curve_fit_min_points,
+                    corner_turn_threshold_deg=curve_fit_corner_angle_deg,
                 )
                 if surfacetag is not None:
                     surfaces.append(surfacetag)
@@ -734,7 +767,13 @@ def add_metals(
                 # gmsh explicit curves to refine around the metal perimeter.
                 for pts_x, pts_y, holes in polys:
                     loop_tag = gmsh_utils._create_wire_loop(  # noqa: SLF001
-                        kernel, list(pts_x), list(pts_y), zmin
+                        kernel,
+                        list(pts_x),
+                        list(pts_y),
+                        zmin,
+                        loop_mode=surface_loop_mode,
+                        point_merge_tol=curve_fit_tolerance_um,
+                        corner_turn_threshold_deg=curve_fit_corner_angle_deg,
                     )
                     if loop_tag is not None:
                         metal_tags[layer_name].setdefault(
@@ -742,7 +781,13 @@ def add_metals(
                         ).append(loop_tag)
                     for hx, hy in holes:
                         hole_loop = gmsh_utils._create_wire_loop(  # noqa: SLF001
-                            kernel, list(hx), list(hy), zmin
+                            kernel,
+                            list(hx),
+                            list(hy),
+                            zmin,
+                            loop_mode=surface_loop_mode,
+                            point_merge_tol=curve_fit_tolerance_um,
+                            corner_turn_threshold_deg=curve_fit_corner_angle_deg,
                         )
                         if hole_loop is not None:
                             metal_tags[layer_name].setdefault(
