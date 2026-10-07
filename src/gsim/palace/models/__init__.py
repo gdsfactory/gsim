@@ -8,7 +8,8 @@ Submodules:
     - stack: MaterialConfig (Layer/Stack are in gsim.common.stack)
     - ports: PortConfig, CPWPortConfig, TerminalConfig, WavePortConfig
     - mesh: MeshConfig
-    - numerical: NumericalConfig
+    - solver: SolverConfig, LinearSolverConfig and problem-specific subclasses
+    - numerical: NumericalConfig (deprecated compatibility model), RefinementConfig
     - problems: DrivenConfig, EigenmodeConfig, ElectrostaticConfig, etc.
     - results: SimulationResult, ValidationResult
 """
@@ -37,17 +38,30 @@ from gsim.palace.models.problems import (
     TransientConfig,
 )
 from gsim.palace.models.results import SimulationResult, ValidationResult
+from gsim.palace.models.solver import (
+    BoundaryModeSolverConfig,
+    DrivenSolverConfig,
+    EigenmodeSolverConfig,
+    ElectrostaticSolverConfig,
+    LinearSolverConfig,
+    SolverConfig,
+)
 from gsim.palace.models.stack import MaterialConfig
 
 __all__ = [
     "BoundaryModeConfig",
+    "BoundaryModeSolverConfig",
     "CPWPortConfig",
     "CrossSectionPlaneConfig",
     "DrivenConfig",
+    "DrivenSolverConfig",
     "EigenmodeConfig",
+    "EigenmodeSolverConfig",
     "ElectrostaticConfig",
+    "ElectrostaticSolverConfig",
     "GeometryConfig",
     "ImpedanceBoundaryConfig",
+    "LinearSolverConfig",
     "MagnetostaticConfig",
     "MaterialConfig",
     "MeshConfig",
@@ -56,6 +70,7 @@ __all__ = [
     "PortConfig",
     "RefinementConfig",
     "SimulationResult",
+    "SolverConfig",
     "TerminalConfig",
     "TransientConfig",
     "TwoTerminalPortConfig",

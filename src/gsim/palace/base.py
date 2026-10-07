@@ -15,12 +15,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from gsim.palace.models import (
     CPWPortConfig,
-    DrivenConfig,
-    EigenmodeConfig,
     ImpedanceBoundaryConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
     RefinementConfig,
     TerminalConfig,
@@ -34,6 +31,7 @@ from gsim.palace.models.results import (
     format_mesh_distortion,
     mesh_identity_lines,
 )
+from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
     from gdsfactory.component import Component
@@ -187,14 +185,14 @@ def _palace_failure_message(returncode: int, output_lines: list[str]) -> str:
     return message
 
 
-class PalaceSimMixin:
+class PalaceSimMixin(SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
     Subclasses must define these attributes (typically via Pydantic fields):
         - geometry: Geometry | None
         - stack: LayerStack | None
         - materials: dict[str, MaterialConfig]
-        - numerical: NumericalConfig
+        - solver: SolverConfig
         - refinement: RefinementConfig
         - _output_dir: Path | None (private)
         - _stack_kwargs: dict[str, Any] (private)
@@ -204,10 +202,7 @@ class PalaceSimMixin:
     geometry: Geometry | None
     stack: LayerStack | None
     materials: dict[str, MaterialConfig]
-    numerical: NumericalConfig
     refinement: RefinementConfig
-    driven: DrivenConfig
-    eigenmode: EigenmodeConfig
     ports: list[PortConfig]
     cpw_ports: list[CPWPortConfig]
     wave_ports: list[WavePortConfig]
@@ -633,38 +628,6 @@ class PalaceSimMixin:
                 from_layer=from_layer,
                 to_layer=to_layer,
             )
-        )
-
-    def set_numerical(
-        self,
-        *,
-        order: int = 1,
-        tolerance: float = 1e-6,
-        max_iterations: int = 400,
-        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = "Default",
-        preconditioner: Literal["Default", "AMS", "BoomerAMG"] = "Default",
-        device: Literal["CPU", "GPU"] = "CPU",
-    ) -> None:
-        """Configure numerical solver parameters.
-
-        Args:
-            order: Finite element order (1-4)
-            tolerance: Linear solver tolerance
-            max_iterations: Maximum solver iterations
-            solver_type: Linear solver type
-            preconditioner: Preconditioner type
-            device: Compute device (CPU or GPU)
-
-        Example:
-            >>> sim.set_numerical(order=3, tolerance=1e-8)
-        """
-        self.numerical = NumericalConfig(
-            order=order,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            solver_type=solver_type,
-            preconditioner=preconditioner,
-            device=device,
         )
 
     def set_refinement(
@@ -1119,20 +1082,22 @@ class PalaceSimMixin:
                 if not wp.layer
             )
 
-        if self.simulation_type == "eigenmode" and self.eigenmode.target is None:
+        eigenmode = self._get_problem_settings("eigenmode")
+        if eigenmode is not None and eigenmode.target is None:
             errors.append(
                 "A positive eigenmode target frequency is required. "
                 "Call set_eigenmode(target=...) with the frequency in Hz."
             )
 
         # Validate excitation port if specified
-        if self.simulation_type == "driven" and self.driven.excitation_port is not None:
+        driven = self._get_problem_settings("driven")
+        if driven is not None and driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
             cpw_names = [cpw.name for cpw in self.cpw_ports]
             all_port_names = port_names + cpw_names
-            if self.driven.excitation_port not in all_port_names:
+            if driven.excitation_port not in all_port_names:
                 errors.append(
-                    f"Excitation port '{self.driven.excitation_port}' not found. "
+                    f"Excitation port '{driven.excitation_port}' not found. "
                     f"Available: {all_port_names}"
                 )
 
@@ -1546,9 +1511,9 @@ class PalaceSimMixin:
             show_gui=mesh_config.show_gui,
             simulation_type=self.simulation_type,
             driven_config=driven_config,
-            eigenmode_config=self.eigenmode,
-            numerical_config=self.numerical,
-            boundary_mode_config=getattr(self, "boundary_mode", None),
+            eigenmode_config=self._get_problem_settings("eigenmode"),
+            numerical_config=self.solver,
+            boundary_mode_config=self._get_problem_settings("boundary_mode"),
             cross_section=getattr(self, "cross_section", None),
             write_config=write_config,
             planar_conductors=mesh_config.planar_conductors,
@@ -1806,10 +1771,10 @@ class PalaceSimMixin:
                 fmax=mesh_config.fmax,
                 show_gui=True,
                 simulation_type=self.simulation_type,
-                driven_config=self.driven,
-                eigenmode_config=self.eigenmode,
-                numerical_config=self.numerical,
-                boundary_mode_config=getattr(self, "boundary_mode", None),
+                driven_config=self._get_problem_settings("driven"),
+                eigenmode_config=self._get_problem_settings("eigenmode"),
+                numerical_config=self.solver,
+                boundary_mode_config=self._get_problem_settings("boundary_mode"),
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
@@ -1995,7 +1960,7 @@ class PalaceSimMixin:
             output_dir=output_dir,
             mesh_config=mesh_config,
             ports=palace_ports,
-            driven_config=self.driven,
+            driven_config=self._get_problem_settings("driven"),
             model_name=model_name,
             verbose=verbose,
             write_config=False,
@@ -2100,7 +2065,7 @@ class PalaceSimMixin:
             )
 
         stack = self._resolve_stack()
-        electrostatic_config = getattr(self, "electrostatic", None)
+        electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
         # Thread impedance boundary configs through hints
@@ -2122,11 +2087,11 @@ class PalaceSimMixin:
             stack=stack,
             ports=self._last_ports,
             simulation_type=self.simulation_type,
-            eigenmode_config=self.eigenmode,
-            driven_config=self.driven,
-            numerical_config=self.numerical,
+            eigenmode_config=self._get_problem_settings("eigenmode"),
+            driven_config=self._get_problem_settings("driven"),
+            numerical_config=self.solver,
             refinement_config=self.refinement,
-            boundary_mode_config=getattr(self, "boundary_mode", None),
+            boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=self.absorbing_boundary,
             hints=hints,
             electrostatic_config=electrostatic_config,

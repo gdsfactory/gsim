@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         ElectrostaticConfig,
         NumericalConfig,
         RefinementConfig,
+        SolverConfig,
     )
     from gsim.palace.models.ports import TerminalConfig
     from gsim.palace.ports.config import PalacePort
@@ -137,7 +138,7 @@ def generate_palace_config(
     simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
-    numerical_config: NumericalConfig | None = None,
+    numerical_config: SolverConfig | NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
     periodic_axis: str | None = None,
@@ -960,7 +961,7 @@ def write_config(
     simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
-    numerical_config: NumericalConfig | None = None,
+    numerical_config: SolverConfig | NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     absorbing_boundary: bool = True,
     hints: dict[str, Any] | None = None,

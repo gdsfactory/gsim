@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         DrivenConfig,
         EigenmodeConfig,
         NumericalConfig,
+        SolverConfig,
     )
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.ports.config import PalacePort
@@ -1132,7 +1133,7 @@ def generate_mesh(
     simulation_type: str = "driven",
     driven_config: DrivenConfig | None = None,
     eigenmode_config: EigenmodeConfig | None = None,
-    numerical_config: NumericalConfig | None = None,
+    numerical_config: SolverConfig | NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     cross_section: CrossSectionPlaneConfig | None = None,
     write_config: bool = True,
@@ -1180,7 +1181,8 @@ def generate_mesh(
         simulation_type: Type of simulation (driven, eigenmode or electrostatics)
         driven_config: Optional DrivenConfig for frequency sweep settings
         eigenmode_config: Optional EigenmodeConfig for eigenmode problems
-        numerical_config: Optional NumericalConfig for solver settings
+        numerical_config: Optional SolverConfig (or legacy NumericalConfig)
+            for solver settings
         boundary_mode_config: Optional BoundaryModeConfig for 2D mode problems
         cross_section: Explicit x/y cross-section plane for native BoundaryMode
         write_config: Whether to write config.json (default True)

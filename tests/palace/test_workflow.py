@@ -553,17 +553,15 @@ class TestNumericalConfig:
         sim.set_stack(substrate_thickness=2.0, air_above=300.0)
         sim.add_cpw_port("o1", layer="metal1", s_width=10, gap_width=6, length=5.0)
         sim.add_cpw_port("o2", layer="metal1", s_width=10, gap_width=6, length=5.0)
-        sim.set_driven(fmin=1e9, fmax=100e9)
-        sim.set_numerical(
-            order=3,
-            tolerance=2e-7,
-            max_iterations=777,
-            solver_type="Default",
-            preconditioner="AMS",
-            device="CPU",
-        )
+        sim.solver.driven.fmin = 2e9
+        sim.solver.driven.fmax = 10e9
+        sim.solver.order = 3
+        sim.solver.linear.tolerance = 2e-7
+        sim.solver.linear.max_iterations = 777
+        sim.solver.linear.preconditioner = "AMS"
 
         sim.mesh(preset="coarse")
+        sim.solver.driven.num_points = 11
         sim.write_config()
         assert sim._output_dir is not None
         config_path = sim._output_dir / "config.json"
@@ -577,6 +575,37 @@ class TestNumericalConfig:
         assert "Preconditioner" not in linear
         assert config["Solver"]["Order"] == 3
         assert config["Solver"]["Device"] == "CPU"
+        sample = config["Solver"]["Driven"]["Samples"][0]
+        assert sample["MinFreq"] == 2.0
+        assert sample["MaxFreq"] == 10.0
+        assert sample["FreqStep"] == pytest.approx(0.8)
+
+    def test_grouped_eigenmode_settings_flow_to_config(self, cpw_component, tmp_path):
+        sim = EigenmodeSim(
+            solver={
+                "order": 1,
+                "linear": {"tolerance": 1e-6, "max_iterations": 400},
+                "eigenmode": {"num_modes": 2, "target": 4e9, "tolerance": 1e-8},
+            }
+        )
+        sim.set_output_dir(tmp_path / "grouped-eigenmode")
+        sim.set_geometry(cpw_component)
+        sim.set_stack(substrate_thickness=2.0)
+        sim.mesh(preset="coarse")
+        # Updating common controls after meshing must retain the target.
+        sim.set_solver(order=1, tolerance=2e-6)
+        sim.solver.eigenmode.save = 2
+        sim.write_config()
+        assert sim.output_dir is not None
+        config = json.loads((sim.output_dir / "config.json").read_text())
+        assert config["Solver"]["Order"] == 1
+        assert config["Solver"]["Linear"]["Tol"] == 2e-6
+        assert config["Solver"]["Eigenmode"] == {
+            "N": 2,
+            "Target": 4.0,
+            "Tol": 1e-8,
+            "Save": 2,
+        }
 
     def test_mumps_solver_config_defaults(self, cpw_component, tmp_path):
         sim = DrivenSim()

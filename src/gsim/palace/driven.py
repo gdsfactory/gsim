@@ -16,9 +16,9 @@ from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     DrivenConfig,
+    DrivenSolverConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
     RefinementConfig,
     TwoTerminalPortConfig,
@@ -37,7 +37,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     with shared Geometry and Stack components from gsim.common.
 
     Example:
-        >>> from gsim.palace import DrivenSim
+        >>> from gsim.palace import DrivenConfig, DrivenSim
         >>>
         >>> sim = DrivenSim()
         >>> sim.set_geometry(component)
@@ -45,7 +45,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_cpw_port("o1", layer="topmetal2", s_width=10, gap_width=6)
         >>> sim.add_cpw_port("o2", layer="topmetal2", s_width=10, gap_width=6)
-        >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
+        >>> sim.solver.driven = DrivenConfig(fmin=1e9, fmax=100e9, num_points=40)
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> sp = sim.run()  # SParams
@@ -59,7 +59,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         driven: Driven simulation configuration (frequencies, etc.)
         mesh: Mesh configuration
         materials: Material property overrides
-        numerical: Numerical solver configuration
+        solver: Grouped numerical and problem-specific solver configuration
     """
 
     model_config = ConfigDict(
@@ -79,17 +79,14 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: None = None
 
-    # Driven simulation config
-    driven: DrivenConfig = Field(default_factory=DrivenConfig)
-    eigenmode: None = None
     absorbing_boundary: bool = True
 
     # Mesh config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
 
-    # Material overrides and numerical config
+    # Material overrides and solver config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: DrivenSolverConfig = Field(default_factory=DrivenSolverConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
@@ -223,7 +220,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     "Supported values: 'center'."
                 )
 
-        self.driven = DrivenConfig(
+        self.solver.driven = DrivenConfig(
             fmin=eff_fmin,
             fmax=eff_fmax,
             num_points=num_points,

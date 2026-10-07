@@ -11,11 +11,11 @@ from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     BoundaryModeConfig,
+    BoundaryModeSolverConfig,
     CPWPortConfig,
     CrossSectionPlaneConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
     RefinementConfig,
     TerminalConfig,
@@ -44,12 +44,9 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     stack: LayerStack | None = None
 
     # Boundary mode config
-    boundary_mode: BoundaryModeConfig = Field(default_factory=BoundaryModeConfig)
     cross_section: CrossSectionPlaneConfig | None = None
 
     # Unused in boundary mode (kept for mixin compatibility)
-    driven: None = None
-    eigenmode: None = None
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
@@ -59,7 +56,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     # Mesh and solver config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     absorbing_boundary: bool = False
 
@@ -100,7 +97,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
             max_size: Eigensolver max subspace size.
             solver_type: Palace eigensolver type.
         """
-        self.boundary_mode = BoundaryModeConfig(
+        self.solver.boundary_mode = BoundaryModeConfig(
             freq=freq,
             num_modes=num_modes,
             save=save,

@@ -17,8 +17,8 @@ from gsim.palace.base import PalaceSimMixin
 from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.models import (
     ElectrostaticConfig,
+    ElectrostaticSolverConfig,
     MaterialConfig,
-    NumericalConfig,
     RefinementConfig,
     TerminalConfig,
     WavePortConfig,
@@ -46,7 +46,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_terminal("T1", layer="topmetal2")
         >>> sim.add_terminal("T2", layer="topmetal2")
-        >>> sim.set_electrostatic()
+        >>> sim.solver.electrostatic.save_fields = 0
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> results = sim.run()  # dict[str, Path]
@@ -58,7 +58,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         terminals: List of terminal configurations
         electrostatic: Electrostatic simulation configuration
         materials: Material property overrides
-        numerical: Numerical solver configuration
+        solver: Grouped numerical and problem-specific solver configuration
     """
 
     model_config = ConfigDict(
@@ -67,7 +67,6 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     )
     simulation_type: Literal["electrostatic"] = "electrostatic"
 
-    driven: None = None
     ports: None = None
     cpw_ports: None = None
     two_terminal_ports: None = None
@@ -79,14 +78,11 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Terminal configurations (no ports in electrostatic)
     terminals: list[TerminalConfig] = Field(default_factory=list)
 
-    # Electrostatic simulation config
-    electrostatic: ElectrostaticConfig = Field(default_factory=ElectrostaticConfig)
-    eigenmode: None = None
     absorbing_boundary: bool = False
 
-    # Material overrides and numerical config
+    # Material overrides and solver config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: ElectrostaticSolverConfig = Field(default_factory=ElectrostaticSolverConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
@@ -179,7 +175,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         Example:
             >>> sim.set_electrostatic(save_fields=1)
         """
-        self.electrostatic = ElectrostaticConfig(
+        self.solver.electrostatic = ElectrostaticConfig(
             save_fields=save_fields,
         )
 
