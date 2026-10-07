@@ -1220,8 +1220,8 @@ def generate_mesh(
     logger.info("  Polygons: %s", len(geometry.polygons))
     logger.info("  Bbox: %s", geometry.bbox)
 
-    # Initialize gmsh
-    gmsh.initialize()
+    # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
+    gmsh.initialize(readConfigFiles=False)
     gmsh.option.setNumber("General.Verbosity", verbosity)
     apply_mesher_options(
         algorithm_3d=algorithm_3d, threads=threads, surface_threads=surface_threads

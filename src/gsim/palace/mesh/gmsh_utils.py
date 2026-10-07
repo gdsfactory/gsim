@@ -1217,6 +1217,7 @@ _RECORDED_OPTIONS = (
     "Mesh.RandomFactor",
     "Mesh.MeshSizeMin",
     "Mesh.MeshSizeMax",
+    "Mesh.MeshSizeFactor",
     "Mesh.MeshSizeFromPoints",
     "Mesh.MeshSizeFromCurvature",
     "Mesh.MeshSizeExtendFromBoundary",
