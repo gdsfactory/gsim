@@ -3,6 +3,20 @@
 See [result validation](../palace-validation.md) for independent solver,
 adaptive sampling, mode identity, and provenance checks.
 
+## Result validation
+
+::: gsim.palace.validation
+    options:
+      show_source: false
+      members:
+        - validate_solution
+        - ModeSample
+        - ModeExpectation
+        - SolutionCheck
+        - AdaptiveCheck
+        - SolutionProvenance
+        - SolutionReport
+
 ## Simulation Classes
 
 ::: gsim.palace.DrivenSim

@@ -230,3 +230,62 @@ def test_input_provenance_requires_an_independent_manifest(tmp_path):
     assert changed.provenance.input_check.status == "failed"
     absent = validate_solution("", expected_input_sha256=manifest)
     assert absent.provenance.input_check.status == "unknown"
+
+
+def test_directory_input_preserves_other_checks(tmp_path):
+    valid = tmp_path / "config.json"
+    valid.write_text("{}")
+    report = validate_solution(
+        CORE_SUCCESS,
+        input_files={"directory": tmp_path, "config": valid},
+    )
+    assert report.core.status == "passed"
+    assert report.provenance.input_check.status == "unknown"
+    assert set(report.provenance.input_sha256) == {"config"}
+    assert "directory" in report.provenance.input_check.evidence[0]
+
+
+def test_unreadable_input_is_unknown(tmp_path, monkeypatch):
+    path = tmp_path / "unreadable.json"
+    path.write_text("{}")
+
+    def denied(*_args, **_kwargs):
+        raise PermissionError("test access denied")
+
+    monkeypatch.setattr(Path, "open", denied)
+    report = validate_solution(CORE_SUCCESS, input_files={"config": path})
+    assert report.core.status == "passed"
+    assert report.provenance.input_check.status == "unknown"
+    assert (
+        "PermissionError: test access denied"
+        in report.provenance.input_check.evidence[0]
+    )
+
+
+def test_crlf_log_preserves_evidence():
+    log = (FIXTURES / "disabled-estimator.txt").read_text(encoding="utf-8")
+    assert validate_solution(log.replace("\n", "\r\n")) == validate_solution(log)
+
+
+def test_unidentified_adaptive_outcome_does_not_satisfy_expected_excitation():
+    report = validate_solution(
+        "Adaptive sampling converged with 2 frequency samples:\n"
+        "Sampled frequencies (GHz): 1, 2\nSample errors: 0, 0\n",
+        expected_excitations=[1],
+    )
+    assert [(check.excitation, check.check.status) for check in report.adaptive] == [
+        (None, "passed"),
+        (1, "unknown"),
+    ]
+
+
+def test_terminal_iteration_header_ends_estimator_section():
+    # Header form from Palace ElectrostaticSolver::Solve; synthetic regression.
+    report = validate_solution(
+        CORE_SUCCESS + "\nUpdating solution error estimates\n"
+        "PCG solver converged in 3 iterations\n"
+        "It 2/2: Index = 2 (elapsed time = 1.00e+00 s)\n"
+        "PCG solver did NOT converge in 20 iterations\n"
+    )
+    assert report.core.status == "failed"
+    assert report.estimator.status == "passed"

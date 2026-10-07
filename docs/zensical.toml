@@ -17,6 +17,7 @@ nav = [
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
+    { "Palace Result Validation" = "palace-validation.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },

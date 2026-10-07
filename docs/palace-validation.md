@@ -32,7 +32,8 @@ estimator supplies no evidence of mesh accuracy.
 
 Adaptive checks retain excitation IDs and complete training-frequency lists in GHz. Missing or truncated outcomes are
 `unknown`; reaching the sample limit is `failed`. Successful adaptive sampling cannot clear an earlier core failure.
-Explicit `expected_excitations` also exposes an entirely missing excitation.
+Explicit `expected_excitations` also exposes an entirely missing excitation. An outcome without an excitation header
+retains `excitation=None`; it cannot satisfy an explicitly requested excitation ID.
 
 ## Check a selected mode
 
@@ -76,8 +77,9 @@ observations; pass all observations you want checked.
 Statuses describe supplied evidence, not a complete physical validation. In particular, a passed core check means at
 least one recognized convergence message and no recognized core failure. It cannot establish complete log coverage, mesh
 convergence, or convergence of unreported eigenpairs. Unrecognized log formats and absent metrics are not proof of
-success. The parser has regressions against archived `cfa430a` and `cfa430a-dirty` logs; later Palace formats may
-require additional parsing rules.
+success. Archived `cfa430a` and `cfa430a-dirty` coverage is limited to driven and eigenmode logs; electrostatic and
+magnetostatic log coverage is not established. Their standard `It N/M: Index = ...` header resets the estimator section,
+but abridged or reformatted logs may omit that boundary. Later Palace formats may require additional parsing rules.
 
 `report.failures` contains explicit failures; an empty tuple can still leave unknown or omitted checks. Mode checks are
 omitted unless requested. Exit and OOM checks remain unknown unless independently recorded values are supplied. No
@@ -85,4 +87,5 @@ resource limits, passivity limits, attenuation limits, or application-specific m
 
 `input_files` records current file hashes. To compare against independently saved run provenance, pass
 `expected_input_sha256={"config.json": saved_digest}`. Only named manifest entries are compared; a mismatch fails and a
-missing file is unknown. Current hashes alone cannot prove which files a remote solver used.
+missing or unreadable file (including a directory) is unknown, with the OS error recorded as evidence. Other input
+checks still complete. Current hashes alone cannot prove which files a remote solver used.

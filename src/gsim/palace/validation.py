@@ -130,8 +130,10 @@ def _provenance(
         try:
             with Path(path).open("rb") as stream:
                 hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-        except FileNotFoundError:
-            missing.append(f"Input {name!r} is unavailable.")
+        except OSError as error:
+            missing.append(
+                f"Input {name!r} is unavailable: {type(error).__name__}: {error}"
+            )
     for name, expected in (expected_input_sha256 or {}).items():
         if name not in hashes:
             missing.append(f"No current digest for recorded input {name!r}.")
@@ -188,6 +190,7 @@ def validate_solution(
         oom_killed: Recorded OOM evidence, independent of exit status.
         metadata: Decoded ``palace.json``; its ``GitTag`` is recorded verbatim.
         input_files: Logical input names mapped to current local files to hash.
+            Missing, unreadable and directory entries are unknown with a reason.
         expected_input_sha256: Optional independently recorded input manifest.
 
     Returns:
