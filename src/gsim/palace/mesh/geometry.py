@@ -223,6 +223,20 @@ def resolve_dielectric_regions(
             )
         )
 
+    # Keep the airbox envelope consistent with ``resolve_mesh_domain_bounds``.
+    # Ports using ``max_size`` or ``full_height`` are built from those domain
+    # bounds, which include both dielectric and layer extents.  If a PDK has a
+    # layer outside its dielectric envelope, omitting it here makes the port
+    # protrude beyond the volume mesh and leaves orphan boundary triangles.
+    for layer in stack.layers.values():
+        z_min_all = min(z_min_all, layer.zmin)
+        z_max_all = max(z_max_all, layer.zmax)
+
+    if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
+        z_try_min, z_try_max = stack.get_z_range()
+        z_min_all = min(z_min_all, z_try_min)
+        z_max_all = max(z_max_all, z_try_max)
+
     if use_airbox:
         if not (math.isfinite(z_min_all) and math.isfinite(z_max_all)):
             raise ValueError(
@@ -1888,6 +1902,17 @@ def add_ports(
                     # Backward-compatible fallback when 3D bounds are unavailable.
                     zmin = layer_zmin
                     zmax = layer_zmax
+                elif port.full_height:
+                    # Partial-width port that still needs the full z extent: the
+                    # air box is not part of the layer stack, so the clamp below
+                    # would cap the port just above the top metal and act as a
+                    # PEC lid in the port eigenproblem.
+                    if domain_bounds is None:
+                        raise ValueError(
+                            f"Port '{port.name}' has full_height=True but "
+                            "domain bounds were not provided to add_ports()"
+                        )
+                    _, _, zmin, _, _, zmax = domain_bounds
                 else:
                     zmin = zmin - port.z_margin
                     zmax = zmax + port.z_margin
@@ -1944,6 +1969,7 @@ def add_ports(
                 port_info.append(
                     {
                         "portnumber": port_num,
+                        "name": port.name,
                         "type": "waveport",
                         "width": effective_width,
                         "xmin": xmin,

@@ -196,6 +196,53 @@ def test_add_dielectrics_explicit_airbox_z_extents(monkeypatch) -> None:
     assert list(tags.keys()) == ["SiO2", "airbox"]
 
 
+def test_explicit_airbox_includes_layers_outside_dielectric_envelope(
+    monkeypatch,
+) -> None:
+    """Full-height ports and their airbox must use the same z envelope."""
+    calls: list[tuple[float, float, float, float, float, float]] = []
+
+    def _fake_create_box(_kernel, xmin, ymin, zmin, xmax, ymax, zmax):
+        calls.append((xmin, ymin, zmin, xmax, ymax, zmax))
+        return len(calls)
+
+    monkeypatch.setattr(
+        "gsim.palace.mesh.geometry.gmsh_utils.create_box", _fake_create_box
+    )
+
+    class _Kernel:
+        def synchronize(self) -> None:
+            return
+
+    geometry = GeometryData(polygons=[], bbox=(0.0, 0.0, 10.0, 20.0), layer_bboxes={})
+    stack = LayerStack(
+        layers={
+            "buried_metal": _mk_layer("buried_metal", -3.0, -2.5, "conductor"),
+            "top_metal": _mk_layer("top_metal", 4.0, 5.0, "conductor"),
+        },
+        dielectrics=[
+            {"name": "oxide", "zmin": -2.0, "zmax": 0.5, "material": "SiO2"},
+        ],
+        materials={"SiO2": {"permittivity": 4.1}},
+    )
+
+    add_dielectrics(
+        _Kernel(),
+        geometry,
+        stack,
+        margin_x=0.0,
+        airbox_z_above=100.0,
+        airbox_z_below=100.0,
+    )
+
+    # The dielectric itself is unchanged, while the airbox covers the same
+    # layer-aware z envelope used to construct max-size/full-height ports.
+    assert calls == [
+        (0.0, 0.0, -2.0, 10.0, 20.0, 0.5),
+        (0.0, 0.0, -103.0, 10.0, 20.0, 105.0),
+    ]
+
+
 def test_add_dielectrics_explicit_airbox_skips_named_air_regions(monkeypatch) -> None:
     calls: list[tuple[float, float, float, float, float, float]] = []
 
