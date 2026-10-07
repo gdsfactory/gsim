@@ -82,6 +82,7 @@ test = [
   "pytest-randomly>=3.16.0",
   "pytest-regressions>=2.5.0",
   "pytest-xdist>=3.6.0",
+  "scikit-rf>=2.1",
 ]
 
 [build-system]

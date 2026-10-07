@@ -1,17 +1,22 @@
 """Tests for WavePortPEC emission with numeric wave ports.
 
-When a model has numeric wave ports, the generated config must list every
+By default a model with numeric wave ports lists every
 boundary attribute that would otherwise contribute a Robin term to the 2D
 port eigenproblem (absorbing walls, finite-conductivity conductors, and
 impedance boundaries) under ``Boundaries.WavePortPEC``.
+The explicit "inherit" policy keeps those physical port boundaries.
 """
 
 from __future__ import annotations
 
 import json
 
+import pytest
+
 from gsim.common.stack.extractor import Layer, LayerStack
+from gsim.palace import DrivenSim
 from gsim.palace.mesh.config_generator import generate_palace_config
+from gsim.palace.models import DrivenConfig
 from gsim.palace.models.ports import ImpedanceBoundaryConfig
 from gsim.palace.ports.config import PalacePort, PortType
 
@@ -75,7 +80,9 @@ def _lumped_ports() -> list[PalacePort]:
     ]
 
 
-def _generate(tmp_path, groups, ports, *, hints=None, absorbing_boundary=True):
+def _generate(
+    tmp_path, groups, ports, *, hints=None, absorbing_boundary=True, driven=None
+):
     config_path = generate_palace_config(
         groups=groups,
         ports=ports,
@@ -86,12 +93,43 @@ def _generate(tmp_path, groups, ports, *, hints=None, absorbing_boundary=True):
         fmax=100e9,
         simulation_type="driven",
         absorbing_boundary=absorbing_boundary,
+        driven_config=driven,
         hints=hints,
     )
     return json.loads(config_path.read_text())
 
 
 class TestWavePortPEC:
+    def test_inherit_keeps_all_physical_boundaries(self, tmp_path):
+        hints = {
+            "_impedance_boundaries": [
+                ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)
+            ]
+        }
+        default = _generate(
+            tmp_path, _groups(), _wave_ports(), hints=hints, driven=DrivenConfig()
+        )
+        sim = DrivenSim()
+        sim.set_driven(waveport_boundary="inherit")
+        inherited = _generate(
+            tmp_path, _groups(), _wave_ports(), hints=hints, driven=sim.driven
+        )
+        assert default["Boundaries"].pop("WavePortPEC") == {
+            "Attributes": [4, 5, 8, 12, 20]
+        }
+        assert inherited == default
+        assert "waveport_boundary" not in inherited["Solver"]["Driven"]
+
+    @pytest.mark.parametrize("policy", ["pec", "inherit"])
+    def test_policy_preserved_by_serialization(self, policy):
+        original = DrivenConfig(waveport_boundary=policy)
+        restored = DrivenConfig.model_validate_json(original.model_dump_json())
+        assert restored.waveport_boundary == policy
+
+    def test_rejects_unknown_policy(self):
+        with pytest.raises(ValueError, match="waveport_boundary"):
+            DrivenSim().set_driven(waveport_boundary="automatic")
+
     def test_union_of_absorbing_and_conductivity(self, tmp_path):
         config = _generate(tmp_path, _groups(), _wave_ports())
         boundaries = config["Boundaries"]
@@ -129,3 +167,29 @@ class TestWavePortPEC:
         groups["boundary_surfaces"] = {"absorbing": {"phys_group": 8}}
         config = _generate(tmp_path, groups, _wave_ports())
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8]}
+
+    @pytest.mark.parametrize("source", ["absorbing", "conductivity"])
+    def test_inherit_with_one_robin_source(self, tmp_path, source):
+        groups = _groups(
+            conductors=source == "conductivity", absorbing=source == "absorbing"
+        )
+        default = _generate(tmp_path, groups, _wave_ports(), driven=DrivenConfig())
+        inherited = _generate(
+            tmp_path,
+            groups,
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="inherit"),
+        )
+        expected = [8, 12] if source == "absorbing" else [4, 5]
+        assert default["Boundaries"].pop("WavePortPEC") == {"Attributes": expected}
+        assert inherited == default
+
+    def test_inherit_does_not_change_lumped_ports(self, tmp_path):
+        default = _generate(tmp_path, _groups(), _lumped_ports(), driven=DrivenConfig())
+        inherited = _generate(
+            tmp_path,
+            _groups(),
+            _lumped_ports(),
+            driven=DrivenConfig(waveport_boundary="inherit"),
+        )
+        assert inherited == default

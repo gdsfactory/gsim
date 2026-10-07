@@ -340,7 +340,7 @@ def generate_mesh(
     initialized_here = not bool(gmsh.isInitialized())
     caller_option_values = {} if initialized_here else _snapshot_gmsh_options()
     if initialized_here:
-        gmsh.initialize()
+        gmsh.initialize(readConfigFiles=False)
     else:
         gmsh.clear()
     try:

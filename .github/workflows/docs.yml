@@ -79,6 +79,7 @@ jobs:
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
     - name: Execute notebook
+      timeout-minutes: 30
       if: >-
         github.event_name == 'push' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
       env:

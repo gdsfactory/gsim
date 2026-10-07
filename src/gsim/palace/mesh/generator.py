@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass, field
 from numbers import Integral
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import gmsh
 
@@ -159,6 +159,7 @@ class MeshResult:
     model_name: str = "palace"
     fmax: float = 100e9
     periodic_axis: str | None = None
+    periodic_translation: tuple[float, float, float] | None = None
 
 
 def _extract_native_boundarymode_rectangles(
@@ -1222,8 +1223,8 @@ def generate_mesh(
     logger.info("  Polygons: %s", len(geometry.polygons))
     logger.info("  Bbox: %s", geometry.bbox)
 
-    # Initialize gmsh
-    gmsh.initialize()
+    # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
+    gmsh.initialize(readConfigFiles=False)
     gmsh.option.setNumber("General.Verbosity", verbosity)
     apply_mesher_options(
         algorithm_3d=algorithm_3d, threads=threads, surface_threads=surface_threads
@@ -1398,6 +1399,7 @@ def generate_mesh(
             )
 
         periodic_info: dict[str, object] | None = None
+        periodic_translation: tuple[float, float, float] | None = None
 
         # Add geometry
         logger.info("Adding metals...")
@@ -1493,6 +1495,9 @@ def generate_mesh(
 
         if periodic_axis in {"x", "y"}:
             periodic_info = gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
+            translation = periodic_info.get("translation")
+            if isinstance(translation, tuple):
+                periodic_translation = cast(tuple[float, float, float], translation)
 
         # Assign physical groups
         logger.info("Assigning physical groups...")
@@ -1644,6 +1649,7 @@ def generate_mesh(
                 boundary_mode_config,
                 absorbing_boundary,
                 periodic_axis,
+                periodic_translation=periodic_translation,
             )
 
     finally:
@@ -1662,6 +1668,7 @@ def generate_mesh(
         model_name=model_name,
         fmax=fmax,
         periodic_axis=periodic_axis,
+        periodic_translation=periodic_translation,
     )
 
     return result
