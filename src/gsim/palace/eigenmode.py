@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from pathlib import Path
 from typing import Any, Literal
 
@@ -143,7 +144,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         floquet: bool = False,
         phi_target: float = math.pi / 2,
         periodic_length: float | None = None,
-        n_eff_guess: float = 2.0,
+        n_eff_guess: float | None = None,
     ) -> None:
         """Configure eigenmode simulation.
 
@@ -160,12 +161,19 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             periodic_length: Optional expected period in mesh units (um). Must
                 match the measured mesh translation, including domain padding.
                 Omit to use the measured period directly.
-            n_eff_guess: Deprecated compatibility argument, ignored. Target
-                frequency controls the eigenvalue search, not the wave vector.
+            n_eff_guess: Deprecated compatibility argument, ignored with a warning.
+                Target frequency controls the eigenvalue search, not the wave vector.
 
         Example:
             >>> sim.set_eigenmode(num_modes=10, target=50e9)
         """
+        if n_eff_guess is not None:
+            warnings.warn(
+                "n_eff_guess is deprecated and ignored; "
+                "Floquet uses the actual mesh period.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.eigenmode = EigenmodeConfig(
             num_modes=num_modes,
             target=target,
@@ -174,7 +182,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
             floquet=floquet,
             phi_target=phi_target,
             periodic_length=periodic_length,
-            n_eff_guess=n_eff_guess,
+            n_eff_guess=2.0 if n_eff_guess is None else n_eff_guess,
         )
 
 

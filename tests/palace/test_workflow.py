@@ -324,7 +324,10 @@ class TestEigenmodeSimWorkflow:
         assert result.valid, f"Mesh validation failed: {result}"
 
     @pytest.mark.parametrize("axis", ["x", "y"])
-    def test_config_has_floquet_periodic_boundary(self, tmp_path, cpw_component, axis):
+    @pytest.mark.parametrize("margin", [0.0, 7.5])
+    def test_config_has_floquet_periodic_boundary(
+        self, tmp_path, cpw_component, axis, margin
+    ):
         """Floquet in eigenmode emits Palace Periodic boundary section."""
         sim = EigenmodeSim()
         sim.set_output_dir(str(tmp_path / "palace-sim-floquet"))
@@ -335,9 +338,8 @@ class TestEigenmodeSimWorkflow:
             target=50e9,
             floquet=True,
             phi_target=-1.57,
-            n_eff_guess=2.2,
         )
-        sim.mesh(preset="coarse", periodic_axis=axis)
+        sim.mesh(preset="coarse", periodic_axis=axis, margin_x=margin, margin_y=margin)
         sim.write_config()
 
         assert sim._output_dir is not None
@@ -365,7 +367,12 @@ class TestEigenmodeSimWorkflow:
         assert len(periodic["BoundaryPairs"]) == 1
         assert len(pair["DonorAttributes"]) > 0
         assert len(pair["ReceiverAttributes"]) > 0
-        assert pair["Translation"][axis_index] == pytest.approx(mesh_period)
+        assert pair["Translation"][axis_index] == pytest.approx(
+            mesh_period, rel=0, abs=1e-10
+        )
+
+        sim.eigenmode.periodic_length = mesh_period
+        sim.write_config()
 
         sim.eigenmode.periodic_length = mesh_period / 2
         with pytest.raises(ValueError, match="does not match the mesh translation"):

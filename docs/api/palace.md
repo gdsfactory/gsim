@@ -94,14 +94,16 @@ sim.eigenmode.compute_floquet_wave_vector(periodic_axis="x")
 After setting geometry and stack, `sim.mesh(periodic_axis="x")` records the actual translation. `sim.write_config()` writes
 it as `Boundaries.Periodic.BoundaryPairs[0].Translation`, and computes `FloquetWaveVector` from that measured length. A length
 mismatch raises `ValueError`; omit `periodic_length` to use the measured value without an expected-length check. Domain
-padding can change the separation of periodic faces.
+padding can change the separation of periodic faces. Generated translations use the CAD face planes rather than the
+tolerance-padded OCC bounding boxes.
 
 Zero, negative phases, and the Brillouin-zone endpoints `+/-pi` are supported without wrapping. With
 [Palace's phase convention](https://awslabs.github.io/palace/stable/guide/boundaries/#Periodic-boundary), the receiver field is
 `exp(-1j * phi_target)` times the donor field. The GDS mesher supports periodic axes `x` and `y`; the wave-vector helper and
 config generation also support `z` for supplied mesh metadata.
 
-`n_eff_guess` is retained as a deprecated compatibility argument and no longer affects the result. Direct calls to
+`n_eff_guess` is retained as a deprecated compatibility argument and no longer affects the result. Passing it explicitly to
+`set_eigenmode()` emits a `DeprecationWarning`. Direct calls to
 `compute_floquet_wave_vector()` now require an explicit length on the config or as a `periodic_length` argument; the old `l0`
 argument and frequency-based length estimate are removed. Old mesh results without translation metadata must be regenerated.
 

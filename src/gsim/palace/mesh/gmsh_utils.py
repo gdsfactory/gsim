@@ -1070,7 +1070,6 @@ def set_periodic_mesh(
             for tag, bb in bboxes.items()
             if abs(bb[0] - global_xmax) < tol and abs(bb[3] - global_xmax) < tol
         ]
-        dx, dy, dz = global_xmax - global_xmin, 0.0, 0.0
     else:
         master_surfs = [
             tag
@@ -1082,7 +1081,6 @@ def set_periodic_mesh(
             for tag, bb in bboxes.items()
             if abs(bb[1] - global_ymax) < tol and abs(bb[4] - global_ymax) < tol
         ]
-        dx, dy, dz = 0.0, global_ymax - global_ymin, 0.0
 
     if not master_surfs or not slave_surfs:
         logger.warning(
@@ -1099,6 +1097,20 @@ def set_periodic_mesh(
             "receiver_phys_groups": [],
             "direction": direction,
         }
+
+    # OCC bounding boxes include a tolerance envelope. Use the planar face
+    # coordinates for the translation so that padding does not inflate the
+    # period stored in the mesh metadata and Palace configuration.
+    axis_index = "xy".index(direction)
+    donor_coordinate = sum(
+        gmsh.model.occ.getCenterOfMass(2, tag)[axis_index] for tag in master_surfs
+    ) / len(master_surfs)
+    receiver_coordinate = sum(
+        gmsh.model.occ.getCenterOfMass(2, tag)[axis_index] for tag in slave_surfs
+    ) / len(slave_surfs)
+    translation = [0.0, 0.0, 0.0]
+    translation[axis_index] = receiver_coordinate - donor_coordinate
+    dx, dy, dz = translation
 
     affine = [
         1,
