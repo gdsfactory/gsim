@@ -144,9 +144,14 @@ class SolverSettingsMixin:
             value = value.model_dump()
         common = SolverConfig.model_validate(value)
         # Replace atomically so callers retaining the old object can restore it.
-        self.solver = type(self.solver).model_validate(
-            {**self.solver.model_dump(), **common.model_dump()}
+        # Keep problem model objects so references to those settings stay live.
+        settings = {
+            name: getattr(self.solver, name) for name in type(self.solver).model_fields
+        }
+        settings.update(
+            {name: getattr(common, name) for name in SolverConfig.model_fields}
         )
+        self.solver = type(self.solver).model_validate(settings)
 
     def _get_problem_settings(self, name: str) -> Any:
         """Return a problem group or None for an inapplicable simulation type."""

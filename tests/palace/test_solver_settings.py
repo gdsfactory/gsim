@@ -43,13 +43,16 @@ def test_setter_defaults_match_constructor_and_preserve_problem(
     sim_class, group, field, value, setter
 ):
     sim = sim_class(solver={group: {field: value}})
+    problem = getattr(sim.solver, group)
     original = sim.solver.model_dump()
     getattr(sim, setter)()
+    assert getattr(sim.solver, group) is problem
     assert sim.solver.model_dump() == original
     assert (
         sim.solver.order == pa.SolverConfig().order == pa.NumericalConfig().order == 2
     )
     getattr(sim, setter)(order=1, tolerance=1e-8)
+    assert getattr(sim.solver, group) is problem
     assert sim.solver.order == 1
     assert sim.solver.linear.tolerance == 1e-8
     assert getattr(getattr(sim.solver, group), field) == value
