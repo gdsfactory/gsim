@@ -24,6 +24,7 @@ from gsim.palace.models import (
     TwoTerminalPortConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 if TYPE_CHECKING:
     from gsim.palace.results import SParams
@@ -104,6 +105,20 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
     # Cloud job state (set by upload/run)
     _job_id: str | None = PrivateAttr(default=None)
+
+    # Legacy solver settings
+
+    @property
+    def driven(self) -> DrivenConfig:
+        """Deprecated alias for solver.driven, retaining the original type."""
+        warn_legacy_solver_setting("sim.driven", "sim.solver.driven")
+        return self.solver.driven
+
+    @driven.setter
+    def driven(self, value: DrivenConfig | dict[str, Any]) -> None:
+        """Replace driven settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.driven", "sim.solver.driven")
+        self._set_problem_settings("driven", value)
 
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)

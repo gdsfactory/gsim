@@ -23,6 +23,7 @@ from gsim.palace.models import (
     TerminalConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 if TYPE_CHECKING:
     from gsim.palace.mesh.nets import Nets
@@ -95,6 +96,20 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_terminals: bool = PrivateAttr(default=False)
+
+    # Legacy solver settings
+
+    @property
+    def electrostatic(self) -> ElectrostaticConfig:
+        """Deprecated alias for solver.electrostatic, retaining the original type."""
+        warn_legacy_solver_setting("sim.electrostatic", "sim.solver.electrostatic")
+        return self.solver.electrostatic
+
+    @electrostatic.setter
+    def electrostatic(self, value: ElectrostaticConfig | dict[str, Any]) -> None:
+        """Replace electrostatic settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.electrostatic", "sim.solver.electrostatic")
+        self._set_problem_settings("electrostatic", value)
 
     # -------------------------------------------------------------------------
     # Terminal methods

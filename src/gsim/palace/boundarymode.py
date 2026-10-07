@@ -23,6 +23,7 @@ from gsim.palace.models import (
     WavePortConfig,
 )
 from gsim.palace.models.results import ValidationResult
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 
 class BoundaryModeSim(PalaceSimMixin, BaseModel):
@@ -74,6 +75,18 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
 
     # Cloud job state
     _job_id: str | None = PrivateAttr(default=None)
+
+    @property
+    def boundary_mode(self) -> BoundaryModeConfig:
+        """Deprecated alias for solver.boundary_mode, retaining the original type."""
+        warn_legacy_solver_setting("sim.boundary_mode", "sim.solver.boundary_mode")
+        return self.solver.boundary_mode
+
+    @boundary_mode.setter
+    def boundary_mode(self, value: BoundaryModeConfig | dict[str, Any]) -> None:
+        """Replace boundary_mode settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.boundary_mode", "sim.solver.boundary_mode")
+        self._set_problem_settings("boundary_mode", value)
 
     def set_boundary_mode(
         self,

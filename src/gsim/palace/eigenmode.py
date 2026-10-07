@@ -25,6 +25,7 @@ from gsim.palace.models import (
     TwoTerminalPortConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,20 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+
+    # Legacy solver settings
+
+    @property
+    def eigenmode(self) -> EigenmodeConfig:
+        """Deprecated alias for solver.eigenmode, retaining the original type."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        return self.solver.eigenmode
+
+    @eigenmode.setter
+    def eigenmode(self, value: EigenmodeConfig | dict[str, Any]) -> None:
+        """Replace eigenmode settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        self._set_problem_settings("eigenmode", value)
 
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)
