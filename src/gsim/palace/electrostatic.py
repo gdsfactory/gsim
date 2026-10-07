@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -23,6 +23,9 @@ from gsim.palace.models import (
     TerminalConfig,
     WavePortConfig,
 )
+
+if TYPE_CHECKING:
+    from gsim.palace.mesh.nets import Nets
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +130,37 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
                 layer=layer,
             )
         )
+
+    def nets(self) -> Nets:
+        """Find the electrically connected conductor shapes of the geometry.
+
+        Metal that touches on one layer, and metal on different layers that a
+        via joins, is one net; disconnected electrodes stay separate even when
+        they share a layer. Electrical ports name the nets they sit on.
+
+        A terminal still selects every shape on its layer, so two disconnected
+        electrodes on one layer end up as a single terminal (gsim#273). This
+        shows how many electrodes each layer holds.
+
+        Returns:
+            The nets, in the order their first shape appears in the layout.
+
+        Raises:
+            ValueError: If no geometry has been set.
+
+        Example:
+            >>> print(sim.nets())
+        """
+        from gsim.palace.mesh.geometry import extract_geometry
+        from gsim.palace.mesh.nets import extract_nets
+
+        component = self.component
+        if component is None:
+            msg = "No component set. Call set_geometry(component) first."
+            raise ValueError(msg)
+        stack = self._resolve_stack()
+        ports = [port for port in component.ports if port.port_type == "electrical"]
+        return extract_nets(extract_geometry(component, stack), stack, ports)
 
     # -------------------------------------------------------------------------
     # Electrostatic configuration

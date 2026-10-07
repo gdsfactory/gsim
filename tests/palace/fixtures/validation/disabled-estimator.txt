@@ -1,0 +1,26 @@
+Sweeping excitation index 1 (1/2):
+
+Calculating boundary modes at wave ports for ω/2π = 1.000e+00 GHz (4.999e-03)
+ Number of global unknowns for port 1:
+  H1: 3480, ND: 8516
+ Port 1, mode 1: kₙ = 1.573e+02-1.998e+04i m⁻¹, Z_PV = 1.589e-03 Ω
+ Number of global unknowns for port 2:
+  H1: 3480, ND: 8516
+ Port 2, mode 1: kₙ = 1.573e+02-1.998e+04i m⁻¹, Z_PV = 1.594e-03 Ω
+
+
+GMRES solver converged in 11 iterations (avg. reduction factor: 1.444e-01)
+ Sol. ||E|| = 2.549603e+00 (||RHS|| = 9.746528e-02)
+ Field energy E (1.314e-14 J) + H (2.829e-14 J) = 4.144e-14 J
+ S[1][1] = -4.170e+00-1.387e+00i, |S[1][1]| = +1.286e+01, arg(S[1][1]) = -1.616e+02
+ S[2][1] = +5.969e-03-7.807e-03i, |S[2][1]| = -4.015e+01, arg(S[2][1]) = -5.260e+01
+ Updating solution error estimates
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 6.313e-01)!
+
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 2.191e-01)!

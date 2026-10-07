@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -121,10 +122,20 @@ class TestEigenSimValidation:
     def test_floquet_options_are_stored(self):
         """Floquet options should propagate into eigenmode config."""
         sim = EigenmodeSim()
-        sim.set_eigenmode(target=40e9, floquet=True, phi_target=1.2, n_eff_guess=2.4)
+        with pytest.warns(DeprecationWarning, match="actual mesh period"):
+            sim.set_eigenmode(
+                target=40e9, floquet=True, phi_target=1.2, n_eff_guess=2.4
+            )
         assert sim.eigenmode.floquet is True
         assert sim.eigenmode.phi_target == pytest.approx(1.2)
-        assert sim.eigenmode.n_eff_guess == pytest.approx(2.4)
+        with pytest.warns(DeprecationWarning, match="actual mesh period"):
+            assert sim.eigenmode.n_eff_guess == pytest.approx(2.4)
+
+    def test_floquet_without_legacy_guess_does_not_warn(self):
+        with warnings.catch_warnings(record=True) as emitted:
+            warnings.simplefilter("always")
+            EigenmodeSim().set_eigenmode(target=40e9, floquet=True)
+        assert not emitted
 
 
 class TestElectrostaticSimValidation:
