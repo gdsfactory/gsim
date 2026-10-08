@@ -599,3 +599,12 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 See [Transmission-line analysis](../transmission_line_analysis.md) for using
 `load_sparams(...).to_skrf()` with scikit-rf's multiline TRL calibration,
 physical impedance normalization and independent-length checks.
+
+## Terminal S-parameters
+
+See [Terminal (multi-pin) Wave Ports](../terminal_wave_ports.md) for the
+conventions and a worked example.
+
+::: gsim.palace.terminal
+    options:
+      show_source: false
