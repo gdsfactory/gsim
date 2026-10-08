@@ -16,13 +16,15 @@ from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     DrivenConfig,
+    DrivenSolverConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
+    RefinementConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 if TYPE_CHECKING:
     from gsim.palace.results import SParams
@@ -36,7 +38,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     with shared Geometry and Stack components from gsim.common.
 
     Example:
-        >>> from gsim.palace import DrivenSim
+        >>> from gsim.palace import DrivenConfig, DrivenSim
         >>>
         >>> sim = DrivenSim()
         >>> sim.set_geometry(component)
@@ -44,7 +46,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_cpw_port("o1", layer="topmetal2", s_width=10, gap_width=6)
         >>> sim.add_cpw_port("o2", layer="topmetal2", s_width=10, gap_width=6)
-        >>> sim.set_driven(fmin=1e9, fmax=100e9, num_points=40)
+        >>> sim.solver.driven = DrivenConfig(fmin=1e9, fmax=100e9, num_points=40)
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> sp = sim.run()  # SParams
@@ -58,7 +60,7 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         driven: Driven simulation configuration (frequencies, etc.)
         mesh: Mesh configuration
         materials: Material property overrides
-        numerical: Numerical solver configuration
+        solver: Grouped numerical and problem-specific solver configuration
     """
 
     model_config = ConfigDict(
@@ -78,17 +80,15 @@ class DrivenSim(PalaceSimMixin, BaseModel):
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: None = None
 
-    # Driven simulation config
-    driven: DrivenConfig = Field(default_factory=DrivenConfig)
-    eigenmode: None = None
     absorbing_boundary: bool = True
 
     # Mesh config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
 
-    # Material overrides and numerical config
+    # Material overrides and solver config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: DrivenSolverConfig = Field(default_factory=DrivenSolverConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -105,6 +105,20 @@ class DrivenSim(PalaceSimMixin, BaseModel):
 
     # Cloud job state (set by upload/run)
     _job_id: str | None = PrivateAttr(default=None)
+
+    # Legacy solver settings
+
+    @property
+    def driven(self) -> DrivenConfig:
+        """Deprecated alias for solver.driven, retaining the original type."""
+        warn_legacy_solver_setting("sim.driven", "sim.solver.driven")
+        return self.solver.driven
+
+    @driven.setter
+    def driven(self, value: DrivenConfig | dict[str, Any]) -> None:
+        """Replace driven settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.driven", "sim.solver.driven")
+        self._set_problem_settings("driven", value)
 
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)
@@ -157,9 +171,11 @@ class DrivenSim(PalaceSimMixin, BaseModel):
         scale: Literal["linear", "log"] = "linear",
         adaptive_tol: float = 0.02,
         adaptive_max_samples: int = 20,
+        circuit_synthesis: bool = False,
         compute_s_params: bool = True,
         reference_impedance: float = 50.0,
         excitation_port: str | None = None,
+        waveport_boundary: Literal["pec", "inherit"] = "pec",
         save_step: int = 0,
         save_fields_at: list[float] | None = None,
         save_freq: str | None = None,
@@ -183,9 +199,18 @@ class DrivenSim(PalaceSimMixin, BaseModel):
             adaptive_max_samples: Maximum number of additional frequency
                 points that adaptive refinement may insert between the
                 points defined by fmin, fmax, and num_points.
+            circuit_synthesis: Enable Palace AC circuit synthesis
+                (AdaptiveCircuitSynthesis). Requires an adaptive sweep
+                (adaptive_tol > 0). Palace writes rom-*.csv files with the
+                synthesized L/R/C circuit matrices next to the S-parameters.
+                Requires Palace >= 0.17 (local runtime default is >= 0.18).
             compute_s_params: Compute S-parameters
             reference_impedance: Reference impedance for S-params (Ohms)
             excitation_port: Port to excite (None = first port)
+            waveport_boundary: Numeric port boundary policy: ``"pec"``
+                (default) approximates conductivity, impedance and absorbing
+                boundaries as PEC in the port eigenproblem; ``"inherit"``
+                keeps those physical conditions. Does not change 3D boundaries.
             save_step: Save fields every N frequency steps for ParaView
                 (0 = disabled)
             save_fields_at: Specific frequencies (Hz) at which to save
@@ -221,16 +246,18 @@ class DrivenSim(PalaceSimMixin, BaseModel):
                     "Supported values: 'center'."
                 )
 
-        self.driven = DrivenConfig(
+        self.solver.driven = DrivenConfig(
             fmin=eff_fmin,
             fmax=eff_fmax,
             num_points=num_points,
             scale=scale,
             adaptive_tol=adaptive_tol,
             adaptive_max_samples=adaptive_max_samples,
+            circuit_synthesis=circuit_synthesis,
             compute_s_params=compute_s_params,
             reference_impedance=reference_impedance,
             excitation_port=excitation_port,
+            waveport_boundary=waveport_boundary,
             save_step=save_step,
             save_fields_at=fields_at,
         )

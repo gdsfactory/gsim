@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+- Palace AC circuit synthesis ([#272](https://github.com/gdsfactory/gsim/issues/272)):
+  `set_driven(..., circuit_synthesis=True)` emits `AdaptiveCircuitSynthesis` for adaptive driven sweeps (requires
+  `adaptive_tol > 0`), and the new `gsim.palace.circuit` module parses the exported `rom-*.csv` matrices into a
+  `CircuitSynthesis` object with `Y(ω)` assembly, port-admittance condensation via Schur complement, port-load
+  subtraction, and S/Z/Y access. The same module provides the reusable EM-to-circuit fit: `fit_rlc` with `model="rlc1p"`
+  (one-pole R, L, C, f0, Q; JAX/Adam in log space or a scipy fallback) and `model="vector_fit"` (scikit-rf VectorFitting
+  multi-pole rational model with stability/passivity test and enforcement, spurious-pole detection and SPICE subcircuit
+  export via `VectorFit`). `CircuitSynthesis.fit_rlc()` fits either model to the exported circuit in one call; one-port
+  circuits use the driving-point impedance.
+- Notebook refactor to the reusable workflow: `palace_inductor.ipynb` fits via `fit_rlc` (the hand-rolled JAX/Adam
+  section is gone) with `SParams.to_skrf()` + `differential_impedance` for S/Z access;
+  `palace_inductor_port_comparison.ipynb` drops its manual `s_to_z` in favour of the package helpers;
+  `palace_transformer.ipynb` uses `to_skrf()` for S/Z/Y access, adds a broadband vector-fit section with passivity
+  checks and SPICE export, and its circulax fit netlist is migrated to the SAX port-reference style required by circulax
+  0.2.3.
+- **Behavior changes called out for review** (beyond circuit synthesis; happy to split into a separate PR if preferred):
+  (a) the prebuilt local Palace runtime default moved from v0.17.0 to v0.18.0 (set `PALACETOOLKIT_PALACE_CPU_TAG` to
+  stay on 0.17.0); (b) `SParams.to_skrf()` now defaults to the reference impedance recorded in `port_information.json`
+  instead of a hardcoded 50 Ohm, and S-parameter plots label it (#74). All new functionality lives in the single module
+  `gsim.palace.circuit`.
+- Notebook refactor to the reusable workflow: `palace_inductor.ipynb` fits via `fit_rlc` (the hand-rolled JAX/Adam
+  section is gone) with `SParams.to_skrf()` + `differential_impedance` for S/Z access;
+  `palace_inductor_port_comparison.ipynb` drops its manual `s_to_z` in favour of the package helpers;
+  `palace_transformer.ipynb` uses `to_skrf()` for S/Z/Y access, adds a broadband vector-fit section with passivity
+  checks and SPICE export, and its circulax fit netlist is migrated to the SAX port-reference style required by circulax
+  0.2.3.
+- First-class S\<->Z\<->Y conversion utilities (`gsim.palace.parameters`): batched
+  `s_to_z`/`z_to_s`/`s_to_y`/`y_to_s`/`z_to_y`/`y_to_z` with explicit scalar or per-port reference impedance, preserved
+  frequency units and port order; incomplete matrices are rejected. `palace_inductor_port_comparison.ipynb` is merged
+  into `palace_inductor.ipynb` as a controlled two-interlayer-vs-gap-port comparison section (identical guard ring)
+  using these conversions.
+- Touchstone export/import with full-fidelity round trips (`SParams.write_touchstone` / `SParams.from_touchstone`):
+  frequency in Hz, port order and names preserved via `! Port[i]` comments, reference impedance restored from the file
+  header; complex-S round-trip error at machine precision (below the 1e-9 acceptance for 2- and 4-port networks,
+  tested).
+- Reference impedance now flows from `port_information.json` into `SParams.z0` (and the npz cache), and S-parameter
+  plots label it (#74).
+- `palace_transformer.ipynb`: the extracted transformer is demonstrated inside a matching network — a series input
+  capacitor swept around the analytic estimate drives a 50 Ohm load through the fitted circulax model, closing the EM ->
+  extracted-parameters -> circuit-design loop.
+- Gap-port comparison leg: committed local Palace v0.18.0 outputs (rom matrices, port-S and provenance) under
+  `nbs/data/inductor/circuit_synthesis_gap/`; the committed caches are intentionally tracked so the notebooks'
+  circuit-synthesis sections replay in CI without re-running Palace..
 - PN-junction depletion model from Sze *Physics of Semiconductor Devices* (`PNJunctionConfig`,
   `make_pn_junction_profile`): computes built-in voltage, depletion width `W` (abrupt or linearly graded), asymmetric
   P/N split `x_p`/`x_n`, and capacitance `C_j = eps_s A / W`. The depletion region is represented automatically — meshed

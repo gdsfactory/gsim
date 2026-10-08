@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,12 +19,14 @@ from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     EigenmodeConfig,
+    EigenmodeSolverConfig,
     MaterialConfig,
-    NumericalConfig,
     PortConfig,
+    RefinementConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         >>> sim.set_stack()
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_port("o1", layer="topmetal2", length=5.0)
-        >>> sim.set_eigenmode(num_modes=10, target=50e9)
+        >>> sim.solver.eigenmode.target = 50e9
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> results = sim.run()  # dict[str, Path]
@@ -55,7 +58,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         cpw_ports: List of CPW (two-element) port configurations
         eigenmode: Eigenmode simulation configuration
         materials: Material property overrides
-        numerical: Numerical solver configuration
+        solver: Grouped numerical and problem-specific solver configuration
     """
 
     model_config = ConfigDict(
@@ -64,7 +67,6 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     )
     simulation_type: Literal["eigenmode"] = "eigenmode"
 
-    driven: None = None
     terminals: None = None
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
     # Composed objects (from common)
@@ -77,12 +79,10 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
 
-    # Eigenmode simulation config
-    eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
-
-    # Material overrides and numerical config
+    # Material overrides and solver config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: EigenmodeSolverConfig = Field(default_factory=EigenmodeSolverConfig)
+    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -94,6 +94,20 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+
+    # Legacy solver settings
+
+    @property
+    def eigenmode(self) -> EigenmodeConfig:
+        """Deprecated alias for solver.eigenmode, retaining the original type."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        return self.solver.eigenmode
+
+    @eigenmode.setter
+    def eigenmode(self, value: EigenmodeConfig | dict[str, Any]) -> None:
+        """Replace eigenmode settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        self._set_problem_settings("eigenmode", value)
 
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)
@@ -140,31 +154,47 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         save: int = 0,
         floquet: bool = False,
         phi_target: float = math.pi / 2,
-        n_eff_guess: float = 2.0,
+        periodic_length: float | None = None,
+        n_eff_guess: float | None = None,
     ) -> None:
         """Configure eigenmode simulation.
 
         Args:
             num_modes: Number of modes to find
-            target: Target frequency in Hz for mode search
+            target: Positive target frequency in Hz for mode search.
+                Required before meshing or exporting the configuration.
             tolerance: Eigenvalue solver tolerance
             save: Number of eigenmodes to save as ParaView fields (0 = disabled)
             floquet: Enable Floquet periodic boundary setup in config generation
                 (requires mesh(periodic_axis=...)).
-            phi_target: Bloch phase advance per cell in radians (Floquet only).
-            n_eff_guess: Initial effective-index guess for Floquet k-vector setup.
+            phi_target: Signed Bloch phase per cell in radians (Floquet only).
+                Zero and +/-pi are valid. The wave vector is phase / mesh period.
+                Palace applies E(receiver) = exp(-i * phi_target) * E(donor).
+            periodic_length: Optional expected period in mesh units (um). Must
+                match the measured mesh translation, including domain padding.
+                Omit to use the measured period directly.
+            n_eff_guess: Deprecated compatibility argument, ignored with a warning.
+                Target frequency controls the eigenvalue search, not the wave vector.
 
         Example:
             >>> sim.set_eigenmode(num_modes=10, target=50e9)
         """
-        self.eigenmode = EigenmodeConfig(
+        if n_eff_guess is not None:
+            warnings.warn(
+                "n_eff_guess is deprecated and ignored; "
+                "Floquet uses the actual mesh period.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.solver.eigenmode = EigenmodeConfig(
             num_modes=num_modes,
             target=target,
             tolerance=tolerance,
             save=save,
             floquet=floquet,
             phi_target=phi_target,
-            n_eff_guess=n_eff_guess,
+            periodic_length=periodic_length,
+            n_eff_guess=2.0 if n_eff_guess is None else n_eff_guess,
         )
 
 

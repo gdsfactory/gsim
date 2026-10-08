@@ -15,7 +15,6 @@ import math
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from scipy.constants import c as C0  # noqa: N812
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,9 @@ class DrivenConfig(BaseModel):
         reference_impedance: Reference impedance for S-parameter normalization
             in Ohms. Standard is 50 Ohm.
         excitation_port: Name of port to excite. None = first port.
+        waveport_boundary: ``"pec"`` replaces Robin boundaries by PEC in the
+            numeric port eigenproblem (default). ``"inherit"`` retains their
+            physical conductivity, impedance and absorbing conditions.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -83,6 +85,14 @@ class DrivenConfig(BaseModel):
         "Default 20 is usually sufficient.",
     )
 
+    circuit_synthesis: bool = Field(
+        default=False,
+        description="Enable Palace AC circuit synthesis (AdaptiveCircuitSynthesis). "
+        "Requires an adaptive sweep (adaptive_tol > 0) and at least one port. "
+        "Palace synthesizes lumped L/R/C circuit matrices from the reduced-order "
+        "model and writes rom-*.csv files next to the S-parameters.",
+    )
+
     compute_s_params: bool = True
     reference_impedance: float = Field(
         default=50.0,
@@ -92,6 +102,14 @@ class DrivenConfig(BaseModel):
 
     excitation_port: str | None = Field(
         default=None, description="Port to excite (None = first port)"
+    )
+
+    waveport_boundary: Literal["pec", "inherit"] = Field(
+        default="pec",
+        description="Boundary treatment in numeric wave-port eigenproblems. "
+        "'pec' preserves the default PEC approximation; 'inherit' retains "
+        "conductivity, impedance and absorbing boundaries. The 3D problem "
+        "keeps its physical boundaries in both cases.",
     )
 
     save_step: int = Field(
@@ -109,6 +127,21 @@ class DrivenConfig(BaseModel):
         """Center frequency of the sweep band in Hz."""
         return (self.fmin + self.fmax) / 2
 
+    def _sample_frequencies(self) -> list[float]:
+        """Return the exported sample grid in Hz using Palace's GHz arithmetic."""
+        if self.num_points == 1 or self.fmin == self.fmax:
+            return [self.fmin]
+        min_ghz = self.fmin / 1e9
+        if self.scale == "log":
+            log_min = math.log10(min_ghz)
+            log_span = math.log10(self.fmax / 1e9) - log_min
+            return [
+                10 ** (log_min + index / (self.num_points - 1) * log_span) * 1e9
+                for index in range(self.num_points)
+            ]
+        step_ghz = (self.fmax - self.fmin) / (self.num_points - 1) / 1e9
+        return [(min_ghz + index * step_ghz) * 1e9 for index in range(self.num_points)]
+
     @model_validator(mode="after")
     def validate_frequency_range(self) -> Self:
         """Validate that fmin <= fmax and snap save_fields_at to the sample grid."""
@@ -118,22 +151,34 @@ class DrivenConfig(BaseModel):
         # Palace requires Save frequencies to exactly match the sample grid.
         # Snap to nearest sample point and warn if the shift is significant.
         if self.save_fields_at:
-            freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1)
+            samples = self._sample_frequencies()
             snapped: list[float] = []
             seen: set[int] = set()
             for freq in self.save_fields_at:
-                step_idx = round((freq - self.fmin) / freq_step)
-                step_idx = max(0, min(step_idx, self.num_points - 1))
-                snapped_freq = self.fmin + step_idx * freq_step
-                if abs(snapped_freq - freq) > freq_step * 0.01:
+                if not math.isfinite(freq):
+                    raise ValueError("save_fields_at frequencies must be finite")
+                sample_index, snapped_freq = min(
+                    enumerate(samples), key=lambda sample: abs(sample[1] - freq)
+                )
+                spacing = min(
+                    (
+                        abs(samples[neighbor] - snapped_freq)
+                        for neighbor in (sample_index - 1, sample_index + 1)
+                        if 0 <= neighbor < len(samples)
+                    ),
+                    default=0.0,
+                )
+                if not math.isclose(
+                    snapped_freq, freq, rel_tol=1e-12, abs_tol=spacing * 0.01
+                ):
                     logger.warning(
                         "save_fields_at: %.4g GHz snapped to %.4g GHz "
                         "(nearest sample point)",
                         freq / 1e9,
                         snapped_freq / 1e9,
                     )
-                if step_idx not in seen:
-                    seen.add(step_idx)
+                if sample_index not in seen:
+                    seen.add(sample_index)
                     snapped.append(snapped_freq)
             self.__dict__["save_fields_at"] = snapped
 
@@ -141,26 +186,41 @@ class DrivenConfig(BaseModel):
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
-        freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
-
-        if self.fmax == self.fmin:
-            freq_step = 1.0
+        sample: dict[str, object] = {
+            "Type": "Linear" if self.scale == "linear" else "Log",
+            "MinFreq": self.fmin / 1e9,
+            "MaxFreq": self.fmax / 1e9,
+            "SaveStep": self.save_step,
+        }
+        if self.num_points == 1:
+            sample = {
+                "Type": "Point",
+                "Freq": [self.fmin / 1e9],
+                "SaveStep": self.save_step,
+            }
+        elif self.scale == "log":
+            sample["NSample"] = self.num_points
         else:
-            freq_step = (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
+            sample["FreqStep"] = (
+                1.0
+                if self.fmax == self.fmin
+                else (self.fmax - self.fmin) / max(1, self.num_points - 1) / 1e9
+            )
         config: dict = {
-            "Samples": [
-                {
-                    "Type": "Linear" if self.scale == "linear" else "Log",
-                    "MinFreq": self.fmin / 1e9,
-                    "MaxFreq": self.fmax / 1e9,
-                    "FreqStep": freq_step,
-                    "SaveStep": self.save_step,
-                }
-            ],
+            "Samples": [sample],
             "AdaptiveTol": max(0, self.adaptive_tol),
         }
         if self.adaptive_tol > 0:
             config["AdaptiveMaxSamples"] = self.adaptive_max_samples
+        if self.circuit_synthesis:
+            if self.adaptive_tol <= 0:
+                msg = (
+                    "circuit_synthesis requires an adaptive sweep "
+                    "(adaptive_tol > 0): Palace rejects AdaptiveCircuitSynthesis "
+                    "without AdaptiveTol > 0."
+                )
+                raise ValueError(msg)
+            config["AdaptiveCircuitSynthesis"] = True
         if self.save_fields_at:
             config["Save"] = [freq / 1e9 for freq in self.save_fields_at]
         return config
@@ -175,8 +235,8 @@ class EigenmodeConfig(BaseModel):
     Attributes:
         num_modes: Number of eigenvalues (resonant modes) to compute.
         target: Target frequency in Hz — Palace searches for eigenvalues
-            above this frequency. None = search from DC. Set this near your
-            expected resonance to speed up convergence.
+            above this frequency. Required before meshing or exporting. Set
+            this near your expected resonance to speed up convergence.
         tolerance: Relative convergence tolerance for the eigenvalue solver.
             Tighter tolerance (e.g. 1e-8) gives more accurate frequencies
             and Q-factors at higher cost.
@@ -191,8 +251,11 @@ class EigenmodeConfig(BaseModel):
     )
     target: float | None = Field(
         default=None,
+        gt=0,
+        allow_inf_nan=False,
         description="Target frequency in Hz. Palace searches for modes above "
-        "this value. Set near expected resonance for faster convergence.",
+        "this value. Required before meshing or exporting. Set near expected "
+        "resonance for faster convergence.",
     )
     tolerance: float = Field(
         default=1e-6,
@@ -213,13 +276,21 @@ class EigenmodeConfig(BaseModel):
     )
     phi_target: float = Field(
         default=math.pi / 2,
+        allow_inf_nan=False,
+        description="Signed Bloch phase per cell in radians; zero and +/-pi are valid.",
+    )
+    periodic_length: float | None = Field(
+        default=None,
         gt=0,
-        description="Target Bloch phase advance per cell (radians).",
+        allow_inf_nan=False,
+        description="Expected cell length in mesh units (um for generated meshes). "
+        "If supplied, must match the measured donor-to-receiver translation.",
     )
     n_eff_guess: float = Field(
         default=2.0,
         gt=0,
-        description="Initial effective-index estimate used for Floquet k-vector setup.",
+        description="Deprecated compatibility field; does not affect the wave vector.",
+        deprecated="The Floquet wave vector now uses the actual mesh period.",
     )
 
     @model_validator(mode="after")
@@ -235,41 +306,53 @@ class EigenmodeConfig(BaseModel):
     def compute_floquet_wave_vector(
         self,
         *,
-        periodic_axis: Literal["x", "y"],
-        l0: float = 1e-6,
+        periodic_axis: Literal["x", "y", "z"],
+        periodic_length: float | None = None,
     ) -> list[float]:
         """Compute Palace Floquet wave vector [kx, ky, kz] in rad / mesh-unit.
 
-        Uses a practical initialization:
-            d_mesh = round(phi * c0 / (2*pi*f_target*n_eff*L0))
-            k = phi / d_mesh
-        where L0 is Palace's mesh-unit scale (default 1e-6 m).
+        The length must be supplied explicitly here or on this config. Config
+        generation passes the measured mesh translation, and checks it against
+        ``self.periodic_length`` when set. Target frequency and effective-index
+        estimates never determine the period. No rounding or unit scaling is
+        applied: k = phi_target / periodic_length.
+
+        Palace's convention is E(receiver) = exp(-i * phi_target) * E(donor).
         """
-        if self.target is None:
+        if periodic_axis not in {"x", "y", "z"}:
+            raise ValueError("periodic_axis must be 'x', 'y', or 'z'.")
+        if periodic_length is None:
+            periodic_length = self.periodic_length
+        if periodic_length is None:
             raise ValueError(
-                "Cannot compute Floquet wave vector without eigenmode target frequency."
+                "Floquet requires an actual periodic_length in mesh units; "
+                "it cannot be inferred from target frequency or n_eff_guess."
             )
-
-        d_mesh = (
-            self.phi_target * C0 / (2 * math.pi * self.target * self.n_eff_guess * l0)
-        )
-        d_mesh_rounded = max(1, round(d_mesh))
-        k_component = self.phi_target / d_mesh_rounded
-
-        if periodic_axis == "x":
-            return [k_component, 0.0, 0.0]
-        if periodic_axis == "y":
-            return [0.0, k_component, 0.0]
-        raise ValueError(f"periodic_axis must be 'x' or 'y', got {periodic_axis!r}")
+        if not math.isfinite(periodic_length) or periodic_length <= 0:
+            raise ValueError("periodic_length must be finite and positive.")
+        if self.periodic_length is not None and not math.isclose(
+            periodic_length, self.periodic_length, rel_tol=1e-8, abs_tol=1e-6
+        ):
+            raise ValueError(
+                f"periodic_length={self.periodic_length} does not match the mesh "
+                f"translation length {periodic_length} (mesh units)."
+            )
+        wave_vector = [0.0, 0.0, 0.0]
+        wave_vector["xyz".index(periodic_axis)] = self.phi_target / periodic_length
+        return wave_vector
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
+        if self.target is None:
+            raise ValueError(
+                "A positive eigenmode target frequency is required. "
+                "Call set_eigenmode(target=...) with the frequency in Hz."
+            )
         config: dict = {
             "N": self.num_modes,
             "Tol": self.tolerance,
+            "Target": self.target / 1e9,
         }
-        if self.target is not None:
-            config["Target"] = self.target / 1e9  # Convert to GHz
         if self.save > 0:
             config["Save"] = self.save
         return config
@@ -378,35 +461,44 @@ class TransientConfig(BaseModel):
         excitation: Excitation waveform type
         excitation_freq: Excitation frequency in Hz (for sinusoidal)
         excitation_width: Pulse width in ns (for gaussian)
-        time_step: Time step in ns (None = adaptive)
+        time_step: Required positive time step in ns.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     excitation: Literal["sinusoidal", "gaussian", "ramp", "smoothstep"] = "sinusoidal"
     excitation_freq: float | None = Field(
-        default=None, description="Excitation frequency in Hz"
+        default=None, allow_inf_nan=False, description="Excitation frequency in Hz"
     )
     excitation_width: float | None = Field(
-        default=None, description="Pulse width in ns (for gaussian)"
+        default=None,
+        allow_inf_nan=False,
+        description="Pulse width in ns (for gaussian)",
     )
-    max_time: float = Field(description="Maximum simulation time in ns")
-    time_step: float | None = Field(
-        default=None, description="Time step in ns (None = adaptive)"
+    max_time: float = Field(
+        gt=0, allow_inf_nan=False, description="Maximum simulation time in ns"
+    )
+    time_step: float = Field(
+        gt=0, allow_inf_nan=False, description="Required time step in ns"
     )
 
     def to_palace_config(self) -> dict:
         """Convert to Palace JSON config format."""
+        waveforms = {
+            "sinusoidal": "Sinusoidal",
+            "gaussian": "Gaussian",
+            "ramp": "Ramp",
+            "smoothstep": "SmoothStep",
+        }
         config: dict = {
-            "Type": self.excitation.capitalize(),
+            "Excitation": waveforms[self.excitation],
             "MaxTime": self.max_time,
+            "TimeStep": self.time_step,
         }
         if self.excitation_freq is not None:
             config["ExcitationFreq"] = self.excitation_freq / 1e9  # Convert to GHz
         if self.excitation_width is not None:
             config["ExcitationWidth"] = self.excitation_width
-        if self.time_step is not None:
-            config["TimeStep"] = self.time_step
         return config
 
 

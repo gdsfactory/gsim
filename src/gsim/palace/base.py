@@ -15,18 +15,23 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from gsim.palace.models import (
     CPWPortConfig,
-    DrivenConfig,
-    EigenmodeConfig,
     ImpedanceBoundaryConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
+    RefinementConfig,
     TerminalConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
-from gsim.palace.models.results import SimulationResult, ValidationResult
+from gsim.palace.models.results import (
+    SimulationResult,
+    ValidationResult,
+    format_field_dofs,
+    format_mesh_distortion,
+    mesh_identity_lines,
+)
+from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
     from gdsfactory.component import Component
@@ -144,14 +149,51 @@ def _recommend_parallel(
     return max(1, recommended), num_threads
 
 
-class PalaceSimMixin:
+# Printed by Palace's ``palace`` launcher script when its MPI launcher (``mpirun``
+# unless ``--launcher`` is given) is not on PATH.
+_MPI_LAUNCHER_MISSING = "Could not locate MPI launcher"
+_FAILURE_OUTPUT_TAIL_LINES = 200
+
+
+def _captured_lines(*streams: str | None) -> list[str]:
+    """Split captured process output into lines, skipping empty streams."""
+    lines: list[str] = []
+    for stream in streams:
+        if stream:
+            lines.extend(stream.splitlines())
+    return lines
+
+
+def _palace_failure_message(returncode: int, output_lines: list[str]) -> str:
+    """Describe a failed Palace run from its exit code and the end of its output.
+
+    When the output shows that the ``palace`` launcher script could not find
+    ``mpirun``, the message also says how to fix that.
+    """
+    message = f"Palace simulation failed with return code {returncode}"
+    tail = "\n".join(output_lines[-_FAILURE_OUTPUT_TAIL_LINES:])
+    if tail.strip():
+        message += f"\n\nOutput (tail):\n{tail}"
+    if any(_MPI_LAUNCHER_MISSING in line for line in output_lines):
+        message += (
+            "\n\nPalace's launcher script could not find `mpirun`. Install an MPI "
+            "runtime that provides it (for example `sudo apt install openmpi-bin` "
+            "on Ubuntu), or run with use_apptainer=True. The prebuilt Palace "
+            "runtime that gsim installs includes the MPI libraries but not "
+            "`mpirun`."
+        )
+    return message
+
+
+class PalaceSimMixin(SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
     Subclasses must define these attributes (typically via Pydantic fields):
         - geometry: Geometry | None
         - stack: LayerStack | None
         - materials: dict[str, MaterialConfig]
-        - numerical: NumericalConfig
+        - solver: SolverConfig
+        - refinement: RefinementConfig
         - _output_dir: Path | None (private)
         - _stack_kwargs: dict[str, Any] (private)
     """
@@ -160,9 +202,7 @@ class PalaceSimMixin:
     geometry: Geometry | None
     stack: LayerStack | None
     materials: dict[str, MaterialConfig]
-    numerical: NumericalConfig
-    driven: DrivenConfig
-    eigenmode: EigenmodeConfig
+    refinement: RefinementConfig
     ports: list[PortConfig]
     cpw_ports: list[CPWPortConfig]
     wave_ports: list[WavePortConfig]
@@ -349,11 +389,10 @@ class PalaceSimMixin:
         if not material or not isinstance(material, str):
             raise ValueError("material must be a non-empty string")
 
-        # Keep mesh margin controls in sync for domain/port extents.
-        mesh_config = getattr(self, "mesh_config", None)
-        if mesh_config is not None:
-            mesh_config.margin_x = mx
-            mesh_config.margin_y = my
+        # Deliberately not synced into ``mesh_config.margin_x``/``margin_y``:
+        # the airbox config below is the single source of the lateral margin, and
+        # writing it to both made it possible to apply it twice. See
+        # ``_resolve_domain_margins``.
 
         # Store explicit airbox expansion for generator plumbing.
         self._airbox_config = {
@@ -363,6 +402,24 @@ class PalaceSimMixin:
             "z_below": zb,
             "material": material,
         }
+
+    def _resolve_domain_margins(self, mesh_config) -> tuple[float, float]:
+        """Lateral margins for the mesh domain, excluding the airbox expansion.
+
+        ``set_airbox()`` owns the lateral margin whenever it has been called: the
+        requested value travels to the mesher as ``airbox_margin_x`` /
+        ``airbox_margin_y`` and is applied there, so it must not be applied a
+        second time as the domain margin. Passing it in both places padded the
+        air volume twice, so ``set_airbox(margin_x=N)`` produced ``2 * N`` um of
+        air.
+
+        ``mesh_config`` is only the fallback, for a simulation that never called
+        ``set_airbox()`` and sizes its domain through the mesh config alone.
+        """
+        airbox_cfg = self._airbox_config or {}
+        margin_x = 0.0 if "margin_x" in airbox_cfg else mesh_config.effective_margin_x
+        margin_y = 0.0 if "margin_y" in airbox_cfg else mesh_config.effective_margin_y
+        return margin_x, margin_y
 
     def _apply_airbox_overrides(
         self,
@@ -573,36 +630,53 @@ class PalaceSimMixin:
             )
         )
 
-    def set_numerical(
+    def set_refinement(
         self,
         *,
-        order: int = 1,
-        tolerance: float = 1e-6,
-        max_iterations: int = 400,
-        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = "Default",
-        preconditioner: Literal["Default", "AMS", "BoomerAMG"] = "Default",
-        device: Literal["CPU", "GPU"] = "CPU",
+        max_its: int = 0,
+        tol: float = 1e-2,
+        uniform_levels: int = 0,
+        max_dofs: int | None = None,
+        update_fraction: float | None = None,
+        nonconformal: bool | None = None,
+        max_nc_levels: int | None = None,
+        save_adapt_iterations: bool | None = None,
+        save_adapt_mesh: bool | None = None,
     ) -> None:
-        """Configure numerical solver parameters.
+        """Configure Palace's adaptive mesh refinement (AMR).
+
+        Palace refines the elements that carry most of its estimated error and
+        re-solves, until the error norm falls below ``tol``, ``max_its``
+        passes have run, or the problem reaches ``max_dofs`` degrees of
+        freedom. See :class:`~gsim.palace.models.RefinementConfig`.
 
         Args:
-            order: Finite element order (1-4)
-            tolerance: Linear solver tolerance
-            max_iterations: Maximum solver iterations
-            solver_type: Linear solver type
-            preconditioner: Preconditioner type
-            device: Compute device (CPU or GPU)
+            max_its: Maximum number of AMR passes. 0 disables AMR.
+            tol: Stop refining when the estimated error norm falls below this.
+            uniform_levels: Uniform refinement levels applied to the input
+                mesh before solving.
+            max_dofs: Maximum degrees of freedom. None means no limit.
+            update_fraction: Dörfler marking fraction, between 0 and 1.
+            nonconformal: Refine with hanging nodes instead of conformally.
+            max_nc_levels: Maximum nonconformal refinement levels; 0 means
+                no limit.
+            save_adapt_iterations: Keep the output of every pass in an
+                ``iterationX`` subdirectory.
+            save_adapt_mesh: Save the final adapted mesh.
 
         Example:
-            >>> sim.set_numerical(order=3, tolerance=1e-8)
+            >>> sim.set_refinement(max_its=5, tol=1e-3, max_dofs=2_000_000)
         """
-        self.numerical = NumericalConfig(
-            order=order,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            solver_type=solver_type,
-            preconditioner=preconditioner,
-            device=device,
+        self.refinement = RefinementConfig(
+            max_its=max_its,
+            tol=tol,
+            uniform_levels=uniform_levels,
+            max_dofs=max_dofs,
+            update_fraction=update_fraction,
+            nonconformal=nonconformal,
+            max_nc_levels=max_nc_levels,
+            save_adapt_iterations=save_adapt_iterations,
+            save_adapt_mesh=save_adapt_mesh,
         )
 
     # -------------------------------------------------------------------------
@@ -669,6 +743,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
     ) -> MeshConfig:
         """Build mesh config from preset with optional overrides.
 
@@ -754,6 +831,9 @@ class PalaceSimMixin:
             mesh_config.high_order_elements = existing_config.high_order_elements
             mesh_config.high_order_order = existing_config.high_order_order
             mesh_config.high_order_optimize = existing_config.high_order_optimize
+            mesh_config.algorithm_3d = existing_config.algorithm_3d
+            mesh_config.threads = existing_config.threads
+            mesh_config.surface_threads = existing_config.surface_threads
 
         # Preserve planar_conductors from sim.mesh_config if not
         # explicitly provided via sim.mesh(planar_conductors=...)
@@ -798,6 +878,12 @@ class PalaceSimMixin:
             mesh_config.high_order_order = high_order_order
         if high_order_optimize is not None:
             mesh_config.high_order_optimize = high_order_optimize
+        if algorithm_3d is not None:
+            mesh_config.algorithm_3d = algorithm_3d
+        if threads is not None:
+            mesh_config.threads = threads
+        if surface_threads is not None:
+            mesh_config.surface_threads = surface_threads
         mesh_config.show_gui = show_gui
 
         return mesh_config
@@ -996,14 +1082,22 @@ class PalaceSimMixin:
                 if not wp.layer
             )
 
+        eigenmode = self._get_problem_settings("eigenmode")
+        if eigenmode is not None and eigenmode.target is None:
+            errors.append(
+                "A positive eigenmode target frequency is required. "
+                "Call set_eigenmode(target=...) with the frequency in Hz."
+            )
+
         # Validate excitation port if specified
-        if self.simulation_type == "driven" and self.driven.excitation_port is not None:
+        driven = self._get_problem_settings("driven")
+        if driven is not None and driven.excitation_port is not None:
             port_names = [p.name for p in self.ports]
             cpw_names = [cpw.name for cpw in self.cpw_ports]
             all_port_names = port_names + cpw_names
-            if self.driven.excitation_port not in all_port_names:
+            if driven.excitation_port not in all_port_names:
                 errors.append(
-                    f"Excitation port '{self.driven.excitation_port}' not found. "
+                    f"Excitation port '{driven.excitation_port}' not found. "
                     f"Available: {all_port_names}"
                 )
 
@@ -1339,7 +1433,8 @@ class PalaceSimMixin:
 
         ordered: list[tuple[int, PortConfig | CPWPortConfig]] = [
             (port.order, port) for port in self.ports
-        ] + [(cpw.order, cpw) for cpw in self.cpw_ports]
+        ]
+        ordered.extend((cpw.order, cpw) for cpw in self.cpw_ports)
 
         for _order, config in sorted(ordered, key=lambda item: item[0]):
             if isinstance(config, PortConfig):
@@ -1391,15 +1486,10 @@ class PalaceSimMixin:
         # Resolve stack
         stack = self._resolve_stack()
         airbox_cfg = self._airbox_config or {}
-        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
-        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
+        domain_margin_x, domain_margin_y = self._resolve_domain_margins(mesh_config)
 
         if verbose:
             logger.info("Generating mesh in %s", output_dir)
-
-        airbox_cfg = getattr(self, "_airbox_config", {})
-        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
-        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
 
         mesh_result = generate_mesh(
             component=component,
@@ -1421,8 +1511,9 @@ class PalaceSimMixin:
             show_gui=mesh_config.show_gui,
             simulation_type=self.simulation_type,
             driven_config=driven_config,
-            eigenmode_config=self.eigenmode,
-            boundary_mode_config=getattr(self, "boundary_mode", None),
+            eigenmode_config=self._get_problem_settings("eigenmode"),
+            numerical_config=self.solver,
+            boundary_mode_config=self._get_problem_settings("boundary_mode"),
             cross_section=getattr(self, "cross_section", None),
             write_config=write_config,
             planar_conductors=mesh_config.planar_conductors,
@@ -1438,6 +1529,9 @@ class PalaceSimMixin:
             high_order_elements=mesh_config.high_order_elements,
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
+            algorithm_3d=mesh_config.algorithm_3d,
+            threads=mesh_config.threads,
+            surface_threads=mesh_config.surface_threads,
             verbosity=gmsh_verbosity,
             decimate_tolerance=decimate_tolerance,
         )
@@ -1452,13 +1546,14 @@ class PalaceSimMixin:
             config_path=mesh_result.config_path,
             port_info=mesh_result.port_info,
             mesh_stats=mesh_result.mesh_stats,
+            metadata=mesh_result.metadata,
         )
 
     def print_mesh_stats(self) -> None:
         """Print mesh statistics from the last mesh generation.
 
-        Reports node/element counts and estimates solver DOFs based on
-        the solver polynomial order (default 2 for 2D, 1 for 3D).
+        Reports node/element counts and input-mesh Field DOF estimates at the
+        configured field order, before Palace preprocessing and refinement.
         """
         mr = self._last_mesh_result
         if mr is None:
@@ -1483,6 +1578,10 @@ class PalaceSimMixin:
         print(f"  Elements:  {elements:,}")  # noqa: T201
         if tets:
             print(f"  Tetrahedra: {tets:,}")  # noqa: T201
+        if distortion := format_mesh_distortion(stats):
+            print(f"  {distortion}")  # noqa: T201
+        if field_dofs := format_field_dofs(stats):
+            print(f"  {field_dofs}")  # noqa: T201
 
         dom_volumes = groups.get("volumes", {})
         bdr_conductors = groups.get("conductor_surfaces", {})
@@ -1491,6 +1590,22 @@ class PalaceSimMixin:
         print(f"  Conductor surfaces:{len(bdr_conductors)}")  # noqa: T201
         print(f"  Interface surfaces:{len(bdr_interfaces)}")  # noqa: T201
 
+        # The domain regions hold the volume elements in 3D and the surface
+        # elements in 2D meshes, where there are no volume groups.
+        physical = stats.get("groups", {})
+        regions = [g for g in physical.get("volumes", []) if g.get("elements")] or [
+            g for g in physical.get("surfaces", []) if g.get("elements")
+        ]
+        region_total = sum(g["elements"] for g in regions)
+        if region_total:
+            print("  Elements by region:")  # noqa: T201
+            for g in sorted(regions, key=lambda g: g["elements"], reverse=True):
+                share = 100 * g["elements"] / region_total
+                line = f"    {g['name']:<24}{g['elements']:>12,}  {share:5.1f}%"
+                if edges := g.get("edge_length"):
+                    line += f"  edges {edges['min']:.3g}-{edges['max']:.3g} um"
+                print(line)  # noqa: T201
+
         if elements and not tets:
             p = 2
             nd_dofs_est = elements * p * (p + 1)
@@ -1498,6 +1613,9 @@ class PalaceSimMixin:
             print(f"  Est. ND-space DOFs (order {p}):  ~{nd_dofs_est:,}")  # noqa: T201
             print(f"  Est. H1-space DOFs (order {p}):  ~{h1_dofs_est:,}")  # noqa: T201
             print(f"  Est. total DOFs:                  ~{nd_dofs_est + h1_dofs_est:,}")  # noqa: T201
+
+        for line in mesh_identity_lines(stats):
+            print(f"  {line}")  # noqa: T201
 
     def _get_ports_for_preview(self, stack: LayerStack) -> list:
         """Get ports for preview."""
@@ -1536,6 +1654,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
         decimate_tolerance: float | None = None,
     ) -> None:
         """Preview the mesh without running simulation.
@@ -1568,6 +1689,10 @@ class PalaceSimMixin:
             high_order_elements: Enable high-order geometric mesh elements.
             high_order_order: Polynomial order for high-order elements.
             high_order_optimize: Run gmsh high-order optimization after meshing.
+            algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
+            threads: Threads for 3D meshing (see ``MeshConfig``).
+            surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
+                differs from run to run.
             decimate_tolerance: Relative tolerance for polygon decimation
                 (None = no decimation; typical 0.001-0.01).
 
@@ -1612,6 +1737,9 @@ class PalaceSimMixin:
             high_order_elements=high_order_elements,
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
+            algorithm_3d=algorithm_3d,
+            threads=threads,
+            surface_threads=surface_threads,
         )
 
         # Resolve stack
@@ -1621,13 +1749,9 @@ class PalaceSimMixin:
         ports = self._get_ports_for_preview(stack)
 
         airbox_cfg = self._airbox_config or {}
-        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
-        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
+        domain_margin_x, domain_margin_y = self._resolve_domain_margins(mesh_config)
 
         # Generate mesh in temp directory
-        airbox_cfg = getattr(self, "_airbox_config", {})
-        domain_margin_x = airbox_cfg.get("margin_x", mesh_config.effective_margin_x)
-        domain_margin_y = airbox_cfg.get("margin_y", mesh_config.effective_margin_y)
         with tempfile.TemporaryDirectory() as tmpdir:
             generate_mesh(
                 component=component,
@@ -1647,10 +1771,10 @@ class PalaceSimMixin:
                 fmax=mesh_config.fmax,
                 show_gui=True,
                 simulation_type=self.simulation_type,
-                driven_config=self.driven,
-                eigenmode_config=self.eigenmode,
-                numerical_config=self.numerical,
-                boundary_mode_config=getattr(self, "boundary_mode", None),
+                driven_config=self._get_problem_settings("driven"),
+                eigenmode_config=self._get_problem_settings("eigenmode"),
+                numerical_config=self.solver,
+                boundary_mode_config=self._get_problem_settings("boundary_mode"),
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
@@ -1663,6 +1787,9 @@ class PalaceSimMixin:
                 high_order_elements=mesh_config.high_order_elements,
                 high_order_order=mesh_config.high_order_order,
                 high_order_optimize=mesh_config.high_order_optimize,
+                algorithm_3d=mesh_config.algorithm_3d,
+                threads=mesh_config.threads,
+                surface_threads=mesh_config.surface_threads,
                 decimate_tolerance=decimate_tolerance,
             )
 
@@ -1701,6 +1828,9 @@ class PalaceSimMixin:
         high_order_elements: bool | None = None,
         high_order_order: int | None = None,
         high_order_optimize: bool | None = None,
+        algorithm_3d: Literal["delaunay", "hxt"] | None = None,
+        threads: int | None = None,
+        surface_threads: int | None = None,
     ) -> SimulationResult:
         """Generate the mesh for Palace simulation.
 
@@ -1748,6 +1878,10 @@ class PalaceSimMixin:
             high_order_elements: Enable high-order geometric mesh elements.
             high_order_order: Polynomial order for high-order elements.
             high_order_optimize: Run gmsh high-order optimization after meshing.
+            algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
+            threads: Threads for 3D meshing (see ``MeshConfig``).
+            surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
+                differs from run to run.
 
         Returns:
             SimulationResult with mesh path
@@ -1796,6 +1930,9 @@ class PalaceSimMixin:
             high_order_elements=high_order_elements,
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
+            algorithm_3d=algorithm_3d,
+            threads=threads,
+            surface_threads=surface_threads,
         )
 
         if merge_via_distance is not None:
@@ -1823,7 +1960,7 @@ class PalaceSimMixin:
             output_dir=output_dir,
             mesh_config=mesh_config,
             ports=palace_ports,
-            driven_config=self.driven,
+            driven_config=self._get_problem_settings("driven"),
             model_name=model_name,
             verbose=verbose,
             write_config=False,
@@ -1860,6 +1997,10 @@ class PalaceSimMixin:
         stats = result.mesh_stats or {}
         node_count = stats.get("nodes")
         tet_count = stats.get("tetrahedra")
+        if distortion := format_mesh_distortion(stats):
+            logger.info("%s", distortion)
+        if field_dofs := format_field_dofs(stats):
+            logger.info("%s", field_dofs)
         if node_count is not None and tet_count is not None:
             logger.info(
                 "Mesh: %s nodes \u00b7 %s tets \u00b7 refined=%.3g \u00b5m \u00b7 "
@@ -1924,7 +2065,7 @@ class PalaceSimMixin:
             )
 
         stack = self._resolve_stack()
-        electrostatic_config = getattr(self, "electrostatic", None)
+        electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
         # Thread impedance boundary configs through hints
@@ -1946,10 +2087,11 @@ class PalaceSimMixin:
             stack=stack,
             ports=self._last_ports,
             simulation_type=self.simulation_type,
-            eigenmode_config=self.eigenmode,
-            driven_config=self.driven,
-            numerical_config=self.numerical,
-            boundary_mode_config=getattr(self, "boundary_mode", None),
+            eigenmode_config=self._get_problem_settings("eigenmode"),
+            driven_config=self._get_problem_settings("driven"),
+            numerical_config=self.solver,
+            refinement_config=self.refinement,
+            boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=self.absorbing_boundary,
             hints=hints,
             electrostatic_config=electrostatic_config,
@@ -2555,22 +2697,26 @@ class PalaceSimMixin:
                     returncode = process.wait()
 
                 if returncode != 0:
-                    tail = "\n".join(streamed_lines[-200:])
-                    error_msg = (
-                        f"Palace simulation failed with return code {returncode}"
+                    raise RuntimeError(
+                        _palace_failure_message(returncode, streamed_lines)
                     )
-                    if tail:
-                        error_msg += f"\n\nOutput (tail):\n{tail}"
-                    raise RuntimeError(error_msg)
             else:
-                result = subprocess.run(  # noqa: S603
-                    cmd,
-                    cwd=output_dir,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    env=_run_env,
-                )
+                try:
+                    result = subprocess.run(  # noqa: S603
+                        cmd,
+                        cwd=output_dir,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=_run_env,
+                    )
+                except subprocess.CalledProcessError as e:
+                    # Same message as the verbose path: without the captured
+                    # output a failure only says "exit status 1".
+                    output_lines = _captured_lines(e.stdout, e.stderr)
+                    raise RuntimeError(
+                        _palace_failure_message(e.returncode, output_lines)
+                    ) from e
                 if result.stdout:
                     logger.debug(result.stdout)
                 if result.stderr:

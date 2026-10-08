@@ -79,7 +79,7 @@ def _file_digest(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def compute_dir_digest(input_dir: str | Path) -> str:
+def compute_dir_digest(input_dir: str | Path, *, exclude: tuple[str, ...] = ()) -> str:
     """Compute a deterministic digest of a directory's contents.
 
     The digest covers both file names (as POSIX-style relative paths, so it
@@ -88,6 +88,8 @@ def compute_dir_digest(input_dir: str | Path) -> str:
 
     Args:
         input_dir: Directory to digest.
+        exclude: Exact POSIX relative paths to omit. By default, diagnostic
+            metadata is included along with all other non-ignored files.
 
     Returns:
         Lowercase hex SHA-256 digest of the directory contents.
@@ -103,6 +105,8 @@ def compute_dir_digest(input_dir: str | Path) -> str:
     hasher = hashlib.sha256()
     count = 0
     for rel_path, path in _iter_files(input_dir):
+        if rel_path in exclude:
+            continue
         hasher.update(rel_path.encode("utf-8"))
         hasher.update(b"\0")
         hasher.update(_file_digest(path).encode("ascii"))
@@ -124,6 +128,11 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     written inputs are byte-identical. It can be dropped once the server-side
     key includes the solver image version.
 
+    Palace reserves root-level ``metadata.json`` for SDK diagnostics. Exclude
+    it from this result-cache key so new measurements do not rerun identical
+    physics inputs. ``compute_dir_digest()`` still includes it by default for
+    callers that need a digest of the complete input bundle.
+
     Args:
         input_dir: Directory holding the files that will be uploaded.
         job_type: Solver name, e.g. ``"meep"`` or ``"palace"``.
@@ -141,7 +150,8 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     """
     from gsim import __version__
 
-    digest = compute_dir_digest(input_dir)
+    exclude = ("metadata.json",) if job_type.lower() == "palace" else ()
+    digest = compute_dir_digest(input_dir, exclude=exclude)
     hasher = hashlib.sha256()
     hasher.update(digest.encode("ascii"))
     hasher.update(b"\0")

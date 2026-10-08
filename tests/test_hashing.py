@@ -115,3 +115,32 @@ class TestComputeInputHash:
 
         _write(tmp_path, "config.json", '{"n": 1}')
         assert compute_input_hash(tmp_path, "meep") != before
+
+    def test_palace_diagnostics_preserve_existing_result_cache(self, tmp_path):
+        """Adding or updating SDK diagnostics must not repeat the same solve."""
+        _write(tmp_path, "config.json", '{"Model": {"Mesh": "palace.msh"}}')
+        _write(tmp_path, "palace.msh", "mesh bytes")
+        cache_key = compute_input_hash(tmp_path, "palace")
+        full_digest = compute_dir_digest(tmp_path)
+
+        _write(tmp_path, "metadata.json", '{"schema_version": 1, "solver": "palace"}')
+        assert compute_input_hash(tmp_path, "palace") == cache_key
+        assert compute_dir_digest(tmp_path) != full_digest
+
+        _write(tmp_path, "metadata.json", '{"schema_version": 2, "solver": "palace"}')
+        assert compute_input_hash(tmp_path, "PALACE") == cache_key
+        _write(tmp_path, "palace.msh", "different mesh bytes")
+        assert compute_input_hash(tmp_path, "palace") != cache_key
+
+    @pytest.mark.parametrize(
+        ("solver", "path"),
+        [("meep", "metadata.json"), ("palace", "data/metadata.json")],
+    )
+    def test_metadata_exclusion_is_specific_to_palace_root(
+        self, tmp_path, solver, path
+    ):
+        """Other engines and nested data files retain normal hashing."""
+        _write(tmp_path, "config.json", "{}")
+        before = compute_input_hash(tmp_path, solver)
+        _write(tmp_path, path, "metadata")
+        assert compute_input_hash(tmp_path, solver) != before

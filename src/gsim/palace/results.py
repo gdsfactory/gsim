@@ -29,6 +29,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
@@ -264,6 +266,19 @@ class PalaceTextResults:
             return self.modes[mode_id]
         raise KeyError(key)
 
+    @property
+    def error_indicators(self) -> dict[str, float] | None:
+        """Norm, minimum, maximum and mean of Palace's error indicator.
+
+        Read from ``error-indicators.csv``; None when Palace did not write it.
+        """
+        rows = self.csv_tables.get("error-indicators.csv")
+        if not rows:
+            return None
+        row = {str(k).strip(): v for k, v in rows[-1].items()}
+        columns = {"norm": "Norm", "min": "Minimum", "max": "Maximum", "mean": "Mean"}
+        return {key: self._to_float(row.get(column)) for key, column in columns.items()}
+
     def keys(self) -> list[str]:
         """Return available result file names."""
         return sorted(self.files.keys())
@@ -357,8 +372,8 @@ class SParam:
 
     def __init__(self, db: NDArray, deg: NDArray) -> None:
         """Create from dB magnitude and degree phase arrays."""
-        self._db = db
-        self._deg = deg
+        self._db = np.asarray(db, dtype=float)
+        self._deg = np.asarray(deg, dtype=float)
 
     @property
     def db(self) -> NDArray:
@@ -408,12 +423,19 @@ class SParams:
         data: dict[tuple[str, str], SParam],
         port_names: list[str],
         files: dict[str, Path] | None = None,
+        z0: float | None = None,
     ) -> None:
         """Create from frequency array, S-parameter data, and port names."""
         self._freq = freq
         self._data = data
         self._port_names = port_names
         self.files = files or {}
+        self._z0 = float(z0) if z0 is not None else None
+
+    @property
+    def z0(self) -> float:
+        """Reference impedance of the S-parameter normalization [Ohm]."""
+        return self._z0 if self._z0 is not None else 50.0
 
     @property
     def freq(self) -> NDArray:
@@ -466,18 +488,21 @@ class SParams:
             cols[f"S_{to_p}_{from_p}_deg"] = sp.deg
         return pd.DataFrame(cols)
 
-    def to_skrf(self, z0: float = 50.0):
+    def to_skrf(self, z0: float | None = None):
         """Convert to a scikit-rf Network object.
 
         Args:
-            z0: Reference impedance in ohms (default 50).
+            z0: Reference impedance in ohms. Defaults to the stored
+                reference impedance (``z0``, falling back to 50 Ohm).
 
         Returns:
-            skrf.Network with frequency in Hz and S-parameters in (f, i, j) order.
+            skrf.Network with frequency in Hz and S-parameters in (f, i, j)
+            order; port names and reference impedance are preserved.
         """
         import numpy as np
         import skrf as rf
 
+        z0 = float(z0) if z0 is not None else self.z0
         n = len(self._port_names)
         f_hz = self._freq * 1e9
         S = np.zeros((len(f_hz), n, n), dtype=complex)
@@ -488,7 +513,84 @@ class SParams:
                 elif (pj, pi) in self._data:
                     # assume reciprocity: S_ij = S_ji
                     S[:, i, j] = self._data[(pj, pi)].complex
-        return rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        network = rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        network.port_names = list(self._port_names)
+        return network
+
+    def write_touchstone(
+        self,
+        path: str | Path,
+        *,
+        z0: float | None = None,
+    ) -> Path:
+        """Export the S-parameters to a Touchstone file (``.sNp``).
+
+        Frequency is written in Hz, port order and the reference
+        impedance are preserved (port names are embedded as ``! Port[i]``
+        comments), and the real/imaginary parts are written with 16-digit
+        precision so the complex S round-trip error stays far below the
+        1e-9 acceptance level.
+
+        Args:
+            path: Destination path (``.sNp`` suffix added when missing).
+            z0: Reference impedance [Ohm]; defaults to the stored ``z0``
+                (falling back to 50 Ohm).
+
+        Returns:
+            The resolved file path.
+        """
+        path = Path(path)
+        if not re.fullmatch(r"\.s\d+p", path.suffix.lower()):
+            # APPEND (do not with_suffix: "run_1.5GHz" would eat ".5GHz").
+            path = Path(f"{path}.s{len(self._port_names)}p")
+        network = self.to_skrf(z0=z0)
+        fmt = "{:.16e}"
+        network.write_touchstone(
+            path,
+            form="ri",
+            format_spec_A=fmt,
+            format_spec_B=fmt,
+            format_spec_freq=fmt,
+            write_z0=False,
+        )
+        logger.info("Touchstone written to %s", path)
+        return path
+
+    @classmethod
+    def from_touchstone(cls, path: str | Path) -> SParams:
+        """Load S-parameters from a Touchstone file written by this class.
+
+        Port names are restored from the ``! Port[i]`` comments when
+        present (otherwise ``p1..pN``), and the reference impedance from
+        the file's ``R`` value.
+        """
+        import skrf as rf
+
+        network = rf.Network(str(path))
+        port_names = [
+            str(name) if name else f"p{i + 1}"
+            for i, name in enumerate(network.port_names or [])
+        ]
+        if len(port_names) != network.number_of_ports:
+            port_names = [f"p{i + 1}" for i in range(network.number_of_ports)]
+
+        freq_ghz = np.asarray(network.f, dtype=float) / 1e9
+        data: dict[tuple[str, str], SParam] = {}
+        n = network.number_of_ports
+        for i in range(n):
+            for j in range(n):
+                s_ij = network.s[:, i, j]
+                data[(port_names[i], port_names[j])] = SParam(
+                    db=20 * np.log10(np.clip(np.abs(s_ij), 1e-300, None)),
+                    deg=np.degrees(np.unwrap(np.angle(s_ij))),
+                )
+        z0 = float(np.real(network.z0[0, 0]))
+        return cls(
+            freq=freq_ghz,
+            data=data,
+            port_names=port_names,
+            z0=z0,
+        )
 
     def _filtered_entries(self, full: bool) -> list[tuple[str, SParam]]:
         """Return ``[(label, SParam), ...]`` filtered by excitation port."""
@@ -520,7 +622,7 @@ class SParams:
             ax2.plot(self._freq, sp.deg, label=label)
 
         ax1.set_ylabel("Magnitude (dB)")
-        ax1.set_title("S-Parameters")
+        ax1.set_title(f"S-Parameters (Z0 = {self.z0:g} Ohm)")
         ax1.legend()
         ax1.grid(True)
 
@@ -634,6 +736,7 @@ class SParams:
 
         ylabel = "Phase (deg)" if phase else "|S| (dB)"
         fig.update_layout(
+            title=f"Z0 = {self.z0:g} Ohm",
             xaxis_title="Frequency (GHz)",
             yaxis_title=ylabel,
             width=650,
@@ -674,6 +777,7 @@ class SParams:
 
         arrays: dict[str, NDArray] = {"freq": self._freq}
         arrays["port_names"] = np.array(self._port_names)
+        arrays["z0"] = np.array([self.z0])
         for (to_p, from_p), sp in self._data.items():
             arrays[f"S_{to_p}_{from_p}_db"] = sp.db
             arrays[f"S_{to_p}_{from_p}_deg"] = sp.deg
@@ -697,6 +801,7 @@ class SParams:
 
         freq = npz["freq"]
         port_names = list(npz["port_names"])
+        z0 = float(npz["z0"][0]) if "z0" in npz else None
 
         data: dict[tuple[str, str], SParam] = {}
         for to_p in port_names:
@@ -707,7 +812,7 @@ class SParams:
                     data[(to_p, from_p)] = SParam(db=npz[db_key], deg=npz[deg_key])
 
         logger.info("S-parameters loaded from %s", filepath)
-        return cls(freq=freq, data=data, port_names=port_names)
+        return cls(freq=freq, data=data, port_names=port_names, z0=z0)
 
     def __repr__(self) -> str:
         """Return string representation."""
@@ -740,6 +845,8 @@ def load_sparams(
 
     Raises:
         FileNotFoundError: If ``port-S.csv`` cannot be found.
+        ValueError: If a numeric CSV cell is malformed. Negative infinity is
+            accepted for dB magnitudes and represents exact zero transmission.
     """
     import pandas as pd
 
@@ -756,12 +863,17 @@ def load_sparams(
 
     port_map = _load_port_map(base_dir, csv_path, port_info_path)
 
-    df = pd.read_csv(csv_path)
+    # Preserve cells verbatim until numeric validation, including padded -inf.
+    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
     df.columns = df.columns.str.strip()
 
     # Extract frequency
     freq_col = next((c for c in df.columns if c.startswith("f")), None)
-    freq = df[freq_col].to_numpy() if freq_col else np.arange(len(df))
+    freq = (
+        _numeric_csv_column(df[freq_col], csv_path, freq_col)
+        if freq_col
+        else np.arange(len(df), dtype=float)
+    )
 
     # Parse S-parameter columns into SParam objects
     # Group by (i, j) pair — each pair has a dB and deg column
@@ -771,7 +883,9 @@ def load_sparams(
         if parsed is None:
             continue
         i, j, kind = parsed
-        raw.setdefault((i, j), {})[kind] = df[col].to_numpy()
+        raw.setdefault((i, j), {})[kind] = _numeric_csv_column(
+            df[col], csv_path, col, allow_negative_infinity=kind == "db"
+        )
 
     # Build port name list (ordered by index)
     all_indices = set()
@@ -790,7 +904,9 @@ def load_sparams(
         data[(to_name, from_name)] = SParam(db=db, deg=deg)
 
     files = dict(source) if isinstance(source, dict) else None
-    return SParams(freq=freq, data=data, port_names=port_names, files=files)
+
+    z0 = _reference_impedance(base_dir, port_info_path)
+    return SParams(freq=freq, data=data, port_names=port_names, files=files, z0=z0)
 
 
 def load_text_results(source: str | Path | dict) -> PalaceTextResults:
@@ -865,6 +981,78 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
     )
 
 
+def load_refinement_history(source: str | Path) -> list[PalaceTextResults]:
+    """Load the results of every adaptive mesh refinement pass, oldest first.
+
+    With ``SaveAdaptIterations``, Palace keeps the output of pass X in an
+    ``iterationX`` subdirectory and writes the last pass at the top level of
+    its output directory. A run without refinement gives a single pass.
+
+    Args:
+        source: Simulation path, or Palace output directory.
+
+    Returns:
+        One :class:`PalaceTextResults` per pass, the final one last.
+    """
+    base = Path(source)
+    passes: list[Path] = []
+    for root in (base, base / "output" / "palace", base / "output"):
+        passes = sorted(
+            (
+                d
+                for d in root.glob("iteration*")
+                if d.is_dir() and d.name.removeprefix("iteration").isdigit()
+            ),
+            key=lambda d: int(d.name.removeprefix("iteration")),
+        )
+        if passes:
+            break
+    return [load_text_results(d) for d in passes] + [load_text_results(base)]
+
+
+def refinement_convergence(
+    history: list[PalaceTextResults],
+    metric: Callable[[PalaceTextResults], float],
+) -> list[dict[str, float | int | None]]:
+    """Tabulate Palace's error estimate and a chosen metric, pass by pass.
+
+    Palace stops refining on its own error estimate, which does not mean that
+    a given quantity (a frequency, an S-parameter, a capacitance) has
+    converged. This lists both for each pass of :func:`load_refinement_history`.
+
+    The relative change of the metric between two passes is not its error:
+    if the changes shrink by a factor r per pass, the error left after the
+    last pass is roughly the last change times r / (1 - r).
+
+    Args:
+        history: Passes from :func:`load_refinement_history`.
+        metric: Function returning the quantity of interest for one pass.
+
+    Returns:
+        One row per pass with ``pass``, ``error_norm``, ``value`` and
+        ``relative_change``: None for the first pass, NaN after a pass where
+        the metric was zero.
+    """
+    table: list[dict[str, float | int | None]] = []
+    previous = None
+    for number, results in enumerate(history, start=1):
+        value = metric(results)
+        indicators = results.error_indicators or {}
+        change = None
+        if previous is not None:
+            change = (value - previous) / abs(previous) if previous else float("nan")
+        table.append(
+            {
+                "pass": number,
+                "error_norm": indicators.get("norm"),
+                "value": value,
+                "relative_change": change,
+            }
+        )
+        previous = value
+    return table
+
+
 def get_port_map(source: str | Path | dict) -> dict[int, str]:
     """Return the ``{port_number: port_name}`` mapping.
 
@@ -877,6 +1065,36 @@ def get_port_map(source: str | Path | dict) -> dict[int, str]:
 # -----------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------
+
+
+def _numeric_csv_column(
+    cells,
+    csv_path: Path,
+    column: str,
+    *,
+    allow_negative_infinity: bool = False,
+) -> NDArray:
+    """Parse numeric cells, reporting the source of invalid solver output."""
+    values = []
+    for row, cell in enumerate(cells, start=1):
+        try:
+            value = float(cell)
+        except (TypeError, ValueError) as exc:
+            msg = (
+                f"Invalid numeric value {cell!r} in {csv_path}, "
+                f"data row {row}, column {column!r}"
+            )
+            raise ValueError(msg) from exc
+        if not np.isfinite(value) and not (
+            allow_negative_infinity and np.isneginf(value)
+        ):
+            msg = (
+                f"Invalid numeric value {cell!r} in {csv_path}, "
+                f"data row {row}, column {column!r}"
+            )
+            raise ValueError(msg)
+        values.append(value)
+    return np.asarray(values, dtype=float)
 
 
 def _parse_sparam_col(col: str) -> tuple[int, int, str] | None:
@@ -966,6 +1184,44 @@ def _load_port_map(
     return port_map
 
 
+def _reference_impedance(
+    base_dir: Path,
+    port_info_path: str | Path | None,
+) -> float | None:
+    """Read the unique reference impedance from ``port_information.json``.
+
+    Returns ``None`` (caller falls back to 50 Ohm) when the file is
+    missing or the ports declare differing reference impedances.
+    """
+    if port_info_path is None:
+        info_path = _find_port_info(base_dir, None)
+    else:
+        info_path = Path(port_info_path)
+        if not info_path.exists():
+            info_path = _find_port_info(base_dir, None)
+    if info_path is None or not info_path.exists():
+        return None
+
+    import json
+
+    with open(info_path) as f:
+        data = json.load(f)
+
+    values = {
+        float(entry["Z0"])
+        for entry in data.get("ports", [])
+        if entry.get("Z0") is not None
+    }
+    if len(values) == 1:
+        return values.pop()
+    if values:
+        logger.warning(
+            "Mixed port reference impedances %s; plots fall back to 50 Ohm labels",
+            sorted(values),
+        )
+    return None
+
+
 def _find_port_info(output_dir: Path, csv_path: Path | None) -> Path | None:
     """Search common locations for ``port_information.json``."""
     name = "port_information.json"
@@ -1011,22 +1267,26 @@ def load_fields(
     *,
     excitation: int = 1,
     cycle: int | None = None,
+    mode: int | None = None,
     boundary: bool = False,
 ):
     """Load the ParaView volume or boundary dataset for a Palace simulation.
 
     Requires ``save_step >= 1`` for driven simulations or ``save >= 1`` for
-    BoundaryMode simulations so that field data was written to disk.
+    Eigenmode or BoundaryMode simulations so that field data was written to disk.
 
     Args:
         source: Results dict from ``sim.run_local()`` / ``sim.run()``,
             or a path to the simulation directory.
         excitation: Excitation index (1-based) to load.
-        cycle: ParaView cycle number (``None`` selects the latest solution
-            cycle, skipping mesh diagnostics).
+        cycle: Exact ParaView cycle number, including metadata-only cycles.
+            Defaults to the last cycle containing solution fields.
+        mode: One-based Eigenmode or BoundaryMode mode number. Selects the
+            corresponding cycle and requires solution fields. Mutually exclusive
+            with ``cycle``.
         boundary: If ``True``, load boundary surface fields
-            (``driven_boundary/``) instead of volume fields
-            (``driven/``).  Boundary data includes ``J_s_real``,
+            (for example, ``eigenmode_boundary/``) instead of volume fields.
+            Boundary data includes ``J_s_real``,
             ``Q_s_real``, etc.
 
     Returns:
@@ -1036,6 +1296,7 @@ def load_fields(
 
     Raises:
         FileNotFoundError: If paraview output is missing.
+        ValueError: If selectors conflict or no solution fields are available.
 
     Example::
 
@@ -1045,8 +1306,16 @@ def load_fields(
     """
     import pyvista as pv
 
+    if mode is not None:
+        if cycle is not None:
+            raise ValueError("Specify mode or cycle, not both")
+        if mode < 1:
+            raise ValueError("mode must be a one-based positive integer")
+
     _, base_dir = _resolve_source(source, require_csv=False)
-    pvtu_path = _find_paraview_dir(base_dir, excitation, cycle, boundary=boundary)
+    pvtu_path = _find_paraview_dir(
+        base_dir, excitation, cycle, boundary=boundary, mode=mode
+    )
     return pv.read(str(pvtu_path))
 
 
@@ -1056,6 +1325,7 @@ def _find_paraview_dir(
     cycle: int | None,
     *,
     boundary: bool = False,
+    mode: int | None = None,
 ) -> Path:
     """Locate the ``.pvtu`` file for the requested excitation and cycle.
 
@@ -1064,11 +1334,14 @@ def _find_paraview_dir(
     - Single-excitation (lumped ports): ``paraview/driven/CycleNNNNNN/`` (no subdir)
     Both are searched, with the explicit ``excitation_N`` folder taking priority.
     """
-    subdirs = (
-        ["driven_boundary", "boundarymode_boundary"]
-        if boundary
-        else ["driven", "boundarymode"]
+    solvers = (
+        ["eigenmode", "boundarymode"]
+        if mode is not None
+        else ["driven", "boundarymode", "eigenmode"]
     )
+    subdirs = [f"{solver}_boundary" if boundary else solver for solver in solvers]
+    if mode is not None:
+        cycle = mode
     search_roots = [
         base_dir,
         base_dir / "output" / "palace",
@@ -1085,7 +1358,7 @@ def _find_paraview_dir(
 
             # Layout 2: flat — Cycle dirs sit directly under the solver folder
             flat = root / "paraview" / subdir
-            if flat.is_dir() and any(flat.iterdir()):
+            if flat.is_dir() and any(flat.glob("Cycle*")):
                 exc_dir = flat
                 break
 
@@ -1095,7 +1368,7 @@ def _find_paraview_dir(
     if exc_dir is None:
         msg = (
             f"ParaView output not found for excitation {excitation}. "
-            "Ensure the simulation was run with save_step >= 1."
+            "Ensure the simulation was run with save_step >= 1 or save >= 1."
         )
         raise FileNotFoundError(msg)
 
@@ -1105,7 +1378,10 @@ def _find_paraview_dir(
         if not candidates:
             msg = f"No .pvtu files found in {pvtu_dir}"
             raise FileNotFoundError(msg)
-        return candidates[-1]
+        selected = candidates[-1]
+        if mode is not None and not _has_solution_fields(selected):
+            raise ValueError(f"Mode {mode} has no solution fields in {selected}")
+        return selected
 
     # Auto-select last available cycle that contains actual field data.
     # Palace writes a final cycle with mesh diagnostics. Indicator/Rank may
@@ -1115,19 +1391,21 @@ def _find_paraview_dir(
     if not candidates:
         msg = (
             f"No .pvtu files found under {exc_dir}. "
-            "Ensure the simulation was run with save_step >= 1."
+            "Ensure the simulation was run with save_step >= 1 or save >= 1."
         )
         raise FileNotFoundError(msg)
 
-    import pyvista as pv
-
-    mesh_metadata_fields = {"Indicator", "Rank", "attribute"}
     for pvtu in candidates:
-        dataset = pv.read(str(pvtu))
-        field_names = set(dataset.point_data) | set(dataset.cell_data)
-        if field_names - mesh_metadata_fields:
+        if _has_solution_fields(pvtu):
             return pvtu
 
-    # All cycles are partition-only — return the last one and let the
-    # caller surface the "field not found" error with context.
-    return candidates[0]
+    raise ValueError(f"No solution fields found in ParaView cycles under {exc_dir}")
+
+
+def _has_solution_fields(pvtu: Path) -> bool:
+    """Distinguish physical fields from Palace's partition/error metadata."""
+    import pyvista as pv
+
+    dataset = pv.read(str(pvtu))
+    field_names = set(dataset.point_data) | set(dataset.cell_data)
+    return bool(field_names - {"Indicator", "Rank", "attribute"})

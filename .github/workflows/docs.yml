@@ -67,7 +67,7 @@ jobs:
         uv sync --no-default-groups --group docs
         case "$NOTEBOOK" in
           nbs/palace_qpdk_resonator.ipynb)
-            uv pip install qpdk==0.3.8
+            uv pip install qpdk==0.4.0
             ;;
           nbs/palace_inductor.ipynb)
             uv sync --no-default-groups --group docs --group palace-inductor
@@ -79,6 +79,7 @@ jobs:
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
     - name: Execute notebook
+      timeout-minutes: 30
       if: >-
         github.event_name == 'push' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
       env:

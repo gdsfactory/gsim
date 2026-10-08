@@ -1,0 +1,39 @@
+{
+  "palace_version": "v0.18.0",
+  "palace_schema_version": "1-6-0",
+  "generated": "2026-10-05",
+  "generator": "nbs/palace_inductor.ipynb (AC circuit synthesis section), local Palace run",
+  "feature": "Palace AdaptiveCircuitSynthesis (rom-*.csv) from adaptive driven sweep",
+  "minimum_palace_version": "0.17.0",
+  "simulation": {
+    "geometry": "IHP SG13G2 single-turn spiral inductor (width=2, space=2.1, diameter=50) with Metal1 guard ring",
+    "ports": "P1, P2 interlayer lumped ports (metal1 -> topmetal2), R = 50 Ohm, both excited",
+    "stack": "IHP SG13G2, substrate_thickness=180um, include_substrate=True",
+    "mesh": "preset=default, refined_mesh_size=1.5",
+    "sweep": {
+      "fmin_ghz": 10.0,
+      "fmax_ghz": 200.0,
+      "num_points": 201,
+      "adaptive_tol": 0.02,
+      "adaptive_max_samples": 20,
+      "AdaptiveCircuitSynthesis": true
+    }
+  },
+  "validation": {
+    "max_abs_S_error_circuit_vs_fem": 5.3e-4,
+    "rlc_fit_fem": {
+      "R_ohm": 3.5314,
+      "L_pH": 115.334,
+      "C_fF": 7.617,
+      "f0_GHz": 169.809,
+      "Q": 34.85
+    },
+    "rlc_fit_circuit": {
+      "R_ohm": 3.5302,
+      "L_pH": 115.346,
+      "C_fF": 7.616,
+      "f0_GHz": 169.804,
+      "Q": 34.86
+    }
+  }
+}

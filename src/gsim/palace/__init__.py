@@ -55,6 +55,28 @@ from gsim.gcloud import run_simulation as _run_simulation
 
 # New simulation classes (composition, no inheritance)
 from gsim.palace.boundarymode import BoundaryModeSim
+
+# Capacitance matrices of electrostatic runs
+from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
+
+# Palace AC circuit synthesis, the EM-to-circuit fit and S/Z/Y conversions
+from gsim.palace.circuit import (
+    CircuitSynthesis,
+    RLCFit,
+    VectorFit,
+    differential_impedance,
+    fit_rlc,
+    initial_guess_rlc,
+    is_complete,
+    load_circuit_synthesis,
+    s_to_y,
+    s_to_z,
+    y_to_s,
+    y_to_z,
+    z_rlc,
+    z_to_s,
+    z_to_y,
+)
 from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
@@ -93,22 +115,30 @@ from gsim.palace.mesh import (
     MeshResult,
     generate_mesh,
 )
+from gsim.palace.mesh.nets import Net, Nets, extract_nets
+from gsim.palace.mesh.validation import check_lumped_port_contact
 
 # Models (new submodule)
 from gsim.palace.models import (
     BoundaryModeConfig,
+    BoundaryModeSolverConfig,
     CPWPortConfig,
     CrossSectionPlaneConfig,
     DrivenConfig,
+    DrivenSolverConfig,
     EigenmodeConfig,
+    EigenmodeSolverConfig,
     ElectrostaticConfig,
+    ElectrostaticSolverConfig,
     GeometryConfig,
+    LinearSolverConfig,
     MagnetostaticConfig,
     MaterialConfig,
     NumericalConfig,
     PECBlockConfig,
     PortConfig,
     SimulationResult,
+    SolverConfig,
     TerminalConfig,
     TransientConfig,
     TwoTerminalPortConfig,
@@ -130,6 +160,7 @@ from gsim.palace.ports import (
     configure_via_port,
     extract_ports,
 )
+from gsim.palace.postprocessing import add_domain_energy_postprocessing
 
 # Results utilities
 from gsim.palace.results import (
@@ -137,7 +168,9 @@ from gsim.palace.results import (
     SParams,
     get_port_map,
     load_fields,
+    load_refinement_history,
     load_sparams,
+    refinement_convergence,
 )
 
 # Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
@@ -161,43 +194,57 @@ __all__ = [
     "BoundaryFieldData",
     "BoundaryModeConfig",
     "BoundaryModeSim",
+    "BoundaryModeSolverConfig",
     "CPWPortConfig",
+    "CapacitanceMatrices",
+    "CircuitSynthesis",
     "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSim",
+    "DrivenSolverConfig",
     "EigenmodeConfig",
     "EigenmodeSim",
+    "EigenmodeSolverConfig",
     "ElectrostaticConfig",
     "ElectrostaticSim",
+    "ElectrostaticSolverConfig",
     "Geometry",
     "GeometryConfig",
     "Layer",
     "LayerStack",
+    "LinearSolverConfig",
     "MagnetostaticConfig",
     "MaterialConfig",
     "MaterialProperties",
     "MeshConfig",
     "MeshResult",
+    "Net",
+    "Nets",
     "NumericalConfig",
     "PECBlockConfig",
     "PalacePort",
     "PortConfig",
     "PortGeometry",
     "PortType",
+    "RLCFit",
     "SParam",
     "SParams",
     "SelectorContext",
     "SimulationResult",
+    "SolverConfig",
     "Stack",
     "StackLayer",
     "TerminalConfig",
     "TransientConfig",
     "TwoTerminalPortConfig",
     "ValidationResult",
+    "VectorFit",
     "VolumeFieldData",
     "WavePortConfig",
     "activate_vector_component",
+    "add_domain_energy_postprocessing",
     "build_selector_context",
+    "check_lumped_port_contact",
     "close_interactive_view",
     "close_interactive_views",
     "configure_cpw_port",
@@ -206,23 +253,31 @@ __all__ = [
     "configure_interlayer_port",
     "configure_two_terminal_port",
     "configure_via_port",
+    "differential_impedance",
     "extract_axis_slice",
     "extract_boundary_cells",
     "extract_from_pdk",
     "extract_layer_stack",
+    "extract_nets",
     "extract_plane_slice",
     "extract_ports",
     "extract_slice_contours",
     "extract_streamplot_inputs_2d",
+    "fit_rlc",
     "generate_mesh",
     "get_material_properties",
     "get_port_map",
     "get_stack",
+    "initial_guess_rlc",
     "install_palace_runtime",
     "interactive_mode",
+    "is_complete",
     "load_boundary_field_data",
+    "load_capacitance",
+    "load_circuit_synthesis",
     "load_field_context",
     "load_fields",
+    "load_refinement_history",
     "load_sparams",
     "load_stack_yaml",
     "load_volume_field_data",
@@ -238,6 +293,7 @@ __all__ = [
     "print_job_summary",
     "print_stack",
     "print_stack_table",
+    "refinement_convergence",
     "resolve_boundary_type_attributes",
     "resolve_entity_attributes",
     "resolve_palace_binary",
@@ -246,8 +302,15 @@ __all__ = [
     "resolve_physical_groups",
     "resolve_scalar_field",
     "run_simulation",
+    "s_to_y",
+    "s_to_z",
     "set_interactive_mode",
     "set_trame_backend",
+    "y_to_s",
+    "y_to_z",
+    "z_rlc",
+    "z_to_s",
+    "z_to_y",
 ]
 
 

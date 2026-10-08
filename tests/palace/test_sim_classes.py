@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -121,10 +122,20 @@ class TestEigenSimValidation:
     def test_floquet_options_are_stored(self):
         """Floquet options should propagate into eigenmode config."""
         sim = EigenmodeSim()
-        sim.set_eigenmode(target=40e9, floquet=True, phi_target=1.2, n_eff_guess=2.4)
+        with pytest.warns(DeprecationWarning, match="actual mesh period"):
+            sim.set_eigenmode(
+                target=40e9, floquet=True, phi_target=1.2, n_eff_guess=2.4
+            )
         assert sim.eigenmode.floquet is True
         assert sim.eigenmode.phi_target == pytest.approx(1.2)
-        assert sim.eigenmode.n_eff_guess == pytest.approx(2.4)
+        with pytest.warns(DeprecationWarning, match="actual mesh period"):
+            assert sim.eigenmode.n_eff_guess == pytest.approx(2.4)
+
+    def test_floquet_without_legacy_guess_does_not_warn(self):
+        with warnings.catch_warnings(record=True) as emitted:
+            warnings.simplefilter("always")
+            EigenmodeSim().set_eigenmode(target=40e9, floquet=True)
+        assert not emitted
 
 
 class TestElectrostaticSimValidation:
@@ -340,6 +351,42 @@ class TestMixinMethods:
                 "material": "air",
             }
 
+    def test_airbox_lateral_margin_reaches_the_mesher_once(self):
+        """``set_airbox(margin_x=N)`` must give N um of air, not 2N.
+
+        The mesher applies ``margin_x`` to the design bbox and then adds
+        ``airbox_margin_x`` on top of that already-expanded extent, so the two
+        must sum to the requested margin. Sending the request in both places
+        doubled every lateral airbox margin.
+        """
+        for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim, BoundaryModeSim]:
+            sim = cls()
+            sim.set_airbox(margin_x=50.0, margin_y=30.0, z_above=100.0, z_below=80.0)
+            domain_x, domain_y = sim._resolve_domain_margins(MeshConfig.default())
+            airbox_cfg = sim._airbox_config
+            assert domain_x + airbox_cfg["margin_x"] == 50.0
+            assert domain_y + airbox_cfg["margin_y"] == 30.0
+
+    def test_airbox_does_not_write_back_into_mesh_config(self):
+        """The airbox config is the only source of the lateral margin.
+
+        ``set_airbox()`` used to copy its lateral margins into ``mesh_config``,
+        which is what made it possible to apply them twice.
+        """
+        sim = DrivenSim()
+        sim.mesh_config = MeshConfig.default()
+        sim.set_airbox(margin_x=50.0, margin_y=30.0)
+        assert sim.mesh_config.margin_x is None
+        assert sim.mesh_config.margin_y is None
+
+    def test_domain_margin_falls_back_to_mesh_config(self):
+        """Without ``set_airbox()`` the mesh config still sizes the domain."""
+        sim = DrivenSim()
+        mesh_config = MeshConfig.default()
+        mesh_config.margin_x = 40.0
+        mesh_config.margin_y = 20.0
+        assert sim._resolve_domain_margins(mesh_config) == (40.0, 20.0)
+
     def test_set_airbox_material(self):
         """set_airbox(material=...) stores a custom background material."""
         for cls in [DrivenSim, EigenmodeSim, ElectrostaticSim, BoundaryModeSim]:
@@ -491,20 +538,29 @@ class TestMixinMethods:
         assert captured["material"] == "sio2"
         assert captured["margin_y"] == 50.0
 
-    def test_set_airbox_margin_y_zero_reaches_generate_mesh(
+    def test_set_airbox_margins_reach_generate_mesh_exactly_once(
         self, monkeypatch, tmp_path
     ):
-        """set_airbox(margin_y=0) must propagate to meshing domain extents."""
+        """set_airbox margins must reach meshing intact, and only once.
+
+        The mesher applies ``margin_*`` to the design bbox and then adds
+        ``airbox_margin_*`` on top, so the pair must sum to what was requested.
+        An explicit ``margin_y=0`` must also survive rather than being replaced
+        by the mesh config's own margin.
+        """
         captured: dict[str, float] = {}
 
         def _fake_generate_mesh(**kwargs):
             captured["margin_x"] = kwargs["margin_x"]
             captured["margin_y"] = kwargs["margin_y"]
+            captured["airbox_margin_x"] = kwargs["airbox_margin_x"]
+            captured["airbox_margin_y"] = kwargs["airbox_margin_y"]
             return SimpleNamespace(
                 mesh_path=tmp_path / "palace.msh",
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -536,8 +592,8 @@ class TestMixinMethods:
             write_config=False,
         )
 
-        assert captured["margin_x"] == 50.0
-        assert captured["margin_y"] == 0.0
+        assert captured["margin_x"] + captured["airbox_margin_x"] == 50.0
+        assert captured["margin_y"] + captured["airbox_margin_y"] == 0.0
 
     def test_curved_mesh_options_reach_generate_mesh(self, monkeypatch, tmp_path):
         """Curve-fit, decimation, and verbosity options must be forwarded."""
@@ -550,6 +606,7 @@ class TestMixinMethods:
                 config_path=None,
                 port_info=[],
                 mesh_stats={},
+                metadata={},
                 groups={},
             )
 
@@ -568,6 +625,7 @@ class TestMixinMethods:
             curve_fit_min_points=12,
             curve_fit_corner_angle_deg=30.0,
         )
+        sim.set_numerical(order=3)
 
         sim._generate_mesh_internal(
             output_dir=tmp_path / "sim",
@@ -588,6 +646,7 @@ class TestMixinMethods:
         assert captured["curve_fit_corner_angle_deg"] == 30.0
         assert captured["decimate_tolerance"] == 0.005
         assert captured["verbosity"] == 7
+        assert captured["numerical_config"] is sim.numerical
 
     def test_set_material(self):
         """Test set_material works on all sim classes."""
