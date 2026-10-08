@@ -156,7 +156,7 @@ def _get_port_vertices(mesh_path: Path, phys_group_tag: int) -> np.ndarray:
     """Load boundary vertices for a surface physical group from a Gmsh mesh."""
     import gmsh
 
-    gmsh.initialize()
+    gmsh.initialize(readConfigFiles=False)
     try:
         gmsh.open(str(mesh_path))
         result = gmsh.model.mesh.getNodesForPhysicalGroup(2, phys_group_tag)
@@ -350,7 +350,7 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
 
     started = not gmsh.isInitialized()
     if started:
-        gmsh.initialize()
+        gmsh.initialize(readConfigFiles=False)
     previous_model = gmsh.model.getCurrent()
     temporary_model = f"gsim_port_contact_{uuid4().hex}"
     model_added = False

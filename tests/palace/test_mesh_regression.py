@@ -17,6 +17,8 @@ Tests are skipped automatically when ``ihp`` is not installed.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -117,6 +119,22 @@ def cpw_waveport_sim(tmp_path_factory):
 
 def test_cpw_waveport_mesh(mesh_regression, cpw_waveport_sim):
     mesh_regression.check(_mesh_snapshot(cpw_waveport_sim))
+
+
+def test_cpw_write_config_preserves_waveport_boundary_policy(cpw_waveport_sim):
+    sim = cpw_waveport_sim
+    original = sim.driven.model_copy(deep=True)
+    try:
+        sim.set_driven(f=50e9, waveport_boundary="pec")
+        default = json.loads(sim.write_config().read_text())
+        assert default["Boundaries"]["WavePort"]
+        assert default["Boundaries"].pop("WavePortPEC")["Attributes"]
+        sim.set_driven(f=50e9, waveport_boundary="inherit")
+        assert json.loads(sim.write_config().read_text()) == default
+        sim.set_driven(f=50e9)
+        assert sim.driven.waveport_boundary == "pec"
+    finally:
+        sim.driven = original
 
 
 # ---------------------------------------------------------------------------

@@ -290,6 +290,7 @@ def test_a_failing_hash_keeps_the_versions_and_settings_and_warns(
     assert "mesh_hash" not in stats
     assert stats["versions"]["gmsh"] == gmsh.__version__
     assert "Mesh.Algorithm3D" in stats["gmsh_options"]
+    assert "Mesh.MeshSizeFactor" in stats["gmsh_options"]
     assert "Could not hash the mesh: out of memory" in caplog.text
 
 

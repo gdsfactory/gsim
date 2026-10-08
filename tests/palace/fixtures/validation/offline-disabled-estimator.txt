@@ -1,0 +1,26 @@
+Beginning PROM construction offline phase:
+ 397 points for frequency sweep over [1.000e+00, 1.000e+02] GHz
+
+Adding excitation index 1 (1/2):
+
+GMRES solver converged in 13 iterations (avg. reduction factor: 1.949e-01)
+ Field energy E (3.089e-13 J) + H (3.269e-13 J) = 6.358e-13 J
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 2.549e+00)!
+
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 7.969e-01)!
+
+Adaptive sampling converged with 9 frequency samples:
+ n = 18, error = 1.038e-07, tol = 1.000e-06, memory = 2/2
+ Sampled frequencies (GHz): 1.000e+00, 1.000e+02, 5.234e+01, 2.262e+01,
+                            8.111e+01, 2.980e+00, 1.085e+01, 3.700e+01,
+                            9.300e+01
+ Sample errors: inf, inf, 4.125e-03, 1.326e-04, 3.332e-05,
+                3.340e-04, 1.974e-05, 9.732e-07, 1.038e-07
+
+Adding excitation index 2 (2/2):
