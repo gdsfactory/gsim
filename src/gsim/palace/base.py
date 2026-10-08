@@ -23,6 +23,7 @@ from gsim.palace.models import (
     NumericalConfig,
     PortConfig,
     RefinementConfig,
+    SymmetryPlaneConfig,
     TerminalConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
@@ -219,6 +220,7 @@ class PalaceSimMixin:
     _input_hash: str | None
     _stack_kwargs: dict[str, Any]
     _pec_blocks: list
+    _symmetry_planes: list[SymmetryPlaneConfig]
     _hints: dict[str, Any]
     _impedance_boundaries: list[ImpedanceBoundaryConfig]
     absorbing_boundary: bool
@@ -632,6 +634,54 @@ class PalaceSimMixin:
                 gds_layer=gds_layer,
                 from_layer=from_layer,
                 to_layer=to_layer,
+            )
+        )
+
+    def add_symmetry_plane(
+        self,
+        axis: Literal["x", "y"] = "y",
+        position: float = 0.0,
+        kind: Literal["pec", "pmc"] = "pmc",
+        keep: Literal["positive", "negative"] = "positive",
+        *,
+        verify_symmetry: bool = True,
+    ) -> None:
+        """Simulate half of a mirror-symmetric structure.
+
+        A PMC plane selects the even (common) mode, a PEC plane the odd
+        (differential) mode. Only one plane is supported, and only for
+        driven and eigenmode simulations.
+
+        Args:
+            axis: Axis normal to the plane.
+            position: Plane position along ``axis`` in um (1 nm grid).
+            kind: ``"pmc"`` (even mode) or ``"pec"`` (odd mode).
+            keep: Side of the plane that is simulated.
+            verify_symmetry: Check that the layout is mirror-symmetric.
+
+        Raises:
+            NotImplementedError: For electrostatic and boundarymode simulations.
+            ValueError: If a plane was already added.
+
+        Example:
+            >>> sim.add_symmetry_plane(axis="y", position=0.0, kind="pec")
+        """
+        if self.simulation_type not in ("driven", "eigenmode"):
+            raise NotImplementedError(
+                "Symmetry planes are only supported for driven and eigenmode "
+                f"simulations, not {self.simulation_type!r}."
+            )
+        if self._symmetry_planes:
+            raise ValueError(
+                "Only one symmetry plane is supported; one was already added."
+            )
+        self._symmetry_planes.append(
+            SymmetryPlaneConfig(
+                axis=axis,
+                position=position,
+                kind=kind,
+                keep=keep,
+                verify_symmetry=verify_symmetry,
             )
         )
 
@@ -1150,6 +1200,15 @@ class PalaceSimMixin:
                 if not terminal.layer
             )
 
+        if self._symmetry_planes and self.simulation_type not in (
+            "driven",
+            "eigenmode",
+        ):
+            errors.append(
+                "Symmetry planes are only supported for driven and eigenmode "
+                f"simulations, not {self.simulation_type!r}."
+            )
+
         valid = len(errors) == 0
         return ValidationResult(valid=valid, errors=errors, warnings=warnings_list)
 
@@ -1555,6 +1614,7 @@ class PalaceSimMixin:
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
             periodic_axis=periodic_axis,
+            symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
             merge_via_distance=mesh_config.merge_via_distance,
             curve_fit_mode=mesh_config.curve_fit_mode,
             curve_fit_layers=mesh_config.curve_fit_layers,
@@ -1813,6 +1873,9 @@ class PalaceSimMixin:
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
+                symmetry_plane=(
+                    self._symmetry_planes[0] if self._symmetry_planes else None
+                ),
                 merge_via_distance=mesh_config.merge_via_distance,
                 curve_fit_mode=mesh_config.curve_fit_mode,
                 curve_fit_layers=mesh_config.curve_fit_layers,

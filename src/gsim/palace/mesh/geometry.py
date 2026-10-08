@@ -9,9 +9,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
+import klayout.db as kdb
 from shapely import Polygon as ShapelyPolygon
 from shapely import buffer
 from shapely.ops import unary_union
@@ -19,10 +20,20 @@ from shapely.ops import unary_union
 from gsim.palace.ports.config import PortType
 
 from . import gmsh_utils
+from .symmetry import DEFAULT_TOL as SYMMETRY_TOL
+from .symmetry import (
+    asymmetric_layers,
+    check_plane_inside_domain,
+    clamp_extent,
+    clamp_xy_bounds,
+    classify_interval,
+    clip_polygon,
+)
 
 if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.models.pec import PECBlockConfig
+    from gsim.palace.models.symmetry import SymmetryPlaneConfig
     from gsim.palace.ports.config import PalacePort
 
 logger = logging.getLogger(__name__)
@@ -152,12 +163,17 @@ def resolve_dielectric_regions(
     airbox_margin_y: float | None = None,
     airbox_z_above: float | None = None,
     airbox_z_below: float | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> list[DielectricRegion]:
     """Resolve dielectric/airbox regions exactly as the 3D pipeline does.
 
     This is the source of truth for background dielectric boxes in Palace
     meshing. It is shared by both 3D and native 2D mesh builders so stack
     material selection stays consistent across solvers.
+
+    With a *symmetry_plane*, the full-model regions are cut at the plane and
+    regions that end up empty are dropped. A plane outside the domain raises
+    ``ValueError``.
     """
     if margin_y is None:
         margin_y = margin_x
@@ -250,11 +266,72 @@ def resolve_dielectric_regions(
             )
         )
 
+    if symmetry_plane is not None:
+        regions = _clamp_regions_to_plane(regions, symmetry_plane)
+
     return regions
 
 
+def _clamp_regions_to_plane(
+    regions: list[DielectricRegion], plane: SymmetryPlaneConfig
+) -> list[DielectricRegion]:
+    """Cut regions at the symmetry plane and drop those left empty."""
+    if not regions:
+        return regions
+    lo_attr, hi_attr = (f"{plane.axis}min", f"{plane.axis}max")
+    check_plane_inside_domain(
+        min(getattr(r, lo_attr) for r in regions),
+        max(getattr(r, hi_attr) for r in regions),
+        plane,
+    )
+    clamped = []
+    for region in regions:
+        lo, hi = clamp_extent(getattr(region, lo_attr), getattr(region, hi_attr), plane)
+        if hi - lo > SYMMETRY_TOL:
+            clamped.append(replace(region, **{lo_attr: lo, hi_attr: hi}))
+    return clamped
+
+
+def _parse_klayout_polygon(poly) -> tuple[list, list, list] | None:
+    """Convert a KLayout polygon to ``(pts_x, pts_y, holes)`` in um (nm / 1000).
+
+    Returns None for degenerate polygons with fewer than three hull points.
+    """
+    points = list(poly.each_point_hull())
+    if len(points) < 3:
+        return None
+    pts_x = [pt.x / 1000.0 for pt in points]
+    pts_y = [pt.y / 1000.0 for pt in points]
+    holes = []
+    for hole_idx in range(poly.holes()):
+        hole_pts = list(poly.each_point_hole(hole_idx))
+        if len(hole_pts) >= 3:
+            hx = [pt.x / 1000.0 for pt in hole_pts]
+            hy = [pt.y / 1000.0 for pt in hole_pts]
+            holes.append((hx, hy))
+    return pts_x, pts_y, holes
+
+
+def _verify_symmetry(regions: dict, plane: SymmetryPlaneConfig) -> None:
+    """Raise ``ValueError`` if layers are not mirror-symmetric about the plane."""
+    if not plane.verify_symmetry:
+        return
+    bad = asymmetric_layers(regions, plane)
+    if bad:
+        raise ValueError(
+            f"Layers {bad} are not mirror-symmetric about "
+            f"{plane.axis}={plane.position} (a layer on one side only counts "
+            "as asymmetric); fix the layout, or pass verify_symmetry=False "
+            "if you drew only the kept half"
+        )
+
+
 def extract_geometry(
-    component, stack: LayerStack, *, decimate_tolerance: float | None = None
+    component,
+    stack: LayerStack,
+    *,
+    decimate_tolerance: float | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> GeometryData:
     """Extract polygon geometry from a gdsfactory component.
 
@@ -264,10 +341,19 @@ def extract_geometry(
         decimate_tolerance: If set, simplify polygons with Douglas-Peucker
             using this relative tolerance (passed to ``decimate()``).
             Typical values: 0.001 (conservative) to 0.01 (aggressive).
+        symmetry_plane: If set, each polygon is clipped to the kept side.
+            ``bbox`` still describes the unclipped layout, because it sets
+            the domain size that the plane then cuts. The layout is checked
+            for mirror symmetry when ``plane.verify_symmetry`` is true.
 
     Returns:
         GeometryData with polygons and bounding boxes
+
+    Raises:
+        ValueError: If the layout is not mirror-symmetric or nothing is left
+            on the kept side.
     """
+    full_regions: dict[tuple[int, int], kdb.Region] = {}
     polygons = []
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
     layer_bboxes = {}
@@ -324,42 +410,48 @@ def extract_geometry(
             continue
 
         for poly in polys:
-            # Convert klayout polygon to lists (nm -> um)
-            points = list(poly.each_point_hull())
-            if len(points) < 3:
+            parsed = _parse_klayout_polygon(poly)
+            if parsed is None:
                 continue
 
-            pts_x = [pt.x / 1000.0 for pt in points]
-            pts_y = [pt.y / 1000.0 for pt in points]
-
-            # Extract holes from polygon
-            holes = []
-            for hole_idx in range(poly.holes()):
-                hole_pts = list(poly.each_point_hole(hole_idx))
-                if len(hole_pts) >= 3:
-                    hx = [pt.x / 1000.0 for pt in hole_pts]
-                    hy = [pt.y / 1000.0 for pt in hole_pts]
-                    holes.append((hx, hy))
-
-            polygons.append((layernum, pts_x, pts_y, holes))
-
-            # Update bounding boxes
-            xmin, xmax = min(pts_x), max(pts_x)
-            ymin, ymax = min(pts_y), max(pts_y)
-
+            # bbox stays that of the unclipped layout: it sets the domain size
+            xmin, xmax = min(parsed[0]), max(parsed[0])
+            ymin, ymax = min(parsed[1]), max(parsed[1])
             global_bbox[0] = min(global_bbox[0], xmin)
             global_bbox[1] = min(global_bbox[1], ymin)
             global_bbox[2] = max(global_bbox[2], xmax)
             global_bbox[3] = max(global_bbox[3], ymax)
 
-            if layernum not in layer_bboxes:
-                layer_bboxes[layernum] = [xmin, ymin, xmax, ymax]
-            else:
-                bbox = layer_bboxes[layernum]
-                bbox[0] = min(bbox[0], xmin)
-                bbox[1] = min(bbox[1], ymin)
-                bbox[2] = max(bbox[2], xmax)
-                bbox[3] = max(bbox[3], ymax)
+            pieces = [parsed]
+            if symmetry_plane is not None:
+                full_regions.setdefault(gds_tuple, kdb.Region()).insert(poly)
+                pieces = [
+                    p
+                    for piece in clip_polygon(poly, symmetry_plane)
+                    if (p := _parse_klayout_polygon(piece)) is not None
+                ]
+
+            for pts_x, pts_y, holes in pieces:
+                polygons.append((layernum, pts_x, pts_y, holes))
+
+                xmin, xmax = min(pts_x), max(pts_x)
+                ymin, ymax = min(pts_y), max(pts_y)
+                if layernum not in layer_bboxes:
+                    layer_bboxes[layernum] = [xmin, ymin, xmax, ymax]
+                else:
+                    bbox = layer_bboxes[layernum]
+                    bbox[0] = min(bbox[0], xmin)
+                    bbox[1] = min(bbox[1], ymin)
+                    bbox[2] = max(bbox[2], xmax)
+                    bbox[3] = max(bbox[3], ymax)
+
+    if symmetry_plane is not None:
+        _verify_symmetry(full_regions, symmetry_plane)
+        if not polygons:
+            raise ValueError(
+                f"Symmetry plane {symmetry_plane.axis}={symmetry_plane.position} "
+                f"(keep={symmetry_plane.keep}) leaves no geometry on the kept side"
+            )
 
     return GeometryData(
         polygons=polygons,
@@ -582,6 +674,17 @@ def get_layer_infos(stack: LayerStack, gds_layer: int) -> list[dict]:
     return infos
 
 
+def _face_on_plane(
+    kernel, tag: int, plane: SymmetryPlaneConfig | None, tol: float = 1e-3
+) -> bool:
+    """True if the surface *tag* is flat on the symmetry plane."""
+    if plane is None:
+        return False
+    bbox = kernel.getBoundingBox(2, tag)
+    lo, hi = (bbox[0], bbox[3]) if plane.axis == "x" else (bbox[1], bbox[4])
+    return classify_interval(lo, hi, plane, tol) == "in_plane"
+
+
 def add_metals(
     kernel,
     geometry: GeometryData,
@@ -593,6 +696,7 @@ def add_metals(
     curve_fit_tolerance_um: float = 0.0,
     curve_fit_min_points: int = 8,
     curve_fit_corner_angle_deg: float = 45.0,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> dict:
     """Add metal, via, and shaped-dielectric geometries to gmsh.
 
@@ -624,6 +728,9 @@ def add_metals(
         curve_fit_min_points: Minimum contour points to attempt curve fitting.
         curve_fit_corner_angle_deg: Turn-angle threshold for corner detection
             during spline/bspline segmentation.
+        symmetry_plane: If set, conductor shell faces lying on the plane are
+            dropped, so the cut face does not become a conductivity boundary.
+            The polygons in *geometry* must already be clipped.
 
     Returns:
         Dict with layer_name -> {"volumes": [...], "surfaces_xy": [...],
@@ -992,7 +1099,12 @@ def add_metals(
                 continue
             _, surfaceloops = kernel.getSurfaceLoops(volumetag)
             if surfaceloops:
-                metal_tags[layer_name]["volumes"].append((volumetag, surfaceloops[0]))
+                shell = [
+                    tag
+                    for tag in surfaceloops[0]
+                    if not _face_on_plane(kernel, tag, symmetry_plane)
+                ]
+                metal_tags[layer_name]["volumes"].append((volumetag, shell))
             kernel.remove([(3, volumetag)])
 
     if _conductor_volumes:
@@ -1024,6 +1136,7 @@ def add_dielectrics(
     airbox_margin_y: float | None = None,
     airbox_z_above: float | None = None,
     airbox_z_below: float | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> dict:
     """Add dielectric volumes to gmsh.
 
@@ -1049,6 +1162,7 @@ def add_dielectrics(
             Falls back to *air_margin* when None.
         airbox_z_below: Extra -z margin for the enclosing airbox (um).
             Falls back to *air_margin* when None.
+        symmetry_plane: If set, boxes are cut at the plane (kept side only).
 
     Returns:
         Dict with material_name -> list of volume_tags
@@ -1064,6 +1178,7 @@ def add_dielectrics(
         airbox_margin_y=airbox_margin_y,
         airbox_z_above=airbox_z_above,
         airbox_z_below=airbox_z_below,
+        symmetry_plane=symmetry_plane,
     )
 
     for region in regions:
@@ -1094,8 +1209,50 @@ def resolve_mesh_domain_bounds(
     airbox_margin_y: float | None = None,
     airbox_z_above: float | None = None,
     airbox_z_below: float | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> tuple[float, float, float, float, float, float]:
-    """Resolve outer mesh-domain bounds (including explicit airbox when used)."""
+    """Resolve outer mesh-domain bounds (including explicit airbox when used).
+
+    With a *symmetry_plane*, the full-model bounds are cut at the plane. A
+    plane outside the domain raises ``ValueError``.
+    """
+    bounds = _resolve_full_domain_bounds(
+        geometry,
+        stack,
+        margin_x=margin_x,
+        margin_y=margin_y,
+        air_margin=air_margin,
+        airbox_margin_x=airbox_margin_x,
+        airbox_margin_y=airbox_margin_y,
+        airbox_z_above=airbox_z_above,
+        airbox_z_below=airbox_z_below,
+    )
+    if symmetry_plane is None:
+        return bounds
+
+    xmin, ymin, zmin, xmax, ymax, zmax = bounds
+    if symmetry_plane.axis == "x":
+        check_plane_inside_domain(xmin, xmax, symmetry_plane)
+        xmin, xmax = clamp_extent(xmin, xmax, symmetry_plane)
+    else:
+        check_plane_inside_domain(ymin, ymax, symmetry_plane)
+        ymin, ymax = clamp_extent(ymin, ymax, symmetry_plane)
+    return (xmin, ymin, zmin, xmax, ymax, zmax)
+
+
+def _resolve_full_domain_bounds(
+    geometry: GeometryData,
+    stack: LayerStack,
+    *,
+    margin_x: float,
+    margin_y: float | None,
+    air_margin: float,
+    airbox_margin_x: float | None,
+    airbox_margin_y: float | None,
+    airbox_z_above: float | None,
+    airbox_z_below: float | None,
+) -> tuple[float, float, float, float, float, float]:
+    """Resolve the uncut outer mesh-domain bounds."""
     if margin_y is None:
         margin_y = margin_x
 
@@ -1270,7 +1427,11 @@ def add_patterned_dielectrics(
     return patterned_tags
 
 
-def extract_pec_polygons(component, gds_layer: tuple[int, int]) -> list:
+def extract_pec_polygons(
+    component,
+    gds_layer: tuple[int, int],
+    symmetry_plane: SymmetryPlaneConfig | None = None,
+) -> list:
     """Extract polygons from an arbitrary GDS layer on a component.
 
     Uses the same klayout polygon parsing pattern as ``extract_geometry()``.
@@ -1278,6 +1439,8 @@ def extract_pec_polygons(component, gds_layer: tuple[int, int]) -> list:
     Args:
         component: gdsfactory Component
         gds_layer: GDS layer tuple (layer, datatype) to extract polygons from
+        symmetry_plane: If set, polygons are clipped to the kept side and the
+            layer is checked for mirror symmetry.
 
     Returns:
         List of (pts_x, pts_y, holes) tuples in microns
@@ -1292,23 +1455,26 @@ def extract_pec_polygons(component, gds_layer: tuple[int, int]) -> list:
             index_to_gds[layer_index] = (info.layer, info.datatype)
 
     result = []
+    full_region = kdb.Region()
     for layer_index, polys in polygons_by_index.items():
         if index_to_gds.get(layer_index) != gds_layer:
             continue
         for poly in polys:
-            points = list(poly.each_point_hull())
-            if len(points) < 3:
+            parsed = _parse_klayout_polygon(poly)
+            if parsed is None:
                 continue
-            pts_x = [pt.x / 1000.0 for pt in points]
-            pts_y = [pt.y / 1000.0 for pt in points]
-            holes = []
-            for hole_idx in range(poly.holes()):
-                hole_pts = list(poly.each_point_hole(hole_idx))
-                if len(hole_pts) >= 3:
-                    hx = [pt.x / 1000.0 for pt in hole_pts]
-                    hy = [pt.y / 1000.0 for pt in hole_pts]
-                    holes.append((hx, hy))
-            result.append((pts_x, pts_y, holes))
+            if symmetry_plane is None:
+                result.append(parsed)
+                continue
+            full_region.insert(poly)
+            result.extend(
+                p
+                for piece in clip_polygon(poly, symmetry_plane)
+                if (p := _parse_klayout_polygon(piece)) is not None
+            )
+
+    if symmetry_plane is not None:
+        _verify_symmetry({gds_layer: full_region}, symmetry_plane)
 
     return result
 
@@ -1318,6 +1484,7 @@ def add_pec_blocks(
     component,
     pec_configs: list[PECBlockConfig],
     stack: LayerStack,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> dict:
     """Add PEC block geometries to gmsh.
 
@@ -1334,6 +1501,8 @@ def add_pec_blocks(
         component: gdsfactory Component
         pec_configs: List of PECBlockConfig objects
         stack: LayerStack with layer definitions
+        symmetry_plane: If set, polygons are clipped to the kept side and
+            shell faces lying on the plane are not returned.
 
     Returns:
         Dict: ``{"pec_block_0": {"surfaces_xy": [...], "surfaces_z": [...]}, ...}``
@@ -1347,7 +1516,7 @@ def add_pec_blocks(
         if from_layer is None or to_layer is None:
             continue
 
-        polys = extract_pec_polygons(component, cfg.gds_layer)
+        polys = extract_pec_polygons(component, cfg.gds_layer, symmetry_plane)
         if not polys:
             continue
 
@@ -1395,6 +1564,8 @@ def add_pec_blocks(
             _, surfaceloops = kernel.getSurfaceLoops(volumetag)
             if surfaceloops:
                 for tag in surfaceloops[0]:
+                    if _face_on_plane(kernel, tag, symmetry_plane):
+                        continue
                     if gmsh_utils.is_vertical_surface(tag):
                         z_tags.append(tag)
                     else:
@@ -1622,12 +1793,65 @@ def build_entities(
     return entities
 
 
+_CPW_HINT = (
+    "Use a single-element lumped port on the kept gap instead (the equivalent "
+    "resistance is 2*R_cpw; verify Palace's multi-element convention first)."
+)
+
+
+def _check_port_extent(
+    port: PalacePort,
+    plane: SymmetryPlaneConfig | None,
+    xrange: tuple[float, float],
+    yrange: tuple[float, float],
+    *,
+    allow_clip: bool = False,
+    hint: str = "",
+) -> str | None:
+    """Classify a port element against the symmetry plane.
+
+    Args:
+        port: Port being built (for error messages).
+        plane: Symmetry plane, or None.
+        xrange: ``(xmin, xmax)`` of the element in um.
+        yrange: ``(ymin, ymax)`` of the element in um.
+        allow_clip: Allow a straddling element (it is clipped by the caller).
+        hint: Extra text appended to the straddle error.
+
+    Returns:
+        None without a plane, else the interval class (``"kept"``,
+        ``"touches"`` or ``"straddles"`` when *allow_clip* is set).
+
+    Raises:
+        ValueError: For elements in the removed half, in the plane, or
+            straddling it when *allow_clip* is false.
+    """
+    if plane is None:
+        return None
+    lo, hi = xrange if plane.axis == "x" else yrange
+    cls = classify_interval(lo, hi, plane, SYMMETRY_TOL)
+    where = f"{plane.axis}={plane.position}"
+    if cls in ("removed", "in_plane"):
+        raise ValueError(
+            f"Port '{port.name}' lies in the removed half of the symmetry plane "
+            f"{where} (or in the plane); configure only kept-side ports"
+        )
+    if cls == "straddles" and not allow_clip:
+        raise ValueError(
+            f"Port '{port.name}' straddles the symmetry plane {where}. {hint}".rstrip()
+        )
+    if cls == "touches" and not allow_clip:
+        logger.warning("Port '%s' touches the symmetry plane %s", port.name, where)
+    return cls
+
+
 def add_ports(
     kernel,
     ports: list[PalacePort],
     stack: LayerStack,
     domain_bbox: tuple[float, float, float, float] | None = None,
     domain_bounds: tuple[float, float, float, float, float, float] | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> tuple[dict, list]:
     """Add port surfaces to gmsh.
 
@@ -1675,7 +1899,15 @@ def add_ports(
                 for i, (cx, cy) in enumerate(port.centers):
                     # "+X"/"-X" -> sheet at constant x; "+Y"/"-Y" -> constant y
                     d = port.directions[i].lstrip("+").lower()
-                    if d in ("x", "-x"):
+                    is_x = d in ("x", "-x")
+                    _check_port_extent(
+                        port,
+                        symmetry_plane,
+                        (cx, cx) if is_x else (cx - hw, cx + hw),
+                        (cy - hw, cy + hw) if is_x else (cy, cy),
+                        hint=_CPW_HINT,
+                    )
+                    if is_x:
                         surf = gmsh_utils.create_port_rectangle(
                             kernel, cx, cy - hw, zmin, cx, cy + hw, zmax
                         )
@@ -1720,6 +1952,14 @@ def add_ports(
 
                 surfaces = []
                 for cx, cy in port.centers:
+                    hx, hy = (hw, hl) if is_y_axis else (hl, hw)
+                    _check_port_extent(
+                        port,
+                        symmetry_plane,
+                        (cx - hx, cx + hx),
+                        (cy - hy, cy + hy),
+                        hint=_CPW_HINT,
+                    )
                     if is_y_axis:
                         surf = gmsh_utils.create_port_rectangle(
                             kernel, cx - hw, cy - hl, zmin, cx + hw, cy + hl, zmin
@@ -1754,6 +1994,7 @@ def add_ports(
             along_x = port.direction in ("x", "-x")
             xmin, xmax = (x - half_gap, x + half_gap) if along_x else (x, x)
             ymin, ymax = (y, y) if along_x else (y - half_gap, y + half_gap)
+            _check_port_extent(port, symmetry_plane, (xmin, xmax), (ymin, ymax))
             surface = gmsh_utils.create_port_rectangle(
                 kernel, xmin, ymin, port.zmin, xmax, ymax, port.zmax
             )
@@ -1794,6 +2035,14 @@ def add_ports(
             else:
                 zmin = to_layer.zmax
                 zmax = from_layer.zmin
+
+            along_x = port.direction in ("x", "-x")
+            _check_port_extent(
+                port,
+                symmetry_plane,
+                (x, x) if along_x else (x - hw, x + hw),
+                (y - hw, y + hw) if along_x else (y, y),
+            )
 
             # Create vertical port surface
             if port.direction in ("x", "-x"):
@@ -1839,6 +2088,10 @@ def add_ports(
 
             if port.port_type == PortType.LUMPED:
                 hl = (port.length or port.width) / 2
+                hx, hy = (hl, hw) if port.direction in ("x", "-x") else (hw, hl)
+                _check_port_extent(
+                    port, symmetry_plane, (x - hx, x + hx), (y - hy, y + hy)
+                )
                 if port.direction in ("x", "-x"):
                     surfacetag = gmsh_utils.create_port_rectangle(
                         kernel, x - hl, y - hw, zmin, x + hl, y + hw, zmin
@@ -1934,6 +2187,20 @@ def add_ports(
                     xmax = x
                     ymin = y - hw - port.lateral_margin
                     ymax = y + hw + port.lateral_margin
+
+                cut_by_plane = False
+                if symmetry_plane is not None:
+                    cls = _check_port_extent(
+                        port,
+                        symmetry_plane,
+                        (xmin, xmax),
+                        (ymin, ymax),
+                        allow_clip=True,
+                    )
+                    cut_by_plane = cls == "straddles"
+                    xmin, ymin, xmax, ymax = clamp_xy_bounds(
+                        (xmin, ymin, xmax, ymax), symmetry_plane
+                    )
                 surfacetag = gmsh_utils.create_port_rectangle(
                     kernel, xmin, ymin, zmin, xmax, ymax, zmax
                 )
@@ -1954,6 +2221,8 @@ def add_ports(
                         "zmax": zmax,
                     }
                 )
+                if cut_by_plane:
+                    port_info[-1]["cut_by_symmetry_plane"] = True
         port_num += 1
 
     kernel.synchronize()

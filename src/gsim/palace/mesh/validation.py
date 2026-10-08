@@ -412,6 +412,25 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
     return contacts
 
 
+def _check_symmetry_config(symmetry: dict, boundaries: dict) -> list[str]:
+    """Check that the plane is PMC/PEC in ``Boundaries`` and not absorbing."""
+    key = "PMC" if symmetry["kind"] == "pmc" else "PEC"
+    pgs = symmetry["phys_group"]
+    expected = set(pgs if isinstance(pgs, list) else [pgs])
+    errors = []
+    if missing := expected - set(boundaries.get(key, {}).get("Attributes", [])):
+        errors.append(
+            f"config.json: symmetry plane attributes {sorted(missing)} "
+            f"are missing from Boundaries.{key}."
+        )
+    if bad := expected & set(boundaries.get("Absorbing", {}).get("Attributes", [])):
+        errors.append(
+            f"config.json: symmetry plane attributes {sorted(bad)} "
+            "are listed under Boundaries.Absorbing."
+        )
+    return errors
+
+
 def validate_mesh(sim) -> ValidationResult:
     """Validate generated mesh and config for a Palace simulation object."""
     errors: list[str] = []
@@ -467,6 +486,14 @@ def validate_mesh(sim) -> ValidationResult:
             "No absorbing boundary found. This is expected if airbox_margin=0."
         )
 
+    symmetry = groups.get("boundary_surfaces", {}).get("symmetry")
+    if symmetry:
+        warnings_list.append(
+            f"Symmetry plane: {symmetry['axis']}={symmetry['position']} "
+            f"{symmetry['kind'].upper()} (keep {symmetry['keep']}), "
+            f"phys_group={symmetry['phys_group']}"
+        )
+
     last_ports = getattr(sim, "_last_ports", None)
     if last_ports and groups.get("port_surfaces") and mesh_result.mesh_path.exists():
         errors.extend(
@@ -508,6 +535,8 @@ def validate_mesh(sim) -> ValidationResult:
                     )
                 ):
                     errors.append("config.json has no LumpedPort nor Waveport entries.")
+                if symmetry:
+                    errors.extend(_check_symmetry_config(symmetry, boundaries))
             except json.JSONDecodeError as e:
                 errors.append(f"config.json is invalid JSON: {e}")
 

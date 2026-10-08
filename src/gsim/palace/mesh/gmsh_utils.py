@@ -7,9 +7,13 @@ import hashlib
 import logging
 import math
 from itertools import pairwise
+from typing import TYPE_CHECKING
 
 import gmsh
 import numpy as np
+
+if TYPE_CHECKING:
+    from gsim.palace.models.symmetry import SymmetryPlaneConfig
 
 logger = logging.getLogger(__name__)
 
@@ -978,6 +982,92 @@ def finalize_mesh_fields(field_ids: list[int]) -> None:
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
     gmsh.option.setNumber("Mesh.Algorithm", 5)  # Delaunay algorithm
+
+
+def assign_symmetry_plane_group(
+    pg_map: dict[str, int],
+    plane: SymmetryPlaneConfig,
+    tol: float = 1e-3,
+) -> dict[str, object]:
+    """Move the faces lying on a symmetry plane into their own physical group.
+
+    Candidates are the surfaces of the ``*__None`` groups (outer faces) whose
+    bounding box is flat at the plane. They are removed from those groups and
+    put into ``symmetry_<axis>_<kind>``. ``pg_map`` is updated in place.
+
+    Must be called after :func:`run_boolean_pipeline` and before
+    :func:`set_periodic_mesh`.
+
+    Args:
+        pg_map: Mapping from physical-group name to physical-group tag.
+        plane: The symmetry plane.
+        tol: Flatness tolerance in um.
+
+    Returns:
+        Dict with ``phys_group``, ``tags``, ``name`` and the plane parameters.
+
+    Raises:
+        RuntimeError: If a named surface (port, conductor shell, PEC) lies on
+            the plane, or if no outer face lies on it.
+    """
+    axis_idx = 0 if plane.axis == "x" else 1
+    groups_2d = set(gmsh.model.getPhysicalGroups(2))
+
+    def _flat(tag: int) -> bool:
+        bb = gmsh.model.getBoundingBox(2, tag)
+        return (
+            abs(bb[axis_idx] - plane.position) <= tol
+            and abs(bb[axis_idx + 3] - plane.position) <= tol
+        )
+
+    plane_tags: set[int] = set()
+    none_groups: dict[str, tuple[int, set[int]]] = {}
+    for pg_name, pg_tag in pg_map.items():
+        # Tags may coincide across dimensions, so confirm the 2D group's name.
+        if (2, pg_tag) not in groups_2d:
+            continue
+        if gmsh.model.getPhysicalName(2, pg_tag) != pg_name:
+            continue
+        tags = {int(t) for t in gmsh.model.getEntitiesForPhysicalGroup(2, pg_tag)}
+        flat = {t for t in tags if _flat(t)}
+        if pg_name.endswith("__None"):
+            plane_tags |= flat
+            none_groups[pg_name] = (pg_tag, tags)
+        elif flat:
+            raise RuntimeError(
+                f"Surfaces {sorted(flat)} of group '{pg_name}' lie on the symmetry "
+                f"plane {plane.axis}={plane.position}; they would clash with the "
+                "plane boundary condition"
+            )
+
+    if not plane_tags:
+        raise RuntimeError(
+            f"No outer faces found on the symmetry plane {plane.axis}={plane.position}"
+        )
+
+    for pg_name, (pg_tag, tags) in none_groups.items():
+        keep_tags = sorted(tags - plane_tags)
+        if len(keep_tags) == len(tags):
+            continue
+        gmsh.model.removePhysicalGroups([(2, pg_tag)])
+        pg_map.pop(pg_name, None)
+        if keep_tags:
+            pg_map[pg_name] = assign_physical_group(2, keep_tags, pg_name)
+
+    name = f"symmetry_{plane.axis}_{plane.kind}"
+    phys_group = assign_physical_group(2, sorted(plane_tags), name)
+    pg_map[name] = phys_group
+    logger.info("Symmetry plane %s: %d faces", name, len(plane_tags))
+
+    return {
+        "name": name,
+        "phys_group": phys_group,
+        "tags": sorted(plane_tags),
+        "axis": plane.axis,
+        "position": plane.position,
+        "kind": plane.kind,
+        "keep": plane.keep,
+    }
 
 
 def set_periodic_mesh(

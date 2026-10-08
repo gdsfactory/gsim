@@ -11,6 +11,7 @@ from gsim.palace.mesh.geometry import (
     resolve_dielectric_regions,
     resolve_mesh_domain_bounds,
 )
+from gsim.palace.models.symmetry import SymmetryPlaneConfig
 
 
 def _assert_airbox_bounds(stack: LayerStack, expected_z: tuple[float, float]):
@@ -84,6 +85,113 @@ def test_empty_stack_uses_default_z_range_for_airbox_and_ports():
     regions = _assert_airbox_bounds(LayerStack(), expected_z=(-3.0, 7.0))
 
     assert [region.name for region in regions] == ["airbox"]
+
+
+def _symmetry_setup():
+    """Geometry, stack and margins with an oxide box narrower than the airbox."""
+    geometry = GeometryData(polygons=[], bbox=(0.0, -10.0, 10.0, 10.0), layer_bboxes={})
+    stack = LayerStack(
+        dielectrics=[{"name": "oxide", "zmin": -2.0, "zmax": 5.2, "material": "sio2"}],
+        materials={"sio2": {"type": "dielectric", "permittivity": 3.9}},
+    )
+    margins = {
+        "margin_x": 1.0,
+        "margin_y": 2.0,
+        "airbox_z_below": 3.0,
+        "airbox_z_above": 7.0,
+    }
+    return geometry, stack, margins
+
+
+@pytest.mark.parametrize("keep", ["positive", "negative"])
+def test_symmetry_bounds_equal_full_bounds_cut_at_plane(keep):
+    """Clamped bounds equal the full bounds with the removed side cut."""
+    geometry, stack, margins = _symmetry_setup()
+    plane = SymmetryPlaneConfig(axis="y", position=1.0, keep=keep)
+
+    full = resolve_mesh_domain_bounds(geometry, stack, **margins)
+    cut = resolve_mesh_domain_bounds(geometry, stack, symmetry_plane=plane, **margins)
+
+    expected = list(full)
+    if keep == "positive":
+        expected[1] = 1.0
+    else:
+        expected[4] = 1.0
+    assert cut == pytest.approx(expected)
+
+
+def test_symmetry_regions_are_cut_and_match_bounds():
+    """Every region is cut at the plane and the airbox matches the bounds."""
+    geometry, stack, margins = _symmetry_setup()
+    plane = SymmetryPlaneConfig(axis="x", position=4.0, keep="negative")
+
+    regions = resolve_dielectric_regions(
+        geometry, stack, symmetry_plane=plane, **margins
+    )
+    bounds = resolve_mesh_domain_bounds(
+        geometry, stack, symmetry_plane=plane, **margins
+    )
+
+    assert {r.name for r in regions} == {"oxide", "airbox"}
+    assert all(r.xmax == pytest.approx(4.0) for r in regions)
+    airbox = next(r for r in regions if r.name == "airbox")
+    assert (airbox.xmin, airbox.ymin, airbox.zmin) == pytest.approx(bounds[:3])
+    assert (airbox.xmax, airbox.ymax, airbox.zmax) == pytest.approx(bounds[3:])
+
+
+def test_symmetry_region_outside_plane_is_dropped():
+    """A region that lies wholly on the removed side disappears."""
+    geometry, stack, margins = _symmetry_setup()
+    # Oxide spans x in [0, 10]; the airbox spans [-1, 11].
+    plane = SymmetryPlaneConfig(axis="x", position=-0.5, keep="negative")
+
+    regions = resolve_dielectric_regions(
+        geometry, stack, symmetry_plane=plane, **margins
+    )
+
+    assert [r.name for r in regions] == ["airbox"]
+    assert regions[0].xmax == pytest.approx(-0.5)
+
+
+def test_symmetry_narrow_region_keeps_its_own_bound():
+    """A region already inside the kept half is not stretched to the plane."""
+    geometry, stack, margins = _symmetry_setup()
+    plane = SymmetryPlaneConfig(axis="x", position=-0.5, keep="positive")
+
+    regions = {
+        r.name: r
+        for r in resolve_dielectric_regions(
+            geometry, stack, symmetry_plane=plane, **margins
+        )
+    }
+
+    assert regions["oxide"].xmin == pytest.approx(0.0)
+    assert regions["airbox"].xmin == pytest.approx(-0.5)
+
+
+@pytest.mark.parametrize(
+    "resolve", [resolve_mesh_domain_bounds, resolve_dielectric_regions]
+)
+@pytest.mark.parametrize("position", [-20.0, 13.0])
+def test_symmetry_plane_outside_domain_raises(resolve, position):
+    """A plane outside the domain is rejected with the domain extent."""
+    geometry, stack, margins = _symmetry_setup()
+    plane = SymmetryPlaneConfig(axis="y", position=position)
+
+    with pytest.raises(ValueError, match="outside the simulation domain"):
+        resolve(geometry, stack, symmetry_plane=plane, **margins)
+
+
+@pytest.mark.parametrize(
+    "resolve", [resolve_mesh_domain_bounds, resolve_dielectric_regions]
+)
+def test_no_symmetry_plane_is_unchanged(resolve):
+    """An explicit ``None`` plane behaves like the default."""
+    geometry, stack, margins = _symmetry_setup()
+
+    assert resolve(geometry, stack, symmetry_plane=None, **margins) == resolve(
+        geometry, stack, **margins
+    )
 
 
 @pytest.mark.parametrize(

@@ -66,6 +66,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     # Stack configuration (stored as kwargs until resolved)
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
     _pec_blocks: list = PrivateAttr(default_factory=list)
+    _symmetry_planes: list = PrivateAttr(default_factory=list)
     _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
     _impedance_boundaries: list = PrivateAttr(default_factory=list)
     _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
