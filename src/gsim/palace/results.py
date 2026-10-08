@@ -1384,9 +1384,8 @@ def _find_paraview_dir(
         return selected
 
     # Auto-select last available cycle that contains actual field data.
-    # Palace writes a final cycle with mesh diagnostics. Indicator/Rank may
-    # be point data or cell data, depending on the MFEM version.
-    # Skip these cycles and pick the latest cycle with solution fields.
+    # Palace writes a final cycle with only Indicator/Rank (mesh partition);
+    # skip it and pick the latest cycle with real solution fields.
     candidates = sorted(exc_dir.rglob("*.pvtu"), reverse=True)
     if not candidates:
         msg = (
