@@ -21,6 +21,8 @@ sim.add_symmetry_plane(axis="y", position=0.0, kind="pmc", keep="positive")
 - `driven` and `eigenmode` only. `electrostatic` and `boundarymode` raise (`NotImplementedError` on the call, an error
   in `validate_config`, and `ValueError` when a config is generated).
 - `mesh(periodic_axis=...)` on the plane's axis raises.
+- The symmetry check groups polygons by `(layer, datatype)`. A layer that has content on one side only counts as
+  asymmetric and raises; if you deliberately drew only the kept half (a pre-cut layout), pass `verify_symmetry=False`.
 - The symmetry check covers layout polygons only. Ports are not checked: keeping the ports symmetric is up to you.
 
 ## Which wall gives which mode
@@ -105,8 +107,10 @@ plane stays natural as long as it is not listed in `WavePortPEC`, which the conf
 
 - **Multi-element lumped-port convention.** Whether Palace combines the elements of a multi-element port in parallel
   decides the `2 * R` rule for a CPW port cut by a PMC plane. v1 rejects that case; the error hint is provisional.
-- No Palace run has been compared against a full model yet (see the validation plan: n_eff, Z_even / Z_odd,
-  `combine_even_odd` against a full 4-port).
+- **Cloud validation.** A 500 um GSSG coupled line on the generic gpdk PDK (`max_size` wave ports, 5-50 GHz) was run as
+  a full model and as both halves. The PEC half matches the full model's mode 1 (odd) with max |dS21| 0.0024 and n_eff
+  1.961 vs 1.966. The PMC half matches mode 2 (even) with max |dS21| 0.0020 and n_eff 1.825 vs 1.828. The halves have
+  21,580 tetrahedra against 42,155 for the full model.
 
 ## Later work
 
