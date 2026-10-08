@@ -111,6 +111,8 @@ plane stays natural as long as it is not listed in `WavePortPEC`, which the conf
   a full model and as both halves. The PEC half matches the full model's mode 1 (odd) with max |dS21| 0.0024 and n_eff
   1.961 vs 1.966. The PMC half matches mode 2 (even) with max |dS21| 0.0020 and n_eff 1.825 vs 1.828. The halves have
   21,580 tetrahedra against 42,155 for the full model.
+- **Four-port lumped reconstruction.** A converged comparison of `combine_even_odd` against a full four-port lumped
+  model is still to be checked; a first comparison by the reviewer gave a maximum complex difference of 0.011.
 
 ## Later work
 

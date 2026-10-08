@@ -1150,7 +1150,12 @@ def _load_symmetry_and_meta(
     for entry in data.get("ports", []):
         name = entry.get("name")
         if name is None:
-            continue
+            # Wave-port records have no name; use the column name from
+            # _load_port_map.
+            num = entry.get("portnumber")
+            if num is None:
+                continue
+            name = f"p{num}"
         meta[name] = {k: entry[k] for k in ("type", "Z0") if k in entry}
     return data.get("symmetry"), meta
 

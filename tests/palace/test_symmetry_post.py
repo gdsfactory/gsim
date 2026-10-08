@@ -254,3 +254,58 @@ def test_load_sparams_without_symmetry(tmp_path: Path):
     )
     sp = load_sparams(tmp_path)
     assert sp.symmetry is None
+
+
+def _write_waveport_result(root: Path, kind: str) -> None:
+    """Write a two-port result whose records have no ``name`` (wave ports)."""
+    palace_dir = root / "output" / "palace"
+    palace_dir.mkdir(parents=True)
+    ports = [
+        {"portnumber": n, "type": "waveport", "width": 10.0, "zmin": 0.0, "zmax": 5.0}
+        for n in (1, 2)
+    ]
+    (root / "port_information.json").write_text(
+        json.dumps({"ports": ports, "symmetry": _symmetry(kind)})
+    )
+    (palace_dir / "port-S.csv").write_text(
+        "f (GHz), |S[1][1]| (dB), arg(S[1][1]) (deg.),"
+        " |S[2][1]| (dB), arg(S[2][1]) (deg.)\n"
+        "1.0, -20.0, -45.0, -3.0, -90.0\n"
+    )
+
+
+def test_load_sparams_waveport_records_without_name(tmp_path: Path):
+    """Records without a name get the port-number name used for the columns."""
+    _write_waveport_result(tmp_path, "pec")
+    sp = load_sparams(tmp_path)
+    assert sp.port_names == ["p1", "p2"]
+    assert sp.port_meta == {"p1": {"type": "waveport"}, "p2": {"type": "waveport"}}
+
+
+def test_waveport_halves_from_disk_are_modal_and_not_combinable(tmp_path: Path):
+    """Loaded wave-port halves get modal references and refuse combining."""
+    _write_waveport_result(tmp_path / "even", "pmc")
+    _write_waveport_result(tmp_path / "odd", "pec")
+    even = load_sparams(tmp_path / "even")
+    odd = load_sparams(tmp_path / "odd")
+    assert mixed_mode_from_halves(even, odd)["z_ref_cc"] == "modal"
+    with pytest.raises(ValueError, match="wave"):
+        combine_even_odd(even, odd)
+
+
+def test_halves_reject_mixed_port_types():
+    """A lumped half cannot be paired with a wave-port half."""
+    a, b = _full_blocks()
+    even = _sparams(a, "pmc")
+    odd = _sparams(b, "pec", ptype="waveport")
+    with pytest.raises(ValueError, match="port types"):
+        mixed_mode_from_halves(even, odd)
+    with pytest.raises(ValueError, match="port types"):
+        combine_even_odd(even, odd)
+
+
+def test_combine_rejects_unknown_mirror_keys():
+    """A mirror_names key that is not a port is an error naming the key."""
+    even, odd, _, _ = _halves()
+    with pytest.raises(ValueError, match="'z'"):
+        combine_even_odd(even, odd, mirror_names={"a": "c", "z": "d"})

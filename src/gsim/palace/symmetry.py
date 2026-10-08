@@ -68,6 +68,14 @@ def _check_halves(even: SParams, odd: SParams) -> None:
     if len(even.freq) != len(odd.freq) or not np.allclose(even.freq, odd.freq):
         raise ValueError("The half models have different frequencies.")
     for name in even.port_names:
+        type_even = even.port_meta.get(name, {}).get("type")
+        type_odd = odd.port_meta.get(name, {}).get("type")
+        if type_even != type_odd:
+            raise ValueError(
+                f"Port '{name}' has different port types in the half models "
+                f"({type_even} vs {type_odd})."
+            )
+    for name in even.port_names:
         z_even = even.port_meta.get(name, {}).get("Z0")
         z_odd = odd.port_meta.get(name, {}).get("Z0")
         if z_even != z_odd:
@@ -144,8 +152,9 @@ def combine_even_odd(
         :class:`SParams` with the original ports followed by their mirrors.
 
     Raises:
-        ValueError: For mismatched half models, wave ports (a full model with
-            wave ports is modal anyway) or clashing mirror names.
+        ValueError: For mismatched half models (including different port
+            types), wave ports (a full model with wave ports is modal anyway),
+            unknown ``mirror_names`` keys or clashing mirror names.
     """
     _check_halves(even, odd)
     names = even.port_names
@@ -157,6 +166,12 @@ def combine_even_odd(
 
     mirrors = {n: f"{n}_mirror" for n in names}
     if mirror_names:
+        unknown = [k for k in mirror_names if k not in mirrors]
+        if unknown:
+            raise ValueError(
+                f"mirror_names has keys that are not ports of the half models: "
+                f"{unknown}; ports are {names}."
+            )
         mirrors.update(mirror_names)
     new_names = list(mirrors.values())
     if len(set(new_names)) != len(new_names) or set(new_names) & set(names):
