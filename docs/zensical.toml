@@ -18,6 +18,7 @@ nav = [
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
+    { "Terminal (multi-pin) Wave Ports" = "terminal_wave_ports.md" },
     { "Palace Result Validation" = "palace-validation.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },

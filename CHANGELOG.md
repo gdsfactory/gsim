@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Terminal (multi-pin) S-parameters from modal S-parameters ([#332](https://github.com/gdsfactory/gsim/issues/332)): the
+  new `gsim.palace.terminal` module converts the modal S-parameters of a multi-conductor port into terminal S-parameters
+  (`modal_to_terminal_s`, inverse `terminal_to_modal_s`) from each port's modal voltage and current matrices, with
+  per-terminal real reference impedances. Helpers: `currents_from_reaction`, `uniform_line_modal_s`,
+  `degenerate_mode_groups`. Any basis of a degenerate mode subspace gives the same terminal S. Tested against an
+  analytic chain-matrix solution of coupled lines and scikit-rf (`z2s`, `se2gmm`). Building the voltage/current matrices
+  from Palace output is not part of this change; see the new "Terminal (multi-pin) Wave Ports" docs page.
 - Palace AC circuit synthesis ([#272](https://github.com/gdsfactory/gsim/issues/272)):
   `set_driven(..., circuit_synthesis=True)` emits `AdaptiveCircuitSynthesis` for adaptive driven sweeps (requires
   `adaptive_tol > 0`), and the new `gsim.palace.circuit` module parses the exported `rom-*.csv` matrices into a
