@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- EMX process-file import: `load_emx_proc` builds a `LayerStack` from an EMX `.proc` file (dielectrics, conductors,
+  vias, GDS layer map, sheet resistance converted to conductivity); unsupported features (bias, fill, via merge,
+  temperature dependence) are skipped with an `EmxImportWarning`.
 - Palace AC circuit synthesis ([#272](https://github.com/gdsfactory/gsim/issues/272)):
   `set_driven(..., circuit_synthesis=True)` emits `AdaptiveCircuitSynthesis` for adaptive driven sweeps (requires
   `adaptive_tol > 0`), and the new `gsim.palace.circuit` module parses the exported `rom-*.csv` matrices into a
