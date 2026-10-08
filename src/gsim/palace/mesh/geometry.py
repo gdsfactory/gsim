@@ -320,8 +320,9 @@ def _verify_symmetry(regions: dict, plane: SymmetryPlaneConfig) -> None:
     if bad:
         raise ValueError(
             f"Layers {bad} are not mirror-symmetric about "
-            f"{plane.axis}={plane.position}; fix the layout or pass "
-            "verify_symmetry=False"
+            f"{plane.axis}={plane.position} (a layer on one side only counts "
+            "as asymmetric); fix the layout, or pass verify_symmetry=False "
+            "if you drew only the kept half"
         )
 
 
@@ -352,7 +353,7 @@ def extract_geometry(
         ValueError: If the layout is not mirror-symmetric or nothing is left
             on the kept side.
     """
-    full_regions: dict[int, kdb.Region] = {}
+    full_regions: dict[tuple[int, int], kdb.Region] = {}
     polygons = []
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
     layer_bboxes = {}
@@ -423,7 +424,7 @@ def extract_geometry(
 
             pieces = [parsed]
             if symmetry_plane is not None:
-                full_regions.setdefault(layernum, kdb.Region()).insert(poly)
+                full_regions.setdefault(gds_tuple, kdb.Region()).insert(poly)
                 pieces = [
                     p
                     for piece in clip_polygon(poly, symmetry_plane)

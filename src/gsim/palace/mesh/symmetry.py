@@ -140,18 +140,12 @@ def asymmetric_layers(
 ) -> list[object]:
     """Return the keys of layers that are not mirror-symmetric about the plane.
 
-    A layer with content on only one side is treated as a layout that was
-    already cut and skipped. Differences up to one database unit are allowed.
+    A layer with content on only one side is asymmetric. Differences up to one
+    database unit are allowed.
     """
     bad: list[object] = []
     for key, region in regions.items():
         if region.is_empty():
-            continue
-        bbox = region.bbox()
-        kept = region & kdb.Region(_half_box(bbox, plane, "kept"))
-        removed = region & kdb.Region(_half_box(bbox, plane, "removed"))
-        if kept.is_empty() or removed.is_empty():
-            logger.info("Layer %s has content on one side only; skipping check", key)
             continue
         diff = (region ^ mirror_region(region, plane)).sized(-1)
         if not diff.is_empty():

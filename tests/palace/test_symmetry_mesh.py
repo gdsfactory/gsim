@@ -121,6 +121,55 @@ def test_extract_geometry_rejects_asymmetric_layout():
     extract_geometry(component, _stack(), symmetry_plane=_plane(verify_symmetry=False))
 
 
+def test_extract_geometry_rejects_one_sided_feature():
+    """A layer only on one side fails the check unless verification is off."""
+    _, gds = _m1()
+    other = (gds[0] + 100, 0)
+    stack = _stack()
+    stack.layers["metal2"] = Layer(
+        name="metal2",
+        gds_layer=other,
+        zmin=0.0,
+        zmax=2.0,
+        thickness=2.0,
+        material="aluminum",
+        layer_type="conductor",
+    )
+    component = _gsg()
+    component.add_polygon([(0, 70), (100, 70), (100, 80), (0, 80)], layer=other)
+    with pytest.raises(ValueError, match="verify_symmetry=False"):
+        extract_geometry(component, stack, symmetry_plane=_plane())
+    extract_geometry(component, stack, symmetry_plane=_plane(verify_symmetry=False))
+
+
+def test_extract_geometry_checks_datatypes_separately():
+    """Mirror-image asymmetries on two datatypes of one layer do not cancel."""
+    layer, gds = _m1()
+    other = (gds[0], gds[1] + 1)
+    stack = _stack()
+    stack.layers["metal2"] = Layer(
+        name="metal2",
+        gds_layer=other,
+        zmin=0.0,
+        zmax=2.0,
+        thickness=2.0,
+        material="aluminum",
+        layer_type="conductor",
+    )
+    component = gf.Component()
+
+    def _box(y0, y1, lyr):
+        """Add a strip along x between y0 and y1."""
+        component.add_polygon([(0, y0), (100, y0), (100, y1), (0, y1)], layer=lyr)
+
+    _box(-10, -5, layer)
+    _box(5, 12, layer)
+    _box(5, 10, other)
+    _box(-12, -5, other)
+    with pytest.raises(ValueError, match="not mirror-symmetric"):
+        extract_geometry(component, stack, symmetry_plane=_plane())
+
+
 def test_extract_geometry_rejects_empty_kept_side():
     """Clipping that leaves nothing raises."""
     with pytest.raises(ValueError, match="no geometry"):

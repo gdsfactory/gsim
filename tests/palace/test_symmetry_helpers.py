@@ -171,11 +171,18 @@ def test_mirror_check_flags_shifted_strip():
     assert asymmetric_layers(layers, _plane()) == ["bad"]
 
 
-def test_mirror_check_skips_precut_layout():
-    """A layout with content on the kept side only is not checked."""
+def test_mirror_check_flags_one_sided_layer():
+    """A layer with content on one side only is asymmetric."""
     layers = {"half": kdb.Region([_rect(0, 3, 100, 10), _rect(0, 20, 100, 30)])}
 
-    assert asymmetric_layers(layers, _plane()) == []
+    assert asymmetric_layers(layers, _plane()) == ["half"]
+
+
+def test_mirror_check_flags_one_sided_extra_feature():
+    """An extra feature on one side of an otherwise symmetric layer is flagged."""
+    region = _gssg() + kdb.Region(_rect(0, 40, 100, 50))
+
+    assert asymmetric_layers({"m": region}, _plane()) == ["m"]
 
 
 def test_mirror_check_tolerates_one_database_unit():
