@@ -29,7 +29,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-__all__ = ["HASH_PREFIX", "compute_dir_digest", "compute_input_hash"]
+__all__ = [
+    "HASH_PREFIX",
+    "compute_dir_digest",
+    "compute_input_hash",
+    "compute_input_manifest",
+]
 
 HASH_PREFIX = "sha256:"
 """Prefix the cloud API expects on an ``input_hash`` value."""
@@ -119,6 +124,28 @@ def compute_dir_digest(input_dir: str | Path, *, exclude: tuple[str, ...] = ()) 
     return hasher.hexdigest()
 
 
+def compute_input_manifest(input_dir: str | Path) -> dict[str, str]:
+    """Hash exact files included by the GF+ SDK directory archive.
+
+    The SDK archives every regular file, including hidden files and interpreter
+    caches. Its omissions differ from result-cache hashing intentionally.
+    Reject symbolic links so a manifest cannot describe bytes outside the
+    staged directory that might change before archive creation. Directories,
+    sockets, and pipes are omitted, matching ``sim._upload_file``.
+    """
+    directory = Path(input_dir)
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Input directory not found: {directory}")
+    entries = sorted(directory.rglob("*"), key=lambda path: path.relative_to(directory))
+    manifest = {}
+    for path in entries:
+        if path.is_symlink():
+            raise ValueError(f"Upload input contains a symbolic link: {path}")
+        if path.is_file():
+            manifest[path.relative_to(directory).as_posix()] = _file_digest(path)
+    return manifest
+
+
 def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     """Compute the cloud cache key for a prepared simulation input directory.
 
@@ -128,7 +155,7 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     written inputs are byte-identical. It can be dropped once the server-side
     key includes the solver image version.
 
-    Palace reserves root-level ``metadata.json`` for SDK diagnostics. Exclude
+    Palace and FDTD reserve root-level ``metadata.json`` for SDK diagnostics. Exclude
     it from this result-cache key so new measurements do not rerun identical
     physics inputs. ``compute_dir_digest()`` still includes it by default for
     callers that need a digest of the complete input bundle.
@@ -150,7 +177,7 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     """
     from gsim import __version__
 
-    exclude = ("metadata.json",) if job_type.lower() == "palace" else ()
+    exclude = ("metadata.json",) if job_type.lower() in {"palace", "fdtd"} else ()
     digest = compute_dir_digest(input_dir, exclude=exclude)
     hasher = hashlib.sha256()
     hasher.update(digest.encode("ascii"))
