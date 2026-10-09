@@ -5,6 +5,12 @@
 - EMX process-file import: `load_emx_proc` builds a `LayerStack` from an EMX `.proc` file (dielectrics, conductors,
   vias, GDS layer map, sheet resistance converted to conductivity); unsupported features (bias, fill, via merge,
   temperature dependence) are skipped with an `EmxImportWarning`.
+- CPW de-embedding notebook ([#341](https://github.com/gdsfactory/gsim/issues/341)): physical RLGC from the de-embedded
+  propagation constant plus impedance anchors, in one joint passive-line fit of both sections (wave ports:
+  `BoundaryModeSim` voltage-power impedance at 10, 25, 50, 75 and 100 GHz; lumped ports: low-frequency de-embedded
+  |Zc|), instead of reading the IEEE P370-biased Zc section by section, which gave negative G at high frequency. The
+  notebook now explains the P370 split bias and the assigned wave-port reference, and regression tests reproduce the
+  bias with synthetic lines.
 - Palace AC circuit synthesis ([#272](https://github.com/gdsfactory/gsim/issues/272)):
   `set_driven(..., circuit_synthesis=True)` emits `AdaptiveCircuitSynthesis` for adaptive driven sweeps (requires
   `adaptive_tol > 0`), and the new `gsim.palace.circuit` module parses the exported `rom-*.csv` matrices into a
