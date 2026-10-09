@@ -239,9 +239,8 @@ def modal_to_terminal_s(
     num = b_mat + a_mat @ s_m
     den = a_mat + b_mat @ s_m
     # S_t = num den^-1  <=>  S_t^T = solve(den^T, num^T)
-    return np.linalg.solve(den.transpose(0, 2, 1), num.transpose(0, 2, 1)).transpose(
-        0, 2, 1
-    )
+    s_t = np.linalg.solve(den.transpose(0, 2, 1), num.transpose(0, 2, 1))
+    return np.asarray(s_t.transpose(0, 2, 1), dtype=np.complex128)
 
 
 def terminal_to_modal_s(
@@ -259,7 +258,8 @@ def terminal_to_modal_s(
     s_t = _check_square_s(s_terminal, "s_terminal")
     nf, nt, _ = s_t.shape
     a_mat, b_mat = _wave_matrices(nt, nf, t_v, t_i, z_ref)
-    return np.linalg.solve(a_mat - s_t @ b_mat, s_t @ a_mat - b_mat)
+    s_m = np.linalg.solve(a_mat - s_t @ b_mat, s_t @ a_mat - b_mat)
+    return np.asarray(s_m, dtype=np.complex128)
 
 
 def currents_from_reaction(
