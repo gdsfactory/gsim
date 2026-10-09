@@ -4,10 +4,17 @@ PDK LayerStack typically only has material names (e.g., "aluminum", "tungsten").
 This database provides the EM properties needed for Palace and MEEP simulation.
 
 Dispersion models:
-    Each material can store one or more dispersion models (Sellmeier, Lorentzian,
-    or constant-epsilon), each annotated with a domain of validity and citation.
-    A material can have multiple models covering different frequency regimes
-    (e.g. SiO2: Sellmeier for optical, constant epsilon for RF).
+    Each material can store one or more dispersion models (Sellmeier, Cauchy,
+    Lorentzian, or constant-epsilon), each annotated with a domain of validity
+    and citation.  A material can have multiple models covering different
+    frequency regimes (e.g. SiO2: Sellmeier for optical, constant epsilon for
+    RF).
+
+    When several models cover the requested wavelength the first one in the
+    ``dispersion_models`` list wins, so list order is the precedence order.
+    When no model covers it, the base ``permittivity`` / ``conductivity`` are
+    returned flagged with ``within_validity=False``; at optical and infrared
+    wavelengths (up to 100 um) :class:`DispersionCoverageWarning` is also emitted.
 
 Unified tensor fields:
     ``permittivity``, ``conductivity``, ``loss_tangent``, and ``permeability``
@@ -27,8 +34,37 @@ import warnings
 from collections.abc import Iterable
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.constants import c as C0  # noqa: N812
+
+from gsim.common.materials.si_li_293k import li_coefficients
+
+# Dispersion model types that are defined in the wavelength/optical domain.
+# When one of them is selected the base (RF) conductivity is dropped.
+_OPTICAL_MODEL_TYPES = ("sellmeier", "cauchy", "lorentzian")
+
+# Prefix of ``ResolvedMaterial.validity_note`` when no model covers the request
+# (lets ``resolve_material_at_wavelength`` avoid warning a second time).
+_NO_COVERAGE_NOTE = "no dispersion model covers"
+
+
+# Relative slack on validity-range edges when a frequency is converted to a
+# wavelength or back (floating-point round trip), far below any physical scale.
+_EDGE_RTOL = 1e-9
+
+# The no-coverage warning is limited to the optical/infrared domain (wavelengths
+# up to 100 um, i.e. above 3 THz). At RF the built-in constant models carry
+# PDK ranges that are narrower than typical sweeps, and a warning there would
+# fire on every RF run; the result is still flagged ``within_validity=False``.
+_COVERAGE_WARNING_MAX_WAVELENGTH_UM = 100.0
+
+
+class DispersionCoverageWarning(UserWarning):
+    """No dispersion model of a material covers the requested wavelength.
+
+    The base ``permittivity`` / ``conductivity`` of the material are returned
+    instead and are not validated at that wavelength.
+    """
 
 
 class ValidityRange(BaseModel):
@@ -60,7 +96,8 @@ class ValidityRange(BaseModel):
             return self.valid_frequency[0] <= freq_hz <= self.valid_frequency[1]
         if self.valid_wavelength is not None:
             wl_um = C0 / freq_hz * 1e6
-            return self.valid_wavelength[0] <= wl_um <= self.valid_wavelength[1]
+            lo, hi = self.valid_wavelength
+            return lo * (1 - _EDGE_RTOL) <= wl_um <= hi * (1 + _EDGE_RTOL)
         return False
 
     def covers_wavelength(self, wl_um: float) -> bool:
@@ -69,7 +106,11 @@ class ValidityRange(BaseModel):
             return self.valid_wavelength[0] <= wl_um <= self.valid_wavelength[1]
         if self.valid_frequency is not None:
             freq_hz = C0 / (wl_um * 1e-6)
-            return self.valid_frequency[0] <= freq_hz <= self.valid_frequency[1]
+            lo, hi = self.valid_frequency
+            # A frequency range converted from a wavelength (or vice versa) can
+            # miss its own edge by one rounding error (10 GHz -> 29979.2458 um
+            # -> 1.0000000000000002e10 Hz); accept that.
+            return lo * (1 - _EDGE_RTOL) <= freq_hz <= hi * (1 + _EDGE_RTOL)
         return False
 
 
@@ -118,8 +159,11 @@ class LorentzianTerm(BaseModel):
 class DispersionModel(BaseModel):
     """A single dispersion model with validity range and citation.
 
-    Supports three model types:
+    Supports four model types:
     - ``sellmeier``: Sellmeier equation with B, C terms (optical)
+    - ``cauchy``: permittivity series in inverse even powers of wavelength,
+      ``eps = epsilon_inf + sum_k A_k / lambda^(2k)`` (k = 1, 2, ...) with
+      ``cauchy_terms = [A_1, A_2, ...]`` in um^(2k)
     - ``lorentzian``: Lorentzian susceptibility poles (general dispersive)
     - ``constant``: Constant permittivity (single-frequency)
 
@@ -135,7 +179,7 @@ class DispersionModel(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    type: Literal["sellmeier", "lorentzian", "constant"]
+    type: Literal["sellmeier", "cauchy", "lorentzian", "constant"]
     axis: Literal["xx", "yy", "zz"] | None = Field(
         default=None,
         description=(
@@ -147,6 +191,13 @@ class DispersionModel(BaseModel):
     sellmeier_terms: list[SellmeierTerm] | None = Field(
         default=None,
         description="Sellmeier B, C terms. Required when type='sellmeier'.",
+    )
+    cauchy_terms: list[float] | None = Field(
+        default=None,
+        description=(
+            "Coefficients [A_1, A_2, ...] of eps = epsilon_inf + sum_k "
+            "A_k / lambda^(2k), A_k in um^(2k). Required when type='cauchy'."
+        ),
     )
     lorentzian_terms: list[LorentzianTerm] | None = Field(
         default=None,
@@ -173,8 +224,33 @@ class DispersionModel(BaseModel):
         description="Citation string (paper, PDK, etc.).",
     )
 
+    @model_validator(mode="after")
+    def _check_cauchy_terms(self) -> DispersionModel:
+        """A ``cauchy`` model must carry at least one coefficient."""
+        if self.type == "cauchy" and not self.cauchy_terms:
+            raise ValueError("Cauchy model requires non-empty cauchy_terms")
+        return self
+
+    def _cauchy_permittivity(self, wavelength_um: float) -> float:
+        """Evaluate eps = epsilon_inf + sum_k A_k / lambda^(2k)."""
+        if not self.cauchy_terms:
+            raise ValueError("Cauchy model has no terms")
+        eps = self.epsilon_inf
+        for k, coefficient in enumerate(self.cauchy_terms, start=1):
+            eps += coefficient / wavelength_um ** (2 * k)
+        return eps
+
     def evaluate_n(self, wavelength_um: float) -> float:
         """Evaluate the refractive index at a given wavelength in um."""
+        if self.type == "cauchy":
+            eps = self._cauchy_permittivity(wavelength_um)
+            if eps < 0:
+                raise ValueError(
+                    f"Cauchy model gives n^2<0 at wavelength={wavelength_um} um "
+                    f"(likely outside validity range)"
+                )
+            return math.sqrt(eps)
+
         if self.type == "sellmeier":
             if not self.sellmeier_terms:
                 raise ValueError("Sellmeier model has no terms")
@@ -218,6 +294,14 @@ class DispersionModel(BaseModel):
         """Evaluate the relative permittivity at a given wavelength in um."""
         if self.type == "constant" and self.permittivity is not None:
             return self.permittivity
+        if self.type == "cauchy":
+            eps = self._cauchy_permittivity(wavelength_um)
+            if eps < 0:
+                raise ValueError(
+                    f"Cauchy model gives n^2<0 at wavelength={wavelength_um} um "
+                    f"(likely outside validity range)"
+                )
+            return eps
         n = self.evaluate_n(wavelength_um)
         return n**2
 
@@ -259,6 +343,18 @@ def _find_best_covering_model(
     if unspecified:
         return unspecified[0]
     return None
+
+
+def _describe_validity(model: DispersionModel) -> str:
+    """One-line description of a model's type and validity, for messages."""
+    v = model.validity
+    if v.valid_wavelength is not None:
+        domain = f"{v.valid_wavelength[0]:g}-{v.valid_wavelength[1]:g} um"
+    elif v.valid_frequency is not None:
+        domain = f"{v.valid_frequency[0]:g}-{v.valid_frequency[1]:g} Hz"
+    else:
+        domain = "unspecified"
+    return f"{model.type} ({domain})"
 
 
 class ResolvedMaterial(BaseModel):
@@ -321,7 +417,7 @@ class ResolvedMaterial(BaseModel):
         if (
             cond is not None
             and cond >= self.CONDUCTIVITY_THRESHOLD
-            and self.model_type not in ("sellmeier", "lorentzian")
+            and self.model_type not in _OPTICAL_MODEL_TYPES
         ):
             return "conductive"
         return "dielectric"
@@ -423,6 +519,13 @@ class MaterialProperties(BaseModel):
            result is a tensor permittivity [eps_xx, eps_yy, eps_zz].
         3. If only isotropic models, pick the best covering one (scalar).
         4. If no dispersion models, fall back to the permittivity field.
+
+        If dispersion models exist but none covers the wavelength (and the
+        material is not a conductor), the base values are returned with
+        ``within_validity=False``, and :class:`DispersionCoverageWarning` is
+        emitted for wavelengths up to 100 um (not at RF).
+        When a wavelength-domain model (Sellmeier, Cauchy, Lorentzian) is
+        selected, the base ``conductivity`` is dropped.
         """
         axis_models: dict[str | None, list[DispersionModel]] = {
             None: [],
@@ -476,7 +579,7 @@ class MaterialProperties(BaseModel):
                     )
 
             base.permittivity = eps_components
-            if any(t in ("sellmeier", "lorentzian") for t in model_types):
+            if any(t in _OPTICAL_MODEL_TYPES for t in model_types):
                 base.conductivity = None
             base.model_type = "/".join(sorted(model_types)) if model_types else ""
             base.model_source = "; ".join(model_sources) if model_sources else ""
@@ -507,11 +610,37 @@ class MaterialProperties(BaseModel):
             base.permittivity = (
                 self.permittivity if _is_tensor(self.permittivity) else eps
             )
-            if selected.type in ("sellmeier", "lorentzian"):
+            if selected.type in _OPTICAL_MODEL_TYPES:
                 base.conductivity = None
             base.model_type = selected.type
             base.model_source = selected.source
             base.within_validity = within_validity
+            base.validity_note = validity_note
+            return base
+
+        cond = self.conductivity
+        if isinstance(cond, list):
+            cond = cond[0]
+        is_conductor = cond is not None and cond >= 1e4
+
+        # Dispersion models exist but none covers this wavelength: the base
+        # values are not validated here. Say so, loudly and in the result.
+        # Conductors are exempt (they never need a permittivity model).
+        if self.dispersion_models and not is_conductor:
+            ranges = "; ".join(_describe_validity(m) for m in self.dispersion_models)
+            freq_text = (
+                f" (frequency={C0 / (wavelength_um * 1e-6):.6g} Hz)"
+                if wavelength_um > 0
+                else ""
+            )
+            validity_note = (
+                f"{_NO_COVERAGE_NOTE} wavelength={wavelength_um:.6g} um{freq_text}; "
+                f"models: {ranges}. Base permittivity/conductivity are not "
+                f"validated at this wavelength"
+            )
+            if 0 < wavelength_um <= _COVERAGE_WARNING_MAX_WAVELENGTH_UM:
+                warnings.warn(validity_note, DispersionCoverageWarning, stacklevel=3)
+            base.within_validity = False
             base.validity_note = validity_note
             return base
 
@@ -521,10 +650,7 @@ class MaterialProperties(BaseModel):
             return base
 
         base.within_validity = False
-        cond = self.conductivity
-        if isinstance(cond, list):
-            cond = cond[0]
-        if cond is not None and cond >= 1e4:
+        if is_conductor:
             base.validity_note = "conductive material (no permittivity needed)"
         else:
             base.validity_note = "no permittivity data available"
@@ -546,20 +672,28 @@ class MaterialProperties(BaseModel):
         wl_min = wavelength_um - bandwidth_um / 2
         wl_max = wavelength_um + bandwidth_um / 2
 
-        resolved_center = self.evaluate_at_wavelength(wavelength_um)
-        eps_center = resolved_center.permittivity_scalar
-        if eps_center is None or eps_center == 0:
-            return 0.0
+        # This is a probe at three wavelengths; the caller has already resolved
+        # (and been warned about) the centre wavelength, so do not repeat the
+        # coverage warning here.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DispersionCoverageWarning)
 
-        try:
-            eps_min = (
-                self.evaluate_at_wavelength(wl_min).permittivity_scalar or eps_center
-            )
-            eps_max = (
-                self.evaluate_at_wavelength(wl_max).permittivity_scalar or eps_center
-            )
-        except (ValueError, ZeroDivisionError):
-            return 0.0
+            resolved_center = self.evaluate_at_wavelength(wavelength_um)
+            eps_center = resolved_center.permittivity_scalar
+            if eps_center is None or eps_center == 0:
+                return 0.0
+
+            try:
+                eps_min = (
+                    self.evaluate_at_wavelength(wl_min).permittivity_scalar
+                    or eps_center
+                )
+                eps_max = (
+                    self.evaluate_at_wavelength(wl_max).permittivity_scalar
+                    or eps_center
+                )
+            except (ValueError, ZeroDivisionError):
+                return 0.0
 
         delta_eps = max(abs(eps_max - eps_center), abs(eps_min - eps_center))
         return delta_eps / eps_center
@@ -689,6 +823,11 @@ def make_doped_materials(
 
     return materials
 
+
+# Silicon, Li 1980 at the 293 K reference temperature: n^2 = eps + A / lambda^2.
+# The numbers are computed from the same function that backs the
+# ``Si-Li-293K`` material card, so there is one source for them.
+_SI_LI_293K_EPS, _SI_LI_293K_A = li_coefficients(293.0)
 
 MATERIALS_DB: dict[str, MaterialProperties] = {
     "aluminum": MaterialProperties(
@@ -835,7 +974,20 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "silicon": MaterialProperties(
         permittivity=11.9,
         conductivity=2.0,
+        # Precedence = list order (first covering model wins). Li 1980 is
+        # listed first: it covers the O-band (1.2-14 um, which the Salzberg &
+        # Villa range 1.36-11 um does not) and is the reference already used
+        # by the ``Si-Li-293K`` material card. Where both apply (1.36-11 um)
+        # Li therefore wins; Salzberg & Villa is kept as a reference model and
+        # is what MEEP uses for Lorentzian poles over 1.36-11 um.
         dispersion_models=[
+            DispersionModel(
+                type="cauchy",
+                cauchy_terms=[_SI_LI_293K_A],
+                epsilon_inf=_SI_LI_293K_EPS,
+                validity=ValidityRange(valid_wavelength=(1.2, 14)),
+                source="Li 1980, J. Phys. Chem. Ref. Data 9, 561 (293 K)",
+            ),
             DispersionModel(
                 type="sellmeier",
                 sellmeier_terms=[
@@ -1104,6 +1256,7 @@ def resolve_material_at_wavelength(
         if (
             not resolved.within_validity
             and resolved.validity_note
+            and not resolved.validity_note.startswith(_NO_COVERAGE_NOTE)
             and resolved.behavior != "conductive"
         ):
             warnings.warn(

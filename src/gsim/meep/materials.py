@@ -19,6 +19,17 @@ Dispersion rendering (RFC: dispersion flag on the Simulation):
       susceptibility poles per material when > threshold (default 0.5%).
     - ``dispersion="true"``: force full dispersion for all materials.
     - ``dispersion="false"``: force constant-epsilon for speed.
+
+Cauchy models (``DispersionModel(type="cauchy")``, e.g. silicon from Li 1980)
+cannot be represented exactly by Lorentzian poles and no poles are fitted here.
+When dispersive rendering is requested for a material whose selected model is
+``cauchy``:
+
+    - if the material also has an isotropic ``sellmeier`` model whose validity
+      covers the simulation wavelength, that model supplies the poles;
+    - otherwise the material is rendered non-dispersive, with the permittivity
+      evaluated from the Cauchy model at the simulation centre wavelength, and a
+      ``UserWarning`` says so.
 """
 
 from __future__ import annotations
@@ -140,10 +151,12 @@ def dispersion_model_to_meep_poles(
     """Convert any DispersionModel to MEEP Lorentzian susceptibility poles.
 
     Dispatches to the appropriate converter based on model type.
-    Returns empty list for constant-type models (no dispersive poles).
+    Returns empty list for constant-type models (no dispersive poles) and for
+    ``cauchy`` models, which have no exact Lorentzian representation (see
+    :func:`_resolved_to_material_data` for how they are handled).
 
     Args:
-        model: A DispersionModel (sellmeier, lorentzian, or constant).
+        model: A DispersionModel (sellmeier, lorentzian, cauchy, or constant).
 
     Returns:
         List of LorentzianPoleConfig for MEEP epsilon_susceptibilities.
@@ -229,6 +242,11 @@ def _resolved_to_material_data(
     from the model's validity bounds. The epsilon_inf field is derived from
     the model's epsilon_inf, and epsilon_diag is set to [eps_inf]*3.
 
+    A ``cauchy`` ``dispersive_model`` is not rendered dispersively: there is no
+    exact pole representation and none is fitted.  The material gets the
+    constant permittivity ``resolved.permittivity`` (evaluated from the model at
+    ``wavelength_um`` by the caller) and a ``UserWarning`` is emitted.
+
     Args:
         resolved: Evaluated material properties from the dispersion resolver
         wavelength_um: Simulation wavelength in um (for loss tangent conversion)
@@ -241,6 +259,21 @@ def _resolved_to_material_data(
         raise ValueError("ResolvedMaterial has no permittivity")
 
     data = MaterialData()
+
+    if dispersive_model is not None and dispersive_model.type == "cauchy":
+        eps_const = resolved.permittivity_scalar
+        n_const = math.sqrt(eps_const) if eps_const is not None else float("nan")
+        warnings.warn(
+            f"MEEP cannot represent the Cauchy permittivity model "
+            f"'{dispersive_model.source or 'unnamed'}' with Lorentzian poles "
+            f"(none are fitted) and no Sellmeier model covers "
+            f"wavelength={wavelength_um} um; rendering it non-dispersive with "
+            f"eps={eps_const} (n={n_const:.5f}) evaluated at the simulation "
+            f"centre wavelength. The index error grows away from "
+            f"{wavelength_um} um.",
+            stacklevel=3,
+        )
+        dispersive_model = None
 
     if dispersive_model is not None:
         poles = dispersion_model_to_meep_poles(dispersive_model)
@@ -322,6 +355,30 @@ def _find_dispersion_model(
         if model.validity.is_unspecified:
             return model
     return None
+
+
+def _substitute_cauchy_with_sellmeier(
+    props: MaterialProperties,
+    model: DispersionModel,
+    wavelength_um: float,
+) -> DispersionModel:
+    """Replace a ``cauchy`` model by a covering isotropic Sellmeier one, if any.
+
+    MEEP can only render Lorentzian poles, which a Sellmeier model maps onto
+    exactly. If the material has no isotropic Sellmeier model whose validity
+    covers ``wavelength_um``, the Cauchy model is returned unchanged and
+    :func:`_resolved_to_material_data` renders it non-dispersive with a warning.
+    """
+    if model.type != "cauchy":
+        return model
+    for candidate in props.dispersion_models:
+        if (
+            candidate.type == "sellmeier"
+            and candidate.axis is None
+            and candidate.validity.covers_wavelength(wavelength_um)
+        ):
+            return candidate
+    return model
 
 
 def resolve_materials(
@@ -440,6 +497,13 @@ def resolve_materials_with_dispersion(
     Lorentzian poles from the Sellmeier/Lorentzian model. Otherwise, use
     constant-epsilon rendering.
 
+    ``cauchy`` models (e.g. silicon, Li 1980) have no exact pole representation.
+    When dispersion would be enabled for such a material, a covering isotropic
+    Sellmeier model of the same material supplies the poles if there is one;
+    otherwise the material is rendered non-dispersive at the permittivity
+    evaluated at ``wavelength_um`` and a ``UserWarning`` is emitted. No poles
+    are fitted.
+
     ``dispersion="true"``: Force full dispersion for all materials that have
     dispersive models in the database.
 
@@ -499,6 +563,10 @@ def resolve_materials_with_dispersion(
         dispersive_model: DispersionModel | None = None
         if props is not None:
             dispersive_model = _find_dispersion_model(props, wavelength_um)
+            if dispersive_model is not None:
+                dispersive_model = _substitute_cauchy_with_sellmeier(
+                    props, dispersive_model, wavelength_um
+                )
 
         if dispersive_model is None or dispersive_model.type == "constant":
             materials[name] = _resolved_to_material_data(resolved, wavelength_um)
