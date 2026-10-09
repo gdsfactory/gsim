@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Silicon in the O-band: the stack material `silicon` gets a Li (1980) model at 293 K, valid 1.2-14 um, computed from
+  the existing `si_li_293k` coefficients through a new `cauchy` dispersion type (eps = eps_inf + sum A_k / lambda^(2k)).
+  Below 1.36 um silicon previously fell back silently to eps = 11.9 and the RF conductivity of 2 S/m. Optical models now
+  drop the base conductivity, a `DispersionCoverageWarning` is emitted when no model covers an optical or infrared
+  wavelength (up to 100 um), and MEEP renders a Cauchy-only wavelength non-dispersive with a warning.
 - EMX process-file import: `load_emx_proc` builds a `LayerStack` from an EMX `.proc` file (dielectrics, conductors,
   vias, GDS layer map, sheet resistance converted to conductivity); unsupported features (bias, fill, via merge,
   temperature dependence) are skipped with an `EmxImportWarning`.
