@@ -1,0 +1,63 @@
+# process generic_4lm {
+#
+# Synthetic EMX-style process file written for the gsim test-suite.
+# Every name, GDS layer number and value below is invented; none of it
+# describes a real technology.
+#
+# Layers are listed from the bottom to the top of the stack.  An embedded
+# conductor starts at the bottom of the finite layer that precedes it,
+# shifted by an optional "offset" line.  Vias connect two conductors.
+#
+# Expected geometry once imported (z = 0 is the top of the substrate, um):
+#   substrate   -100.0 ..   0.0   er 11.9, 10 ohm-cm
+#   ild0           0.0 ..   1.0   er 4.2
+#   ild1           1.0 ..   2.0   er 3.9
+#   ild2           2.0 ..   4.0   er 3.6
+#   passivation    4.0 ..   5.5   er 6.5
+#   M1 0.2 .. 0.6, M2 1.0 .. 2.0, M3 2.5 .. 4.0
+#   V1 0.6 .. 1.0 (M1-M2), V2 2.0 .. 2.5 (M2-M3)
+# }
+
+temp_reference 25
+background_dielectric_constant 1.0
+
+# ---- scalar defines ---------------------------------------------------
+define tc_m2 = 0.004
+define tm1 = 0.2 * 2
+define includefill = 0
+define rs_m1 = 0.1
+define rs_m3 = table(width, space) { 0.1, 0.1 => 0.02; 0.5, 0.2 => 0.025 }
+
+# ---- GDS streams (lNtM = GDS layer N, datatype M) ----------------------
+define M1 = l11t0
+define M2 = l12t0 + fill(if(includefill, l12t5, 0))
+define M3_DRAW = l13t0
+define M3 = M3_DRAW
+define V1 = l21t0
+define V2 = l22t0
+define MARKER = l99t0
+
+# ---- vertical stack, bottom to top --------------------------------------
+layer 100 11.9 name substrate 10 ohm-cm
+
+layer 1.0 4.2 name ild0
+offset 0.2
+conductor tm1 rs_m1 M1
+
+layer 1.0 3.9 name ild1
+conductor 1.0 3.5e7 * (1 - tc_m2 * dtemp) S/m M2
+
+layer 2.0 3.6 name ild2
+offset 0.5
+conductor 1.5 rs_m3 M3
+
+layer 1.5 6.5 name passivation
+layer infinity 1.0 name air
+
+# ---- vias -----------------------------------------------------------------
+via M1 M2 { rect 0.2 0.2 1.2e6 S/m } V1
+via M2 M3 {
+  # a declaration spread over several lines
+  rect 0.4 0.4
+  8.0e6 S/m
+} V2
