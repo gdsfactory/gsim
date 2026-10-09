@@ -29,6 +29,7 @@ import contextlib
 import functools
 import importlib
 import io
+import json
 import logging
 import re
 import shutil
@@ -855,6 +856,10 @@ def upload_simulation_dir(
         input_hash: Optional cache key recorded with the job. Silently
             dropped when the installed SDK does not support it.
 
+    Palace and FDTD metadata is read from root-level ``metadata.json`` and
+    forwarded with the exact staged-file manifest when the SDK supports both
+    fields. An older SDK warns and submits with fixed resources.
+
     Returns:
         PreJob object from gdsfactoryplus
 
@@ -871,6 +876,31 @@ def upload_simulation_dir(
             logger.debug(
                 "Installed gdsfactoryplus does not accept input_hash; "
                 "uploading without a cache key"
+            )
+    metadata_path = input_dir / "metadata.json"
+    if job_type.casefold() in {"palace", "fdtd"} and metadata_path.is_file():
+        if all(
+            _sdk_accepts(sim.upload_simulation, name)
+            for name in ("sizing_metadata", "input_manifest")
+        ):
+            from gsim.hashing import compute_input_manifest
+
+            metadata = json.loads(metadata_path.read_text(encoding="utf8"))
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("solver") != job_type.casefold()
+            ):
+                raise ValueError(
+                    "Sizing metadata solver must match the submitted job type"
+                )
+            kwargs["sizing_metadata"] = metadata
+            kwargs["input_manifest"] = compute_input_manifest(input_dir)
+        else:
+            logger.warning(
+                "Installed gdsfactoryplus cannot forward sizing metadata and input "
+                "manifest; dynamic sizing unavailable, submitting with fixed "
+                "resources. "
+                "Upgrade gdsfactoryplus to enable dynamic sizing."
             )
     try:
         return sim.upload_simulation(

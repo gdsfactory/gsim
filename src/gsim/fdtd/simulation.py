@@ -25,6 +25,7 @@ from gsim.fdtd.config import (
     build_fdtd_config,
 )
 from gsim.fdtd.mesh import background_bounds_nm, generate_mesh
+from gsim.fdtd.metadata import write_metadata
 from gsim.fdtd.models import (
     FDTDConfigError,
     FDTDGeometryError,
@@ -321,6 +322,7 @@ class Simulation:
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",
         )
+        write_metadata(manifest, config, mesh_path)
         return SimulationArtifacts(
             mesh_path=mesh_path,
             config_path=config_path,
