@@ -1,6 +1,6 @@
 [project]
 name = "gsim"
-version = "0.6.0"
+version = "0.7.0"
 description = "Electromagnetic simulation for photonics and electronics, powered by GDSFactory."
 readme = "README.md"
 requires-python = "~=3.12.0"
