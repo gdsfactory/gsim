@@ -106,7 +106,16 @@ def _cached_runtime_prefix(tag: str | None = None) -> Path:
 def _set_executable(path: Path) -> None:
     """Make the given path executable for all users."""
     mode = path.stat().st_mode
-    path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    executable_mode = mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    if mode != executable_mode:
+        path.chmod(executable_mode)
+
+
+def _restore_bin_permissions(prefix: Path) -> None:
+    """Restore executable bits lost by wheel extraction, including MPI helpers."""
+    for path in (prefix / "bin").rglob("*"):
+        if path.is_file():
+            _set_executable(path)
 
 
 def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
@@ -128,6 +137,7 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
     bin_palace = prefix / "bin" / "palace"
     lib_dir = prefix / "lib"
     if not force and bin_palace.is_file() and lib_dir.is_dir():
+        _restore_bin_permissions(prefix)
         return bin_palace
 
     if not _is_linux_x86_64():
@@ -178,16 +188,15 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
 
     if not bin_palace.is_file():
         raise RuntimeError("Cached runtime install did not produce bin/palace")
-    _set_executable(bin_palace)
-    bin_native = prefix / "bin" / "palace-x86_64.bin"
-    if bin_native.is_file():
-        _set_executable(bin_native)
+    _restore_bin_permissions(prefix)
     return bin_palace
 
 
 def _cached_binary() -> Path | None:
     """Return the cached ``palace`` launcher path, or ``None`` if not present."""
     candidate = _cached_runtime_prefix() / "bin" / "palace"
+    if candidate.is_file():
+        _restore_bin_permissions(candidate.parent.parent)
     return candidate if candidate.is_file() else None
 
 
