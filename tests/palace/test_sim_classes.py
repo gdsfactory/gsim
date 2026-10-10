@@ -886,6 +886,7 @@ class TestInstallPalaceRuntime:
             prefix = tmp_path / f"palace-cpu-v{tag}"
             (prefix / "bin").mkdir(parents=True)
             (prefix / "lib").mkdir(parents=True)
+            (prefix / "share").mkdir(parents=True)
             bin_palace = prefix / "bin" / "palace"
             bin_palace.write_text('#!/bin/sh\nexec "$(dirname "$0")/palace-launcher"\n')
             bin_palace.chmod(0o755)
@@ -931,6 +932,7 @@ class TestInstallPalaceRuntime:
             zf.writestr("palacetoolkit_palace_cpu/bin/mpirun", "#!/bin/sh\nexit 0\n")
             zf.writestr("palacetoolkit_palace_cpu/bin/palace-x86_64.bin", "x")
             zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
+            zf.writestr("palacetoolkit_palace_cpu/share/openmpi/help.txt", "MPI help")
         wheel_buf.seek(0)
 
         class _FakeResponse:
@@ -959,6 +961,7 @@ class TestInstallPalaceRuntime:
             assert result == prefix / "bin" / "palace"
             assert (prefix / "bin" / "palace").is_file()
             assert (prefix / "lib" / "libfoo.so").is_file()
+            assert (prefix / "share/openmpi/help.txt").read_text() == "MPI help"
             assert os.access(result, os.X_OK)
             assert os.access(prefix / "bin/mpirun", os.X_OK)
             subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
