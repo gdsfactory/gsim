@@ -59,6 +59,7 @@ class TestCauchyModel:
         props = MaterialProperties(dispersion_models=[dm])
         dumped = props.to_dict()["dispersion_models"]
         assert isinstance(dumped, list)
+        assert isinstance(dumped[0], dict)
         assert dumped[0]["cauchy_terms"] == [0.5]
 
 

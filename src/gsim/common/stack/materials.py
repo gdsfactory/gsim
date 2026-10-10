@@ -792,24 +792,24 @@ def make_doped_materials(
             )
     else:
         for entry in entries:
-            if len(entry) == 2:
-                name, sigma = entry
-                items.append(
-                    (
-                        name,
-                        permittivity,
-                        sigma,
-                        f"{source_prefix} ({name}) -- Drude sigma",
+            match entry:
+                case (name, sigma):
+                    items.append(
+                        (
+                            name,
+                            permittivity,
+                            sigma,
+                            f"{source_prefix} ({name}) -- Drude sigma",
+                        )
                     )
-                )
-            elif len(entry) == 4:
-                items.append(entry)
-            else:
-                msg = (
-                    "Entries must be (name, sigma) or (name, permittivity, "
-                    f"sigma, source) tuples, got {entry!r}"
-                )
-                raise ValueError(msg)
+                case (name, eps, sigma, source):
+                    items.append((name, eps, sigma, source))
+                case _:
+                    msg = (
+                        "Entries must be (name, sigma) or (name, permittivity, "
+                        f"sigma, source) tuples, got {entry!r}"
+                    )
+                    raise ValueError(msg)
 
     materials: dict[str, MaterialProperties] = {}
     for name, eps, sigma, source in items:
