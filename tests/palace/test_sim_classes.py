@@ -894,7 +894,7 @@ class TestInstallPalaceRuntime:
             launcher.chmod(0o644)
             result = rt.install_palace_runtime(force=False)
             assert result == bin_palace
-            subprocess.run([str(result)], check=True)  # noqa: S603
+            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_raises_on_non_linux_x86_64(self, tmp_path: Path) -> None:
@@ -961,11 +961,11 @@ class TestInstallPalaceRuntime:
             assert (prefix / "lib" / "libfoo.so").is_file()
             assert os.access(result, os.X_OK)
             assert os.access(prefix / "bin/mpirun", os.X_OK)
-            subprocess.run([str(result)], check=True)  # noqa: S603
+            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
 
             (prefix / "bin/palace-launcher").chmod(0o644)
             assert rt._cached_binary() == result
-            subprocess.run([str(result)], check=True)  # noqa: S603
+            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
 
 
 class TestResolvePalaceLibraryDir:
