@@ -79,6 +79,24 @@ def test_legacy_constructor_and_properties(sim_class, group, field, value):
     assert sim.solver.linear.max_iterations == 123
 
 
+@pytest.mark.parametrize("setter", ["set_solver", "set_numerical"])
+@pytest.mark.parametrize("initial_guess", [None, False, True])
+def test_initial_guess_setter_matches_direct_configuration(setter, initial_guess):
+    sim = pa.ElectrostaticSim()
+    controls = dict(
+        order=2, tolerance=1e-9, max_iterations=1000, preconditioner="BoomerAMG"
+    )
+    sim.set_solver(**controls)
+    sim.solver.linear.initial_guess = initial_guess
+    expected = sim.solver.to_palace_config()
+    getattr(sim, setter)(**controls, initial_guess=initial_guess)
+    assert sim.solver.to_palace_config() == expected
+    if initial_guess is None:
+        assert "InitialGuess" not in expected["Linear"]
+    else:
+        assert expected["Linear"]["InitialGuess"] is initial_guess
+
+
 def test_linear_and_eigenmode_tolerances_are_independent():
     sim = pa.EigenmodeSim()
     sim.solver.eigenmode.target = 4e9

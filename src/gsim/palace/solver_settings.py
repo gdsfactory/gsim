@@ -73,6 +73,7 @@ class SolverSettingsMixin:
         order: int = _DEFAULT_SOLVER.order,
         tolerance: float = _DEFAULT_SOLVER.linear.tolerance,
         max_iterations: int = _DEFAULT_SOLVER.linear.max_iterations,
+        initial_guess: bool | None = _DEFAULT_SOLVER.linear.initial_guess,
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = (
             _DEFAULT_SOLVER.linear.solver_type
         ),
@@ -86,6 +87,7 @@ class SolverSettingsMixin:
         Defaults match ``SolverConfig()``: order 2, linear tolerance 1e-6,
         400 iterations, default backend/preconditioner, and CPU. Set individual
         controls directly through ``sim.solver`` to retain other common values.
+        Initial guesses follow Palace's default unless set explicitly.
 
         Example:
             >>> sim.set_solver(order=1, tolerance=1e-6)
@@ -98,6 +100,7 @@ class SolverSettingsMixin:
                 linear=LinearSolverConfig(
                     tolerance=tolerance,
                     max_iterations=max_iterations,
+                    initial_guess=initial_guess,
                     solver_type=solver_type,
                     preconditioner=preconditioner,
                 ),
@@ -110,6 +113,7 @@ class SolverSettingsMixin:
         order: int | _UnsetOrder = _UnsetOrder.DEFAULT,
         tolerance: float = _DEFAULT_SOLVER.linear.tolerance,
         max_iterations: int = _DEFAULT_SOLVER.linear.max_iterations,
+        initial_guess: bool | None = _DEFAULT_SOLVER.linear.initial_guess,
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = (
             _DEFAULT_SOLVER.linear.solver_type
         ),
@@ -141,6 +145,7 @@ class SolverSettingsMixin:
             order=order,
             tolerance=tolerance,
             max_iterations=max_iterations,
+            initial_guess=initial_guess,
             solver_type=solver_type,
             preconditioner=preconditioner,
             device=device,
