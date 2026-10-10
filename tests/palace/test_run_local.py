@@ -10,7 +10,7 @@ from typing import Self, cast
 
 import pytest
 
-from gsim.palace import BoundaryModeSim, DrivenSim
+from gsim.palace import BoundaryModeSim, DrivenSim, ElectrostaticSim
 from gsim.palace.base import _recommend_parallel
 
 
@@ -143,6 +143,32 @@ def test_run_local_explicit_large_processes_warns(monkeypatch, tmp_path, caplog)
     # The explicit request is still respected.
     cmd = cast(list[str], captured["cmd"])
     assert "8" in cmd[cmd.index("-np") + 1 :][:1]
+
+
+@pytest.mark.parametrize("preconditioner", ["AMS", "BoomerAMG"])
+def test_run_local_iterative_solver_has_no_direct_warning(
+    monkeypatch, tmp_path, caplog, preconditioner
+):
+    _setup_local_palace(monkeypatch, tmp_path)
+    monkeypatch.delenv("PALACE_SIF", raising=False)
+    monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+    monkeypatch.setattr("gsim.palace.base._count_physical_cpus", lambda: 16)
+    captured = {}
+
+    def _fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    sim = ElectrostaticSim()
+    sim.set_solver(preconditioner=preconditioner)
+    sim._last_mesh_result = _mesh_result(1000)
+    _setup_sim(sim, tmp_path / "sim")
+    with caplog.at_level("WARNING", logger="gsim.palace.base"):
+        sim.run_local(num_processes=4, verbose=False)
+    assert not any("SuperLU_DIST" in record.message for record in caplog.records)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-np") + 1] == "4"
 
 
 def test_run_local_3d_caps_default_processes(monkeypatch, tmp_path):
