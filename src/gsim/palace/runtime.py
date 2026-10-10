@@ -136,7 +136,12 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
     prefix = _cached_runtime_prefix(tag)
     bin_palace = prefix / "bin" / "palace"
     lib_dir = prefix / "lib"
-    if not force and bin_palace.is_file() and lib_dir.is_dir():
+    if (
+        not force
+        and bin_palace.is_file()
+        and lib_dir.is_dir()
+        and (prefix / "share").is_dir()
+    ):
         _restore_bin_permissions(prefix)
         return bin_palace
 
@@ -182,9 +187,7 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
 
         if prefix.exists():
             shutil.rmtree(prefix)
-        prefix.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(bin_src, prefix / "bin")
-        shutil.copytree(lib_src, prefix / "lib")
+        shutil.copytree(payload_root, prefix)
 
     if not bin_palace.is_file():
         raise RuntimeError("Cached runtime install did not produce bin/palace")
@@ -195,9 +198,11 @@ def install_palace_runtime(force: bool = False, timeout: float = 180.0) -> Path:
 def _cached_binary() -> Path | None:
     """Return the cached ``palace`` launcher path, or ``None`` if not present."""
     candidate = _cached_runtime_prefix() / "bin" / "palace"
-    if candidate.is_file():
-        _restore_bin_permissions(candidate.parent.parent)
-    return candidate if candidate.is_file() else None
+    prefix = candidate.parent.parent
+    if not candidate.is_file() or not (prefix / "share").is_dir():
+        return None
+    _restore_bin_permissions(prefix)
+    return candidate
 
 
 def _cached_library_dir() -> Path | None:
