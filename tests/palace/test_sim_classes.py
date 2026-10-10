@@ -888,14 +888,18 @@ class TestInstallPalaceRuntime:
             (prefix / "lib").mkdir(parents=True)
             (prefix / "share").mkdir(parents=True)
             bin_palace = prefix / "bin" / "palace"
-            bin_palace.write_text('#!/bin/sh\nexec "$(dirname "$0")/palace-launcher"\n')
+            bin_palace.write_text(
+                "import runpy\nfrom pathlib import Path\n"
+                'runpy.run_path(str(Path(__file__).with_name("palace-launcher")))\n'
+            )
             bin_palace.chmod(0o755)
             launcher = prefix / "bin" / "palace-launcher"
-            launcher.write_text("#!/bin/sh\nexit 0\n")
+            launcher.write_text("pass\n")
             launcher.chmod(0o644)
             result = rt.install_palace_runtime(force=False)
             assert result == bin_palace
-            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
+            assert os.access(result.with_name("palace-launcher"), os.X_OK)
+            subprocess.run([sys.executable, str(result)], check=True)  # noqa: S603
 
     @pytest.mark.usefixtures("_mock_gcloud")
     def test_raises_on_non_linux_x86_64(self, tmp_path: Path) -> None:
@@ -924,11 +928,10 @@ class TestInstallPalaceRuntime:
         with zipfile.ZipFile(wheel_buf, "w") as zf:
             zf.writestr(
                 "palacetoolkit_palace_cpu/bin/palace",
-                '#!/bin/sh\nexec "$(dirname "$0")/palace-launcher"\n',
+                "import runpy\nfrom pathlib import Path\n"
+                'runpy.run_path(str(Path(__file__).with_name("palace-launcher")))\n',
             )
-            zf.writestr(
-                "palacetoolkit_palace_cpu/bin/palace-launcher", "#!/bin/sh\nexit 0\n"
-            )
+            zf.writestr("palacetoolkit_palace_cpu/bin/palace-launcher", "pass\n")
             zf.writestr("palacetoolkit_palace_cpu/bin/mpirun", "#!/bin/sh\nexit 0\n")
             zf.writestr("palacetoolkit_palace_cpu/bin/palace-x86_64.bin", "x")
             zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
@@ -964,11 +967,13 @@ class TestInstallPalaceRuntime:
             assert (prefix / "share/openmpi/help.txt").read_text() == "MPI help"
             assert os.access(result, os.X_OK)
             assert os.access(prefix / "bin/mpirun", os.X_OK)
-            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
+            assert os.access(result.with_name("palace-launcher"), os.X_OK)
+            subprocess.run([sys.executable, str(result)], check=True)  # noqa: S603
 
             (prefix / "bin/palace-launcher").chmod(0o644)
             assert rt._cached_binary() == result
-            subprocess.run(["sh", result.as_posix()], check=True)  # noqa: S603, S607
+            assert os.access(result.with_name("palace-launcher"), os.X_OK)
+            subprocess.run([sys.executable, str(result)], check=True)  # noqa: S603
 
 
 class TestResolvePalaceLibraryDir:
