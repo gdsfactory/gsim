@@ -49,15 +49,17 @@ boundary.solver.boundary_mode.freq = 5e9
 boundary.solver.boundary_mode.num_modes = 2
 ```
 
-All four share six controls: `order`, `device`, and
-`linear.{solver_type, preconditioner, tolerance, max_iterations}`.
+All four share seven controls: `order`, `device`, and
+`linear.{solver_type, preconditioner, tolerance, max_iterations, initial_guess}`.
+The optional `initial_guess` is omitted by default; set it to `False` to start each
+linear solve from zero when comparing residual norms.
 
 | Simulation | Problem group | Problem settings | Total settings |
 | --- | --- | --- | --- |
-| DrivenSim | `solver.driven` | 12 | 18 |
-| EigenmodeSim | `solver.eigenmode` | 8 | 14 |
-| ElectrostaticSim | `solver.electrostatic` | 1 | 7 |
-| BoundaryModeSim | `solver.boundary_mode` | 7 | 13 |
+| DrivenSim | `solver.driven` | 12 | 19 |
+| EigenmodeSim | `solver.eigenmode` | 8 | 15 |
+| ElectrostaticSim | `solver.electrostatic` | 1 | 8 |
+| BoundaryModeSim | `solver.boundary_mode` | 7 | 14 |
 
 `sim.set_solver(...)` replaces the common controls using the same defaults as
 `SolverConfig()`, while preserving the problem-specific settings. Assign individual
