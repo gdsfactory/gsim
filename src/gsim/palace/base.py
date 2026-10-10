@@ -2423,7 +2423,11 @@ class PalaceSimMixin(SolverSettingsMixin):
                 None,
                 None,
             )
-            if num_processes > rec_processes:
+            linear_type = self.solver.linear.to_palace_config()["Type"]
+            if (
+                linear_type in {"Default", "SuperLU", "STRUMPACK", "MUMPS"}
+                and num_processes > rec_processes
+            ):
                 logger.warning(
                     "Requested %d MPI ranks but SuperLU_DIST direct solve "
                     "does not scale beyond %d rank(s) on this problem size; "
