@@ -6,7 +6,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
 import pyvista as pv
@@ -103,7 +103,8 @@ class StreamplotInputs2D:
 
 def _axis_name(idx: int) -> Axis:
     """Map axis index 0/1/2 to axis name x/y/z."""
-    return cast(Axis, {0: "x", 1: "y", 2: "z"}[idx])
+    names: dict[int, Axis] = {0: "x", 1: "y", 2: "z"}
+    return names[idx]
 
 
 def _source_to_dataset(

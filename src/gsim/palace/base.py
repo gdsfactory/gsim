@@ -203,11 +203,11 @@ class PalaceSimMixin(SolverSettingsMixin):
     stack: LayerStack | None
     materials: dict[str, MaterialConfig]
     refinement: RefinementConfig
-    ports: list[PortConfig]
-    cpw_ports: list[CPWPortConfig]
+    ports: list[PortConfig] | None
+    cpw_ports: list[CPWPortConfig] | None
     wave_ports: list[WavePortConfig]
-    two_terminal_ports: list[TwoTerminalPortConfig]
-    terminals: list[TerminalConfig]
+    two_terminal_ports: list[TwoTerminalPortConfig] | None
+    terminals: list[TerminalConfig] | None
     simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
     _output_dir: Path | None
     _job_id: str | None
@@ -1054,7 +1054,7 @@ class PalaceSimMixin(SolverSettingsMixin):
                 )
         else:
             # Validate port configurations
-            for port in self.ports:
+            for port in self.ports or []:
                 if (
                     port.geometry == "inplane"
                     and port.layer is None
@@ -1072,7 +1072,7 @@ class PalaceSimMixin(SolverSettingsMixin):
             # Validate CPW ports
             errors.extend(
                 f"CPW port '{cpw.name}': 'layer' is required"
-                for cpw in self.cpw_ports
+                for cpw in self.cpw_ports or []
                 if not cpw.layer
             )
             # Validate wave ports
@@ -1092,8 +1092,8 @@ class PalaceSimMixin(SolverSettingsMixin):
         # Validate excitation port if specified
         driven = self._get_problem_settings("driven")
         if driven is not None and driven.excitation_port is not None:
-            port_names = [p.name for p in self.ports]
-            cpw_names = [cpw.name for cpw in self.cpw_ports]
+            port_names = [p.name for p in self.ports or []]
+            cpw_names = [cpw.name for cpw in self.cpw_ports or []]
             all_port_names = port_names + cpw_names
             if driven.excitation_port not in all_port_names:
                 errors.append(
@@ -1101,7 +1101,7 @@ class PalaceSimMixin(SolverSettingsMixin):
                     f"Available: {all_port_names}"
                 )
 
-        if self.simulation_type == "electrostatic" and len(self.terminals) < 2:
+        if self.simulation_type == "electrostatic" and len(self.terminals or []) < 2:
             # Electrostatic requires at least 2 terminals
             errors.append(
                 "Electrostatic simulation requires at least 2 terminals. "
@@ -1111,7 +1111,7 @@ class PalaceSimMixin(SolverSettingsMixin):
             # Validate terminal configurations
             errors.extend(
                 f"Terminal '{terminal.name}': 'layer' is required"
-                for terminal in self.terminals
+                for terminal in self.terminals or []
                 if not terminal.layer
             )
 
@@ -1432,9 +1432,9 @@ class PalaceSimMixin(SolverSettingsMixin):
             )
 
         ordered: list[tuple[int, PortConfig | CPWPortConfig]] = [
-            (port.order, port) for port in self.ports
+            (port.order, port) for port in self.ports or []
         ]
-        ordered.extend((cpw.order, cpw) for cpw in self.cpw_ports)
+        ordered.extend((cpw.order, cpw) for cpw in self.cpw_ports or [])
 
         for _order, config in sorted(ordered, key=lambda item: item[0]):
             if isinstance(config, PortConfig):
@@ -2862,7 +2862,7 @@ class PalaceSimMixin(SolverSettingsMixin):
             ... )
         """
         # Remove existing config for this port if any
-        self.ports = [p for p in self.ports if p.name != name]
+        self.ports = [p for p in self.ports or [] if p.name != name]
 
         self.ports.append(
             PortConfig(
@@ -2884,7 +2884,7 @@ class PalaceSimMixin(SolverSettingsMixin):
                 center=center,
                 orientation=orientation,
                 width=width,
-                order=len(self.ports) + len(self.cpw_ports),
+                order=len(self.ports or []) + len(self.cpw_ports or []),
             )
         )
 
@@ -2940,7 +2940,7 @@ class PalaceSimMixin(SolverSettingsMixin):
             ... )
         """
         # Remove existing CPW port with same name if any
-        self.cpw_ports = [p for p in self.cpw_ports if p.name != name]
+        self.cpw_ports = [p for p in self.cpw_ports or [] if p.name != name]
 
         self.cpw_ports.append(
             CPWPortConfig(
@@ -2957,7 +2957,7 @@ class PalaceSimMixin(SolverSettingsMixin):
                 nsamples=nsamples,
                 center=center,
                 orientation=orientation,
-                order=len(self.ports) + len(self.cpw_ports),
+                order=len(self.ports or []) + len(self.cpw_ports or []),
             )
         )
 
@@ -2989,7 +2989,7 @@ class PalaceSimMixin(SolverSettingsMixin):
         """
         self.two_terminal_ports = [
             p
-            for p in self.two_terminal_ports
+            for p in self.two_terminal_ports or []
             if p.plus_port != plus_port and p.minus_port != minus_port
         ]
         self.two_terminal_ports.append(
