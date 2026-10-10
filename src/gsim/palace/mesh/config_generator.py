@@ -148,6 +148,7 @@ def generate_palace_config(
     terminals: list[TerminalConfig] | None = None,
     refinement_config: RefinementConfig | None = None,
     periodic_translation: tuple[float, float, float] | None = None,
+    characteristic_length_um: float | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -282,6 +283,11 @@ def generate_palace_config(
         },
         "Solver": solver_conf,
     }
+
+    if characteristic_length_um is not None:
+        if characteristic_length_um <= 0:
+            raise ValueError("Characteristic length must be positive")
+        config["Model"]["Lc"] = characteristic_length_um
 
     # Build domains section
     # Evaluate dispersion models at the problem's target frequency. Driven
@@ -981,12 +987,13 @@ def write_config(
         electrostatic_config=electrostatic_config,
         terminals=terminals,
         refinement_config=refinement_config,
+        characteristic_length_um=mesh_result.metadata.get("characteristic_length_um"),
     )
 
     # Update the mesh_result with the config path
     mesh_result.config_path = config_path
-    mesh_result.metadata = write_metadata(
-        mesh_result.mesh_stats, mesh_result.output_dir, config_path
+    mesh_result.metadata.update(
+        write_metadata(mesh_result.mesh_stats, mesh_result.output_dir, config_path)
     )
 
     return config_path

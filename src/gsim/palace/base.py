@@ -2304,6 +2304,8 @@ class PalaceSimMixin(SolverSettingsMixin):
         palace_sif_path: str | Path | None = None,
         palace_executable: str | Path | None = None,
         use_apptainer: bool = False,
+        container_binary: str | None = None,
+        log_path: str | Path | None = None,
         num_processes: int | None = None,
         num_threads: int | None = None,
         verbose: bool = True,
@@ -2328,6 +2330,10 @@ class PalaceSimMixin(SolverSettingsMixin):
             use_apptainer: If True (default), run via Apptainer using SIF file.
                 If False, run Palace executable directly.
                 Ignored when ``palace_executable`` is explicitly provided.
+            container_binary: Execute this binary with MPI inside the container,
+                using a clean environment, instead of the image's runscript.
+                Useful for images containing multiple CPU-specific binaries.
+            log_path: Save combined solver output, including failed runs.
             num_processes: Number of MPI processes. If None (default), a
                 problem-size-aware default is chosen: 2D mode-analysis runs
                 use a single MPI rank (SuperLU_DIST's 2D processor grid does
@@ -2471,13 +2477,19 @@ class PalaceSimMixin(SolverSettingsMixin):
                     if palace_sif_path is not None:
                         break
 
-        if palace_executable is None:
+        explicit_container = (
+            use_apptainer
+            and container_binary is not None
+            and palace_sif_path is not None
+            and palace_executable is None
+        )
+        if palace_executable is None and not explicit_container:
             palace_executable = os.environ.get("PALACE_EXECUTABLE")
 
         # Prefer a local Palace executable when available, even when a SIF is
         # configured via PALACE_SIF. This keeps local developer workflows on
         # native binaries by default.
-        if palace_executable is None:
+        if palace_executable is None and not explicit_container:
             for root in dedup_roots:
                 candidate = (root / "bin" / "palace").resolve()
                 if candidate.exists() and os.access(candidate, os.X_OK):
@@ -2530,13 +2542,25 @@ class PalaceSimMixin(SolverSettingsMixin):
                 )
 
             # Build Apptainer command
-            cmd = [
-                "apptainer",
-                "run",
-                str(sif_path),
-                "-np",
-                str(num_processes),
-            ]
+            if container_binary is None:
+                cmd = ["apptainer", "run", str(sif_path), "-np", str(num_processes)]
+            else:
+                container_options = ["--cleanenv"]
+                if num_threads is not None:
+                    container_options.extend(
+                        ["--env", f"OMP_NUM_THREADS={num_threads}"]
+                    )
+                cmd = [
+                    "apptainer",
+                    "exec",
+                    *container_options,
+                    str(sif_path),
+                    "mpirun",
+                    "--oversubscribe",
+                    "-np",
+                    str(num_processes),
+                    container_binary,
+                ]
 
         else:
             # Direct Palace execution
@@ -2654,7 +2678,9 @@ class PalaceSimMixin(SolverSettingsMixin):
                 _run_env["LD_LIBRARY_PATH"],
             )
 
-        if num_threads is not None:
+        if num_threads is not None and not (
+            run_with_apptainer and container_binary is not None
+        ):
             cmd.extend(["-nt", str(num_threads)])
         cmd.extend(["config.json"])
 
@@ -2676,9 +2702,10 @@ class PalaceSimMixin(SolverSettingsMixin):
             _emit_info("Processes: %d", num_processes)
 
         # Run simulation
+        captured_output: list[str] = []
         try:
             if verbose:
-                streamed_lines: list[str] = []
+                streamed_lines = captured_output
                 with subprocess.Popen(  # noqa: S603
                     cmd,
                     cwd=output_dir,
@@ -2714,9 +2741,11 @@ class PalaceSimMixin(SolverSettingsMixin):
                     # Same message as the verbose path: without the captured
                     # output a failure only says "exit status 1".
                     output_lines = _captured_lines(e.stdout, e.stderr)
+                    captured_output.extend(output_lines)
                     raise RuntimeError(
                         _palace_failure_message(e.returncode, output_lines)
                     ) from e
+                captured_output.extend(_captured_lines(result.stdout, result.stderr))
                 if result.stdout:
                     logger.debug(result.stdout)
                 if result.stderr:
@@ -2732,6 +2761,11 @@ class PalaceSimMixin(SolverSettingsMixin):
                 "correct path via palace_executable parameter, "
                 "or set PALACE_EXECUTABLE environment variable."
             ) from e
+        finally:
+            if log_path is not None:
+                target = Path(log_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("\n".join(captured_output) + "\n", encoding="utf-8")
 
         if verbose:
             _emit_info("Simulation completed successfully")
