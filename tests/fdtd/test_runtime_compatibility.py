@@ -13,6 +13,7 @@ def test_historical_simulation_import_exposes_public_workflow(fdtd_pdk_module):
     assert Simulation is fdtd.Simulation
     simulation = Simulation(pdk=fdtd_pdk_module)
     simulation.source(port="o1")
+    assert isinstance(simulation.source, fdtd.PortSource)
     assert simulation.source.port == "o1"
     legacy = ArtifactSimulation(pdk=fdtd_pdk_module, default_port="o1")
     assert legacy.geometry("straight", settings={"length": 2}).component is not None

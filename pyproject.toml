@@ -27,6 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+meshwell = ["meshwell~=2.1.1"]
 # Interactive 3-D visualization (PyVista + trame server rendering) with the
 # extra packages needed for reliable headless and notebook use.
 visualize = [

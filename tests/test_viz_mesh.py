@@ -230,7 +230,7 @@ def test_plot_mesh_2d_camera_faces_plane(
 
     viz.plot_mesh(msh, interactive=True, mode="live")
 
-    camera: Any = captured["camera"]
+    camera = cast(pv.Camera, captured["camera"])
     view = np.array(camera.position) - np.array(camera.focal_point)
     view /= np.linalg.norm(view)
     # The fixture mesh is thin along z, so the camera must face +z/-z.
@@ -255,7 +255,7 @@ def test_plot_mesh_3d_keeps_iso_camera(
 
     viz.plot_mesh(msh, interactive=True, mode="live")
 
-    camera: Any = captured["camera"]
+    camera = cast(pv.Camera, captured["camera"])
     view = np.array(camera.position) - np.array(camera.focal_point)
     view /= np.linalg.norm(view)
     # Isometric view is not aligned to a single axis.
