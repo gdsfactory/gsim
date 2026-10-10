@@ -26,6 +26,7 @@ from gsim.palace.models import (
 from gsim.palace.models.solver import warn_legacy_solver_setting
 
 if TYPE_CHECKING:
+    from gsim.palace.mesh.generator import MeshResult
     from gsim.palace.mesh.nets import Nets
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_terminals: bool = PrivateAttr(default=False)
+    _last_mesh_result: Any = PrivateAttr(default=None)
+    _last_ports: list = PrivateAttr(default_factory=list)
 
     # Legacy solver settings
 
@@ -140,6 +143,65 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
                 layer=layer,
             )
         )
+
+    def mesh_sheets(
+        self,
+        *,
+        conductor_layer: tuple[int, int],
+        terminal_ports: dict[str, str],
+        domain_bounds: tuple[float, float, float, float],
+        height: float,
+        near_mesh: float,
+        far_mesh: float,
+        permittivity: float = 11.45,
+        normalization_depth_um: float | None = None,
+        minimum_feature_elements: float = 4,
+    ) -> MeshResult:
+        """Mesh component electrodes on silicon with the meshwell backend.
+
+        Named ports select disconnected electrodes on one GDS layer; all other
+        metal is ground. Set ``normalization_depth_um`` for a uniform-line 2D
+        cross section: Palace reports total capacitance for that depth. Without
+        it, mesh the full 3D sheets. Dimensions are in micrometres. Call
+        ``set_geometry`` and ``set_output_dir`` first, then ``write_config``.
+
+        Returns:
+            Mesh and physical groups ready for config generation.
+
+        Raises:
+            ValueError: If geometry, output directory or parameters are invalid.
+        """
+        from gsim.palace.mesh.meshwell import mesh_sheets
+
+        if self.component is None or self._output_dir is None:
+            raise ValueError("Set geometry and output directory before meshing")
+        if permittivity <= 0 or (
+            normalization_depth_um is not None and normalization_depth_um <= 0
+        ):
+            raise ValueError("Permittivity and normalization depth must be positive")
+        result = mesh_sheets(
+            self.component,
+            conductor_layer=conductor_layer,
+            terminal_ports=terminal_ports,
+            domain_bounds=domain_bounds,
+            height=height,
+            near_mesh=near_mesh,
+            far_mesh=far_mesh,
+            path=self._output_dir / "palace.msh",
+            cross_section=normalization_depth_um is not None,
+            minimum_feature_elements=minimum_feature_elements,
+        )
+        if normalization_depth_um is not None:
+            result.metadata["characteristic_length_um"] = normalization_depth_um
+        self.set_stack(
+            LayerStack(materials={"silicon": {"permittivity": permittivity}})
+        )
+        self.terminals = [
+            TerminalConfig(name=name, layer=name) for name in terminal_ports
+        ]
+        self._last_mesh_result = result
+        self._last_ports = []
+        return result
 
     def nets(self) -> Nets:
         """Find the electrically connected conductor shapes of the geometry.

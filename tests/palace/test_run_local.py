@@ -523,3 +523,60 @@ def test_run_local_failure_keeps_only_the_output_tail(monkeypatch, tmp_path):
     assert "line 300" in lines
     assert "line 499" in lines
     assert "line 299" not in lines
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_container_binary_and_solver_log(monkeypatch, tmp_path: Path, fails: bool):
+    from gsim.palace import ElectrostaticSim
+
+    monkeypatch.setenv("PALACE_EXECUTABLE", "/ignored/native/palace")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("shutil.which", lambda _: "/bin/apptainer")
+    image = tmp_path / "palace.sif"
+    image.write_bytes(b"image")
+    captured = {}
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        if fails:
+            raise subprocess.CalledProcessError(
+                1, cmd, output="solver failed", stderr="diagnostic"
+            )
+        return SimpleNamespace(
+            stdout="solver completed\n", stderr="diagnostic\n", returncode=0
+        )
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    sim = ElectrostaticSim()
+    _setup_sim(sim, tmp_path / "sim")
+    log = tmp_path / "solver.log"
+    options = dict(
+        palace_sif_path=image,
+        use_apptainer=True,
+        container_binary="palace-cpu",
+        num_processes=4,
+        num_threads=1,
+        verbose=False,
+        log_path=log,
+    )
+    if fails:
+        with pytest.raises(RuntimeError, match="solver failed"):
+            sim.run_local(**options)
+    else:
+        sim.run_local(**options)
+    assert captured["cmd"] == [
+        "apptainer",
+        "exec",
+        "--cleanenv",
+        "--env",
+        "OMP_NUM_THREADS=1",
+        str(image),
+        "mpirun",
+        "--oversubscribe",
+        "-np",
+        "4",
+        "palace-cpu",
+        "config.json",
+    ]
+    assert "diagnostic" in log.read_text()
+    assert "failed" in log.read_text() if fails else "completed" in log.read_text()

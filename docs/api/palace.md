@@ -599,3 +599,34 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 See [Transmission-line analysis](../transmission_line_analysis.md) for using
 `load_sparams(...).to_skrf()` with scikit-rf's multiline TRL calibration,
 physical impedance normalization and independent-length checks.
+
+## Planar electrode components
+
+Install `gsim[meshwell]` to mesh zero-thickness electrodes on silicon. Component ports select disconnected terminals on
+a single GDS layer; unselected metal is grounded.
+
+```python
+sim = pa.ElectrostaticSim()
+sim.set_geometry(component)
+sim.set_output_dir("./capacitance")
+sim.mesh_sheets(
+    conductor_layer=(1, 0),
+    terminal_ports={"T1": "o1", "T2": "o2"},
+    domain_bounds=(-100, -100, 100, 100),
+    height=100,
+    near_mesh=0.5,
+    far_mesh=20,
+)
+sim.solver.linear.initial_guess = False
+sim.write_config()
+sim.run_local(num_processes=4, num_threads=1, log_path="./capacitance/solver.log")
+capacitance = sim.load_capacitance()
+```
+
+All layout and mesh dimensions are in micrometres. For a uniform transmission line, pass `normalization_depth_um=4` to
+extract the transverse 2D section at the domain's x midpoint. Palace reports capacitance for that implicit depth; divide
+by `4e-6` to obtain farads per metre. Mesh and domain sensitivity still need separate checks.
+
+`run_local(container_binary="palace", use_apptainer=True, palace_sif_path="./palace.sif")` executes a binary inside the
+image with MPI and a clean environment. Omitting `container_binary` retains the image's runscript. `log_path` records
+combined solver output on both success and failure.
