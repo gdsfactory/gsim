@@ -129,3 +129,27 @@ def test_ground_frame_hole_keeps_electrodes_separate(tmp_path: Path) -> None:
     )
     assert set(mesh.groups["pec_surfaces"]) == {"T1", "T2", "ground"}
     assert sim.validate_mesh().valid
+
+
+def test_meshing_progress_preserves_mesh(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    meshes = []
+    for verbose in (False, True):
+        sim = ElectrostaticSim()
+        sim.set_geometry(_component())
+        sim.set_output_dir(tmp_path / str(verbose))
+        mesh = sim.mesh_sheets(
+            conductor_layer=(1, 0),
+            terminal_ports={"T1": "lower", "T2": "upper"},
+            domain_bounds=(0, -25, 4, 25),
+            height=25,
+            near_mesh=0.4,
+            far_mesh=5,
+            normalization_depth_um=4,
+            verbose=verbose,
+        )
+        output = capfd.readouterr().out
+        assert ("Meshing 2D" in output) == verbose
+        meshes.append(mesh.mesh_path.read_bytes())
+    assert meshes[0] == meshes[1]

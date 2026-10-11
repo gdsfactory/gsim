@@ -26,6 +26,7 @@ def mesh_sheets(
     path: Path,
     cross_section: bool = False,
     minimum_feature_elements: float = 4,
+    verbose: bool = False,
 ) -> MeshResult:
     """Mesh zero-thickness conductors on silicon, selecting terminals by ports.
 
@@ -46,6 +47,7 @@ def mesh_sheets(
         path: Output MSH 2.2 file.
         cross_section: Generate a 2D rather than a 3D mesh.
         minimum_feature_elements: Minimum elements along isolated ground strips.
+        verbose: Show Gmsh progress during mesh generation.
 
     Returns:
         Mesh and physical groups ready for Palace config generation.
@@ -103,6 +105,7 @@ def mesh_sheets(
         far_mesh=far_mesh,
         path=path,
         minimum_feature_elements=minimum_feature_elements,
+        verbose=verbose,
     )
     result.metadata.update(
         dimension=2 if cross_section else 3, terminal_names=tuple(terminal_ports)
@@ -119,6 +122,7 @@ def _mesh_sheets(
     far_mesh: float,
     path: Path,
     minimum_feature_elements: float,
+    verbose: bool,
 ) -> MeshResult:
     """Mesh zero-thickness conductors between equal-height air and substrate volumes."""
     import gmsh
@@ -148,6 +152,7 @@ def _mesh_sheets(
         far_mesh=far_mesh,
         path=path,
         minimum_feature_elements=minimum_feature_elements,
+        verbose=verbose,
     )
 
 
@@ -160,6 +165,7 @@ def _mesh_cross_section(
     far_mesh: float,
     path: Path,
     minimum_feature_elements: float,
+    verbose: bool,
 ) -> MeshResult:
     """Mesh the transverse section of a uniform line with meshwell curves."""
     import gmsh
@@ -216,6 +222,7 @@ def _mesh_cross_section(
         far_mesh=far_mesh,
         path=path,
         minimum_feature_elements=minimum_feature_elements,
+        verbose=verbose,
     )
 
 
@@ -229,6 +236,7 @@ def _mesh_entities(
     far_mesh: float,
     path: Path,
     minimum_feature_elements: float,
+    verbose: bool,
 ) -> MeshResult:
     """Keep meshing, physical groups and Palace export consistent across dimensions."""
     import gmsh
@@ -272,7 +280,7 @@ def _mesh_entities(
             dim=dim,
             default_characteristic_length=far_mesh,
             resolution_specs=resolutions,
-            verbosity=0,
+            verbosity=int(verbose),
         )
         groups = {
             "volumes": {},
