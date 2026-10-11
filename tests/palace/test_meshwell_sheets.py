@@ -35,8 +35,16 @@ def _component() -> gf.Component:
 @pytest.mark.parametrize("depth", [None, 4.0])
 @pytest.mark.parametrize("threads", [1, 2])
 def test_component_sheet_mesh_config(
-    tmp_path: Path, depth: float | None, threads: int
+    tmp_path: Path, depth: float | None, threads: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    options = []
+    generate = gmsh.model.mesh.generate
+
+    def record_threads(dim: int) -> None:
+        options.append(gmsh.option.getNumber("General.NumThreads"))
+        generate(dim)
+
+    monkeypatch.setattr(gmsh.model.mesh, "generate", record_threads)
     sim = ElectrostaticSim()
     sim.set_geometry(_component())
     sim.set_output_dir(tmp_path)
@@ -57,6 +65,7 @@ def test_component_sheet_mesh_config(
     assert len(config["Boundaries"]["Terminal"]) == 2
     assert mesh.metadata["terminal_names"] == ("T1", "T2")
     assert mesh.metadata["mesh_threads"] == threads
+    assert options == [threads]
     gmsh.initialize()
     try:
         gmsh.open(str(mesh.mesh_path))
@@ -137,8 +146,17 @@ def test_ground_frame_hole_keeps_electrodes_separate(tmp_path: Path) -> None:
 
 
 def test_meshing_progress_preserves_mesh(
-    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    options = []
+    generate = gmsh.model.mesh.generate
+
+    def record_terminal(dim: int) -> None:
+        # Native DLL output on Windows bypasses pytest's descriptor capture.
+        options.append(gmsh.option.getNumber("General.Terminal"))
+        generate(dim)
+
+    monkeypatch.setattr(gmsh.model.mesh, "generate", record_terminal)
     meshes = []
     for verbose in (False, True):
         sim = ElectrostaticSim()
@@ -154,8 +172,7 @@ def test_meshing_progress_preserves_mesh(
             normalization_depth_um=4,
             verbose=verbose,
         )
-        output = capfd.readouterr().out
-        assert ("Meshing 2D" in output) == verbose
+        assert options[-1] == int(verbose)
         meshes.append(mesh.mesh_path.read_bytes())
     assert meshes[0] == meshes[1]
 
