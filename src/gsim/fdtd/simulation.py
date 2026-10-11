@@ -24,6 +24,7 @@ from gsim.fdtd.config import (
     PlaneMonitorConfig,
     build_fdtd_config,
 )
+from gsim.fdtd.domain import Padding, padding_pair
 from gsim.fdtd.mesh import background_bounds_nm, generate_mesh
 from gsim.fdtd.models import (
     FDTDConfigError,
@@ -45,7 +46,10 @@ class Simulation:
     wavelength_halfspan_um: float = 0.05
     num_wavelengths: int = 101
     default_port: str | None = None
-    background_padding_um: float = 1.0
+    padding: Padding = 1.0
+    padding_x: Padding | None = None
+    padding_y: Padding | None = None
+    padding_z: Padding | None = None
     mesh_size_nm: float = 1000.0
     geometry_tolerance_nm: float = 10.0
     vertical_port_axis: Literal["+z", "-z"] = "+z"
@@ -65,13 +69,15 @@ class Simulation:
         positive_values = {
             "wavelength_um": self.wavelength_um,
             "nanometers_per_cell": self.nanometers_per_cell,
-            "background_padding_um": self.background_padding_um,
             "mesh_size_nm": self.mesh_size_nm,
             "geometry_tolerance_nm": self.geometry_tolerance_nm,
         }
         for name, value in positive_values.items():
             if not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive.")
+        for value in (self.padding, self.padding_x, self.padding_y, self.padding_z):
+            if value is not None:
+                padding_pair(value)
         if self.geometry_tolerance_nm > 30:
             raise ValueError("geometry_tolerance_nm must be at most 30.")
         if not self.background_material:
@@ -227,7 +233,10 @@ class Simulation:
         domain_bounds = background_bounds_nm(
             self.resolved,
             self.background_material,
-            self.background_padding_um,
+            self.padding,
+            padding_x=self.padding_x,
+            padding_y=self.padding_y,
+            padding_z=self.padding_z,
         )
         background_index = material_snapshots[self.background_material].refractive_index
         outward_sign = 1 if self.vertical_port_axis == "+z" else -1
@@ -267,7 +276,7 @@ class Simulation:
             ):
                 raise FDTDConfigError(
                     f"Vertical port {name!r} aperture exceeds the background "
-                    "domain; increase background_padding_um or reduce "
+                    "domain; increase padding or reduce "
                     "vertical_port_aperture_width_um."
                 )
             focal_point = (center_x_nm, center_y_nm, device_z_nm)
@@ -312,7 +321,10 @@ class Simulation:
             resolved,
             mesh_path,
             background_material=self.background_material,
-            background_padding_um=self.background_padding_um,
+            padding=self.padding,
+            padding_x=self.padding_x,
+            padding_y=self.padding_y,
+            padding_z=self.padding_z,
             mesh_size_nm=self.mesh_size_nm,
             geometry_tolerance_nm=self.geometry_tolerance_nm,
         )
