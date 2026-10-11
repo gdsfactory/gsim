@@ -157,6 +157,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         normalization_depth_um: float | None = None,
         minimum_feature_elements: float = 4,
         verbose: bool = False,
+        num_threads: int = 1,
     ) -> MeshResult:
         """Mesh component electrodes on silicon with the meshwell backend.
 
@@ -165,7 +166,8 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         cross section: Palace reports total capacitance for that depth. Without
         it, mesh the full 3D sheets. Dimensions are in micrometres. Call
         ``set_geometry`` and ``set_output_dir`` first, then ``write_config``.
-        Set ``verbose=True`` to show Gmsh progress during long meshes.
+        Set ``verbose=True`` to show Gmsh progress during long meshes and
+        ``num_threads`` to allocate CPU threads to Gmsh.
 
         Returns:
             Mesh and physical groups ready for config generation.
@@ -193,6 +195,7 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
             cross_section=normalization_depth_um is not None,
             minimum_feature_elements=minimum_feature_elements,
             verbose=verbose,
+            num_threads=num_threads,
         )
         if normalization_depth_um is not None:
             result.metadata["characteristic_length_um"] = normalization_depth_um

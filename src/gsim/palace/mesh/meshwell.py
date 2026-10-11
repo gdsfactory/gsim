@@ -27,6 +27,7 @@ def mesh_sheets(
     cross_section: bool = False,
     minimum_feature_elements: float = 4,
     verbose: bool = False,
+    num_threads: int = 1,
 ) -> MeshResult:
     """Mesh zero-thickness conductors on silicon, selecting terminals by ports.
 
@@ -48,6 +49,7 @@ def mesh_sheets(
         cross_section: Generate a 2D rather than a 3D mesh.
         minimum_feature_elements: Minimum elements along isolated ground strips.
         verbose: Show Gmsh progress during mesh generation.
+        num_threads: CPU threads available to Gmsh.
 
     Returns:
         Mesh and physical groups ready for Palace config generation.
@@ -59,8 +61,10 @@ def mesh_sheets(
 
     from gsim.palace.mesh.geometry import extract_pec_polygons
 
-    if min(height, near_mesh, far_mesh, minimum_feature_elements) <= 0:
-        raise ValueError("Mesh dimensions and feature resolution must be positive")
+    if min(height, near_mesh, far_mesh, minimum_feature_elements, num_threads) <= 0:
+        raise ValueError(
+            "Mesh dimensions, feature resolution and thread count must be positive"
+        )
     if not terminal_ports or "ground" in terminal_ports:
         raise ValueError("Select at least one terminal; 'ground' is reserved")
     footprint = box(*domain_bounds)
@@ -106,9 +110,12 @@ def mesh_sheets(
         path=path,
         minimum_feature_elements=minimum_feature_elements,
         verbose=verbose,
+        num_threads=num_threads,
     )
     result.metadata.update(
-        dimension=2 if cross_section else 3, terminal_names=tuple(terminal_ports)
+        dimension=2 if cross_section else 3,
+        terminal_names=tuple(terminal_ports),
+        mesh_threads=num_threads,
     )
     return result
 
@@ -123,6 +130,7 @@ def _mesh_sheets(
     path: Path,
     minimum_feature_elements: float,
     verbose: bool,
+    num_threads: int,
 ) -> MeshResult:
     """Mesh zero-thickness conductors between equal-height air and substrate volumes."""
     import gmsh
@@ -137,7 +145,7 @@ def _mesh_sheets(
             "Meshwell requires its own Gmsh session; finalize the existing session "
             "first"
         )
-    model = ModelManager(n_threads=1, filename=str(path.with_suffix("")))
+    model = ModelManager(n_threads=num_threads, filename=str(path.with_suffix("")))
     entities: list[GeometryEntity] = [
         PolyPrism(footprint, {0: 0, height: 0}, physical_name="air"),
         PolyPrism(footprint, {-height: 0, 0: 0}, physical_name="silicon"),
@@ -166,6 +174,7 @@ def _mesh_cross_section(
     path: Path,
     minimum_feature_elements: float,
     verbose: bool,
+    num_threads: int,
 ) -> MeshResult:
     """Mesh the transverse section of a uniform line with meshwell curves."""
     import gmsh
@@ -180,7 +189,7 @@ def _mesh_cross_section(
             "first"
         )
     lower, upper = footprint.bounds[1], footprint.bounds[3]
-    model = ModelManager(n_threads=1, filename=str(path.with_suffix("")))
+    model = ModelManager(n_threads=num_threads, filename=str(path.with_suffix("")))
     # Different snapping grids leave conductor edges outside the dielectric mesh.
     entities: list[GeometryEntity] = [
         PolySurface(

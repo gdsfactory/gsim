@@ -33,7 +33,10 @@ def _component() -> gf.Component:
 
 
 @pytest.mark.parametrize("depth", [None, 4.0])
-def test_component_sheet_mesh_config(tmp_path: Path, depth: float | None) -> None:
+@pytest.mark.parametrize("threads", [1, 2])
+def test_component_sheet_mesh_config(
+    tmp_path: Path, depth: float | None, threads: int
+) -> None:
     sim = ElectrostaticSim()
     sim.set_geometry(_component())
     sim.set_output_dir(tmp_path)
@@ -45,6 +48,7 @@ def test_component_sheet_mesh_config(tmp_path: Path, depth: float | None) -> Non
         near_mesh=0.4,
         far_mesh=5,
         normalization_depth_um=depth,
+        num_threads=threads,
     )
     sim.solver.linear.initial_guess = False
     config = json.loads(sim.write_config().read_text())
@@ -52,6 +56,7 @@ def test_component_sheet_mesh_config(tmp_path: Path, depth: float | None) -> Non
     assert config["Model"].get("Lc") == depth
     assert len(config["Boundaries"]["Terminal"]) == 2
     assert mesh.metadata["terminal_names"] == ("T1", "T2")
+    assert mesh.metadata["mesh_threads"] == threads
     gmsh.initialize()
     try:
         gmsh.open(str(mesh.mesh_path))
@@ -153,3 +158,20 @@ def test_meshing_progress_preserves_mesh(
         assert ("Meshing 2D" in output) == verbose
         meshes.append(mesh.mesh_path.read_bytes())
     assert meshes[0] == meshes[1]
+
+
+@pytest.mark.parametrize("threads", [0, -1])
+def test_invalid_mesh_thread_count(tmp_path: Path, threads: int) -> None:
+    sim = ElectrostaticSim()
+    sim.set_geometry(_component())
+    sim.set_output_dir(tmp_path)
+    with pytest.raises(ValueError, match="thread count must be positive"):
+        sim.mesh_sheets(
+            conductor_layer=(1, 0),
+            terminal_ports={"T1": "lower", "T2": "upper"},
+            domain_bounds=(0, -25, 4, 25),
+            height=25,
+            near_mesh=0.4,
+            far_mesh=5,
+            num_threads=threads,
+        )
