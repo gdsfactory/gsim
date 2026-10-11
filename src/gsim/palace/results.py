@@ -20,6 +20,7 @@ import builtins
 import csv
 import json
 import logging
+import math
 import re
 import warnings
 from pathlib import Path
@@ -28,12 +29,78 @@ from typing import TYPE_CHECKING, Literal, TypedDict, overload
 import matplotlib.pyplot as plt
 import numpy as np
 
+from gsim.palace._validation_log import clean_lines, solver_checks
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+
+class StaticSolverMetrics(TypedDict):
+    """Observed linear-solver metrics for one indexed static excitation."""
+
+    index: int
+    initial_residual: float
+    final_residual: float
+    relative_residual: float
+    iterations: int
+
+
+def load_static_solver_metrics(log: str) -> list[StaticSolverMetrics]:
+    """Read electrostatic or magnetostatic field solves from a verbose Palace log.
+
+    The final/initial KSP residual ratio is relative to the right-hand side only
+    when the solve starts from zero. Auxiliary error-estimator solves are excluded.
+    No residual tolerance or mesh-accuracy criterion is assumed.
+
+    Args:
+        log: Complete verbose log containing indexed static excitations.
+
+    Returns:
+        Metrics in log order, including repeated indices. Logs without indexed
+        static excitations return an empty list.
+
+    Raises:
+        ValueError: An indexed field solve is incomplete, failed, ambiguous, or
+            lacks finite residuals with a positive initial norm.
+    """
+    blocks = re.split(
+        r"^It \d+/\d+:\s+Index\s*=\s*(\d+)[^\n]*\n",
+        "\n".join(clean_lines(log)) + "\n",
+        flags=re.MULTILINE,
+    )
+    metrics = []
+    for index, block in zip(blocks[1::2], blocks[2::2], strict=True):
+        field_log = block.split("Updating solution error estimates")[0]
+        core, _ = solver_checks(clean_lines(field_log), estimator_disabled=False)
+        residuals = [
+            float(value) for value in re.findall(r"KSP residual norm (\S+)", field_log)
+        ]
+        iterations = re.findall(r"solver converged in (\d+) iterations?\b", field_log)
+        if (
+            core.status != "passed"
+            or len(iterations) != 1
+            or len(residuals) < 2
+            or not all(math.isfinite(value) and value >= 0 for value in residuals)
+            or residuals[0] <= 0
+        ):
+            raise ValueError(f"Missing static solver convergence at index {index}")
+        relative = residuals[-1] / residuals[0]
+        if not math.isfinite(relative):
+            raise ValueError(f"Nonfinite residual ratio at index {index}")
+        metrics.append(
+            StaticSolverMetrics(
+                index=int(index),
+                initial_residual=residuals[0],
+                final_residual=residuals[-1],
+                relative_residual=relative,
+                iterations=int(iterations[0]),
+            )
+        )
+    return metrics
 
 
 class ModeMetrics(TypedDict):
