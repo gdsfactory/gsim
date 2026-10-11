@@ -66,11 +66,15 @@ class RuntimeConfigMixin:
     """Serialize sources, monitors, and solver controls for GDSFactory FDTD."""
 
     source: SourceType
-    resolved: ResolvedPassivePcell
     materials: Materials
     monitors: Monitors
     domain: Domain
     solver: Solver
+
+    @property
+    def resolved(self) -> ResolvedPassivePcell:
+        """Return canonical geometry supplied by the concrete simulation."""
+        raise NotImplementedError
 
     def _background_bounds_nm(
         self,

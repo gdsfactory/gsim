@@ -37,7 +37,7 @@ def test_domain_rejects_invalid_padding(field, value) -> None:
 
 def test_old_padding_argument_names_are_rejected() -> None:
     with pytest.raises(ValidationError, match="padding_um"):
-        fdtd.Domain(padding_um=1)
+        fdtd.Domain.model_validate({"padding_um": 1})
     with pytest.raises(TypeError, match="background_padding_um"):
         fdtd.Simulation(background_padding_um=1)
 
