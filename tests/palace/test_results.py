@@ -794,15 +794,11 @@ def postproc_results_dir(tmp_path: Path) -> Path:
         "        +2.147482805724e-10,        +5.000000000000e+01,"
         "        +1.230000000000e+01,        +1.000000000000e-07\n"
     )
-    (palace_dir / "mode-V.csv").write_text(
-        "        m,               Re{V[1]} (V),               Im{V[1]} (V)\n"
-        " 1.00e+00,        -4.389238602922e+00,        -7.635835463547e+00\n"
-    )
     return tmp_path
 
 
 class TestModePostprocessingResults:
-    """Tests for mode-Z.csv / mode-V.csv postprocessing parsing."""
+    """Tests for mode-Z.csv postprocessing parsing."""
 
     def test_impedance_parsed_per_index(self, postproc_results_dir: Path) -> None:
         out = load_text_results(postproc_results_dir)
@@ -821,15 +817,9 @@ class TestModePostprocessingResults:
             index=1, mode=1, quantity="L_VI"
         ) == pytest.approx(1.0e-07)
 
-    def test_voltage_parsed_complex(self, postproc_results_dir: Path) -> None:
-        out = load_text_results(postproc_results_dir)
-        voltage = out.mode_voltage(index=1, mode=1)
-        assert voltage == complex(-4.389238602922, -7.635835463547)
-
     def test_missing_quantity_returns_none(self, postproc_results_dir: Path) -> None:
         out = load_text_results(postproc_results_dir)
         assert out.characteristic_impedance(index=9, mode=1) is None
-        assert out.mode_voltage(index=9, mode=1) is None
 
     def test_pretty_text_includes_postprocessing(
         self, postproc_results_dir: Path
@@ -837,4 +827,3 @@ class TestModePostprocessingResults:
         out = load_text_results(postproc_results_dir)
         text = str(out)
         assert "Z[1] mode 1:" in text
-        assert "V[1] mode 1:" in text

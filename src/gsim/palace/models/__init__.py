@@ -16,7 +16,11 @@ Submodules:
 
 from __future__ import annotations
 
-from gsim.palace.models.cross_section import CrossSectionPlaneConfig
+from gsim.palace.models.cross_section import (
+    ContactSpec,
+    CrossSectionPlaneConfig,
+    InterfaceSpec,
+)
 from gsim.palace.models.geometry import GeometryConfig
 from gsim.palace.models.mesh import MeshConfig
 from gsim.palace.models.numerical import NumericalConfig, RefinementConfig
@@ -52,6 +56,7 @@ __all__ = [
     "BoundaryModeConfig",
     "BoundaryModeSolverConfig",
     "CPWPortConfig",
+    "ContactSpec",
     "CrossSectionPlaneConfig",
     "DrivenConfig",
     "DrivenSolverConfig",
@@ -61,6 +66,7 @@ __all__ = [
     "ElectrostaticSolverConfig",
     "GeometryConfig",
     "ImpedanceBoundaryConfig",
+    "InterfaceSpec",
     "LinearSolverConfig",
     "MagnetostaticConfig",
     "MaterialConfig",

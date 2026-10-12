@@ -185,8 +185,9 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short -m 'not cloud and not meep_local'"
+addopts = "--tb=short -m 'not cloud and not meep_local and not palace_local'"
 markers = [
+  "palace_local: tests running the Palace binary locally (deselected by default; run with `pytest -m palace_local`)",
   "cloud: tests that submit jobs to GDSFactory+ cloud servers (deselected by default; run with `pytest -m cloud`)",
   "sim_smoke_test: smallest cloud sims (one per solver) run automatically per-PR; run with `pytest -m sim_smoke_test`",
   "meep_local: tests requiring a local MEEP installation (deselected by default; run with `pytest -m meep_local`)",

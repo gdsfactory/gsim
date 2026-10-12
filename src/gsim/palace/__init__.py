@@ -118,6 +118,12 @@ from gsim.palace.mesh import (
 from gsim.palace.mesh.nets import Net, Nets, extract_nets
 from gsim.palace.mesh.validation import check_lumped_port_contact
 
+# Saved boundary-mode fields, and the line parameters they carry
+from gsim.palace.mode_fields import (
+    BoundaryModeField,
+    load_boundary_mode_field,
+)
+
 # Models (new submodule)
 from gsim.palace.models import (
     BoundaryModeConfig,
@@ -176,6 +182,8 @@ from gsim.palace.results import (
 # Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
 from gsim.palace.runtime import (
     install_palace_runtime,
+    local_abort_report,
+    require_palace_binary,
     resolve_palace_binary,
     resolve_palace_library_dir,
 )
@@ -193,6 +201,7 @@ __all__ = [
     "MATERIALS_DB",
     "BoundaryFieldData",
     "BoundaryModeConfig",
+    "BoundaryModeField",
     "BoundaryModeSim",
     "BoundaryModeSolverConfig",
     "CPWPortConfig",
@@ -273,6 +282,7 @@ __all__ = [
     "interactive_mode",
     "is_complete",
     "load_boundary_field_data",
+    "load_boundary_mode_field",
     "load_capacitance",
     "load_circuit_synthesis",
     "load_field_context",
@@ -281,6 +291,7 @@ __all__ = [
     "load_sparams",
     "load_stack_yaml",
     "load_volume_field_data",
+    "local_abort_report",
     "parse_layer_stack",
     "plot_boundary_field",
     "plot_cross_section",
@@ -294,6 +305,7 @@ __all__ = [
     "print_stack",
     "print_stack_table",
     "refinement_convergence",
+    "require_palace_binary",
     "resolve_boundary_type_attributes",
     "resolve_entity_attributes",
     "resolve_palace_binary",

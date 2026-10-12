@@ -134,12 +134,12 @@ class TestBoundaryModeNative2D:
 
     def test_mesh_has_no_ports(self, boundarymode_sim):
         """Native 2D BoundaryMode should not emit port groups."""
-        groups = boundarymode_sim._last_mesh_result.groups
+        groups = boundarymode_sim.mesh_groups
         assert groups["port_surfaces"] == {}
 
     def test_mesh_has_domains_and_boundary_conductors(self, boundarymode_sim):
         """Native 2D BoundaryMode mesh includes domains and boundary conductors."""
-        groups = boundarymode_sim._last_mesh_result.groups
+        groups = boundarymode_sim.mesh_groups
         assert len(groups["volumes"]) > 0, "No 2D material domains found"
         assert (
             len(groups["conductor_surfaces"]) > 0 or len(groups["pec_surfaces"]) > 0
@@ -147,7 +147,7 @@ class TestBoundaryModeNative2D:
 
     def test_mesh_conductors_not_in_domain_volumes(self, boundarymode_sim):
         """Conductor interiors should be excluded from BoundaryMode volume domains."""
-        groups = boundarymode_sim._last_mesh_result.groups
+        groups = boundarymode_sim.mesh_groups
         for layer_name in groups["conductor_surfaces"]:
             assert layer_name not in groups["volumes"]
 
@@ -215,12 +215,12 @@ class TestBoundaryModeBackgroundMaterial:
     def test_default_background_is_air(self, tmp_path):
         """Without a custom material the background volume is named 'air'."""
         sim = self._build(tmp_path, "air", 10e9)
-        assert "air" in sim._last_mesh_result.groups["volumes"]
+        assert "air" in sim.mesh_groups["volumes"]
 
     def test_sio2_background_replaces_air(self, tmp_path):
         """material='sio2' names the background 'sio2' and drops the air volume."""
         sim = self._build(tmp_path, "sio2", 10e9)
-        volumes = sim._last_mesh_result.groups["volumes"]
+        volumes = sim.mesh_groups["volumes"]
         assert "sio2" in volumes
         assert "air" not in volumes
 
@@ -230,7 +230,7 @@ class TestBoundaryModeBackgroundMaterial:
         sim.write_config()
         config = json.loads((Path(sim._output_dir) / "config.json").read_text())
 
-        volumes = sim._last_mesh_result.groups["volumes"]
+        volumes = sim.mesh_groups["volumes"]
         bg_pg = volumes["sio2"]["phys_group"]
         materials = config["Domains"]["Materials"]
         bg_entry = next(m for m in materials if bg_pg in m.get("Attributes", []))
@@ -252,7 +252,7 @@ class TestCPWMeshVolumetricConductors:
 
     def test_mesh_has_conductor_surfaces(self, volumetric_sim):
         """Volumetric conductors must produce metal_xy and metal_z groups."""
-        groups = volumetric_sim._last_mesh_result.groups
+        groups = volumetric_sim.mesh_groups
         conductor_names = list(groups["conductor_surfaces"].keys())
         assert any("xy" in name for name in conductor_names), (
             f"No _xy conductor surfaces found. Got: {conductor_names}"
@@ -263,12 +263,12 @@ class TestCPWMeshVolumetricConductors:
 
     def test_mesh_has_volumes(self, volumetric_sim):
         """Dielectric volumes must be present."""
-        groups = volumetric_sim._last_mesh_result.groups
+        groups = volumetric_sim.mesh_groups
         assert len(groups["volumes"]) > 0, "No dielectric volumes found"
 
     def test_mesh_has_port_surfaces(self, volumetric_sim):
         """CPW ports must produce port surface groups."""
-        groups = volumetric_sim._last_mesh_result.groups
+        groups = volumetric_sim.mesh_groups
         assert "P1" in groups["port_surfaces"], "Port P1 not found"
         assert "P2" in groups["port_surfaces"], "Port P2 not found"
         for port_name in ("P1", "P2"):
@@ -278,7 +278,7 @@ class TestCPWMeshVolumetricConductors:
 
     def test_mesh_has_absorbing_boundary(self, volumetric_sim):
         """Absorbing boundary surfaces must be present."""
-        groups = volumetric_sim._last_mesh_result.groups
+        groups = volumetric_sim.mesh_groups
         assert "absorbing" in groups["boundary_surfaces"], "No absorbing boundary"
 
     def test_config_json_valid(self, volumetric_sim):
@@ -303,7 +303,7 @@ class TestCPWMeshPlanarConductors:
 
     def test_mesh_has_pec_surfaces(self, planar_sim):
         """Planar conductors must produce PEC surface groups."""
-        groups = planar_sim._last_mesh_result.groups
+        groups = planar_sim.mesh_groups
         assert len(groups["pec_surfaces"]) > 0, "No PEC surfaces found"
 
     def test_config_json_has_pec(self, planar_sim):
@@ -448,26 +448,26 @@ class TestQPDKMesh:
 
     def test_mesh_has_pec_surfaces(self, qpdk_sim):
         """Zero-thickness conductors must produce PEC surface groups."""
-        groups = qpdk_sim._last_mesh_result.groups
+        groups = qpdk_sim.mesh_groups
         assert len(groups["pec_surfaces"]) > 0, (
             f"No PEC surfaces found. Got: {groups['pec_surfaces']}"
         )
 
     def test_mesh_has_volumes(self, qpdk_sim):
         """Sapphire and vacuum volumes must be present."""
-        groups = qpdk_sim._last_mesh_result.groups
+        groups = qpdk_sim.mesh_groups
         vol_names = list(groups["volumes"].keys())
         assert len(vol_names) >= 2, f"Expected >= 2 volumes, got: {vol_names}"
 
     def test_mesh_has_port_surfaces(self, qpdk_sim):
         """CPW ports must produce port surface groups."""
-        groups = qpdk_sim._last_mesh_result.groups
+        groups = qpdk_sim.mesh_groups
         assert "P1" in groups["port_surfaces"], "Port P1 not found"
         assert "P2" in groups["port_surfaces"], "Port P2 not found"
 
     def test_no_conductor_volume_surfaces(self, qpdk_sim):
         """Zero-thickness conductors must NOT produce volumetric surfaces."""
-        groups = qpdk_sim._last_mesh_result.groups
+        groups = qpdk_sim.mesh_groups
         assert len(groups["conductor_surfaces"]) == 0, (
             f"Unexpected volumetric conductor surfaces: "
             f"{list(groups['conductor_surfaces'].keys())}"
@@ -575,7 +575,7 @@ class TestPECBlockMesh:
 
     def test_mesh_has_pec_surfaces(self, pec_block_sim):
         """PEC blocks must produce PEC surface groups."""
-        groups = pec_block_sim._last_mesh_result.groups
+        groups = pec_block_sim.mesh_groups
         pec_names = list(groups["pec_surfaces"].keys())
         assert len(pec_names) > 0, f"No PEC surfaces found. Got: {pec_names}"
         assert any("pec_block" in name for name in pec_names), (
@@ -591,7 +591,7 @@ class TestPECBlockMesh:
 
     def test_mesh_has_conductor_surfaces(self, pec_block_sim):
         """Volumetric conductors should still be present alongside PEC blocks."""
-        groups = pec_block_sim._last_mesh_result.groups
+        groups = pec_block_sim.mesh_groups
         assert len(groups["conductor_surfaces"]) > 0, (
             "No conductor surfaces found — PEC blocks should not replace them"
         )
@@ -670,7 +670,7 @@ class TestShapedDielectric:
 
     def test_shaped_dielectric_volume_exists(self, shaped_dielectric_sim):
         """CORE must appear as a volume group with is_shaped_dielectric=True."""
-        groups = shaped_dielectric_sim._last_mesh_result.groups
+        groups = shaped_dielectric_sim.mesh_groups
         assert "CORE" in groups["volumes"], (
             f"CORE not found in volumes. Got: {list(groups['volumes'].keys())}"
         )
@@ -680,7 +680,7 @@ class TestShapedDielectric:
 
     def test_shaped_dielectric_not_via(self, shaped_dielectric_sim):
         """CORE must NOT be marked as a via."""
-        groups = shaped_dielectric_sim._last_mesh_result.groups
+        groups = shaped_dielectric_sim.mesh_groups
         assert groups["volumes"]["CORE"].get("is_via") is not True, (
             "CORE volume should not be marked as via"
         )
@@ -691,7 +691,7 @@ class TestShapedDielectric:
         config_path = Path(shaped_dielectric_sim._output_dir) / "config.json"
         config = json.loads(config_path.read_text())
 
-        groups = shaped_dielectric_sim._last_mesh_result.groups
+        groups = shaped_dielectric_sim.mesh_groups
         core_pg = groups["volumes"]["CORE"]["phys_group"]
 
         materials = config["Domains"]["Materials"]

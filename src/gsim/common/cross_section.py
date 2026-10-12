@@ -11,9 +11,10 @@ aligned 2D slices from 3D layer extrusions.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from gsim.common.stack import Layer, LayerStack, get_stack, make_doped_materials
 
@@ -21,6 +22,38 @@ if TYPE_CHECKING:
     import gdsfactory as gf
 
 logger = logging.getLogger(__name__)
+
+_PLANE_SPEC_RE = re.compile(
+    r"^\s*([xXyYzZ])\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$"
+)
+
+
+def parse_plane_spec(spec: str) -> tuple[Literal["x", "y", "z"], float]:
+    """Split a ``"x=<value>"`` plane spec into its axis and coordinate.
+
+    The one reading of the string a user names a Cross-section with,
+    shared by everything that takes one: the axis is ``x``, ``y`` or
+    ``z`` in either case, and the coordinate is a number — a bare
+    ``"x="`` names no plane and is rejected here rather than by whatever
+    tries to use it.
+
+    Args:
+        spec: The plane spec, ``"<axis>=<value>"`` with whitespace
+            anywhere around the parts.
+
+    Returns:
+        ``(axis, value)``, the axis lowercased.
+
+    Raises:
+        ValueError: When the spec names no axis or carries no number.
+    """
+    match = _PLANE_SPEC_RE.match(spec)
+    if match is None:
+        raise ValueError(
+            "Invalid plane spec. Use 'x=<value>', 'y=<value>', or 'z=<value>'"
+        )
+    axis = cast(Literal["x", "y", "z"], match.group(1).lower())
+    return axis, float(match.group(2))
 
 
 @dataclass(frozen=True)
@@ -714,4 +747,5 @@ __all__ = [
     "extract_xy_polygons",
     "extract_xz_rectangles",
     "extract_yz_rectangles",
+    "parse_plane_spec",
 ]

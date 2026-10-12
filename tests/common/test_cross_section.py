@@ -18,6 +18,7 @@ from gsim.common.cross_section import (
     extract_xy_polygons,
     extract_xz_rectangles,
     extract_yz_rectangles,
+    parse_plane_spec,
 )
 from gsim.common.stack.pn_junction import make_doping_profile
 
@@ -649,3 +650,22 @@ class TestBuildOpticalCrossSection:
         oxide = stack.dielectrics[0]
         assert oxide["zmin"] == pytest.approx(-3.0)
         assert oxide["zmax"] == pytest.approx(1.5)
+
+
+class TestParsePlaneSpec:
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            ("x=0", ("x", 0.0)),
+            (" Y = -1.5 ", ("y", -1.5)),
+            ("z=1e-3", ("z", 1e-3)),
+            ("x=.5", ("x", 0.5)),
+        ],
+    )
+    def test_it_reads_the_axis_and_the_coordinate(self, spec, expected):
+        assert parse_plane_spec(spec) == expected
+
+    @pytest.mark.parametrize("spec", ["x=", "w=0", "0", "x 0", "x=abc", ""])
+    def test_a_spec_naming_no_plane_is_rejected(self, spec):
+        with pytest.raises(ValueError, match="Invalid plane spec"):
+            parse_plane_spec(spec)
