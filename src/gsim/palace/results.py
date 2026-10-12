@@ -423,12 +423,29 @@ class SParams:
         data: dict[tuple[str, str], SParam],
         port_names: list[str],
         files: dict[str, Path] | None = None,
+        *,
+        symmetry: dict | None = None,
+        port_meta: dict[str, dict] | None = None,
     ) -> None:
-        """Create from frequency array, S-parameter data, and port names."""
+        """Create from frequency array, S-parameter data, and port names.
+
+        Args:
+            freq: Frequency in GHz.
+            data: S-parameters keyed by ``(to_port, from_port)``.
+            port_names: Ordered port names.
+            files: Source files, if any.
+            symmetry: Symmetry-plane record from ``port_information.json``
+                (``axis``, ``position``, ``kind``, ``keep``, ``mode``), or
+                None for a full model.
+            port_meta: Per-port ``{"type": ..., "Z0": ...}`` from
+                ``port_information.json``.
+        """
         self._freq = freq
         self._data = data
         self._port_names = port_names
         self.files = files or {}
+        self.symmetry = symmetry
+        self.port_meta = port_meta or {}
 
     @property
     def freq(self) -> NDArray:
@@ -729,11 +746,14 @@ class SParams:
         n_freq = len(self._freq)
         n_ports = len(self._port_names)
         ports_str = ", ".join(self._port_names)
-        return (
+        text = (
             f"SParams({n_ports} ports [{ports_str}], "
             f"{n_freq} freq points, "
             f"{len(self._data)} S-parameters)"
         )
+        if self.symmetry:
+            text += f"\n  symmetry: {_describe_symmetry(self.symmetry)}"
+        return text
 
 
 def load_sparams(
@@ -814,7 +834,15 @@ def load_sparams(
         data[(to_name, from_name)] = SParam(db=db, deg=deg)
 
     files = dict(source) if isinstance(source, dict) else None
-    return SParams(freq=freq, data=data, port_names=port_names, files=files)
+    symmetry, port_meta = _load_symmetry_and_meta(base_dir, csv_path, port_info_path)
+    return SParams(
+        freq=freq,
+        data=data,
+        port_names=port_names,
+        files=files,
+        symmetry=symmetry,
+        port_meta=port_meta,
+    )
 
 
 def load_text_results(source: str | Path | dict) -> PalaceTextResults:
@@ -1090,6 +1118,46 @@ def _load_port_map(
         )
 
     return port_map
+
+
+def _describe_symmetry(symmetry: dict) -> str:
+    """One-line description of a symmetry record for ``repr``."""
+    kind = symmetry["kind"].upper()
+    if symmetry["kind"] == "pmc":
+        mode = "even/common mode; lumped ref per line R -> common-mode ref R/2"
+    else:
+        mode = "odd/differential mode; lumped ref per line R -> differential ref 2R"
+    return f"{symmetry['axis']}={symmetry['position']} {kind} ({mode})"
+
+
+def _load_symmetry_and_meta(
+    output_dir: Path,
+    csv_path: Path | None,
+    port_info_path: str | Path | None = None,
+) -> tuple[dict | None, dict[str, dict]]:
+    """Read the symmetry record and per-port type/Z0 from ``port_information.json``."""
+    if port_info_path is not None:
+        info_path: Path | None = Path(port_info_path)
+    else:
+        info_path = _find_port_info(output_dir, csv_path)
+    if info_path is None or not info_path.exists():
+        return None, {}
+
+    with open(info_path) as f:
+        data = json.load(f)
+
+    meta: dict[str, dict] = {}
+    for entry in data.get("ports", []):
+        name = entry.get("name")
+        if name is None:
+            # Wave-port records have no name; use the column name from
+            # _load_port_map.
+            num = entry.get("portnumber")
+            if num is None:
+                continue
+            name = f"p{num}"
+        meta[name] = {k: entry[k] for k in ("type", "Z0") if k in entry}
+    return data.get("symmetry"), meta
 
 
 def _find_port_info(output_dir: Path, csv_path: Path | None) -> Path | None:

@@ -88,8 +88,15 @@ Lumped ports with R on each line:
 - A half model cannot show mode conversion (`S_dc`, `S_cd` are zero by construction), and its energies and DOFs are
   halved (ratios such as Q are not).
 
-The plane is also recorded in `port_information.json` (a `symmetry` block and a per-port flag) so that results can be
-interpreted later.
+`SParams.symmetry` carries the plane from `port_information.json` and `repr` shows it in one line. Helpers in
+`gsim.palace.symmetry`:
+
+- `mixed_mode_from_halves(even, odd)`: checks that both are matching PMC/PEC half models (same plane, ports,
+  frequencies, port R) and returns `{"cc", "dd", "z_ref_cc", "z_ref_dd"}`.
+- `combine_even_odd(even, odd, mirror_names=None)`: single-ended 2N-port result for lumped ports, with
+  `S_ij = (cc_ij + dd_ij)/2` and `S_ij' = (cc_ij - dd_ij)/2` (default mirror names `f"{name}_mirror"`). Wave ports
+  raise: a full model with wave ports is modal.
+- `full_model_impedance(z_half, kind)`.
 
 ## Not verified
 
@@ -104,6 +111,8 @@ plane stays natural as long as it is not listed in `WavePortPEC`, which the conf
   a full model and as both halves. The PEC half matches the full model's mode 1 (odd) with max |dS21| 0.0024 and n_eff
   1.961 vs 1.966. The PMC half matches mode 2 (even) with max |dS21| 0.0020 and n_eff 1.825 vs 1.828. The halves have
   21,580 tetrahedra against 42,155 for the full model.
+- **Four-port lumped reconstruction.** A converged comparison of `combine_even_odd` against a full four-port lumped
+  model is still to be checked; a first comparison by the reviewer gave a maximum complex difference of 0.011.
 
 ## Later work
 
