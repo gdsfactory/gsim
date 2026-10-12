@@ -1,3 +1,5 @@
+# Preserve the generated GitHub release-note snapshot verbatim between refreshes.
+exclude: '^docs/CHANGELOG\.md$'
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: "v6.0.0"

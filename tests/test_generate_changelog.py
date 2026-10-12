@@ -72,6 +72,8 @@ def test_orders_published_releases_and_excludes_drafts():
     releases = [
         _release("0.1.0", "2026-01-01T12:00:00Z", "- Initial release"),
         _release("0.3.0", None, "private draft", draft=True),
+        _release("0.4.0", "2026-04-01", "dated draft", draft=True),
+        _release("0.5.0", None, "unpublished notes", draft=False),
         _release("0.2.0rc1", "2026-02-01T12:00:00Z", "- Preview", prerelease=True),
         _release("0.2.0", "2026-02-02T12:00:00Z", "- Stable release"),
     ]
@@ -84,16 +86,21 @@ def test_orders_published_releases_and_excludes_drafts():
     assert changelog.index("## 0.2.0rc1 (prerelease)") < changelog.index("## 0.1.0\n")
     assert "0.3.0" not in changelog
     assert "private draft" not in changelog
+    assert "dated draft" not in changelog
+    assert "unpublished notes" not in changelog
     assert "Released 2026-02-02." in changelog
     assert "- Stable release" in changelog
 
 
 @pytest.mark.parametrize("fence", ["```", "~~~"])
-def test_nests_release_headings_without_modifying_code(fence):
+@pytest.mark.parametrize("heading_prefix", ["", "#"])
+def test_normalizes_release_headings_without_modifying_code(fence, heading_prefix):
     """Release sections form a usable TOC while code comments remain unchanged."""
     notes = (
-        "# What's Changed\n\n## Features\n\n- Preserve the original PR title (#12)\n\n"
-        f"{fence}python\n# A code comment\nprint('example')\n{fence}\n\n## Fixes"
+        f"{heading_prefix}# What's Changed\n\n{heading_prefix}## Features\n\n"
+        "- Preserve the original PR title (#12)\n\n"
+        f"{fence}python\n# A code comment\nprint('example')\n{fence}\n\n"
+        f"{heading_prefix}## Fixes"
     )
 
     changelog = generate_changelog.render_changelog(
@@ -107,6 +114,28 @@ def test_nests_release_headings_without_modifying_code(fence):
     assert "- Preserve the original PR title (#12)" in changelog
 
 
+def test_removes_repeated_pr_bullets_only_within_each_release():
+    """Repeated categories do not duplicate entries or remove distinct release notes."""
+    entry = "- Refactor solver [#12](https://github.com/example/project/pull/12)"
+    distinct_entry = (
+        "- Additional details [#12](https://github.com/example/project/pull/12)"
+    )
+    notes = (
+        f"# Changes\n\n## Refactoring\n\n{entry}\n\n## Documentation\n\n"
+        f"{entry}\n{distinct_entry}\n\n```text\n{entry}\n{entry}\n```"
+    )
+    changelog = generate_changelog.render_changelog(
+        [
+            _release("0.2.0", "2026-02-01", notes),
+            _release("0.1.0", "2026-01-01", entry),
+        ],
+        repository="example/project",
+    )
+
+    assert changelog.count(entry) == 4  # One per release plus two preserved code lines.
+    assert distinct_entry in changelog
+
+
 def test_does_not_invent_missing_historical_notes():
     """Versions with no published body retain their release links and dates."""
     changelog = generate_changelog.render_changelog(
@@ -117,8 +146,34 @@ def test_does_not_invent_missing_historical_notes():
     assert "https://github.com/example/project/releases/tag/0.1.0" in changelog
 
 
-def test_preserves_existing_output_when_github_is_unavailable(monkeypatch, tmp_path):
-    """A failed refresh reports the failure and leaves the existing file intact."""
+def test_refreshes_snapshot_with_published_history(monkeypatch, tmp_path):
+    """Successful refreshes replace old snapshots using published notes only."""
+    output_path = tmp_path / "docs" / "CHANGELOG.md"
+    releases = [
+        _release("0.1.0", "2026-01-01", "- Published change"),
+        _release("0.2.0", None, "Unreleased change", draft=True),
+    ]
+    monkeypatch.setattr(
+        sys, "argv", ["generate_changelog", "--output", str(output_path)]
+    )
+    monkeypatch.setattr(
+        generate_changelog, "fetch_releases", lambda *_args, **_kwargs: releases
+    )
+
+    assert generate_changelog.main() == 0
+
+    assert output_path.read_text(
+        encoding="utf-8"
+    ) == generate_changelog.render_changelog(
+        releases, repository=generate_changelog.DEFAULT_REPOSITORY
+    )
+    assert "Unreleased" not in output_path.read_text(encoding="utf-8")
+
+
+def test_uses_existing_snapshot_when_github_is_unavailable(
+    monkeypatch, tmp_path, capsys
+):
+    """Offline builds succeed with a warning and leave the snapshot intact."""
     output_path = tmp_path / "CHANGELOG.md"
     output_path.write_text("existing release history\n")
     monkeypatch.setattr(
@@ -130,10 +185,31 @@ def test_preserves_existing_output_when_github_is_unavailable(monkeypatch, tmp_p
 
     monkeypatch.setattr(generate_changelog, "fetch_releases", fail_fetch)
 
-    with pytest.raises(SystemExit, match="Cannot generate changelog"):
-        generate_changelog.main()
+    assert generate_changelog.main() == 0
 
     assert output_path.read_text() == "existing release history\n"
+    assert "Warning: Cannot refresh changelog" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("existing_empty_file", [False, True])
+def test_fails_when_github_is_unavailable_without_a_snapshot(
+    monkeypatch, tmp_path, existing_empty_file
+):
+    """A build cannot silently succeed with an empty or missing release history."""
+    output_path = tmp_path / "CHANGELOG.md"
+    if existing_empty_file:
+        output_path.touch()
+    monkeypatch.setattr(
+        sys, "argv", ["generate_changelog", "--output", str(output_path)]
+    )
+
+    def fail_fetch(*_args, **_kwargs):
+        raise URLError("GitHub unavailable")
+
+    monkeypatch.setattr(generate_changelog, "fetch_releases", fail_fetch)
+
+    with pytest.raises(SystemExit, match="Cannot generate changelog"):
+        generate_changelog.main()
 
 
 def test_rejects_empty_published_history():

@@ -62,6 +62,10 @@ show_source = false
 show_submodules = false
 inherited_members = false
 
+# Include shared simulation methods without preloading external Pydantic members.
+[project.plugins.api-autonav.module_options.'^gsim\.palace\.(driven|eigenmode|electrostatic|boundarymode)$']
+inherited_members = true
+
 [project.plugins.llmstxt]
 full_output = "llms-full.txt"
 
