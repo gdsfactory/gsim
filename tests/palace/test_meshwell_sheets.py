@@ -177,6 +177,38 @@ def test_meshing_progress_preserves_mesh(
     assert meshes[0] == meshes[1]
 
 
+def test_transverse_mesh_refines_edges_of_long_conductors(tmp_path: Path) -> None:
+    gf.gpdk.PDK.activate()
+    component = gf.Component()
+    for bottom, top in [(-150, -120), (-119, -40), (-20, 20), (40, 119), (120, 150)]:
+        component.add_polygon(
+            [(0, bottom), (4, bottom), (4, top), (0, top)], layer=(1, 0)
+        )
+    for name, y in [("lower", -80), ("upper", 80)]:
+        component.add_port(
+            name=name,
+            center=(0, y),
+            width=2,
+            orientation=180,
+            layer=(1, 0),
+            port_type="electrical",
+        )
+    sim = ElectrostaticSim()
+    sim.set_geometry(component)
+    sim.set_output_dir(tmp_path)
+    mesh = sim.mesh_sheets(
+        conductor_layer=(1, 0),
+        terminal_ports={"T1": "lower", "T2": "upper"},
+        domain_bounds=(0, -150, 4, 150),
+        height=150,
+        near_mesh=0.02,
+        far_mesh=8,
+        normalization_depth_um=4,
+    )
+    assert mesh.mesh_stats["triangles"] < 20_000
+    assert sim.validate_mesh().valid
+
+
 @pytest.mark.parametrize("threads", [0, -1])
 def test_invalid_mesh_thread_count(tmp_path: Path, threads: int) -> None:
     sim = ElectrostaticSim()

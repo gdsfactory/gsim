@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, override
 
 if TYPE_CHECKING:
     from gdsfactory import Component
@@ -253,16 +253,32 @@ def _mesh_entities(
 
     from gsim.palace.mesh.generator import MeshResult
 
+    class EdgeThresholdField(ThresholdField):
+        @override
+        def apply_distance(self, model: Any, entities_mass_dict: dict) -> int:
+            points = model.getBoundary(
+                [(1, tag) for tag in entities_mass_dict],
+                combined=False,
+                oriented=False,
+            )
+            field = model.mesh.field.add("Distance")
+            model.mesh.field.setNumbers(
+                field, "PointsList", sorted({p[1] for p in points})
+            )
+            return field
+
     try:
         model.cad.process_entities(entities, interface_delimiter="___")
-        field = ThresholdField(
+        field_type = ThresholdField if dim == 3 else EdgeThresholdField
+        field = field_type(
             apply_to="surfaces" if dim == 3 else "curves",
             sizemin=near_mesh,
             sizemax=far_mesh,
-            distmin=1,
+            distmin=1 if dim == 3 else min(1, 4 * near_mesh),
             distmax=25,
         )
-        resolutions = {name: [field] for name in sheets if name != "ground"}
+        # Transverse sheet fields are singular at the edges, not along the rails.
+        resolutions = {name: [field] for name in sheets if dim == 2 or name != "ground"}
         ground_parts = (
             list(sheets["ground"].geoms)
             if "ground" in sheets and hasattr(sheets["ground"], "geoms")
@@ -274,17 +290,17 @@ def _mesh_entities(
             (part.bounds[3] - part.bounds[1] for part in ground_parts), default=far_mesh
         )
         if dim == 2 and len(ground_parts) > 2:
-            # Refine the inner strip without refining the long outer ground rails.
-            resolutions["ground"] = [
-                ThresholdField(
+            # Thin strip edges need a finer target than the other conductors.
+            resolutions["ground"].append(
+                EdgeThresholdField(
                     apply_to="curves",
                     max_mass=strip * 1.001,
                     sizemin=min(near_mesh, strip / minimum_feature_elements),
                     sizemax=far_mesh,
-                    distmin=min(1, strip / 4),
+                    distmin=min(1, strip / 4, 4 * near_mesh),
                     distmax=25,
                 )
-            ]
+            )
         model.mesh.process_geometry(
             dim=dim,
             default_characteristic_length=far_mesh,
