@@ -96,7 +96,8 @@ repos:
   hooks:
   - id: mdformat
     args: [--wrap=120]
-    exclude: 'docs/nbs/example\.md|docs/api\.md|docs/api/'
+    # Zensical resolves API symbol references at build time; mdformat escapes them.
+    exclude: '^docs/'
     additional_dependencies:
     - mdformat-gfm
     - mdformat-gfm-alerts

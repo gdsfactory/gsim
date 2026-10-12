@@ -69,4 +69,5 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         body: ${{ steps.draft.outputs.body }}
+        generate_release_notes: ${{ steps.draft.outputs.body == '' }}
         files: dist/*

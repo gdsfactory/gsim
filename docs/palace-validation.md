@@ -1,8 +1,9 @@
 # Validate Palace result evidence
 
-`validate_solution` reports core solver convergence, optional error estimation, adaptive sampling, process exit and OOM
-evidence, mode checks, and input provenance independently. A zero exit code does not establish physical validity. The
-function reads supplied evidence and never changes tolerances or reruns a simulation.
+[`validate_solution`][gsim.palace.validation.validate_solution] reports core solver convergence, optional error
+estimation, adaptive sampling, process exit and OOM evidence, mode checks, and input provenance independently. A zero
+exit code does not establish physical validity. The function reads supplied evidence and never changes tolerances or
+reruns a simulation.
 
 ```python
 import json

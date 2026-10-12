@@ -1,22 +1,11 @@
-# Cloud API
+# Cloud execution guide
 
-::: gsim.gcloud.run_simulation
-    options:
-      show_source: false
+Submit simulations, inspect job status, and load results through [`gsim.gcloud`][gsim.gcloud].
 
-::: gsim.gcloud.get_status
-    options:
-      show_source: false
-
-::: gsim.gcloud.wait_for_results
-    options:
-      show_source: false
-
-::: gsim.gcloud.RunResult
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`run_simulation`][gsim.gcloud.run_simulation]
+- [`get_status`][gsim.gcloud.get_status]
+- [`wait_for_results`][gsim.gcloud.wait_for_results]
+- [`RunResult`][gsim.gcloud.RunResult]
 
 ## Result caching
 
@@ -32,14 +21,6 @@ bytes the solver consumes — rather than from the simulation object, so it also
 covers changes to the generated solver script. A lookup failure is never fatal:
 it degrades to a normal submit.
 
-::: gsim.gcloud.check_cache
-    options:
-      show_source: false
-
-::: gsim.gcloud.check_cache_for_dir
-    options:
-      show_source: false
-
-::: gsim.hashing.compute_input_hash
-    options:
-      show_source: false
+- [`check_cache`][gsim.gcloud.check_cache]
+- [`check_cache_for_dir`][gsim.gcloud.check_cache_for_dir]
+- [`compute_input_hash`][gsim.hashing.compute_input_hash]

@@ -1,9 +1,12 @@
-# GDSFactory FDTD API
+# GDSFactory FDTD guide
 
 `gsim.fdtd` separates simulation setup into geometry, materials, source,
 monitors, domain, and solver concerns. It generates the transfer mesh and
 validated `config.json`, submits one source to one cloud job, and returns typed
 results.
+
+Use [`Simulation`][gsim.fdtd.Simulation] to configure a run and
+[`FDTDResult`][gsim.fdtd.FDTDResult] to inspect its output.
 
 ## Configure and run
 
@@ -218,53 +221,12 @@ Simulation setup views remain separate from these result plots: `sim.plot_*()`
 inspects the submitted geometry and mesh, while `result.plot*()` displays solver
 output.
 
-## Reference
+## API reference
 
-::: gsim.fdtd.Simulation
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - write
-        - upload
-        - start
-        - get_status
-        - wait_for_results
-        - run
-        - plot_2d
-        - plot_3d
-
-::: gsim.fdtd.PortSource
-    options:
-      show_source: false
-      members: false
-
-::: gsim.fdtd.DipoleSource
-    options:
-      show_source: false
-      members: false
-
-::: gsim.fdtd.LineCurrentSource
-    options:
-      show_source: false
-      members: false
-
-::: gsim.fdtd.GaussianBeamSource
-    options:
-      show_source: false
-      members: false
-
-::: gsim.fdtd.PlaneMonitor
-    options:
-      show_source: false
-      members: false
-
-::: gsim.fdtd.FDTDResult
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - from_file
-        - from_run_result
-        - plot
-        - plot_plotly
+- [`Simulation`][gsim.fdtd.Simulation]
+- [`PortSource`][gsim.fdtd.PortSource]
+- [`DipoleSource`][gsim.fdtd.DipoleSource]
+- [`LineCurrentSource`][gsim.fdtd.LineCurrentSource]
+- [`GaussianBeamSource`][gsim.fdtd.GaussianBeamSource]
+- [`PlaneMonitor`][gsim.fdtd.PlaneMonitor]
+- [`FDTDResult`][gsim.fdtd.FDTDResult]

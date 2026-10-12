@@ -1,4 +1,7 @@
-# Palace API
+# Palace guide
+
+Use [`gsim.palace`][gsim.palace] for driven RF and microwave simulations, eigenmodes, electrostatics, and boundary modes.
+This guide covers solver configuration, meshing, and result processing. Class and function links open the API reference.
 
 ## Solver settings
 
@@ -104,44 +107,12 @@ the grouped format. `NumericalConfig(**sim.numerical.model_dump())` accepts that
 format and copies the six common numerical controls into a flat legacy model.
 For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings.
 
-::: gsim.palace.SolverConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - order
-        - device
-        - linear
-
-::: gsim.palace.LinearSolverConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - tolerance
-        - max_iterations
-        - solver_type
-        - preconditioner
-
-::: gsim.palace.DrivenConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.EigenmodeConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.ElectrostaticConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.BoundaryModeConfig
-    options:
-      show_source: false
-      inherited_members: false
+- [`SolverConfig`][gsim.palace.SolverConfig]
+- [`LinearSolverConfig`][gsim.palace.LinearSolverConfig]
+- [`DrivenConfig`][gsim.palace.DrivenConfig]
+- [`EigenmodeConfig`][gsim.palace.EigenmodeConfig]
+- [`ElectrostaticConfig`][gsim.palace.ElectrostaticConfig]
+- [`BoundaryModeConfig`][gsim.palace.BoundaryModeConfig]
 
 See [result validation](../palace-validation.md) for independent solver,
 adaptive sampling, mode identity, and provenance checks.
@@ -177,116 +148,14 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 
 ## Result validation
 
-::: gsim.palace.validation
-    options:
-      show_source: false
-      members:
-        - validate_solution
-        - ModeSample
-        - ModeExpectation
-        - SolutionCheck
-        - AdaptiveCheck
-        - SolutionProvenance
-        - SolutionReport
+- [`validation`][gsim.palace.validation]
 
 ## Simulation Classes
 
-::: gsim.palace.DrivenSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_driven
-        - set_material
-        - solver
-        - set_solver
-        - add_port
-        - add_cpw_port
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - write_config
-        - run
-        - start
-        - upload
-        - get_status
-        - wait_for_results
-
-::: gsim.palace.EigenmodeSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_eigenmode
-        - set_material
-        - solver
-        - set_solver
-        - add_port
-        - add_cpw_port
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - run
-
-::: gsim.palace.ElectrostaticSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_electrostatic
-        - set_material
-        - solver
-        - set_solver
-        - add_terminal
-        - nets
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - run
-        - load_capacitance
-
-::: gsim.palace.BoundaryModeSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - solver
-        - set_solver
-        - set_boundary_mode
-        - set_cross_section
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_material
-        - mesh
-        - validate_config
-        - validate_mesh
-        - write_config
-        - run
+- [`DrivenSim`][gsim.palace.DrivenSim]
+- [`EigenmodeSim`][gsim.palace.EigenmodeSim]
+- [`ElectrostaticSim`][gsim.palace.ElectrostaticSim]
+- [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
 
 ## Floquet eigenmodes
 
@@ -321,20 +190,8 @@ argument and frequency-based length estimate are removed. Old mesh results witho
 
 ## Capacitance
 
-::: gsim.palace.CapacitanceMatrices
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - between
-        - to_ground
-        - maxwell_frame
-        - mutual_frame
-        - problems
-
-::: gsim.palace.load_capacitance
-    options:
-      show_source: false
+- [`CapacitanceMatrices`][gsim.palace.CapacitanceMatrices]
+- [`load_capacitance`][gsim.palace.load_capacitance]
 
 ## Saved fields and S-parameters
 
@@ -434,165 +291,43 @@ Use it alongside SICN's signed validity check and solution convergence; κ alone
 does not measure simulation accuracy. A numerically singular center is displayed
 as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 
-::: gsim.palace.MeshConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - coarse
-        - default
-        - fine
-
-::: gsim.palace.generate_mesh
-    options:
-      show_source: false
+- [`MeshConfig`][gsim.palace.MeshConfig]
+- [`generate_mesh`][gsim.palace.generate_mesh]
 
 ## Nets
 
-::: gsim.palace.Nets
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - net_at
-
-::: gsim.palace.Net
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - layers
-
-::: gsim.palace.extract_nets
-    options:
-      show_source: false
+- [`Nets`][gsim.palace.Nets]
+- [`Net`][gsim.palace.Net]
+- [`extract_nets`][gsim.palace.extract_nets]
 
 ## Stack
 
-::: gsim.palace.LayerStack
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
-
-::: gsim.palace.Layer
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`LayerStack`][gsim.palace.LayerStack]
+- [`Layer`][gsim.palace.Layer]
 
 ## Circuit Synthesis
 
-::: gsim.palace.CircuitSynthesis
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - nodes
-        - L_inv
-        - R_inv
-        - C
-        - port_labels
-        - port_indices
-        - internal_indices
-        - port_loads
-        - port_names
-        - Y
-        - port_admittance
-        - port_impedance
-        - s_parameters
-        - port_reference_impedances
-        - eigenfrequencies
-        - fit_rlc
-
-::: gsim.palace.fit_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.differential_impedance
-    options:
-      show_source: false
-
-::: gsim.palace.initial_guess_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.z_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.load_circuit_synthesis
-    options:
-      show_source: false
+- [`CircuitSynthesis`][gsim.palace.CircuitSynthesis]
+- [`fit_rlc`][gsim.palace.fit_rlc]
+- [`differential_impedance`][gsim.palace.differential_impedance]
+- [`initial_guess_rlc`][gsim.palace.initial_guess_rlc]
+- [`z_rlc`][gsim.palace.z_rlc]
+- [`load_circuit_synthesis`][gsim.palace.load_circuit_synthesis]
 
 ## Fitting
 
-::: gsim.palace.RLCFit
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - R
-        - L
-        - C
-        - f0
-        - Q
-        - rms_error
-        - z
-        - y
-        - to_dict
-
-::: gsim.palace.VectorFit
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - raw
-        - network
-        - poles
-        - residues
-        - zeros
-        - n_poles
-        - is_stable
-        - rms_error
-        - is_passive
-        - passivity_test
-        - passivity_enforce
-        - get_spurious
-        - s
-        - z
-        - y
-        - write_spice
+- [`RLCFit`][gsim.palace.RLCFit]
+- [`VectorFit`][gsim.palace.VectorFit]
 
 ## Parameter Conversions
 
-::: gsim.palace.s_to_z
-    options:
-      show_source: false
-
-::: gsim.palace.z_to_s
-    options:
-      show_source: false
-
-::: gsim.palace.s_to_y
-    options:
-      show_source: false
-
-::: gsim.palace.y_to_s
-    options:
-      show_source: false
-
-::: gsim.palace.z_to_y
-    options:
-      show_source: false
-
-::: gsim.palace.y_to_z
-    options:
-      show_source: false
-
-::: gsim.palace.is_complete
-    options:
-      show_source: false
+- [`s_to_z`][gsim.palace.s_to_z]
+- [`z_to_s`][gsim.palace.z_to_s]
+- [`s_to_y`][gsim.palace.s_to_y]
+- [`y_to_s`][gsim.palace.y_to_s]
+- [`z_to_y`][gsim.palace.z_to_y]
+- [`y_to_z`][gsim.palace.y_to_z]
+- [`is_complete`][gsim.palace.is_complete]
 
 ## Transmission-line analysis
 

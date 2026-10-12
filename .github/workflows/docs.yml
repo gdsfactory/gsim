@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
 permissions:
   contents: read
 env:
@@ -13,7 +16,7 @@ jobs:
   discover-notebooks:
     name: Discover docs notebooks
     if: >-
-      github.event_name == 'push' || (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') || (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
       notebooks: ${{ steps.notebooks.outputs.notebooks }}
@@ -81,7 +84,7 @@ jobs:
     - name: Execute notebook
       timeout-minutes: 30
       if: >-
-        github.event_name == 'push' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
+        github.event_name != 'pull_request' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
       env:
         GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
         NOTEBOOK: ${{ matrix.notebook }}
@@ -126,15 +129,17 @@ jobs:
         path: docs/nbs
         merge-multiple: true
     - name: Build docs
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: just docs
     - name: Upload Pages artifact
-      if: github.event_name == 'push'
+      if: github.event_name != 'pull_request'
       uses: actions/upload-pages-artifact@v3
       with:
         path: docs/site
   pages:
     name: Deploy to GitHub Pages
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: build
     permissions:

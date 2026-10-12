@@ -16,10 +16,6 @@ nav = [
   { "FEM for RF" = [
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
-    { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
-    { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
-    { "EMX Process Files" = "emx_proc_import.md" },
-    { "Palace Result Validation" = "palace-validation.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },
@@ -29,8 +25,14 @@ nav = [
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
+  { "Modeling & Analysis" = [
+    { "EMX Process Files" = "emx_proc_import.md" },
+    { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
+    { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
+    { "Palace Result Validation" = "palace-validation.md" }
+  ] },
   { "Changelog" = "CHANGELOG.md" },
-  { "API Reference" = [
+  { "API Guides" = [
     { "Materials" = "materials.md" },
     { "GDSFactory FDTD" = "api/fdtd.md" },
     { "Palace" = "api/palace.md" },
@@ -48,6 +50,34 @@ copyright = "Copyright &copy; 2025 GDSFactory"
 
 [project.plugins.search]
 
+[project.plugins.api-autonav]
+modules = ["../src/gsim"]
+nav_section_title = "API Reference"
+api_root_uri = "reference"
+exclude_private = true
+nav_item_prefix = ""
+
+[project.plugins.api-autonav.module_options.".*"]
+show_source = false
+show_submodules = false
+inherited_members = false
+
+[project.plugins.llmstxt]
+full_output = "llms-full.txt"
+
+[project.plugins.llmstxt.sections]
+"Getting started" = ["index.md"]
+"Guides" = [
+  "api/*.md",
+  "transmission_line_analysis.md",
+  "emx_proc_import.md",
+  "palace-validation.md",
+  "materials.md"
+]
+"Tutorials" = ["nbs/*.md"]
+"API reference" = ["reference/**/*.md"]
+"Releases" = ["CHANGELOG.md"]
+
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["../src"]
 inventories = [
@@ -56,6 +86,7 @@ inventories = [
 ]
 
 [project.plugins.mkdocstrings.handlers.python.options]
+backlinks = "tree"
 docstring_options = { ignore_init_summary = true }
 docstring_section_style = "list"
 docstring_style = "google"
@@ -77,6 +108,7 @@ summary = true
 [project.theme]
 name = "material"
 custom_dir = "overrides"
+features = ["content.action.copy"]
 
 [[project.theme.palette]]
 media = "(prefers-color-scheme: light)"

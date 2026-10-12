@@ -43,7 +43,6 @@ visualize = [
 [dependency-groups]
 dev = [
   "build>=1.2.0",
-  "towncrier>=24.0.0",
   { include-group = "docs" },
   { include-group = "lint" },
   { include-group = "test" }
@@ -53,6 +52,7 @@ docs = [
   "griffe>=1.5.6",
   "ipykernel>=6.29.5",
   "matplotlib>=3.10.0",
+  "mkdocstrings-python>=2.0.9",
   "mkdocstrings[python]>=0.27.0",
   "nb-clean>=4.0.1",
   "nbconvert>=7.16.6",
@@ -60,7 +60,7 @@ docs = [
   "papermill>=2.6.0",
   "plotly>=6.0.0",
   "vega-datasets>=0.9.0",
-  "zensical>=0.0.46"
+  "zensical>=0.0.69"
 ]
 lint = [
   "mkinit>=1.1.0",
