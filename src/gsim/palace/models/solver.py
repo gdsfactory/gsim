@@ -61,6 +61,8 @@ class LinearSolverConfig(BaseModel):
         default="Default", description="Preconditioner used with the Default backend."
     )
 
+    initial_guess: bool | None = None
+
     def to_palace_config(self) -> dict[str, Any]:
         """Convert to Palace's ``Solver.Linear`` block."""
         config: dict[str, object] = {
@@ -69,6 +71,8 @@ class LinearSolverConfig(BaseModel):
             "Tol": self.tolerance,
             "MaxIts": self.max_iterations,
         }
+        if self.initial_guess is not None:
+            config["InitialGuess"] = self.initial_guess
         if self.solver_type == "MUMPS":
             config.update(
                 MaxIts=1,

@@ -1299,14 +1299,14 @@ def extract_pec_polygons(component, gds_layer: tuple[int, int]) -> list:
             points = list(poly.each_point_hull())
             if len(points) < 3:
                 continue
-            pts_x = [pt.x / 1000.0 for pt in points]
-            pts_y = [pt.y / 1000.0 for pt in points]
+            pts_x = [pt.x * component.kcl.dbu for pt in points]
+            pts_y = [pt.y * component.kcl.dbu for pt in points]
             holes = []
             for hole_idx in range(poly.holes()):
                 hole_pts = list(poly.each_point_hole(hole_idx))
                 if len(hole_pts) >= 3:
-                    hx = [pt.x / 1000.0 for pt in hole_pts]
-                    hy = [pt.y / 1000.0 for pt in hole_pts]
+                    hx = [pt.x * component.kcl.dbu for pt in hole_pts]
+                    hy = [pt.y * component.kcl.dbu for pt in hole_pts]
                     holes.append((hx, hy))
             result.append((pts_x, pts_y, holes))
 
