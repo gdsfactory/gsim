@@ -19,13 +19,14 @@ from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     CPWPortConfig,
     EigenmodeConfig,
+    EigenmodeSolverConfig,
     MaterialConfig,
-    NumericalConfig,
     PortConfig,
     RefinementConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         >>> sim.set_stack()
         >>> sim.set_airbox(margin_x=120.0, margin_above=120.0, margin_below=20.0)
         >>> sim.add_port("o1", layer="topmetal2", length=5.0)
-        >>> sim.set_eigenmode(num_modes=10, target=50e9)
+        >>> sim.solver.eigenmode.target = 50e9
         >>> sim.set_output_dir("./sim")
         >>> sim.mesh(preset="default")
         >>> results = sim.run()  # dict[str, Path]
@@ -57,7 +58,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         cpw_ports: List of CPW (two-element) port configurations
         eigenmode: Eigenmode simulation configuration
         materials: Material property overrides
-        numerical: Numerical solver configuration
+        solver: Grouped numerical and problem-specific solver configuration
     """
 
     model_config = ConfigDict(
@@ -66,7 +67,6 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     )
     simulation_type: Literal["eigenmode"] = "eigenmode"
 
-    driven: None = None
     terminals: None = None
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
     # Composed objects (from common)
@@ -79,12 +79,9 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
 
-    # Eigenmode simulation config
-    eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
-
-    # Material overrides and numerical config
+    # Material overrides and solver config
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: EigenmodeSolverConfig = Field(default_factory=EigenmodeSolverConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
 
     # Stack configuration (stored as kwargs until resolved)
@@ -98,6 +95,20 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+
+    # Legacy solver settings
+
+    @property
+    def eigenmode(self) -> EigenmodeConfig:
+        """Deprecated alias for solver.eigenmode, retaining the original type."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        return self.solver.eigenmode
+
+    @eigenmode.setter
+    def eigenmode(self, value: EigenmodeConfig | dict[str, Any]) -> None:
+        """Replace eigenmode settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.eigenmode", "sim.solver.eigenmode")
+        self._set_problem_settings("eigenmode", value)
 
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)
@@ -176,7 +187,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        self.eigenmode = EigenmodeConfig(
+        self.solver.eigenmode = EigenmodeConfig(
             num_modes=num_modes,
             target=target,
             tolerance=tolerance,

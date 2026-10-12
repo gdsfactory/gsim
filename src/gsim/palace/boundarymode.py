@@ -11,11 +11,11 @@ from gsim.common import Geometry, LayerStack
 from gsim.palace.base import PalaceSimMixin
 from gsim.palace.models import (
     BoundaryModeConfig,
+    BoundaryModeSolverConfig,
     CPWPortConfig,
     CrossSectionPlaneConfig,
     MaterialConfig,
     MeshConfig,
-    NumericalConfig,
     PortConfig,
     RefinementConfig,
     TerminalConfig,
@@ -23,6 +23,7 @@ from gsim.palace.models import (
     WavePortConfig,
 )
 from gsim.palace.models.results import ValidationResult
+from gsim.palace.models.solver import warn_legacy_solver_setting
 
 
 class BoundaryModeSim(PalaceSimMixin, BaseModel):
@@ -44,12 +45,9 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     stack: LayerStack | None = None
 
     # Boundary mode config
-    boundary_mode: BoundaryModeConfig = Field(default_factory=BoundaryModeConfig)
     cross_section: CrossSectionPlaneConfig | None = None
 
     # Unused in boundary mode (kept for mixin compatibility)
-    driven: None = None
-    eigenmode: None = None
     ports: list[PortConfig] = Field(default_factory=list)
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
@@ -59,7 +57,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     # Mesh and solver config
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
-    numerical: NumericalConfig = Field(default_factory=NumericalConfig)
+    solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     absorbing_boundary: bool = False
 
@@ -78,6 +76,18 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
 
     # Cloud job state
     _job_id: str | None = PrivateAttr(default=None)
+
+    @property
+    def boundary_mode(self) -> BoundaryModeConfig:
+        """Deprecated alias for solver.boundary_mode, retaining the original type."""
+        warn_legacy_solver_setting("sim.boundary_mode", "sim.solver.boundary_mode")
+        return self.solver.boundary_mode
+
+    @boundary_mode.setter
+    def boundary_mode(self, value: BoundaryModeConfig | dict[str, Any]) -> None:
+        """Replace boundary_mode settings through their deprecated top-level name."""
+        warn_legacy_solver_setting("sim.boundary_mode", "sim.solver.boundary_mode")
+        self._set_problem_settings("boundary_mode", value)
 
     def set_boundary_mode(
         self,
@@ -101,7 +111,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
             max_size: Eigensolver max subspace size.
             solver_type: Palace eigensolver type.
         """
-        self.boundary_mode = BoundaryModeConfig(
+        self.solver.boundary_mode = BoundaryModeConfig(
             freq=freq,
             num_modes=num_modes,
             save=save,

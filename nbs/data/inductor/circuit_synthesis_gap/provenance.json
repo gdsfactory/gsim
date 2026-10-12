@@ -1,0 +1,46 @@
+{
+  "palace_version": "v0.18.0",
+  "palace_schema_version": "1-6-0",
+  "generated": "2026-10-05",
+  "generator": "nbs/palace_inductor_gap.ipynb (AC circuit synthesis with a gap differential port), local Palace run",
+  "feature": "Palace AdaptiveCircuitSynthesis (rom-*.csv) from adaptive driven sweep, single gap lumped port",
+  "minimum_palace_version": "0.17.0",
+  "simulation": {
+    "geometry": "IHP SG13G2 single-turn spiral inductor (width=2, space=2.1, diameter=50) with Metal1 guard ring (identical to nbs/palace_inductor.ipynb); differential excitation via a Palace gap lumped port spanning the 2.10 um slot between the two floating TopMetal2 terminals",
+    "ports": "Pdiff gap port (layer=TopMetal2, R = 50 Ohm, excited, orientation 0)",
+    "stack": "IHP SG13G2, substrate_thickness=180um, include_substrate=True",
+    "mesh": "preset=default, refined_mesh_size=1.5",
+    "sweep": {
+      "fmin_ghz": 10.0,
+      "fmax_ghz": 200.0,
+      "num_points": 201,
+      "adaptive_tol": 0.02,
+      "adaptive_max_samples": 20,
+      "AdaptiveCircuitSynthesis": true
+    }
+  },
+  "validation": {
+    "max_abs_S_error_circuit_vs_fem": 5.8e-4,
+    "low_frequency": {
+      "L_circuit_pH": 124.889,
+      "L_fem_pH": 124.864,
+      "R_circuit_ohm": 1.3557,
+      "R_fem_ohm": 1.364
+    },
+    "rlc_fit_circuit": {
+      "R_ohm": 3.515,
+      "L_pH": 107.663,
+      "C_fF": 8.074,
+      "f0_GHz": 170.707,
+      "Q": 32.85
+    },
+    "rlc_fit_fem": {
+      "R_ohm": 3.516,
+      "L_pH": 107.663,
+      "C_fF": 8.073,
+      "f0_GHz": 170.713,
+      "Q": 32.84
+    },
+    "raw_port_block": { "L_self_pH": 0.061, "C_pad_fF": 0.019 }
+  }
+}

@@ -73,8 +73,15 @@ def _relative_length_change(temperature_kelvin: float) -> float:
     )
 
 
-def _li_index(wavelength_um: float, temperature_kelvin: float) -> float:
-    """Evaluate Li's wavelength- and temperature-dependent silicon equation."""
+def li_coefficients(temperature_kelvin: float) -> tuple[float, float]:
+    """Return Li's ``(epsilon, A)`` so that ``n^2 = epsilon + A / lambda^2``.
+
+    ``epsilon`` is the temperature-dependent high-wavelength dielectric
+    constant and ``A`` (in um^2) is the dispersion strength multiplied by the
+    lattice-expansion factor.  This is the single source of the numbers used by
+    :func:`_li_index` and by the ``cauchy`` silicon model in the stack
+    material table.
+    """
     dielectric_constant = (
         11.4445
         + 2.7739e-4 * temperature_kelvin
@@ -85,9 +92,13 @@ def _li_index(wavelength_um: float, temperature_kelvin: float) -> float:
         0.8948 + 4.3977e-4 * temperature_kelvin + 7.3835e-8 * temperature_kelvin**2
     )
     lattice_factor = exp(-3.0 * _relative_length_change(temperature_kelvin))
-    return sqrt(
-        dielectric_constant + lattice_factor * dispersion_strength / wavelength_um**2
-    )
+    return dielectric_constant, lattice_factor * dispersion_strength
+
+
+def _li_index(wavelength_um: float, temperature_kelvin: float) -> float:
+    """Evaluate Li's wavelength- and temperature-dependent silicon equation."""
+    dielectric_constant, dispersion_strength = li_coefficients(temperature_kelvin)
+    return sqrt(dielectric_constant + dispersion_strength / wavelength_um**2)
 
 
 def _li_index_table() -> TabulatedValue:
@@ -165,4 +176,4 @@ SI_LI_293K = material_card(
     info={"composition": "crystalline silicon"},
 )
 
-__all__ = ["SI_LI_293K"]
+__all__ = ["SI_LI_293K", "li_coefficients"]

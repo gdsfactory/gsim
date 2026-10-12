@@ -32,7 +32,7 @@ def test_concerns_batch_validate_without_partial_updates() -> None:
 
     simulation.source(port="o2", wavelength_um=1.31, wavelength_span_um=0.04)
     simulation.domain(
-        padding_um=0.75,
+        padding=0.75,
         pml_cells=16,
         x_bounds=(-0.25, 2.25),
         y_bounds=(-1.0, 1.0),
@@ -44,7 +44,7 @@ def test_concerns_batch_validate_without_partial_updates() -> None:
 
     assert isinstance(simulation.source, fdtd.PortSource)
     assert simulation.source.port == "o2"
-    assert simulation.domain.padding_um == 0.75
+    assert simulation.domain.padding == 0.75
     assert simulation.domain.x_bounds == (-0.25, 2.25)
     assert simulation.domain.y_bounds == (-1.0, 1.0)
     assert simulation.domain.z_bounds == (-0.5, 0.75)

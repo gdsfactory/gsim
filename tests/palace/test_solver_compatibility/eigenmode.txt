@@ -1,0 +1,51 @@
+{
+    "Problem": {
+        "Type": "Eigenmode",
+        "Verbose": 3,
+        "Output": "output/palace"
+    },
+    "Model": {
+        "Mesh": "palace.msh",
+        "L0": 1e-06,
+        "Refinement": {
+            "UniformLevels": 0,
+            "Tol": 0.01,
+            "MaxIts": 0
+        }
+    },
+    "Solver": {
+        "Linear": {
+            "Type": "AMS",
+            "KSPType": "GMRES",
+            "Tol": 1e-08,
+            "MaxIts": 123
+        },
+        "Order": 1,
+        "Device": "CPU",
+        "Eigenmode": {
+            "N": 10,
+            "Tol": 1e-08,
+            "Target": 4.0
+        }
+    },
+    "Domains": {
+        "Materials": [
+            {
+                "Attributes": [
+                    1
+                ],
+                "Permittivity": 1.0,
+                "LossTan": 0.0
+            }
+        ],
+        "Postprocessing": {
+            "Energy": [],
+            "Probe": []
+        }
+    },
+    "Boundaries": {
+        "Conductivity": [],
+        "LumpedPort": [],
+        "WavePort": []
+    }
+}

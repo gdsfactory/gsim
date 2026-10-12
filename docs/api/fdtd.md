@@ -19,7 +19,7 @@ sim.source(
     wavelength_span_um=0.1,
     num_wavelengths=101,
 )
-sim.domain(padding_um=0.75, pml_cells=16)
+sim.domain(padding=0.75, pml_cells=16)
 sim.solver(
     cell_size_nm=40,
     energy_decay_fraction=1e-6,
@@ -51,11 +51,39 @@ hole, or edge topology, meshing safely falls back to vertical slices bounded by
 Use `write(path)` to generate `mesh.msh` and `config.json` without submitting.
 The original flat constructor keywords remain accepted for compatibility.
 
+Domain padding is specified in micrometers, using `padding` as a shared fallback
+and `padding_x`, `padding_y`, or `padding_z` to override individual axes. Each
+accepts a nonnegative scalar (equal padding on both sides) or a
+`(negative_side, positive_side)` pair. Zero padding is allowed.
+
+```python
+sim.domain(
+    padding=1,
+    padding_x=(0, 2),  # -x, +x
+    padding_y=0.5,    # both y sides
+    padding_z=(1, 2), # below, above
+)
+```
+
+Explicit axis padding is measured from the resolved geometry bounds. Without
+`padding_z`, automatic Z sizing uses the PDK background stack when present,
+otherwise the shared padding. The shared fallback retains automatic guided-port
+alignment. Explicit axis padding must be zero on a side containing a guided
+port: waveguide extensions into padding are not currently supported, and a
+nonzero value on that side raises an error. For a bend with an input on the
+negative X face and an output on the positive Y face, use
+`padding_x=(0, 1)` and `padding_y=(1, 0)` to pad its other sides.
+
+The old `padding_um` domain argument and `background_padding_um` constructor
+argument have been removed; configure `sim.domain(padding=...)` instead.
+
 Optional `x_bounds`, `y_bounds`, and `z_bounds` tuples set the non-PML physical
 domain in micrometers. Omitted axes remain automatically sized from the
 component, PDK stack, and padding. Explicit bounds must contain the geometry,
 sources, and monitors; guided ports must remain on a domain face. The backend
 adds PML outside these bounds.
+Do not combine explicit bounds and explicit per-axis padding on the same axis;
+the shared padding fallback can still be used for other axes.
 
 ```python
 sim.domain(

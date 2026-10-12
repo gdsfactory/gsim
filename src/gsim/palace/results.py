@@ -423,6 +423,7 @@ class SParams:
         data: dict[tuple[str, str], SParam],
         port_names: list[str],
         files: dict[str, Path] | None = None,
+        z0: float | None = None,
         *,
         symmetry: dict | None = None,
         port_meta: dict[str, dict] | None = None,
@@ -434,6 +435,7 @@ class SParams:
             data: S-parameters keyed by ``(to_port, from_port)``.
             port_names: Ordered port names.
             files: Source files, if any.
+            z0: Reference impedance of the S-parameters, or None for 50 Ohm.
             symmetry: Symmetry-plane record from ``port_information.json``
                 (``axis``, ``position``, ``kind``, ``keep``, ``mode``), or
                 None for a full model.
@@ -444,8 +446,14 @@ class SParams:
         self._data = data
         self._port_names = port_names
         self.files = files or {}
+        self._z0 = float(z0) if z0 is not None else None
         self.symmetry = symmetry
         self.port_meta = port_meta or {}
+
+    @property
+    def z0(self) -> float:
+        """Reference impedance of the S-parameter normalization [Ohm]."""
+        return self._z0 if self._z0 is not None else 50.0
 
     @property
     def freq(self) -> NDArray:
@@ -498,18 +506,21 @@ class SParams:
             cols[f"S_{to_p}_{from_p}_deg"] = sp.deg
         return pd.DataFrame(cols)
 
-    def to_skrf(self, z0: float = 50.0):
+    def to_skrf(self, z0: float | None = None):
         """Convert to a scikit-rf Network object.
 
         Args:
-            z0: Reference impedance in ohms (default 50).
+            z0: Reference impedance in ohms. Defaults to the stored
+                reference impedance (``z0``, falling back to 50 Ohm).
 
         Returns:
-            skrf.Network with frequency in Hz and S-parameters in (f, i, j) order.
+            skrf.Network with frequency in Hz and S-parameters in (f, i, j)
+            order; port names and reference impedance are preserved.
         """
         import numpy as np
         import skrf as rf
 
+        z0 = float(z0) if z0 is not None else self.z0
         n = len(self._port_names)
         f_hz = self._freq * 1e9
         S = np.zeros((len(f_hz), n, n), dtype=complex)
@@ -520,7 +531,84 @@ class SParams:
                 elif (pj, pi) in self._data:
                     # assume reciprocity: S_ij = S_ji
                     S[:, i, j] = self._data[(pj, pi)].complex
-        return rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        network = rf.Network(f=f_hz, s=S, z0=z0, f_unit="Hz")
+        network.port_names = list(self._port_names)
+        return network
+
+    def write_touchstone(
+        self,
+        path: str | Path,
+        *,
+        z0: float | None = None,
+    ) -> Path:
+        """Export the S-parameters to a Touchstone file (``.sNp``).
+
+        Frequency is written in Hz, port order and the reference
+        impedance are preserved (port names are embedded as ``! Port[i]``
+        comments), and the real/imaginary parts are written with 16-digit
+        precision so the complex S round-trip error stays far below the
+        1e-9 acceptance level.
+
+        Args:
+            path: Destination path (``.sNp`` suffix added when missing).
+            z0: Reference impedance [Ohm]; defaults to the stored ``z0``
+                (falling back to 50 Ohm).
+
+        Returns:
+            The resolved file path.
+        """
+        path = Path(path)
+        if not re.fullmatch(r"\.s\d+p", path.suffix.lower()):
+            # APPEND (do not with_suffix: "run_1.5GHz" would eat ".5GHz").
+            path = Path(f"{path}.s{len(self._port_names)}p")
+        network = self.to_skrf(z0=z0)
+        fmt = "{:.16e}"
+        network.write_touchstone(
+            path,
+            form="ri",
+            format_spec_A=fmt,
+            format_spec_B=fmt,
+            format_spec_freq=fmt,
+            write_z0=False,
+        )
+        logger.info("Touchstone written to %s", path)
+        return path
+
+    @classmethod
+    def from_touchstone(cls, path: str | Path) -> SParams:
+        """Load S-parameters from a Touchstone file written by this class.
+
+        Port names are restored from the ``! Port[i]`` comments when
+        present (otherwise ``p1..pN``), and the reference impedance from
+        the file's ``R`` value.
+        """
+        import skrf as rf
+
+        network = rf.Network(str(path))
+        port_names = [
+            str(name) if name else f"p{i + 1}"
+            for i, name in enumerate(network.port_names or [])
+        ]
+        if len(port_names) != network.number_of_ports:
+            port_names = [f"p{i + 1}" for i in range(network.number_of_ports)]
+
+        freq_ghz = np.asarray(network.f, dtype=float) / 1e9
+        data: dict[tuple[str, str], SParam] = {}
+        n = network.number_of_ports
+        for i in range(n):
+            for j in range(n):
+                s_ij = network.s[:, i, j]
+                data[(port_names[i], port_names[j])] = SParam(
+                    db=20 * np.log10(np.clip(np.abs(s_ij), 1e-300, None)),
+                    deg=np.degrees(np.unwrap(np.angle(s_ij))),
+                )
+        z0 = float(np.real(network.z0[0, 0]))
+        return cls(
+            freq=freq_ghz,
+            data=data,
+            port_names=port_names,
+            z0=z0,
+        )
 
     def _filtered_entries(self, full: bool) -> list[tuple[str, SParam]]:
         """Return ``[(label, SParam), ...]`` filtered by excitation port."""
@@ -552,7 +640,7 @@ class SParams:
             ax2.plot(self._freq, sp.deg, label=label)
 
         ax1.set_ylabel("Magnitude (dB)")
-        ax1.set_title("S-Parameters")
+        ax1.set_title(f"S-Parameters (Z0 = {self.z0:g} Ohm)")
         ax1.legend()
         ax1.grid(True)
 
@@ -666,6 +754,7 @@ class SParams:
 
         ylabel = "Phase (deg)" if phase else "|S| (dB)"
         fig.update_layout(
+            title=f"Z0 = {self.z0:g} Ohm",
             xaxis_title="Frequency (GHz)",
             yaxis_title=ylabel,
             width=650,
@@ -706,6 +795,7 @@ class SParams:
 
         arrays: dict[str, NDArray] = {"freq": self._freq}
         arrays["port_names"] = np.array(self._port_names)
+        arrays["z0"] = np.array([self.z0])
         for (to_p, from_p), sp in self._data.items():
             arrays[f"S_{to_p}_{from_p}_db"] = sp.db
             arrays[f"S_{to_p}_{from_p}_deg"] = sp.deg
@@ -729,6 +819,7 @@ class SParams:
 
         freq = npz["freq"]
         port_names = list(npz["port_names"])
+        z0 = float(npz["z0"][0]) if "z0" in npz else None
 
         data: dict[tuple[str, str], SParam] = {}
         for to_p in port_names:
@@ -739,7 +830,7 @@ class SParams:
                     data[(to_p, from_p)] = SParam(db=npz[db_key], deg=npz[deg_key])
 
         logger.info("S-parameters loaded from %s", filepath)
-        return cls(freq=freq, data=data, port_names=port_names)
+        return cls(freq=freq, data=data, port_names=port_names, z0=z0)
 
     def __repr__(self) -> str:
         """Return string representation."""
@@ -835,11 +926,13 @@ def load_sparams(
 
     files = dict(source) if isinstance(source, dict) else None
     symmetry, port_meta = _load_symmetry_and_meta(base_dir, csv_path, port_info_path)
+    z0 = _reference_impedance(base_dir, port_info_path)
     return SParams(
         freq=freq,
         data=data,
         port_names=port_names,
         files=files,
+        z0=z0,
         symmetry=symmetry,
         port_meta=port_meta,
     )
@@ -1158,6 +1251,44 @@ def _load_symmetry_and_meta(
             name = f"p{num}"
         meta[name] = {k: entry[k] for k in ("type", "Z0") if k in entry}
     return data.get("symmetry"), meta
+
+
+def _reference_impedance(
+    base_dir: Path,
+    port_info_path: str | Path | None,
+) -> float | None:
+    """Read the unique reference impedance from ``port_information.json``.
+
+    Returns ``None`` (caller falls back to 50 Ohm) when the file is
+    missing or the ports declare differing reference impedances.
+    """
+    if port_info_path is None:
+        info_path = _find_port_info(base_dir, None)
+    else:
+        info_path = Path(port_info_path)
+        if not info_path.exists():
+            info_path = _find_port_info(base_dir, None)
+    if info_path is None or not info_path.exists():
+        return None
+
+    import json
+
+    with open(info_path) as f:
+        data = json.load(f)
+
+    values = {
+        float(entry["Z0"])
+        for entry in data.get("ports", [])
+        if entry.get("Z0") is not None
+    }
+    if len(values) == 1:
+        return values.pop()
+    if values:
+        logger.warning(
+            "Mixed port reference impedances %s; plots fall back to 50 Ohm labels",
+            sorted(values),
+        )
+    return None
 
 
 def _find_port_info(output_dir: Path, csv_path: Path | None) -> Path | None:

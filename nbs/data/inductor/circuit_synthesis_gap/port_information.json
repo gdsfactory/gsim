@@ -1,0 +1,21 @@
+{
+  "ports": [
+    {
+      "portnumber": 1,
+      "name": "Pdiff",
+      "Z0": 50.0,
+      "type": "lumped",
+      "direction": "X",
+      "length": 2.1,
+      "width": 3.0,
+      "xmin": -1.05,
+      "xmax": 1.05,
+      "ymin": 2.1,
+      "ymax": 2.1,
+      "zmin": 11.030000000000001,
+      "zmax": 14.030000000000001
+    }
+  ],
+  "unit": 1e-6,
+  "name": "palace"
+}

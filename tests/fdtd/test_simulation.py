@@ -59,7 +59,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
         pml_cells=16,
         num_wavelengths=3,
         default_port="o1",
@@ -239,7 +239,7 @@ def test_vertical_port_becomes_fiber_monitor_not_material_port(
         pdk=fdtd_pdk_module,
         default_port="o1",
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
     )
     simulation.geometry("vertical_coupler")
 
@@ -268,7 +268,7 @@ def test_vertical_default_port_uses_gaussian_beam(
         pdk=fdtd_pdk_module,
         default_port="o2",
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
     )
     simulation.source(
         vertical_monitor_heatmap=fdtd.Heatmap(
@@ -323,7 +323,7 @@ def test_write_restores_options_from_existing_gmsh_session(
             pdk=fdtd_pdk_module,
             default_port="o1",
             mesh_size_nm=750,
-            background_padding_um=0.25,
+            domain={"padding": 0.25},
         )
         simulation.geometry("straight", settings={"length": 2.0})
         simulation.write(tmp_path)

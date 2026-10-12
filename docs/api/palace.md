@@ -1,5 +1,148 @@
 # Palace API
 
+## Solver settings
+
+Numerical and problem-specific settings live under `sim.solver`. Each simulation
+exposes its applicable problem group alongside the common controls:
+
+```python
+import gsim.palace as pa
+
+sim = pa.EigenmodeSim()
+sim.solver.order = 1
+sim.solver.linear.tolerance = 1e-6
+sim.solver.linear.max_iterations = 400
+sim.solver.eigenmode.num_modes = 2
+sim.solver.eigenmode.target = 4e9  # Hz; required before meshing/exporting
+sim.solver.eigenmode.tolerance = 1e-8
+sim.solver.eigenmode.save = 2
+```
+
+The linear tolerance controls each linear solve. The eigenmode tolerance controls
+eigenvalue convergence. They are independent. Field order defaults to **2**, linear
+tolerance to **1e-6**, and maximum linear iterations to **400**. The backend and
+preconditioner default to `"Default"`, and the device defaults to `"CPU"`.
+
+You can also supply grouped settings at construction:
+
+```python
+sim = pa.EigenmodeSim(
+    solver={
+        "order": 1,
+        "linear": {"tolerance": 1e-6, "max_iterations": 400},
+        "eigenmode": {"num_modes": 2, "target": 4e9, "tolerance": 1e-8, "save": 2},
+    }
+)
+```
+
+Other simulation types expose their own problem group:
+
+```python
+driven = pa.DrivenSim(solver={"driven": {"fmin": 1e9, "fmax": 10e9, "num_points": 40}})
+driven.solver.driven.adaptive_tol = 0.01
+
+electrostatic = pa.ElectrostaticSim()
+electrostatic.solver.electrostatic.save_fields = 2
+
+boundary = pa.BoundaryModeSim()
+boundary.solver.boundary_mode.freq = 5e9
+boundary.solver.boundary_mode.num_modes = 2
+```
+
+All four share six controls: `order`, `device`, and
+`linear.{solver_type, preconditioner, tolerance, max_iterations}`.
+
+| Simulation | Problem group | Problem settings | Total settings |
+| --- | --- | --- | --- |
+| DrivenSim | `solver.driven` | 12 | 18 |
+| EigenmodeSim | `solver.eigenmode` | 8 | 14 |
+| ElectrostaticSim | `solver.electrostatic` | 1 | 7 |
+| BoundaryModeSim | `solver.boundary_mode` | 7 | 13 |
+
+`sim.set_solver(...)` replaces the common controls using the same defaults as
+`SolverConfig()`, while preserving the problem-specific settings. Assign individual
+attributes to retain other common values. The generated Palace JSON continues to
+use `Solver.Order`, `Solver.Device`, `Solver.Linear`, and the applicable problem block.
+
+### Existing code
+
+`sim.numerical`, `NumericalConfig`, `set_numerical(...)`, the top-level problem
+attributes, and legacy constructor arguments remain supported and emit
+`DeprecationWarning` messages pointing to the grouped API. Problem-specific setters
+such as `set_eigenmode(...)` remain available as convenience methods. Old serialized
+inputs still load; simulation serialization uses the grouped `solver` field.
+`NumericalConfig` retains its flat serialization format. Migrate direct access as follows:
+
+| Previous access | Grouped access |
+| --- | --- |
+| `sim.numerical.order` | `sim.solver.order` |
+| `sim.numerical.tolerance` | `sim.solver.linear.tolerance` |
+| `sim.eigenmode.target` | `sim.solver.eigenmode.target` |
+| `sim.driven.fmin` | `sim.solver.driven.fmin` |
+| `sim.electrostatic.save_fields` | `sim.solver.electrostatic.save_fields` |
+| `sim.boundary_mode.freq` | `sim.solver.boundary_mode.freq` |
+
+Calling `set_numerical()` without an explicit order now uses **2**, matching the
+constructor and `set_solver()`. Pass `order=1` to retain the previous setter behavior.
+Such calls emit a temporary `FutureWarning` explaining this change. Explicit-order
+calls emit the usual API deprecation warning. The new grouped API emits neither.
+
+Update individual controls directly to preserve other settings:
+
+```python
+sim.solver.order = 1
+sim.solver.linear.tolerance = 1e-8
+```
+
+`sim.set_solver(...)` replaces the common controls with the supplied values and
+their defaults, preserving the existing problem group, such as the eigenmode
+target. Assigning `sim.solver = ...` replaces the entire solver configuration,
+including its problem group; a new eigenmode group defaults to `target=None`.
+
+`sim.numerical` is a deprecated alias for `sim.solver`, so its `model_dump()` uses
+the grouped format. `NumericalConfig(**sim.numerical.model_dump())` accepts that
+format and copies the six common numerical controls into a flat legacy model.
+For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings.
+
+::: gsim.palace.SolverConfig
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - order
+        - device
+        - linear
+
+::: gsim.palace.LinearSolverConfig
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - tolerance
+        - max_iterations
+        - solver_type
+        - preconditioner
+
+::: gsim.palace.DrivenConfig
+    options:
+      show_source: false
+      inherited_members: false
+
+::: gsim.palace.EigenmodeConfig
+    options:
+      show_source: false
+      inherited_members: false
+
+::: gsim.palace.ElectrostaticConfig
+    options:
+      show_source: false
+      inherited_members: false
+
+::: gsim.palace.BoundaryModeConfig
+    options:
+      show_source: false
+      inherited_members: false
+
 See [result validation](../palace-validation.md) for independent solver,
 adaptive sampling, mode identity, and provenance checks.
 
@@ -51,14 +194,15 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 ::: gsim.palace.DrivenSim
     options:
       show_source: false
-      inherited_members: false
+      inherited_members: true
       members:
         - set_output_dir
         - set_geometry
         - set_stack
         - set_driven
         - set_material
-        - set_numerical
+        - solver
+        - set_solver
         - add_port
         - add_cpw_port
         - add_pec
@@ -79,14 +223,15 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 ::: gsim.palace.EigenmodeSim
     options:
       show_source: false
-      inherited_members: false
+      inherited_members: true
       members:
         - set_output_dir
         - set_geometry
         - set_stack
         - set_eigenmode
         - set_material
-        - set_numerical
+        - solver
+        - set_solver
         - add_port
         - add_cpw_port
         - add_pec
@@ -102,14 +247,15 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 ::: gsim.palace.ElectrostaticSim
     options:
       show_source: false
-      inherited_members: false
+      inherited_members: true
       members:
         - set_output_dir
         - set_geometry
         - set_stack
         - set_electrostatic
         - set_material
-        - set_numerical
+        - solver
+        - set_solver
         - add_terminal
         - nets
         - add_pec
@@ -123,6 +269,25 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
         - run
         - load_capacitance
 
+::: gsim.palace.BoundaryModeSim
+    options:
+      show_source: false
+      inherited_members: true
+      members:
+        - solver
+        - set_solver
+        - set_boundary_mode
+        - set_cross_section
+        - set_output_dir
+        - set_geometry
+        - set_stack
+        - set_material
+        - mesh
+        - validate_config
+        - validate_mesh
+        - write_config
+        - run
+
 ## Floquet eigenmodes
 
 Set the signed cell phase in radians. The wave vector uses the measured donor-to-receiver mesh translation; the eigenvalue
@@ -134,7 +299,7 @@ from gsim.palace import EigenmodeSim
 
 sim = EigenmodeSim()
 sim.set_eigenmode(target=40e9, floquet=True, phi_target=-0.4, periodic_length=100.0)
-sim.eigenmode.compute_floquet_wave_vector(periodic_axis="x")
+sim.solver.eigenmode.compute_floquet_wave_vector(periodic_axis="x")
 # [-0.004, 0.0, 0.0] rad/um
 ```
 
@@ -315,6 +480,119 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
       show_source: false
       inherited_members: false
       members: false
+
+## Circuit Synthesis
+
+::: gsim.palace.CircuitSynthesis
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - nodes
+        - L_inv
+        - R_inv
+        - C
+        - port_labels
+        - port_indices
+        - internal_indices
+        - port_loads
+        - port_names
+        - Y
+        - port_admittance
+        - port_impedance
+        - s_parameters
+        - port_reference_impedances
+        - eigenfrequencies
+        - fit_rlc
+
+::: gsim.palace.fit_rlc
+    options:
+      show_source: false
+
+::: gsim.palace.differential_impedance
+    options:
+      show_source: false
+
+::: gsim.palace.initial_guess_rlc
+    options:
+      show_source: false
+
+::: gsim.palace.z_rlc
+    options:
+      show_source: false
+
+::: gsim.palace.load_circuit_synthesis
+    options:
+      show_source: false
+
+## Fitting
+
+::: gsim.palace.RLCFit
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - R
+        - L
+        - C
+        - f0
+        - Q
+        - rms_error
+        - z
+        - y
+        - to_dict
+
+::: gsim.palace.VectorFit
+    options:
+      show_source: false
+      inherited_members: false
+      members:
+        - raw
+        - network
+        - poles
+        - residues
+        - zeros
+        - n_poles
+        - is_stable
+        - rms_error
+        - is_passive
+        - passivity_test
+        - passivity_enforce
+        - get_spurious
+        - s
+        - z
+        - y
+        - write_spice
+
+## Parameter Conversions
+
+::: gsim.palace.s_to_z
+    options:
+      show_source: false
+
+::: gsim.palace.z_to_s
+    options:
+      show_source: false
+
+::: gsim.palace.s_to_y
+    options:
+      show_source: false
+
+::: gsim.palace.y_to_s
+    options:
+      show_source: false
+
+::: gsim.palace.z_to_y
+    options:
+      show_source: false
+
+::: gsim.palace.y_to_z
+    options:
+      show_source: false
+
+::: gsim.palace.is_complete
+    options:
+      show_source: false
 
 ## Transmission-line analysis
 

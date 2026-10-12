@@ -85,6 +85,14 @@ class DrivenConfig(BaseModel):
         "Default 20 is usually sufficient.",
     )
 
+    circuit_synthesis: bool = Field(
+        default=False,
+        description="Enable Palace AC circuit synthesis (AdaptiveCircuitSynthesis). "
+        "Requires an adaptive sweep (adaptive_tol > 0) and at least one port. "
+        "Palace synthesizes lumped L/R/C circuit matrices from the reduced-order "
+        "model and writes rom-*.csv files next to the S-parameters.",
+    )
+
     compute_s_params: bool = True
     reference_impedance: float = Field(
         default=50.0,
@@ -204,6 +212,15 @@ class DrivenConfig(BaseModel):
         }
         if self.adaptive_tol > 0:
             config["AdaptiveMaxSamples"] = self.adaptive_max_samples
+        if self.circuit_synthesis:
+            if self.adaptive_tol <= 0:
+                msg = (
+                    "circuit_synthesis requires an adaptive sweep "
+                    "(adaptive_tol > 0): Palace rejects AdaptiveCircuitSynthesis "
+                    "without AdaptiveTol > 0."
+                )
+                raise ValueError(msg)
+            config["AdaptiveCircuitSynthesis"] = True
         if self.save_fields_at:
             config["Save"] = [freq / 1e9 for freq in self.save_fields_at]
         return config
