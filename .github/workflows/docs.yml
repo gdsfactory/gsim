@@ -1,58 +1,18 @@
-name: Docs
+name: Single uncached MEEP notebook
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 env:
+  NOTEBOOK: nbs/meep_2d.ipynb
   PLOTLY_RENDERER: notebook_connected
   PYVISTA_JUPYTER_BACKEND: static
   PYVISTA_OFF_SCREEN: "true"
 jobs:
-  discover-notebooks:
-    name: Discover docs notebooks
-    if: >-
-      github.event_name != 'pull_request' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository)
+  meep-2d:
+    name: Run meep_2d without simulation cache
     runs-on: ubuntu-latest
-    outputs:
-      notebooks: ${{ steps.notebooks.outputs.notebooks }}
-      run_all: ${{ steps.changed-notebooks.outputs.run_all }}
-      changed_notebooks: ${{ steps.changed-notebooks.outputs.notebooks }}
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v6
-    - name: Install UV
-      uses: astral-sh/setup-uv@v6
-    - name: List published notebooks
-      id: notebooks
-      run: echo "notebooks=$(uv run python scripts/list_docs_notebooks.py --json)" >> "$GITHUB_OUTPUT"
-    - name: Detect changed notebooks
-      if: github.event_name == 'pull_request'
-      id: changed-notebooks
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        changed_files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-        run_all=false
-        if grep -qxE 'pyproject\.toml|uv\.lock|src/.+|scripts/.+' <<< "$changed_files"; then
-          run_all=true
-          echo "Project code or dependencies changed; all notebooks will be executed"
-        fi
-        echo "run_all=${run_all}" >> "$GITHUB_OUTPUT"
-        changed=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | tr '\n' ' ')
-        echo "notebooks=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | jq -Rsc 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
-        echo "Changed notebooks: ${changed:-none}"
-  execute-notebooks:
-    name: Execute ${{ matrix.notebook }}
-    needs: discover-notebooks
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        notebook: ${{ fromJSON(needs.discover-notebooks.outputs.notebooks) }}
+    timeout-minutes: 30
     steps:
     - name: Checkout repo
       uses: actions/checkout@v6
@@ -62,91 +22,41 @@ jobs:
     - name: Install UV
       uses: astral-sh/setup-uv@v6
     - name: Create environment
-      env:
-        NOTEBOOK: ${{ matrix.notebook }}
       run: |
         uv sync --no-default-groups --group docs
-        case "$NOTEBOOK" in
-          nbs/palace_qpdk_resonator.ipynb)
-            uv pip install qpdk==0.4.0
-            ;;
-          nbs/palace_inductor.ipynb)
-            uv sync --no-default-groups --group docs --group palace-inductor
-            ;;
-          nbs/palace_*.ipynb)
-            uv pip install ihp-gdsfactory==0.2.8
-            ;;
-        esac
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
-    - name: Execute notebook
-      timeout-minutes: 30
-      if: >-
-        github.event_name != 'pull_request' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
+    - name: Disable simulation cache in the runner's notebook copy
+      run: |
+        uv run --no-sync python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        notebook_path = Path(os.environ["NOTEBOOK"])
+        notebook = json.loads(notebook_path.read_text())
+        cached_call = "sim.run(check_cache=True)"
+        uncached_call = "sim.run(check_cache=False)"
+        replaced_calls = 0
+        for cell in notebook["cells"]:
+            if cell["cell_type"] != "code":
+                continue
+            source = "".join(cell["source"])
+            replaced_calls += source.count(cached_call)
+            cell["source"] = source.replace(cached_call, uncached_call).splitlines(keepends=True)
+        if replaced_calls != 1:
+            raise SystemExit(f"Expected one simulation call, found {replaced_calls}")
+        notebook_path.write_text(json.dumps(notebook, indent=1) + "\n")
+        print("Disabled simulation cache for exactly one MEEP simulation call.")
+        PY
+    - name: Execute the single notebook
       env:
         GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
-        NOTEBOOK: ${{ matrix.notebook }}
-      run: uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim
-    - name: Strip absolute paths
-      env:
-        NOTEBOOK: ${{ matrix.notebook }}
-      run: uv run --no-sync python scripts/strip_notebook_paths.py "$NOTEBOOK"
-    - name: Convert notebook to Markdown
-      env:
-        NOTEBOOK: ${{ matrix.notebook }}
-      run: |
-        mkdir -p generated-docs
-        uv run --no-sync jupyter nbconvert --to markdown --embed-images "$NOTEBOOK" --output-dir generated-docs
-    - name: Upload generated docs
+      run: uv run --no-sync papermill "$NOTEBOOK" "$RUNNER_TEMP/meep_2d.executed.ipynb" -k gsim
+    - name: Upload executed notebook
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: notebook-docs-${{ strategy.job-index }}
-        path: generated-docs
+        name: meep-2d-uncached
+        path: ${{ runner.temp }}/meep_2d.executed.ipynb
         retention-days: 1
-  build:
-    name: Build docs
-    needs: execute-notebooks
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v6
-    - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libosmesa6 xvfb
-    - name: Install UV
-      uses: astral-sh/setup-uv@v6
-    - name: Install Just
-      uses: taiki-e/install-action@just
-    - name: Install svgbob
-      run: cargo install svgbob_cli
-    - name: Create environment
-      run: uv sync --dev
-    - name: Download generated docs
-      uses: actions/download-artifact@v4
-      with:
-        pattern: notebook-docs-*
-        path: docs/nbs
-        merge-multiple: true
-    - name: Build docs
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: just docs
-    - name: Upload Pages artifact
-      if: github.event_name != 'pull_request'
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: docs/site
-  pages:
-    name: Deploy to GitHub Pages
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
