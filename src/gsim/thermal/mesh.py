@@ -597,7 +597,8 @@ def _load(
     region_material: dict[str, str],
 ) -> CrossSectionMesh:
     """Read the msh back into skfem, the way the femwell adapter does."""
-    mio = meshio.read(str(msh_path))
+    # Name the format: ".msh" is also ANSYS, whose failed try prints to stdout.
+    mio = meshio.read(str(msh_path), file_format="gmsh")
     tris, tri_tags = cell_blocks(mio, "triangle")
 
     # Drop points no triangle references, keeping triangle order intact.
