@@ -160,19 +160,26 @@ call after configuring geometry, source and solver:
 sim.add_monitors()               # Optical port images and an XY overview.
 sim.add_monitors(xy=False)       # Alternative: optical port images only.
 sim.add_monitors(z_um=0.11)      # Alternative: set the XY height in micrometers.
+sim.add_monitors(margin_um=1.0)  # Alternative: more cladding around each port.
 ```
 
 These are alternative calls, not a sequence: monitor names must be unique.
 `xy=True` is the default; `z_um=None` chooses the resolved geometry's vertical
-midpoint and is ignored when `xy=False`. Each optical port gets a 2 by 2 µm plane
-three grid cells inward along its normal; the XY overview spans the component's
+midpoint and is ignored when `xy=False`. Each optical port's plane follows its
+own width and its owning PDK layer's vertical bounds, including negative layer
+thickness. `margin_um=0.75` adds that much cladding on each side of the cross
+section; set it to zero for only the active region or increase it for wider field
+tails. This is a geometric window, not an automatically mode-converged aperture.
+The plane is three grid cells inward along its normal; the XY overview spans the component's
 bounding box. All these planes use the source center wavelength, record intensity
 without flux, and leave implicit guided-port responses unchanged. They show the
 driven field, not independent source eigenmode profiles. Existing custom monitors
 are preserved, and name collisions fail before adding any of these planes.
 Changing geometry/source/solver later requires recreating the diagnostic planes.
 This helper only configures monitors; it does not mesh or submit a job. Explicit
-domain bounds still need to contain the requested planes.
+domain bounds still need to contain the requested planes. Dimensional suffixes
+follow the existing `center_um`/`position_um` conventions; the domain's `padding`
+rename is specific to its directional-padding API.
 
 Additional plane monitors can independently record flux, scalar heatmaps, and
 Gaussian fiber overlap:

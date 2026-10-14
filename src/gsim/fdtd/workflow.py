@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from math import isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Self
@@ -213,25 +214,32 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         """Cloud job identifier after upload or run."""
         return self._job_id
 
-    def add_monitors(self, *, xy: bool = True, z_um: float | None = None) -> Self:
+    def add_monitors(
+        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+    ) -> Self:
         """Add center-wavelength port intensity images and an optional XY overview.
 
         Args:
             xy: Include the component-wide XY overview (default: True).
             z_um: Overview height in micrometers. None uses the resolved geometry's
                 vertical midpoint. Ignored when xy is False.
+            margin_um: Nonnegative cladding margin on each side of a port's
+                active cross section, in micrometers (default: 0.75).
 
         Returns:
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows are 2 by 2 micrometers, three Yee cells inward
-            from each port. Each plane records only the source center wavelength,
+            Optical port windows follow the port width and owning PDK layer's
+            vertical bounds, plus margin_um, three Yee cells inward from each
+            port. Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
             raise ValueError before any planes are added. This method does not
             mesh, submit or run a simulation.
         """
+        if not isfinite(margin_um) or margin_um < 0:
+            raise ValueError("margin_um must be finite and nonnegative")
         resolved = self._resolve_geometry()
         wavelength_um = self.source.wavelength_um
         offset_um = 3 * self.solver.cell_size_nm / 1000
@@ -240,6 +248,13 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             if port.port_type != "optical":
                 continue
             nx, ny, _ = port.normal
+            if port.layer_key is None:
+                raise FDTDGeometryError(
+                    f"Optical port {port.name!r} has no owning layer"
+                )
+            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            width_um = port.width + 2 * margin_um
+            height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
                 ("+x" if nx > 0 else "-x") if nx else ("+y" if ny > 0 else "-y")
             )
@@ -251,7 +266,9 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                         port.center[1] - ny * offset_um,
                         port.center[2],
                     ),
-                    size_um=(0, 2.0, 2.0) if nx else (2.0, 0, 2.0),
+                    size_um=(0, width_um, height_um)
+                    if nx
+                    else (width_um, 0, height_um),
                     normal=normal,
                     flux=False,
                     wavelengths_um=[wavelength_um],

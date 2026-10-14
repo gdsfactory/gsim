@@ -33,7 +33,7 @@ def test_default_diagnostic_planes_serialize(tmp_path, fdtd_pdk_module):
     assert planes["port_o2"].center_um == pytest.approx((3.82, 0, 0.11))
     assert planes["port_o1"].normal == "-x"
     assert planes["port_o2"].normal == "+x"
-    assert planes["port_o1"].size_um == (0, 2, 2)
+    assert planes["port_o1"].size_um == pytest.approx((0, 2, 1.72))
     overview = planes["overview_xy"]
     assert overview.center_um == pytest.approx((2, 0, 0.11))
     assert overview.size_um == pytest.approx((4, 0.5, 0))
@@ -72,7 +72,7 @@ def test_y_ports_use_current_source_and_solver(fdtd_pdk_module):
     simulation.add_monitors(xy=False)
     assert simulation.monitors["port_o1"].normal == "-y"
     assert simulation.monitors["port_o2"].normal == "+y"
-    assert simulation.monitors["port_o1"].size_um == (2, 0, 2)
+    assert simulation.monitors["port_o1"].size_um == pytest.approx((2, 0, 1.72))
     assert simulation.monitors["port_o1"].center_um == pytest.approx((0, 0.12, 0.11))
     assert simulation.monitors["port_o2"].center_um == pytest.approx((0, 1.88, 0.11))
     heatmap = simulation.monitors["port_o1"].heatmap
@@ -109,4 +109,34 @@ def test_missing_geometry_fails_before_monitor_mutation():
     simulation = fdtd.Simulation()
     with pytest.raises(fdtd.FDTDGeometryError, match="No geometry"):
         simulation.add_monitors()
+    assert len(simulation.monitors) == 0
+
+
+@pytest.mark.parametrize("margin_um", [0.0, 0.25, 1.0])
+def test_window_tracks_each_port_and_owning_layer(fdtd_pdk_module, margin_um):
+    import gdsfactory as gf
+
+    layer = fdtd_pdk_module.PDK.layer_stack.layers["core"]
+    layer.zmin = 1.2
+    layer.thickness = -0.6
+    component = gf.Component()
+    component.add_polygon([(0, -0.6), (4, -0.9), (4, 0.9), (0, 0.6)], layer=(1, 0))
+    component.add_port("in", center=(0, 0), width=1.2, orientation=180, layer=(1, 0))
+    component.add_port("out", center=(4, 0), width=1.8, orientation=0, layer=(1, 0))
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry(component)
+    simulation.add_monitors(xy=False, margin_um=margin_um)
+    for name, width in (("in", 1.2), ("out", 1.8)):
+        monitor = simulation.monitors[f"port_{name}"]
+        assert monitor.size_um == pytest.approx(
+            (0, width + 2 * margin_um, 0.6 + 2 * margin_um)
+        )
+        assert monitor.center_um[2] == pytest.approx(0.9)
+
+
+@pytest.mark.parametrize("margin_um", [-1.0, float("nan"), float("inf")])
+def test_invalid_margin_does_not_mutate_monitors(fdtd_pdk_module, margin_um):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        simulation.add_monitors(margin_um=margin_um)
     assert len(simulation.monitors) == 0
