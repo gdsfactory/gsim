@@ -79,7 +79,8 @@ own optical window around its drawn core.
 layer made of that material changes. To give the 220 nm core a thin-film conductivity without changing the bulk
 substrate, give the core its own material name in the stack. The tutorial shows how.
 
-`set_boundary` chooses adiabatic or convective top and sides. Free convection in air (h ≈ 10 W/m²/K) is negligible next
+`set_boundary` chooses adiabatic or convective top and sides; settings you leave out keep their current value.
+Free convection in air (h ≈ 10 W/m²/K) is negligible next
 to conduction into the substrate, which is why adiabatic is the default.
 
 ## Numerical knobs
@@ -91,9 +92,12 @@ to conduction into the substrate, which is why adiabatic is the default.
 ## Results
 
 - [`ThermalResult`][gsim.thermal.ThermalResult]: `p_pi`, `efficiency`, `resistance`, `v_pi`, `crosstalk` (rad on each
-  victim at P_π), `thermal_resistance` (K/mW at each core), `dneff_per_power`, `temperature(power)` and `phase(power)`.
+  victim at P_π), `crosstalk_ratio` (victim phase over phase-shifter phase), `thermal_resistance` (K/mW at each core),
+  `dneff_per_power`, `temperature(power)`, `phase(power)` and `drive_power(voltage=… | current=…)`, which turns a
+  drive voltage or current into heater power in mW.
 - [`TemperatureMap`][gsim.thermal.TemperatureMap]: the temperature rise at one power, with `at(position, z)`,
-  `peak(layer)` and `plot()`.
+  `peak(layer)` and `plot(xlim=, zlim=)`. Pass `ambient=` (in K, e.g. 293.15) to `at` or `peak` for an absolute
+  temperature instead of the rise.
 - [`StepResponse`][gsim.thermal.StepResponse]: the phase over time after the heater is switched on. It gives
   `tau` (the 10–90 % rise time) and `tau_1e` (the time to reach 1 − 1/e, about 63 %). In this linear model the fall time
   equals the rise time.
@@ -115,7 +119,8 @@ These lower-level building blocks are public for custom pipelines. They work on 
   [`CrossSectionMesh`][gsim.thermal.CrossSectionMesh]
 - [`solve_steady`][gsim.thermal.solve_steady], [`solve_transient`][gsim.thermal.solve_transient] and
   [`HeatOperator`][gsim.thermal.HeatOperator]
-- [`joule_heat_density`][gsim.thermal.joule_heat_density]
+- [`joule_heat_density`][gsim.thermal.joule_heat_density] and
+  [`drive_power_per_length`][gsim.thermal.drive_power_per_length]
 - [`thermo_optic_permittivity`][gsim.thermal.thermo_optic_permittivity],
   [`solve_thermo_optic_shift`][gsim.thermal.solve_thermo_optic_shift], [`ModeShift`][gsim.thermal.ModeShift] and
   [`sample_temperature`][gsim.thermal.sample_temperature]
