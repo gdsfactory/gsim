@@ -1493,12 +1493,20 @@ def _get_ci[T](mapping: Mapping[str, T] | None, name: str) -> T | None:
     return None
 
 
-def _scalar_conductivity(value: float | list[float] | None, label: str) -> float | None:
-    """Return an isotropic conductivity as a scalar."""
+def _scalar_conductivity(
+    value: float | list[float] | None, label: str, *, required: bool
+) -> float | None:
+    """Return an isotropic conductivity as a scalar.
+
+    An anisotropic one has no scalar value: it is an error when the
+    caller needs the conductivity, and left out (``None``) otherwise.
+    """
     if value is None or not isinstance(value, list):
         return value
     if len(set(value)) == 1:
         return value[0]
+    if not required:
+        return None
     msg = (
         f"Material {label} has an anisotropic conductivity {value}; the "
         "thermal solver needs a scalar electrical conductivity."
@@ -1534,7 +1542,9 @@ def thermal_properties(
 
     Raises:
         ValueError: If the material is unknown, a required field is
-            unknown or unset, or the conductivity is anisotropic.
+            unknown or unset, or the electrical conductivity is required
+            and anisotropic (an anisotropic one that is not required
+            resolves to ``None``).
     """
     required = tuple(required)
     unknown = [f for f in required if f not in _THERMAL_PROPERTY_NAMES]
@@ -1585,7 +1595,9 @@ def thermal_properties(
         if src.conductivity is not None:
             values["electrical_conductivity"] = src.conductivity
     values["electrical_conductivity"] = _scalar_conductivity(
-        values["electrical_conductivity"], label
+        values["electrical_conductivity"],
+        label,
+        required="electrical_conductivity" in required,
     )
 
     missing = [f for f in required if values[f] is None]

@@ -252,13 +252,16 @@ def solve_thermo_optic_shift(
     polarization: Literal["TE", "TM"] | None = "TE",
     mode_order: int = 0,
     num_modes: int = 4,
+    n_guess: float | None = None,
 ) -> ModeShift:
     """Effective-index shift of one Mode under a temperature rise.
 
     The Mode is solved twice on the same optical mesh, with ``epsilon0``
     and with :func:`thermo_optic_permittivity` of ``sqrt(epsilon0)``, so
     the discretisation error cancels in the difference. The perturbed
-    Mode is the one overlapping the unperturbed Mode most.
+    Mode is the one overlapping the unperturbed Mode most; its solve is
+    seeded at the unperturbed index, which the small perturbation
+    barely moves.
 
     Args:
         optical_mesh: The optical Window (from
@@ -275,6 +278,10 @@ def solve_thermo_optic_shift(
         mode_order: Which Mode of that polarization, by descending
             ``Re(neff)``: 0 is the fundamental.
         num_modes: How many Modes each solve computes to choose from.
+        n_guess: Effective-index guess the unperturbed solve looks for
+            Modes around, e.g. the waveguide core's index; ``None`` uses
+            femwell's default (just above the largest index in the
+            Window).
 
     Returns:
         The two indices, the first-order estimate and both Modes.
@@ -298,9 +305,17 @@ def solve_thermo_optic_shift(
     # One loader path: the optical mesh as built, so element i of every
     # per-element array is element i of the basis.
     basis0 = skfem.Basis(optical_mesh.mesh, skfem.ElementTriP0())
-    modes0 = compute_modes(basis0, eps0, wavelength=wavelength_um, num_modes=num_modes)
+    modes0 = compute_modes(
+        basis0, eps0, wavelength=wavelength_um, num_modes=num_modes, n_guess=n_guess
+    )
     mode0 = _select(modes0, polarization, mode_order)
-    modes = compute_modes(basis0, eps, wavelength=wavelength_um, num_modes=num_modes)
+    modes = compute_modes(
+        basis0,
+        eps,
+        wavelength=wavelength_um,
+        num_modes=num_modes,
+        n_guess=complex(mode0.n_eff).real,
+    )
     overlaps = [abs(complex(mode0.calculate_overlap(m))) for m in modes]
     best = int(np.argmax(overlaps))
     mode = modes[best]

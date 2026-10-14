@@ -135,6 +135,21 @@ class TestThermalPropertiesHelper:
         assert props.thermal_conductivity == pytest.approx(3.0)
         assert props.specific_heat is None
 
+    def test_anisotropic_conductivity_is_dropped_unless_it_is_required(self):
+        record = MaterialProperties(
+            conductivity=[1e5, 1e5, 1e3], thermal_conductivity=3.0
+        )
+        props = thermal_properties(record)
+        assert props.thermal_conductivity == pytest.approx(3.0)
+        assert props.electrical_conductivity is None
+        with pytest.raises(ValueError, match="anisotropic"):
+            thermal_properties(record, required=("electrical_conductivity",))
+
+    def test_isotropic_conductivity_given_as_a_list_is_a_scalar(self):
+        record = MaterialProperties(conductivity=[2e6, 2e6, 2e6])
+        props = thermal_properties(record, required=("electrical_conductivity",))
+        assert props.electrical_conductivity == pytest.approx(2e6)
+
     def test_missing_required_field_names_material_and_field(self):
         with pytest.raises(ValueError, match=r"poly_si.*thermal_conductivity"):
             thermal_properties("poly_si", required=("thermal_conductivity",))

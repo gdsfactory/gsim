@@ -631,8 +631,15 @@ def _load(
     for name, tag in group_tags(mio, dim=1).items():
         pairs = np.sort(lines[line_tags == tag], axis=1)
         keys = pairs[:, 0] * n_nodes + pairs[:, 1]
-        idx = order[np.searchsorted(sorted_keys, keys)]
-        boundary_facets[name] = np.asarray(np.sort(idx), dtype=np.int64)
+        pos = np.minimum(np.searchsorted(sorted_keys, keys), sorted_keys.size - 1)
+        unmatched = int(np.count_nonzero(sorted_keys[pos] != keys))
+        if unmatched:
+            raise RuntimeError(
+                f"Boundary group '{name}' of {msh_path}: {unmatched} of its "
+                f"{keys.size} line elements are not edges of the triangle "
+                "mesh, so the mesh is inconsistent; please report it."
+            )
+        boundary_facets[name] = np.asarray(np.sort(order[pos]), dtype=np.int64)
 
     return CrossSectionMesh(
         mesh=mesh,

@@ -13,7 +13,8 @@ What :class:`~gsim.thermal.ThermalSim` hands back:
 - :class:`HeaterReport` -- one table of the figures above.
 
 Units: lengths in um, power in mW (total heater power over the heater
-length), temperature **rise** above ambient in K, time in us,
+length), temperature **rise** above ambient in K (absolute temperatures
+only where an ``ambient`` in K is given), time in us,
 resistance in ohm, voltage in V, phase in rad. Every result is a 2D
 cross-section of an infinitely long heater: no end losses, meanders or
 via spreading.
@@ -30,6 +31,11 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from gsim.thermal.optical import sample_temperature
+from gsim.thermal.solver import (
+    _crossing_time,
+    _normalised_step,
+    drive_power_per_length,
+)
 
 if TYPE_CHECKING:
     from gsim.thermal.mesh import CrossSectionMesh
@@ -58,6 +64,18 @@ def power_per_length(power_mW: float, length_um: float) -> float:
     return power_mW * _MW_TO_W / (length_um * _UM_TO_M)
 
 
+def _absolute(ambient: float | None) -> float:
+    """The offset an ``ambient`` adds to a rise: 0 for none, else the ambient."""
+    if ambient is None:
+        return 0.0
+    if not ambient > 0:
+        raise ValueError(
+            "ambient is an absolute temperature in kelvin (e.g. 293.15 for "
+            f"20 C), got {ambient}."
+        )
+    return float(ambient)
+
+
 def _in_plane_axis(plane: str) -> str:
     """Name of the in-plane axis of a vertical cut, ``y`` for ``x=...``."""
     return "y" if plane.strip().lower().startswith("x") else "x"
@@ -80,22 +98,29 @@ class TemperatureMap:
     values: NDArray[np.float64] = field(repr=False)
     power: float
 
-    def at(self, position: ArrayLike, z: ArrayLike) -> Any:
-        """Temperature rise at in-plane position(s) and height(s).
+    def at(
+        self, position: ArrayLike, z: ArrayLike, *, ambient: float | None = None
+    ) -> Any:
+        """Temperature rise (or temperature) at in-plane position(s) and height(s).
 
         Args:
             position: In-plane coordinate(s) in um -- ``y`` for an
                 ``"x=..."`` cut, ``x`` for a ``"y=..."`` cut, as in
                 :meth:`ThermalSim.add_waveguide`.
             z: Height(s) in um, broadcast against ``position``.
+            ambient: Ambient (heat-sink) temperature in K, usually 293.15.
+                ``None`` returns the rise above ambient; a value returns
+                the absolute temperature, rise plus ambient.
 
         Returns:
-            The rise in K: a float for scalar inputs, else an array of
-            the broadcast shape.
+            The rise (or temperature) in K: a float for scalar inputs,
+            else an array of the broadcast shape.
 
         Raises:
-            ValueError: When a point lies outside the thermal Window.
+            ValueError: When a point lies outside the thermal Window, or
+                ``ambient`` is not a positive temperature in K.
         """
+        offset = _absolute(ambient)
         h, v = np.broadcast_arrays(
             np.asarray(position, dtype=float), np.asarray(z, dtype=float)
         )
@@ -103,34 +128,50 @@ class TemperatureMap:
             self.mesh, self.values, np.vstack([h.ravel(), v.ravel()])
         )
         if h.ndim == 0:
-            return float(values[0])
-        return values.reshape(h.shape)
+            return float(values[0]) + offset
+        return values.reshape(h.shape) + offset
 
-    def peak(self, layer: str | None = None) -> float:
-        """Peak temperature rise, over the whole Window or one Region.
+    def peak(self, layer: str | None = None, *, ambient: float | None = None) -> float:
+        """Peak temperature rise (or temperature), over the Window or one Region.
 
         Args:
             layer: A Region of the thermal mesh -- a drawn stack layer
                 such as the heater, or a slab by its material name.
                 ``None`` takes the whole Window.
+            ambient: Ambient (heat-sink) temperature in K, usually 293.15.
+                ``None`` returns the rise above ambient; a value returns
+                the absolute peak temperature, rise plus ambient.
 
         Returns:
-            The largest nodal rise in K.
+            The largest nodal rise (or temperature) in K.
 
         Raises:
-            ValueError: When the mesh has no Region of that name.
+            ValueError: When the mesh has no Region of that name, or
+                ``ambient`` is not a positive temperature in K.
         """
+        offset = _absolute(ambient)
         if layer is None:
-            return float(self.values.max())
+            return float(self.values.max()) + offset
         nodes = np.unique(self.mesh.mesh.t[:, self.mesh.region_mask(layer)])
-        return float(self.values[nodes].max())
+        return float(self.values[nodes].max()) + offset
 
-    def plot(self, ax: Any = None, *, cmap: str = "inferno") -> Any:
+    def plot(
+        self,
+        ax: Any = None,
+        *,
+        cmap: str = "inferno",
+        xlim: tuple[float, float] | None = None,
+        zlim: tuple[float, float] | None = None,
+    ) -> Any:
         """Draw the temperature rise over the Cross-section.
 
         Args:
             ax: Matplotlib axes to draw on; a new figure when ``None``.
             cmap: Matplotlib colormap name.
+            xlim: In-plane range ``(min, max)`` to show (um), e.g. to zoom
+                on the heater; the whole Window when ``None``.
+            zlim: Height range ``(min, max)`` to show (um); the whole
+                Window when ``None``.
 
         Returns:
             The matplotlib axes.
@@ -148,6 +189,10 @@ class TemperatureMap:
         ax.set_ylabel("z (µm)")
         ax.set_title(f"Temperature rise at {self.power:.3g} mW")
         ax.set_aspect("equal")
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        if zlim is not None:
+            ax.set_ylim(*zlim)
         return ax
 
 
@@ -185,7 +230,7 @@ class StepResponse:
     tau_1e: float
 
     def plot(self, ax: Any = None) -> Any:
-        """Draw the phase over time, marking tau.
+        """Draw the phase over time, marking the 10 % and 90 % points and tau_1e.
 
         Args:
             ax: Matplotlib axes to draw on; a new figure when ``None``.
@@ -197,11 +242,31 @@ class StepResponse:
 
         if ax is None:
             _, ax = plt.subplots()
+        t, s = _normalised_step(self.time, self.phase)
+        start, span = self.phase[0], self.phase[-1] - self.phase[0]
+        levels = np.array([0.1, 0.9])
         ax.plot(self.time, self.phase, label=self.phase_shifter)
         ax.axhline(self.steady_phase, color="0.6", linestyle=":", label="steady")
+        ax.plot(
+            [_crossing_time(t, s, level) for level in levels],
+            start + levels * span,
+            "o",
+            color="C1",
+            label="10 % and 90 %",
+        )
+        ax.plot(
+            [self.time[0] + self.tau_1e],
+            [start + (1.0 - math.exp(-1.0)) * span],
+            "s",
+            color="C2",
+            label="1/e",
+        )
         ax.set_xlabel("Time (µs)")
         ax.set_ylabel("Phase shift (rad)")
-        ax.set_title(f"Step to {self.power:.3g} mW: tau(10-90 %) = {self.tau:.3g} µs")
+        ax.set_title(
+            f"Step to {self.power:.3g} mW: tau(10-90 %) = {self.tau:.3g} µs, "
+            f"tau(1/e) = {self.tau_1e:.3g} µs"
+        )
         ax.legend()
         return ax
 
@@ -217,6 +282,8 @@ class HeaterReport:
         v_pi: Voltage for a pi phase shift (V).
         peak_temperature: Peak temperature rise in the heater at P_pi (K).
         crosstalk: Phase on each victim waveguide at P_pi (rad).
+        crosstalk_ratio: Victim phase over phase-shifter phase, by
+            victim waveguide.
         thermal_resistance: Core temperature rise per mW, by waveguide
             (K/mW).
         length: Heater length (um).
@@ -231,6 +298,7 @@ class HeaterReport:
     v_pi: float
     peak_temperature: float
     crosstalk: dict[str, float]
+    crosstalk_ratio: dict[str, float]
     thermal_resistance: dict[str, float]
     length: float
     wavelength: float
@@ -257,6 +325,10 @@ class HeaterReport:
         rows += [
             (f"Crosstalk at P_pi, {name} (rad)", f"{value:.4g}")
             for name, value in self.crosstalk.items()
+        ]
+        rows += [
+            (f"Crosstalk ratio, {name}", f"{value:.4g}")
+            for name, value in self.crosstalk_ratio.items()
         ]
         if self.tau is not None:
             rows.append(("tau 10-90 % (us)", f"{self.tau:.4g}"))
@@ -315,6 +387,8 @@ class ThermalResult:
         v_pi: Voltage across the heater at P_pi (V).
         crosstalk: Phase on each victim waveguide when the heater
             drives P_pi (rad).
+        crosstalk_ratio: Phase on each victim waveguide over the phase
+            shifter's phase, at any power (linear model).
         thermal_resistance: Temperature rise at each waveguide's core
             centre per mW of heater power (K/mW).
         dneff_per_power: Effective-index shift per mW of heater power,
@@ -331,6 +405,7 @@ class ThermalResult:
     resistance: float
     v_pi: float
     crosstalk: dict[str, float]
+    crosstalk_ratio: dict[str, float]
     thermal_resistance: dict[str, float]
     dneff_per_power: dict[str, float]
     dneff_first_order: dict[str, float]
@@ -369,11 +444,52 @@ class ThermalResult:
             for name, slope in self.dneff_per_power.items()
         }
 
+    def drive_power(
+        self, *, voltage: float | None = None, current: float | None = None
+    ) -> float:
+        """Total heater power of a voltage or current drive.
+
+        The heater is the resistance over its length: ``V^2 / R`` or
+        ``I^2 R``. Give exactly one drive.
+
+        Args:
+            voltage: Voltage across the heater (V).
+            current: Current through the heater (A).
+
+        Returns:
+            The dissipated power (mW), for :meth:`phase` and
+            :meth:`temperature`.
+
+        Raises:
+            ValueError: Unless exactly one drive is given.
+        """
+        given = [v for v in (voltage, current) if v is not None]
+        if len(given) != 1:
+            raise ValueError(
+                "drive_power needs exactly one of voltage= (V) or current= (A)."
+            )
+        length_m = self.length * _UM_TO_M
+        per_length = drive_power_per_length(
+            self.resistance / length_m,
+            voltage_V=voltage,
+            current_A=current,
+            length_um=self.length,
+        )
+        return per_length * length_m / _MW_TO_W
+
     @property
     def peak_temperature(self) -> float:
-        """Peak temperature rise in the heater at P_pi (K)."""
+        """Peak temperature rise in the heater at P_pi (K).
+
+        Taken over the heater layers drawn in the cut; a heater layer the
+        cut misses carries no current there.
+        """
         tmap = self.temperature(self.p_pi)
-        return max(tmap.peak(layer) for layer in self.heater_layers)
+        return max(
+            tmap.peak(layer)
+            for layer in self.heater_layers
+            if layer in self.mesh.region_material
+        )
 
     def report(self, step: StepResponse | None = None) -> HeaterReport:
         """Figures of merit in one table.
@@ -391,6 +507,7 @@ class ThermalResult:
             v_pi=self.v_pi,
             peak_temperature=self.peak_temperature,
             crosstalk=dict(self.crosstalk),
+            crosstalk_ratio=dict(self.crosstalk_ratio),
             thermal_resistance=dict(self.thermal_resistance),
             length=self.length,
             wavelength=self.wavelength,

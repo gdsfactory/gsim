@@ -210,6 +210,22 @@ def test_the_unperturbed_index_matches_the_femwell_adapter_on_the_same_mesh(
     assert heated_10k.neff0 == pytest.approx(complex(modes[0].n_eff), rel=1e-9)
 
 
+def test_an_index_guess_seeds_the_solve_without_changing_the_shift(
+    optical_mesh, stack, heated_10k
+):
+    eps0, dn_dt = _optical_inputs(optical_mesh, stack)
+    seeded = solve_thermo_optic_shift(
+        optical_mesh,
+        eps0,
+        dn_dt,
+        np.full(eps0.size, 10.0),
+        wavelength_um=WAVELENGTH_UM,
+        n_guess=3.4777,  # the Si core's index
+    )
+    assert seeded.neff0 == pytest.approx(heated_10k.neff0, rel=1e-9)
+    assert seeded.delta_neff == pytest.approx(heated_10k.delta_neff, rel=1e-6)
+
+
 # TM0 of a 220 nm strip reaches further into the oxide than TE0 and is
 # (correctly) flagged at the edge of this Window; selection is the point.
 @pytest.mark.filterwarnings("ignore:The Mode's field at the optical Window edge")

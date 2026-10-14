@@ -8,7 +8,9 @@ one table and :class:`ThermalOptions` holds the numerical knobs.
 
 Underneath is a pure functional core, public for custom pipelines:
 :func:`build_cross_section_mesh`, :func:`solve_steady`,
-:func:`solve_transient`, :func:`joule_heat_density` and
+:func:`solve_transient`, :func:`joule_heat_density`,
+:func:`drive_power_per_length` (a voltage, current or total power as
+the power per length the core takes) and
 :func:`solve_thermo_optic_shift`.
 
 Units: lengths in um, power in mW, temperature rise in K, time in us.
@@ -32,6 +34,7 @@ from gsim.thermal.results import (
 from gsim.thermal.sim import ThermalOptions, ThermalSim
 from gsim.thermal.solver import (
     HeatOperator,
+    drive_power_per_length,
     joule_heat_density,
     solve_steady,
     solve_transient,
@@ -48,6 +51,7 @@ __all__ = [
     "ThermalResult",
     "ThermalSim",
     "build_cross_section_mesh",
+    "drive_power_per_length",
     "joule_heat_density",
     "sample_temperature",
     "solve_steady",

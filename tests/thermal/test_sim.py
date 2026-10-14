@@ -387,3 +387,240 @@ def test_solving_with_no_waveguide_says_what_is_missing():
     sim.set_heater("heater", length=320.0)
     with pytest.raises(ValueError, match="add_waveguide"):
         sim.solve(wavelength=WAVELENGTH)
+
+
+# --------------------------------------------------------------- setup changes
+
+
+def test_assigning_a_setup_field_directly_invalidates_the_cached_solve():
+    fast = ThermalOptions(precision="fast")
+    sim = femwell_sim(length=320.0)
+    first = sim.solve(wavelength=WAVELENGTH, options=fast)
+
+    sim.heater_length = 640.0
+    longer = sim.solve(wavelength=WAVELENGTH, options=fast)
+    assert longer.length == 640.0
+    assert longer.resistance == pytest.approx(2.0 * first.resistance, rel=1e-9)
+
+    sim.materials = {"tin": {"conductivity": SIGMA_TIN / 2}}
+    halved = sim.solve(wavelength=WAVELENGTH, options=fast)
+    assert halved.resistance == pytest.approx(4.0 * first.resistance, rel=1e-9)
+
+
+def _heater_strips_sim(strips, window=(-8.0, 8.0), layers="heater") -> ThermalSim:
+    """The femwell case with the heater drawn as ``(centre, width)`` strips."""
+    gf.gpdk.PDK.activate()
+    c = gf.Component()
+    _rect(c, 0.0, CORE_W, (1, 0))
+    for centre, width in strips:
+        _rect(c, centre, width, (47, 0))
+    sim = ThermalSim()
+    sim.set_geometry(c)
+    sim.set_stack(femwell_stack())
+    sim.set_cross_section("x=0", window=window)
+    sim.set_heater(layers, length=320.0)
+    sim.add_waveguide("arm", position=0.0)
+    return sim
+
+
+@pytest.mark.parametrize(
+    ("strips", "extent"),
+    [
+        ([(0.0, 2.0), (7.5, 2.0)], r"\[6\.5, 8\.5\]"),  # half outside
+        ([(0.0, 2.0), (12.0, 2.0)], r"\[11, 13\]"),  # wholly outside
+    ],
+)
+def test_a_heater_conductor_the_window_cuts_is_an_error_naming_the_remedy(
+    strips, extent
+):
+    sim = _heater_strips_sim(strips)
+    with pytest.raises(ValueError, match=extent) as error:
+        sim.solve(wavelength=WAVELENGTH, options=ThermalOptions("fast"))
+    message = str(error.value)
+    assert "'heater'" in message
+    assert "(-8, 8)" in message
+    assert "set_cross_section" in message
+
+
+def test_two_heater_strips_conduct_in_parallel():
+    sim = _heater_strips_sim([(-1.5, 1.0), (1.5, 1.0)])
+    result = sim.solve(wavelength=WAVELENGTH, options=ThermalOptions("fast"))
+    # Same total conductor cross-section as the single 2 um strip.
+    by_hand = 320e-6 / (SIGMA_TIN * 2 * 1e-6 * HEATER_T * 1e-6)
+    assert result.resistance == pytest.approx(by_hand, rel=1e-9)
+
+
+def test_a_heater_layer_the_cut_misses_is_left_out_with_a_warning():
+    sim = _heater_strips_sim([(0.0, HEATER_W)], layers=["heater", "lead"])
+    sim.stack.layers["lead"] = _layer(
+        "lead", (49, 0), 2.4, 2.6, "tin", kind="conductor"
+    )
+    with pytest.warns(UserWarning, match="lead"):
+        result = sim.solve(wavelength=WAVELENGTH, options=ThermalOptions("fast"))
+    assert result.peak_temperature == pytest.approx(
+        result.temperature(result.p_pi).peak("heater")
+    )
+    assert "Peak heater rise" in str(result.report())
+
+
+# --------------------------------------------------------------- result read-outs
+
+
+def test_crosstalk_ratio_is_the_victim_phase_over_the_shifter_phase(canonical):
+    _sim, result, _step = canonical
+    # At P_pi the phase shifter turns exactly pi.
+    assert result.crosstalk_ratio == {
+        "neighbour": pytest.approx(result.crosstalk["neighbour"] / math.pi)
+    }
+    assert 0.0 < result.crosstalk_ratio["neighbour"] < 1.0
+    assert "Crosstalk ratio, neighbour" in str(result.report())
+
+
+def test_temperatures_are_rises_unless_an_ambient_is_given(femwell_result):
+    tmap = femwell_result.temperature(power=10.0)
+    rise = tmap.at(0.0, 0.11)
+    assert 0.0 < rise < 50.0
+    assert tmap.at(0.0, 0.11, ambient=293.15) == pytest.approx(293.15 + rise)
+    np.testing.assert_allclose(
+        tmap.at([0.0, 1.0], [0.11, 0.11], ambient=300.0),
+        300.0 + tmap.at([0.0, 1.0], [0.11, 0.11]),
+    )
+    assert tmap.peak(ambient=300.0) == pytest.approx(300.0 + tmap.peak())
+    assert tmap.peak("heater", ambient=300.0) == pytest.approx(
+        300.0 + tmap.peak("heater")
+    )
+    with pytest.raises(ValueError, match="kelvin"):
+        tmap.peak(ambient=-20.0)
+
+
+def test_drive_power_from_a_voltage_or_a_current(femwell_result):
+    r = femwell_result.resistance
+    # V = 5 V across R: V^2 / R; I = 10 mA through R: I^2 R (in mW).
+    assert femwell_result.drive_power(voltage=5.0) == pytest.approx(25.0 / r * 1e3)
+    assert femwell_result.drive_power(current=0.01) == pytest.approx(1e-4 * r * 1e3)
+    assert femwell_result.drive_power(voltage=femwell_result.v_pi) == pytest.approx(
+        femwell_result.p_pi
+    )
+    with pytest.raises(ValueError, match="exactly one"):
+        femwell_result.drive_power(voltage=1.0, current=0.01)
+    with pytest.raises(ValueError, match="exactly one"):
+        femwell_result.drive_power()
+
+
+def test_drive_power_per_length_is_public():
+    from gsim.thermal import drive_power_per_length
+
+    assert drive_power_per_length(1.0, current_A=2.0) == pytest.approx(4.0)
+
+
+# --------------------------------------------------------------- materials
+
+
+def test_an_anisotropic_conductivity_matters_only_on_the_heater():
+    fast = ThermalOptions(precision="fast")
+    sim = femwell_sim()
+    sim.stack.materials["si_core"]["conductivity"] = [1e3, 1e3, 10.0]
+    assert 15.0 < sim.solve(wavelength=WAVELENGTH, options=fast).p_pi < 30.0
+
+    sim = femwell_sim()
+    sim.stack.materials["tin"]["conductivity"] = [SIGMA_TIN, SIGMA_TIN, 1e3]
+    with pytest.raises(ValueError, match=r"heater.*anisotropic"):
+        sim.solve(wavelength=WAVELENGTH, options=fast)
+
+
+def test_an_optical_override_skips_an_invalid_stack_entry_like_the_rest():
+    sim = femwell_sim()
+    # Not a valid MaterialProperties record: the thermal path falls back to
+    # the database's oxide, and so must the optical override.
+    sim.stack.materials["oxide"]["mass_density"] = -1.0
+    sim.set_material("oxide", permittivity=1.444**2)
+    result = sim.solve(wavelength=WAVELENGTH, options=ThermalOptions("fast"))
+    assert 15.0 < result.p_pi < 30.0
+
+
+def test_set_material_merges_names_that_differ_only_in_case():
+    sim = ThermalSim()
+    sim.set_material("TiN", conductivity=1e6)
+    sim.set_material("tin", thermal_conductivity=20.0)
+    assert sim.materials == {"TiN": {"conductivity": 1e6, "thermal_conductivity": 20.0}}
+
+
+def test_a_setup_change_warns_again_about_a_material_without_dn_dt():
+    sim = femwell_sim()
+    sim.stack.dielectrics[2]["material"] = "clad_ox"
+    sim.stack.materials["clad_ox"] = {
+        "permittivity": 1.444**2,
+        "thermal_conductivity": 1.38,
+        **_OX,
+    }
+    fast = ThermalOptions(precision="fast")
+    with pytest.warns(UserWarning, match="clad_ox"):
+        sim.solve(wavelength=WAVELENGTH, options=fast)
+    sim.heater_length = 330.0
+    with pytest.warns(UserWarning, match="clad_ox"):
+        sim.solve(wavelength=WAVELENGTH, options=fast)
+
+
+# --------------------------------------------------------------- boundaries, cut
+
+
+def test_set_boundary_keeps_what_a_call_leaves_out():
+    sim = ThermalSim()
+    sim.set_boundary(top="convective", heat_transfer_coefficient=20.0)
+    sim.set_boundary(sides="convective")
+    assert sim.boundary == {"top": 20.0, "left": 20.0, "right": 20.0}
+    sim.set_boundary(top="adiabatic")
+    assert sim.boundary == {"left": 20.0, "right": 20.0}
+    sim.set_boundary(heat_transfer_coefficient=5.0)
+    assert sim.boundary == {"left": 5.0, "right": 5.0}
+
+
+def test_a_waveguide_on_the_shared_edge_of_two_touching_strips_is_found():
+    gf.gpdk.PDK.activate()
+    c = gf.Component()
+    _rect(c, -CORE_W / 4, CORE_W / 2, (1, 0))
+    _rect(c, CORE_W / 4, CORE_W / 2, (1, 0))
+    _rect(c, 0.0, HEATER_W, (47, 0))
+    sim = ThermalSim()
+    sim.set_geometry(c)
+    sim.set_stack(femwell_stack())
+    sim.set_cross_section("x=0", window=(-8.0, 8.0))
+    sim.set_heater("heater", length=320.0)
+    sim.add_waveguide("arm", position=0.0)
+    assert [wg.name for wg in sim.waveguides] == ["arm"]
+
+
+# --------------------------------------------------------------- plots
+
+
+def test_the_step_plot_marks_the_10_90_points_and_the_1e_time(canonical):
+    import matplotlib as mpl
+
+    mpl.use("Agg")
+    import matplotlib.pyplot as plt
+
+    _sim, _result, step = canonical
+    ax = step.plot()
+    marks = {line.get_label(): line for line in ax.get_lines()}
+    t10, t90 = marks["10 % and 90 %"].get_xdata()
+    assert t90 - t10 == pytest.approx(step.tau)
+    np.testing.assert_allclose(
+        marks["10 % and 90 %"].get_ydata(),
+        [0.1 * step.phase[-1], 0.9 * step.phase[-1]],
+    )
+    (t_1e,) = marks["1/e"].get_xdata()
+    assert t_1e == pytest.approx(step.tau_1e)
+    plt.close("all")
+
+
+def test_the_temperature_plot_zooms_to_given_limits(canonical):
+    import matplotlib as mpl
+
+    mpl.use("Agg")
+    import matplotlib.pyplot as plt
+
+    _sim, result, _step = canonical
+    ax = result.temperature(power=result.p_pi).plot(xlim=(-3.0, 3.0), zlim=(-1.0, 3.0))
+    assert ax.get_xlim() == (-3.0, 3.0)
+    assert ax.get_ylim() == (-1.0, 3.0)
+    plt.close("all")

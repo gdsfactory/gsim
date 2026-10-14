@@ -38,12 +38,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
 from gsim.common.cross_section import parse_plane_spec
 from gsim.common.stack.materials import (
     MaterialProperties,
     ThermalProperties,
+    _get_ci,
     get_material_properties,
     thermal_properties,
 )
@@ -104,6 +105,9 @@ _OVERRIDABLE = (
     "permittivity",
     "loss_tangent",
 )
+# set_material's name for a ThermalProperties field, where they differ.
+_SET_MATERIAL_NAME = {"electrical_conductivity": "conductivity"}
+_DEFAULT_HEAT_TRANSFER_COEFFICIENT = 10.0  # W/m^2/K, free convection in air
 
 
 @dataclass(frozen=True)
@@ -234,8 +238,8 @@ class ThermalSim(BaseModel):
     Configure with the setters, then :meth:`solve` (steady: P_pi,
     crosstalk, resistance, V_pi, temperature field) and
     :meth:`solve_transient` (switching time). Every setter can be called
-    in any order before a solve; a setter called after a solve clears
-    the cached meshes.
+    in any order before a solve; a setter called -- or a field assigned
+    directly -- after a solve clears the cached meshes and solves.
 
     Units: lengths in um, power in mW, temperature rise in K, time in us.
     """
@@ -255,6 +259,13 @@ class ThermalSim(BaseModel):
 
     _cache: dict[tuple[Any, ...], Any] = PrivateAttr(default_factory=dict)
     _warned: set[str] = PrivateAttr(default_factory=set)
+    _h: float = PrivateAttr(default=_DEFAULT_HEAT_TRANSFER_COEFFICIENT)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Set a field; changing any setup field forgets the cached solves."""
+        super().__setattr__(name, value)
+        if not name.startswith("_"):
+            self._changed()
 
     # ------------------------------------------------------------------ setup
 
@@ -265,7 +276,6 @@ class ThermalSim(BaseModel):
             component: The gdsfactory component (heater and waveguides).
         """
         self.component = component
-        self._changed()
 
     def set_stack(self, stack: LayerStack) -> None:
         """Set the layer stack: layer heights, materials and slabs.
@@ -275,7 +285,6 @@ class ThermalSim(BaseModel):
                 :func:`gsim.common.stack.get_stack`.
         """
         self.stack = stack
-        self._changed()
 
     def set_cross_section(
         self,
@@ -310,7 +319,6 @@ class ThermalSim(BaseModel):
         self.plane = plane
         self.window = None if window is None else (float(window[0]), float(window[1]))
         self.depth = None if depth is None else float(depth)
-        self._changed()
 
     def set_heater(self, layers: str | list[str], *, length: float) -> None:
         """Name the heater: the layers whose drawn conductors carry its current.
@@ -332,7 +340,6 @@ class ThermalSim(BaseModel):
             raise ValueError(f"Heater length must be positive (um), got {length}.")
         self.heater_layers = names
         self.heater_length = float(length)
-        self._changed()
 
     def add_waveguide(
         self,
@@ -372,10 +379,12 @@ class ThermalSim(BaseModel):
         if self._can_locate():
             self._locate_strip(spec)
         self.waveguides = (*self.waveguides, spec)
-        self._changed()
 
     def set_material(self, name: str, **properties: float) -> None:
         """Override material properties for this simulation only.
+
+        Calls for the same material merge, whatever the case of
+        ``name``; the override keeps the spelling of the first call.
 
         Args:
             name: Material name as the stack names it (case-insensitive).
@@ -391,30 +400,42 @@ class ThermalSim(BaseModel):
                 f"Unknown material properties {unknown}; set_material accepts "
                 f"{list(_OVERRIDABLE)}."
             )
-        merged = {**self.materials.get(name, {}), **properties}
+        key = next(
+            (k for k in self.materials if k.lower().strip() == name.lower().strip()),
+            name,
+        )
+        merged = {**self.materials.get(key, {}), **properties}
         MaterialProperties.model_validate(merged)
-        self.materials = {**self.materials, name: merged}
-        self._changed()
+        self.materials = {**self.materials, key: merged}
 
     def set_boundary(
         self,
         *,
-        top: Literal["adiabatic", "convective"] = "adiabatic",
-        sides: Literal["adiabatic", "convective"] = "adiabatic",
-        heat_transfer_coefficient: float = 10.0,
+        top: Literal["adiabatic", "convective"] | None = None,
+        sides: Literal["adiabatic", "convective"] | None = None,
+        heat_transfer_coefficient: float | None = None,
     ) -> None:
         """Choose the top and side boundary conditions.
 
         The bottom of the Modelled depth is always the heat sink, at
         ambient. A convective edge loses ``h dT`` to ambient; free
         convection in air (h ~ 10 W/m^2/K) is negligible next to the
-        substrate path, hence the adiabatic default.
+        substrate path, hence the adiabatic default. Calls are
+        cumulative: a setting left as ``None`` keeps its current value
+        (initially adiabatic top and sides, h = 10 W/m^2/K).
 
         Args:
             top: Condition on the top of the stack.
             sides: Condition on the two sides of the thermal Window.
-            heat_transfer_coefficient: h in W/m^2/K for convective edges.
+            heat_transfer_coefficient: h in W/m^2/K, shared by every
+                convective edge.
         """
+        if top is None:
+            top = "convective" if "top" in self.boundary else "adiabatic"
+        if sides is None:
+            sides = "convective" if "left" in self.boundary else "adiabatic"
+        if heat_transfer_coefficient is None:
+            heat_transfer_coefficient = self._h
         for label, value in (("top", top), ("sides", sides)):
             if value not in {"adiabatic", "convective"}:
                 raise ValueError(
@@ -426,6 +447,7 @@ class ThermalSim(BaseModel):
                 f"got {heat_transfer_coefficient}."
             )
         h = float(heat_transfer_coefficient)
+        self._h = h
         boundary: dict[str, float] = {}
         if top == "convective":
             boundary["top"] = h
@@ -433,7 +455,6 @@ class ThermalSim(BaseModel):
             boundary["left"] = h
             boundary["right"] = h
         self.boundary = boundary
-        self._changed()
 
     # ------------------------------------------------------------------ solves
 
@@ -553,8 +574,9 @@ class ThermalSim(BaseModel):
     # ------------------------------------------------------------------ internals
 
     def _changed(self) -> None:
-        """Forget every cached mesh and solve after a setup change."""
+        """Forget every cached solve and once-only warning after a setup change."""
         self._cache.clear()
+        self._warned.clear()
 
     def _spec(self, name: str) -> _WaveguideSpec:
         """The waveguide added under ``name``."""
@@ -640,15 +662,20 @@ class ThermalSim(BaseModel):
         self, material: str, region: str, required: tuple[str, ...]
     ) -> ThermalProperties:
         """Thermal properties of a Region's material, or a physics error."""
-        props = thermal_properties(material, self.stack, self._overrides())
-        for name in required:
-            if getattr(props, name) is None:
-                raise ValueError(
-                    f"Region {region!r} is {material!r}, which has no {name}. "
-                    f"Give it with sim.set_material({material!r}, {name}=...) "
-                    "or in the stack's materials."
+        try:
+            return thermal_properties(
+                material, self.stack, self._overrides(), required=required
+            )
+        except ValueError as error:
+            hint = ""
+            if required:
+                kwargs = ", ".join(
+                    f"{_SET_MATERIAL_NAME.get(n, n)}=..." for n in required
                 )
-        return props
+                hint = f" For this run only: sim.set_material({material!r}, {kwargs})."
+            raise ValueError(
+                f"Region {region!r} is {material!r}: {error}{hint}"
+            ) from error
 
     def _mesh_sizes(
         self, rects: list[Any], extent: float, opts: ThermalOptions
@@ -671,14 +698,23 @@ class ThermalSim(BaseModel):
         rects = self._section()
         drawn = {r.group for r in rects}
         absent = [name for name in self.heater_layers if name not in drawn]
-        if absent:
+        if len(absent) == len(self.heater_layers):
             raise ValueError(
                 f"Heater layer(s) {absent} are not drawn in the cut "
                 f"{self.plane!r}; layers drawn there: {sorted(drawn)}."
             )
+        if absent:
+            warnings.warn(
+                f"Heater layer(s) {absent} are not drawn in the cut "
+                f"{self.plane!r}; only {sorted(set(self.heater_layers) - set(absent))} "
+                "carry the heater current there.",
+                UserWarning,
+                stacklevel=4,
+            )
         h0 = min(r.h0 for r in rects)
         h1 = max(r.h1 for r in rects)
         window = self.window or (h0 - 20.0, h1 + 20.0)
+        self._check_heater_inside(rects, window)
         sizes, coarse = self._mesh_sizes(rects, window[1] - window[0], opts)
         mesh = build_cross_section_mesh(
             self.component,
@@ -725,6 +761,25 @@ class ThermalSim(BaseModel):
         )
         self._cache[key] = thermal
         return thermal
+
+    def _check_heater_inside(
+        self, rects: list[Any], window: tuple[float, float]
+    ) -> None:
+        """Raise when the thermal Window cuts off part of a heater conductor.
+
+        The resistance, P_pi and V_pi come from the drawn conductors, so
+        a heater rectangle the Window clips would silently change them.
+        """
+        for r in rects:
+            if r.group in self.heater_layers and (r.h0 < window[0] or r.h1 > window[1]):
+                raise ValueError(
+                    f"Heater layer {r.group!r} is drawn over [{r.h0:g}, {r.h1:g}] um "
+                    f"in the cut {self.plane!r}, outside the thermal Window "
+                    f"({window[0]:g}, {window[1]:g}) um: the heater's resistance "
+                    "and power would be wrong. Widen the Window with "
+                    "set_cross_section(..., window=(min, max)) to contain every "
+                    "heater conductor."
+                )
 
     def _optical_window(
         self, spec: _WaveguideSpec, strip: _Strip, thermal: _Thermal
@@ -813,17 +868,11 @@ class ThermalSim(BaseModel):
     def _optical_overrides(self, mesh: CrossSectionMesh) -> dict[str, Any]:
         """Material records carrying this run's optical overrides."""
         records: dict[str, Any] = {}
-        stack_materials = dict(self.stack.materials or {})
         for material in set(mesh.region_material.values()):
             props = self._override_for(material)
             if not props:
                 continue
-            entry = stack_materials.get(material)
-            base = (
-                MaterialProperties.model_validate(entry)
-                if entry is not None
-                else get_material_properties(material) or MaterialProperties()
-            )
+            base = _stack_record(material, self.stack)
             update: dict[str, Any] = dict(props)
             if "permittivity" in props:
                 # A given permittivity replaces the dispersion models.
@@ -896,6 +945,7 @@ class ThermalSim(BaseModel):
             optical.unit_rise * reference,
             wavelength_um=wavelength,
             polarization=shifter.polarization,
+            n_guess=_core_index(optical),
         )
         slope = shift.delta_neff.real / reference  # per W/m
         if slope == 0:
@@ -916,6 +966,7 @@ class ThermalSim(BaseModel):
                 victim.unit_rise * drive_pi,
                 wavelength_um=wavelength,
                 polarization=wg.polarization,
+                n_guess=_core_index(victim),
             )
             slopes[wg.name] = vshift.delta_neff.real / drive_pi
             first_order[wg.name] = vshift.delta_neff_first_order.real / drive_pi
@@ -945,6 +996,11 @@ class ThermalSim(BaseModel):
                 for name, phase in phases_at_pi.items()
                 if name != shifter.name
             },
+            crosstalk_ratio={
+                name: phase / phases_at_pi[shifter.name]
+                for name, phase in phases_at_pi.items()
+                if name != shifter.name
+            },
             thermal_resistance={
                 name: float(rise) * per_mw
                 for name, rise in zip(strips, rise_at_cores, strict=True)
@@ -960,10 +1016,34 @@ class ThermalSim(BaseModel):
         return steady
 
 
+def _stack_record(material: str, stack: Any) -> MaterialProperties:
+    """The stack's record for a material, as the other material paths read it.
+
+    The stack entry (matched case-insensitively) when it is a valid
+    :class:`MaterialProperties` record; otherwise -- no entry, or one that
+    does not validate -- the database record, else an empty record.
+    """
+    entry = _get_ci(stack.materials, material)
+    if isinstance(entry, MaterialProperties):
+        return entry
+    if entry is not None:
+        try:
+            return MaterialProperties.model_validate(entry)
+        except ValidationError:
+            pass
+    return get_material_properties(material) or MaterialProperties()
+
+
 def _describe(rects: Any) -> str:
     """Name and in-plane extent of drawn rectangles, for error messages."""
     items = [f"{r.group} [{r.h0:g}, {r.h1:g}] um" for r in rects]
     return ", ".join(items) if items else "none"
+
+
+def _core_index(optical: _Optical) -> float:
+    """Largest real index of a waveguide's core in its optical Window."""
+    core = optical.mesh.region_mask(optical.strip.layer)
+    return float(np.sqrt(optical.epsilon0[core]).real.max())
 
 
 def _element_areas(mesh: CrossSectionMesh) -> NDArray[np.float64]:

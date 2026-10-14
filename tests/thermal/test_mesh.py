@@ -279,3 +279,34 @@ def test_max_size_overrides_a_region_default(phase_shifter, stack, tmp_path):
 def test_horizontal_plane_is_rejected(phase_shifter, stack):
     with pytest.raises(ValueError, match="vertical"):
         build_cross_section_mesh(phase_shifter, stack, "z=0.1")
+
+
+def test_a_boundary_line_that_is_no_mesh_edge_is_an_error(tmp_path):
+    # Two triangles of a unit square split along the 1-3 diagonal, and a
+    # "bottom" line joining corners 0 and 2, which no triangle edge does.
+    from gsim.thermal.mesh import _load
+
+    skfem = pytest.importorskip("skfem")
+    points = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]
+    )
+    path = tmp_path / "bad.msh"
+    meshio.write(
+        path,
+        meshio.Mesh(
+            points,
+            [
+                ("triangle", np.array([[0, 1, 3], [1, 2, 3]])),
+                ("line", np.array([[0, 2]])),
+            ],
+            cell_data={
+                "gmsh:physical": [np.array([1, 1]), np.array([2])],
+                "gmsh:geometrical": [np.array([1, 1]), np.array([2])],
+            },
+            field_data={"slab": np.array([1, 2]), "bottom": np.array([2, 1])},
+        ),
+        file_format="gmsh22",
+        binary=False,
+    )
+    with pytest.raises(RuntimeError, match="bottom"):
+        _load(skfem, path, "x=0", (0.0, 1.0), (0.0, 1.0), {"slab": "oxide"})
