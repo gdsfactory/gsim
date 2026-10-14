@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Self
 
 import gdsfactory as gf
 from pdk_schema import Index, ScalarValue
@@ -24,11 +24,13 @@ from gsim.fdtd.api import (
     Domain,
     GaussianBeamSource,
     Geometry,
+    Heatmap,
     LineCurrentSource,
     Materials,
     Monitors,
     PlaneMonitor,
     PortSource,
+    SignedAxis,
     Solver,
     SourceType,
 )
@@ -210,6 +212,78 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
     def job_id(self) -> str | None:
         """Cloud job identifier after upload or run."""
         return self._job_id
+
+    def add_monitors(self, *, xy: bool = True, z_um: float | None = None) -> Self:
+        """Add center-wavelength port intensity images and an optional XY overview.
+
+        Args:
+            xy: Include the component-wide XY overview (default: True).
+            z_um: Overview height in micrometers. None uses the resolved geometry's
+                vertical midpoint. Ignored when xy is False.
+
+        Returns:
+            This simulation, with the diagnostic planes added to its monitors.
+
+        Notes:
+            Optical port windows are 2 by 2 micrometers, three Yee cells inward
+            from each port. Each plane records only the source center wavelength,
+            without additional flux measurements. Guided S-parameter measurements
+            remain implicit. Existing monitors are preserved; duplicate names
+            raise ValueError before any planes are added. This method does not
+            mesh, submit or run a simulation.
+        """
+        resolved = self._resolve_geometry()
+        wavelength_um = self.source.wavelength_um
+        offset_um = 3 * self.solver.cell_size_nm / 1000
+        planes: list[PlaneMonitor] = []
+        for port in resolved.ports.values():
+            if port.port_type != "optical":
+                continue
+            nx, ny, _ = port.normal
+            normal: SignedAxis = (
+                ("+x" if nx > 0 else "-x") if nx else ("+y" if ny > 0 else "-y")
+            )
+            planes.append(
+                PlaneMonitor(
+                    name=f"port_{port.name}",
+                    center_um=(
+                        port.center[0] - nx * offset_um,
+                        port.center[1] - ny * offset_um,
+                        port.center[2],
+                    ),
+                    size_um=(0, 2.0, 2.0) if nx else (2.0, 0, 2.0),
+                    normal=normal,
+                    flux=False,
+                    wavelengths_um=[wavelength_um],
+                    heatmap=Heatmap(
+                        quantity="intensity", wavelengths_um=[wavelength_um]
+                    ),
+                )
+            )
+        if xy:
+            if z_um is None:
+                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+            component = resolved.component
+            planes.append(
+                PlaneMonitor(
+                    name="overview_xy",
+                    center_um=(component.dx, component.dy, z_um),
+                    size_um=(component.dxsize, component.dysize, 0),
+                    normal="+z",
+                    flux=False,
+                    wavelengths_um=[wavelength_um],
+                    heatmap=Heatmap(
+                        quantity="intensity", wavelengths_um=[wavelength_um]
+                    ),
+                )
+            )
+        existing_names = {monitor.name for monitor in self.monitors}
+        for plane in planes:
+            if plane.name in existing_names:
+                raise ValueError(f"monitor {plane.name!r} already exists")
+        for plane in planes:
+            self.monitors.add(plane)
+        return self
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve current geometry at the current source wavelength."""

@@ -153,6 +153,27 @@ types return outgoing port amplitudes and powers.
 
 ## Plane monitors
 
+For notebook diagnostics, add center-wavelength field intensity images with one
+call after configuring geometry, source and solver:
+
+```python
+sim.add_monitors()               # Optical port images and an XY overview.
+sim.add_monitors(xy=False)       # Alternative: optical port images only.
+sim.add_monitors(z_um=0.11)      # Alternative: set the XY height in micrometers.
+```
+
+These are alternative calls, not a sequence: monitor names must be unique.
+`xy=True` is the default; `z_um=None` chooses the resolved geometry's vertical
+midpoint and is ignored when `xy=False`. Each optical port gets a 2 by 2 µm plane
+three grid cells inward along its normal; the XY overview spans the component's
+bounding box. All these planes use the source center wavelength, record intensity
+without flux, and leave implicit guided-port responses unchanged. They show the
+driven field, not independent source eigenmode profiles. Existing custom monitors
+are preserved, and name collisions fail before adding any of these planes.
+Changing geometry/source/solver later requires recreating the diagnostic planes.
+This helper only configures monitors; it does not mesh or submit a job. Explicit
+domain bounds still need to contain the requested planes.
+
 Additional plane monitors can independently record flux, scalar heatmaps, and
 Gaussian fiber overlap:
 
