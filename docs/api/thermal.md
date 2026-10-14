@@ -39,7 +39,7 @@ result.report(step)  # P_pi, efficiency, R, V_pi, peak heater rise, tau
 ```
 
 The [thermo-optic phase shifter tutorial](../nbs/thermal_phase_shifter.md) builds the `stack` for a published heater.
-It then compares the result with measurement and checks convergence.
+It then compares the result with the paper's simulations and measurements, and checks convergence.
 
 ## Units and conventions
 
