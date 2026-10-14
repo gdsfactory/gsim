@@ -34,6 +34,9 @@ nav = [
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
+  { "Thermal" = [
+    { "Thermo-optic Phase Shifter" = "nbs/thermal_phase_shifter.md" }
+  ] },
   { "Modeling & Analysis" = [
     { "EMX Process Files" = "emx_proc_import.md" },
     { "Conductor Models" = "palace_conductors.md" },
@@ -54,6 +57,7 @@ nav = [
     { "Palace" = "api/palace.md" },
     { "TCAD" = "api/tcad.md" },
     { "Meep" = "api/meep.md" },
+    { "Thermal" = "api/thermal.md" },
     { "Common" = "api/common.md" },
     { "Cloud" = "api/cloud.md" }
   ] }
