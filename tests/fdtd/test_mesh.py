@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from shapely.affinity import rotate
 from shapely.geometry import MultiPolygon, Polygon, box
 
+import gsim.fdtd.mesh_geometry as mesh_geometry
 import gsim.fdtd.mesh_loft as mesh_loft
 from gsim.common.pdk import ResolvedLayer, ResolvedPort
 from gsim.fdtd.mesh import _priority_by_mesh_order
@@ -174,3 +177,58 @@ def test_disconnected_polygons_are_lofted_independently(monkeypatch) -> None:
 
     assert volume_tags == [1, 2]
     assert lofted_geometries == [first, second]
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_stepped_profiles_preserve_port_planes_and_volume_in_nanometers(
+    monkeypatch, axis
+):
+    geometry = box(0, -0.25, 1, 0.25)
+    ports = [_resolved_port("o1", 0, -1), _resolved_port("o2", 1, 1)]
+    if axis == 1:
+        geometry = rotate(geometry, 90, origin=(0, 0))
+        ports = [
+            replace(
+                port, center=(0, port.center[0], 0.11), normal=(0, port.normal[0], 0)
+            )
+            for port in ports
+        ]
+    extrusions = []
+
+    def record_extrusion(_kernel, x, y, z, height, *, holes):
+        extrusions.append((Polygon(zip(x, y, strict=True)), z, height))
+        assert holes == []
+        return len(extrusions)
+
+    monkeypatch.setattr(mesh_geometry, "extrude_polygon", record_extrusion)
+    tags = mesh_geometry._add_stepped_layer_volumes(
+        None,
+        _resolved_layer(geometry),
+        ports,
+        geometry_tolerance_nm=10,
+    )
+    assert tags == [1, 2]
+    assert sum(
+        polygon.area * height for polygon, _, height in extrusions
+    ) == pytest.approx(110_000_000)
+    for polygon, z, height in extrusions:
+        assert polygon.bounds[axis] == pytest.approx(0)
+        assert polygon.bounds[axis + 2] == pytest.approx(1000)
+        assert z >= 0
+        assert z + height <= 220
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"bias": 0.1},
+        {"z_to_bias": ([0, 1], [0, 0.1])},
+        {"width_to_z": -0.1},
+        {"width_to_z": 1.1},
+        {"sidewall_angle": 80},
+    ],
+)
+def test_unsupported_layer_profiles_fail_before_extrusion(overrides):
+    layer = replace(_resolved_layer(box(0, 0, 1, 1)), **overrides)
+    with pytest.raises(mesh_geometry.FDTDGeometryError, match="core"):
+        mesh_geometry._validate_layer(layer)

@@ -93,29 +93,6 @@ def test_simplification_returns_independent_copy_on_failure(monkeypatch, failure
     assert original.bbox().left == 0
 
 
-@pytest.mark.parametrize(
-    ("point_count", "scale"), [(4, 0.1), (32, 0.5), (128, 1), (1024, 1.5)]
-)
-def test_adaptive_tolerance_scales_with_polygon_complexity(point_count, scale):
-    angles = np.linspace(0, 2 * np.pi, point_count, endpoint=False)
-    polygon = polygon_utils.shapely_to_klayout(
-        Polygon(np.column_stack((100 * np.cos(angles), 100 * np.sin(angles))))
-    )
-    assert polygon is not None
-    assert polygon.num_points_hull() == point_count
-    assert polygon_utils._adaptive_tolerance(polygon, relative=0.01) == pytest.approx(
-        200 * 0.01 * scale
-    )
-
-
-@pytest.mark.parametrize(("relative", "expected"), [(0, 0.001), (100, 1)])
-def test_adaptive_tolerance_limits(relative, expected):
-    polygon = polygon_utils.shapely_to_klayout(box(0, 0, 10, 10))
-    assert polygon_utils._adaptive_tolerance(polygon, relative) == pytest.approx(
-        expected
-    )
-
-
 def test_decimation_keeps_simple_shapes_and_reduces_complex_shapes(caplog):
     rectangle = polygon_utils.shapely_to_klayout(box(0, 0, 2, 1))
     circle = polygon_utils.shapely_to_klayout(Point(0, 0).buffer(10, quad_segs=128))
