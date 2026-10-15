@@ -114,7 +114,7 @@ def test_topview_plots_keep_scalar_values_and_requested_color_scale(
     if log:
         assert isinstance(image.norm, plt.matplotlib.colors.LogNorm)
     elif symmetric:
-        assert image.norm.vmax is not None
+        assert isinstance(image.norm.vmax, float)
         assert image.norm.vmin == -image.norm.vmax
 
 
