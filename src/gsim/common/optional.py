@@ -2,8 +2,8 @@
 
 A Backend package imports without its solver: ``import gsim.tcad`` works
 with no DEVSIM, ``import gsim.femwell`` with no femwell, so a user who
-installed neither extra can still read a stack, build a mesh, or ask a
-Study what it would run. The solver import happens on the one path that
+installed neither extra can still read a stack, build a mesh, or
+configure a simulation. The solver import happens on the one path that
 needs it, and when it fails the error has to name the packaging extra
 that provides it rather than the bare ``ModuleNotFoundError`` a user
 cannot act on.
