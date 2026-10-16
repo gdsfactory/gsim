@@ -37,7 +37,7 @@ def validate_mesh(mesh_path: Path, manifest: MeshManifest) -> None:
             "GDSFactory FDTD requires sequential one-based node IDs."
         )
 
-    mesh = meshio.read(mesh_path)
+    mesh = meshio.read(mesh_path, file_format="gmsh")
     actual_names = set(mesh.field_data)
     expected_names = _manifest_names(manifest)
     if actual_names != expected_names:

@@ -82,7 +82,11 @@ from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
 
 # Visualization
-from gsim.palace.field_viz import plot_fields_2d, resolve_physical_groups
+from gsim.palace.field_viz import (
+    extract_streamplot_inputs_2d,
+    plot_fields_2d,
+    resolve_physical_groups,
+)
 
 # Field-visualization (NaN-free direct mesh rendering)
 from gsim.palace.fields import (

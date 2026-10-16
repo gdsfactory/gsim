@@ -58,7 +58,7 @@ def resolve_physical_groups(
         msg = f"Mesh file not found: {path}"
         raise FileNotFoundError(msg)
 
-    m = meshio.read(str(path))
+    m = meshio.read(str(path), file_format="gmsh")
     if not hasattr(m, "field_data") or not m.field_data:
         msg = f"No physical groups found in mesh: {path}"
         raise ValueError(msg)

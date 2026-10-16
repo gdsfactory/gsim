@@ -436,7 +436,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         """
         import meshio
 
-        points = meshio.read(str(self.mesh_path)).points
+        points = meshio.read(str(self.mesh_path), file_format="gmsh").points
         h = points[:, 0]
         v = points[:, 1]
         return ((float(h.min()), float(h.max())), (float(v.min()), float(v.max())))

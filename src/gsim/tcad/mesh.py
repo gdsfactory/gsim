@@ -39,7 +39,7 @@ def write_scaled_msh(
     """
     if scale <= 0.0:
         raise ValueError("scale must be positive")
-    mesh = meshio.read(str(src))
+    mesh = meshio.read(str(src), file_format="gmsh")
     mesh.points = mesh.points * scale
     meshio.write(str(dst), mesh, file_format="gmsh22", binary=False)
     return Path(dst)
@@ -60,7 +60,7 @@ def line_group_points(path: str | Path, group: str) -> NDArray[np.float64]:
         ValueError: When the mesh holds no line group of that name, or no
             line cells at all.
     """
-    mesh = meshio.read(str(path))
+    mesh = meshio.read(str(path), file_format="gmsh")
     tag = group_tags(mesh, dim=1).get(group)
     if tag is None:
         raise ValueError(f"The mesh holds no line group named '{group}'.")
