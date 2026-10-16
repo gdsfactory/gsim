@@ -1,13 +1,24 @@
 """Check stack conversion and validation using physical layer definitions."""
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import yaml
 from gdsfactory.technology import LayerLevel
 from gdsfactory.technology import LayerStack as GfLayerStack
 
-from gsim.common.stack.extractor import Layer, LayerStack, extract_from_pdk
+from gsim.common.stack.extractor import (
+    Layer,
+    LayerStack,
+    extract_from_pdk,
+    extract_layer_stack,
+)
+from gsim.common.stack.materials import (
+    MATERIALS_DB,
+    DispersionModel,
+    MaterialProperties,
+)
 
 
 @pytest.fixture
@@ -100,3 +111,118 @@ def test_pdk_wrapper_variants_keep_the_same_layer_coordinates(wrapper, tmp_path)
         ]
         == "si"
     )
+
+
+def _pdk_levels(specifications):
+    return cast(
+        Any,
+        SimpleNamespace(
+            layers={
+                name: SimpleNamespace(
+                    layer=layer,
+                    zmin=zmin,
+                    thickness=height,
+                    material=material,
+                    sidewall_angle=0,
+                    info={"layer_type": kind},
+                )
+                for name, layer, zmin, height, material, kind in specifications
+            }
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("photonic", "substrate", "box"),
+    [
+        (True, True, True),
+        (True, False, True),
+        (True, True, False),
+        (True, False, False),
+        (False, True, False),
+        (False, False, False),
+    ],
+)
+def test_substrate_extraction_preserves_box_and_air_regions(photonic, substrate, box):
+    specifications = [
+        (
+            "core" if photonic else "metal1",
+            (1, 0),
+            0,
+            0.22,
+            "silicon" if photonic else "aluminum",
+            "dielectric" if photonic else "conductor",
+        )
+    ]
+    if substrate:
+        specifications.append(("substrate", (999, 0), -10, 8, "silicon", "substrate"))
+    if box:
+        specifications.append(("box", (999, 0), -2, 2, "SiO2", "dielectric"))
+    stack = extract_layer_stack(
+        _pdk_levels(specifications),
+        include_substrate=True,
+        substrate_thickness=5,
+        air_below=2,
+        air_above=1,
+    )
+    regions = {region["name"]: region for region in stack.dielectrics}
+    assert (regions["substrate"]["zmin"], regions["substrate"]["zmax"]) == (
+        -10 if photonic and substrate else -5,
+        -2 if box else 0,
+    )
+    if box:
+        assert (
+            regions["box"]["zmin"],
+            regions["box"]["zmax"],
+            regions["box"]["material"],
+        ) == (-2, 0, "SiO2")
+    assert (regions["air_box_bottom"]["zmin"], regions["air_box_bottom"]["zmax"]) == (
+        -7,
+        -5,
+    )
+    assert regions["air_box"]["zmax"] == pytest.approx(1.22)
+
+
+@pytest.mark.parametrize("kind", ["unknown", "dispersive", "conductive", "passivation"])
+def test_bulk_background_uses_dielectric_properties_and_explicit_layer_types(
+    monkeypatch, kind
+):
+    material = "unlisted-test-material"
+    if kind != "unknown":
+        properties = MaterialProperties(
+            conductivity=[1e5, 1e5, 1e5] if kind == "conductive" else None,
+            dispersion_models=[DispersionModel(type="constant", permittivity=3)]
+            if kind == "dispersive"
+            else [],
+            permittivity=3 if kind == "passivation" else None,
+        )
+        monkeypatch.setitem(MATERIALS_DB, material, properties)
+    name = "passivation" if kind == "passivation" else "region"
+    stack = extract_layer_stack(
+        _pdk_levels([(name, (1, 0), 0, 1, material, "dielectric")])
+    )
+    if kind == "conductive":
+        assert stack.dielectrics[0]["material"] == "SiO2"
+    else:
+        assert any(region["material"] == material for region in stack.dielectrics)
+    if kind == "unknown":
+        assert stack.materials[material]["type"] == "unknown"
+
+
+@pytest.mark.parametrize("gap", [-1, 0, 1])
+def test_stack_validation_distinguishes_gaps_overlaps_and_planar_metals(layers, gap):
+    stack = LayerStack.from_layer_list(layers)
+    stack.layers["metal"].thickness = 0
+    stack.dielectrics[1]["zmin"] = gap
+    report = stack.validate_stack()
+    assert bool(report) == (gap <= 0)
+    assert "zero thickness" in str(report)
+    assert ("Z-axis gap" in str(report)) == (gap > 0)
+    assert ("Z-axis overlap" in str(report)) == (gap < 0)
+    assert yaml.full_load(stack.to_yaml())["layers"]["metal"]["thickness"] == 0
+
+
+def test_empty_stack_and_missing_pdk_are_reported():
+    assert extract_layer_stack(_pdk_levels([])).layers == {}
+    with pytest.raises(ValueError, match="Could not find layer stack"):
+        extract_from_pdk(SimpleNamespace())

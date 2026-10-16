@@ -371,7 +371,7 @@ class TestBuildDopedCrossSection:
             ],
             permittivity=11.9,
             fmax=200e9,
-            verbose=False,
+            verbose=True,
         )
 
         assert "pp_slab_0" in stack.layers
@@ -605,7 +605,7 @@ class TestBuildOpticalCrossSection:
             device_layers=self._device_layers(LAYER),
             substrate_thickness=2.0,
             cladding_top=2.0,
-            verbose=False,
+            verbose=True,
         )
 
         assert set(stack.layers) == {"core", "slab", "p_rib", "n_rib"}

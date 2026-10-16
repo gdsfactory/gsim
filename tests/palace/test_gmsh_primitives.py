@@ -7,17 +7,6 @@ import pytest
 from gsim.palace.mesh import gmsh_utils as geometry
 
 
-@pytest.fixture
-def kernel():
-    gmsh.initialize()
-    gmsh.option.setNumber("General.Terminal", 0)
-    gmsh.model.add("primitives")
-    try:
-        yield gmsh.model.occ
-    finally:
-        gmsh.finalize()
-
-
 @pytest.mark.parametrize("meshseed", [0, 0.5])
 def test_box_volume_surface_queries_and_groups_preserve_dimensions(kernel, meshseed):
     tag = geometry.create_box(kernel, 1, 2, 3, 3, 5, 7, meshseed=meshseed)

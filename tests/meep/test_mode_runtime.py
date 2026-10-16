@@ -2,7 +2,6 @@
 
 import json
 import subprocess
-from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -13,58 +12,6 @@ from gsim.meep import Simulation as MeepSimulation
 from gsim.meep import mode_solver
 from gsim.meep.models.results import ModeResult
 from gsim.meep.simulation import _precompute_cross_section_geometry
-
-
-@dataclass
-class Vector:
-    x: float = 0
-    y: float = 0
-    z: float = 0
-
-
-@pytest.fixture
-def backend(monkeypatch):
-    class Simulation:
-        def __init__(self, **kwargs):
-            vars(self).update(kwargs)
-            self.calls = []
-            self.initialized = self.resets = 0
-            backend.instances.append(self)
-
-        def init_sim(self):
-            self.initialized += 1
-
-        def reset_meep(self):
-            self.resets += 1
-
-        def get_eigenmode(self, frequency, _direction, _where, **kwargs):
-            self.calls.append(kwargs)
-            if (
-                kwargs["band_num"] in backend.failed_bands
-                or frequency in backend.failed_frequencies
-            ):
-                return None
-            return SimpleNamespace(
-                kdom=Vector(1.8 * frequency),
-                group_velocity=0.25,
-                amplitude=lambda point, _component: point.x
-                + 2 * point.y
-                + 3 * point.z
-                + 1j,
-            )
-
-    backend = SimpleNamespace(
-        Vector3=Vector,
-        Simulation=Simulation,
-        instances=[],
-        failed_bands=set(),
-        failed_frequencies=set(),
-        inf=np.inf,
-        **dict.fromkeys(["Medium", "Block", "Prism", "PML", "Volume"], SimpleNamespace),
-        **{name: name for name in ["X", "Y", "Z", "Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]},
-    )
-    monkeypatch.setattr(mode_solver, "_import_meep", lambda: backend)
-    return backend
 
 
 @pytest.mark.parametrize("z_margin", [0.5, (0, 1)])

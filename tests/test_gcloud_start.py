@@ -214,7 +214,7 @@ class TestUpload:
         config_dir.mkdir()
         (config_dir / "config.json").write_text("{}")
 
-        job_id = upload(config_dir, "palace", verbose=False)
+        job_id = upload(config_dir, "palace", verbose=True)
         assert job_id == "job-xyz"
         mock_upload_dir.assert_called_once_with(config_dir, "palace")
 
@@ -242,7 +242,7 @@ class TestStart:
         fake_job = FakeJob(job_name="palace-started")
         mock_sim.start_simulation.return_value = fake_job
 
-        name = start("job-abc", verbose=False)
+        name = start("job-abc", verbose=True)
         assert name == "palace-started"
         call_args = mock_sim.start_simulation.call_args
         pre_job = call_args[0][0]
@@ -441,7 +441,7 @@ class TestWaitForResultsSingle:
         output_file.write_text("data")
         mock_sim.download_results.return_value = {"output": output_file}
 
-        result = wait_for_results(*["job-1"], verbose="quiet", parent_dir=tmp_path)
+        result = wait_for_results(["job-1"], verbose="status", parent_dir=tmp_path)
         # Single element list -> single result, not a list
         assert not isinstance(result, list)
 
@@ -513,7 +513,7 @@ class TestWaitForResultsMulti:
         mock_sim.download_results.side_effect = fake_download
 
         results = wait_for_results(
-            "job-1", "job-2", verbose="quiet", parent_dir=tmp_path
+            "job-1", "job-2", verbose="status", parent_dir=tmp_path
         )
         assert isinstance(results, list)
         assert len(results) == 2
@@ -583,7 +583,7 @@ class TestRunSimulationBackwardCompat:
         result = run_simulation(
             config_dir=config_dir,
             job_type="palace",
-            verbose=False,
+            verbose=True,
             parent_dir=tmp_path,
         )
         assert result.job_name == "palace-bc"
