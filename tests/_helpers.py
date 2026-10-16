@@ -2,6 +2,38 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pytest
+from numpy.typing import ArrayLike, NDArray
+
+
+def skip_without_devsim() -> None:
+    """Skip the caller when DEVSIM cannot be imported.
+
+    Goes through :func:`gsim.tcad.runtime.require_devsim` rather than a
+    bare import, so the first import picks up devsim-openblas the way a
+    user's does: DEVSIM loads its BLAS/LAPACK library only on that first
+    import, and cannot initialise again in the same process after a
+    failure. ``pytest.importorskip("devsim")`` would bypass both.
+    """
+    from gsim.tcad.runtime import require_devsim
+
+    try:
+        require_devsim()
+    except ImportError as err:
+        pytest.skip(f"DEVSIM is unavailable: {err}", allow_module_level=True)
+
+
+def series_rc_admittance(
+    freq_hz: ArrayLike, r_ohm_m: float | ArrayLike, c_f_per_m: float | ArrayLike
+) -> NDArray[np.complex128]:
+    """Admittance of a series-RC branch, straight from Z = R + 1/(jwC)."""
+    omega = 2 * np.pi * np.asarray(freq_hz, dtype=np.float64)
+    return np.asarray(
+        1.0 / (np.asarray(r_ohm_m) + 1.0 / (1j * omega * np.asarray(c_f_per_m))),
+        dtype=np.complex128,
+    )
+
 
 def draw_pn_rib(
     *,
@@ -63,3 +95,29 @@ def draw_pn_rib(
         verbose=False,
     )
     return comp, stack
+
+
+def longest_edge_in_box(
+    mesh_path, h: tuple[float, float], z: tuple[float, float]
+) -> float:
+    """Longest edge (um) of the triangles lying wholly inside a box.
+
+    A triangle with a corner outside the box straddles its border, where the
+    size field steps from the box's size to the surrounding one; such an
+    element measures the transition, not the box.
+    """
+    import meshio
+
+    mesh = meshio.read(str(mesh_path))
+    points = mesh.points[:, :2]
+    triangles = np.vstack([c.data for c in mesh.cells if c.type == "triangle"])
+    corners = points[triangles]
+    inside = (
+        (corners[..., 0] > h[0])
+        & (corners[..., 0] < h[1])
+        & (corners[..., 1] > z[0])
+        & (corners[..., 1] < z[1])
+    ).all(axis=1)
+    corners = corners[inside]
+    edges = np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=-1)
+    return float(edges.max())

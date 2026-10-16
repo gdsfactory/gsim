@@ -30,13 +30,15 @@ nav = [
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
     { "Terminal (multi-pin) Wave Ports" = "terminal_wave_ports.md" },
-    { "Palace Result Validation" = "palace-validation.md" }
+    { "Palace Result Validation" = "palace-validation.md" },
+    { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" }
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Guides" = [
     { "Materials" = "materials.md" },
     { "GDSFactory FDTD" = "api/fdtd.md" },
     { "Palace" = "api/palace.md" },
+    { "TCAD" = "api/tcad.md" },
     { "Meep" = "api/meep.md" },
     { "Common" = "api/common.md" },
     { "Cloud" = "api/cloud.md" }

@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from gsim.common.config import MutableModel as _MutableModel
 from gsim.fdtd.domain import Padding, padding_pair
 
 Vector3 = tuple[float, float, float]
@@ -24,19 +25,6 @@ Waveform = Literal["pulse", "continuous_wave"]
 HeatmapQuantity = Literal[
     "abs_e", "intensity", "abs_h", "ex", "ey", "ez", "hx", "hy", "hz"
 ]
-
-
-class _MutableModel(BaseModel):
-    """Validated model that supports concise batch updates."""
-
-    model_config = ConfigDict(validate_assignment=True, extra="forbid")
-
-    def __call__(self, **updates: Any) -> Self:
-        """Validate and apply several settings atomically."""
-        updated = type(self).model_validate({**self.model_dump(), **updates})
-        for field_name in type(self).model_fields:
-            object.__setattr__(self, field_name, getattr(updated, field_name))
-        return self
 
 
 class Geometry(BaseModel):
@@ -87,10 +75,17 @@ class Material(_MutableModel):
 
 
 class Materials(_MutableModel):
-    """Background material and optional refractive-index overrides."""
+    """Background material, refractive-index overrides, and dispersion handling.
+
+    By default each material reaches the solver as its index at the source
+    wavelength, and one warning names every card that varies over the source
+    band. ``dispersion=True`` sends such cards as dispersive models instead;
+    the deployed GDSFactory FDTD solver does not accept those yet.
+    """
 
     background: str = Field(default="SiO2", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)
+    dispersion: bool = False
 
     @field_validator("overrides", mode="before")
     @classmethod

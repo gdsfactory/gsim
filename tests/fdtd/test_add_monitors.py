@@ -116,6 +116,7 @@ def test_missing_geometry_fails_before_monitor_mutation():
 def test_window_tracks_each_port_and_owning_layer(fdtd_pdk_module, margin_um):
     import gdsfactory as gf
 
+    fdtd_pdk_module.PDK.activate()
     layer = fdtd_pdk_module.PDK.layer_stack.layers["core"]
     layer.zmin = 1.2
     layer.thickness = -0.6

@@ -366,6 +366,7 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                 snapshots[name],
                 refractive_index=material.refractive_index,
                 extinction_coefficient=0.0,
+                card=_constant_material_card(name, material.refractive_index),
             )
         return snapshots
 

@@ -447,6 +447,7 @@ class RuntimeConfigMixin:
                 max_wall_seconds=self.solver.max_wall_seconds,
                 excitation=excitation,
                 monitors=monitors,
+                dispersion=self.materials.dispersion,
             )
         except ValidationError as error:
             raise FDTDConfigError(

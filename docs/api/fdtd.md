@@ -54,6 +54,35 @@ hole, or edge topology, meshing safely falls back to vertical slices bounded by
 Use `write(path)` to generate `mesh.msh` and `config.json` without submitting.
 The original flat constructor keywords remain accepted for compatibility.
 
+## Material dispersion
+
+By default, each material reaches the solver as its index at the source
+wavelength. A broadband run therefore uses that one index at every wavelength.
+`write()` and `run()` emit one warning that names every material whose card
+varies over the source band, and by how much.
+
+`sim.materials(dispersion=True)` sends those cards as dispersive models instead.
+The deployed GDSFactory FDTD solver does not accept them yet, so a run with
+`dispersion=True` currently fails on the cloud.
+
+| Material card | `config.json` material entry with `dispersion=True` |
+| --- | --- |
+| Constant, lossless | `refractive_index` |
+| Sellmeier, lossless | `dispersion.sellmeier`, with `wavelength_range_nm` |
+| Anything else (tables, equations, loss) | `dispersion.table` of `n` and `k` |
+
+Tables are sampled at 21 evenly spaced wavelengths, plus the knots of a
+tabulated card inside the band, so that narrow features are kept. The sampled
+range is the source band plus a 10 % margin on each side; a side keeps its
+margin only if the card is still valid there. A card that does not cover the
+band itself raises `FDTDConfigError`.
+
+A continuous-wave or zero-span source needs only the index at its wavelength,
+so every material is written as a constant there. The solver encodes loss only
+in a dispersion table, so a lossy card raises unless the source is pulsed and
+`dispersion=True`. `sim.materials(overrides={"si": 3.47})` always gives a
+constant material.
+
 Domain padding is specified in micrometers, using `padding` as a shared fallback
 and `padding_x`, `padding_y`, or `padding_z` to override individual axes. Each
 accepts a nonnegative scalar (equal padding on both sides) or a

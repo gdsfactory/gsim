@@ -34,6 +34,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
     "nbs/palace_cpw_deembedding.ipynb",
+    "nbs/tcad_pn_junction.ipynb",
 ]
 
 

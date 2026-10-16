@@ -8,7 +8,7 @@ merged Shapely polygons.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import shapely
 import shapely.geometry
@@ -33,6 +33,32 @@ def round_coordinates(geom: AnyShapelyPolygon, ndigits: int = 4) -> AnyShapelyPo
     return shapely.ops.transform(_round_coords, geom)
 
 
+def layer_level_region(component: GFComponent, layer) -> Any:
+    """Evaluate the KLayout region a layer or LayerLevel covers on a component.
+
+    A ``LayerLevel`` with ``background=True`` fills the component bounding box,
+    whether or not its source layer has polygons, minus the polygons on its
+    ``background_exclude_layers``. Any other level, or a bare layer, evaluates
+    its source expression with ``get_shapes()``, which resolves DerivedLayer
+    booleans.
+
+    ``background`` was added to ``LayerLevel`` in gdsfactory 9.4x; on older
+    versions the attribute is absent and every level evaluates its source layer.
+    """
+    if getattr(layer, "background", False):
+        import gdsfactory as gf
+        from kfactory import kdb
+
+        region = kdb.Region(component.kdb_cell.bbox())
+        for excluded_layer in getattr(layer, "background_exclude_layers", ()):
+            layer_index = component.kcl.layer(*gf.get_layer_tuple(excluded_layer))
+            region -= kdb.Region(component.kdb_cell.begin_shapes_rec(layer_index))
+        return region
+
+    source_layer = getattr(layer, "layer", layer)
+    return source_layer.get_shapes(component)
+
+
 def fuse_polygons(
     component: GFComponent,
     layer,
@@ -41,9 +67,10 @@ def fuse_polygons(
 ) -> AnyShapelyPolygon:
     """Extract and merge all polygons for a layer from a component.
 
-    Calls ``layer.get_shapes(component)`` which handles DerivedLayer boolean
-    operations (KLayout Region). Converts the resulting KLayout polygons to
-    Shapely, including holes, then merges and simplifies.
+    Evaluates the layer with :func:`layer_level_region`, which handles
+    DerivedLayer boolean operations and background levels. Converts the
+    resulting KLayout polygons to Shapely, including holes, then merges and
+    simplifies.
 
     Args:
         component: gdsfactory Component
@@ -55,8 +82,7 @@ def fuse_polygons(
     Returns:
         Merged Shapely Polygon or MultiPolygon
     """
-    source_layer = getattr(layer, "layer", layer)
-    layer_region = source_layer.get_shapes(component)
+    layer_region = layer_level_region(component, layer)
 
     shapely_polygons = []
     for klayout_polygon in layer_region.each_merged():
