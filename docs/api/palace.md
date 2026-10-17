@@ -1,4 +1,7 @@
-# Palace API
+# Palace guide
+
+Use [`gsim.palace`][gsim.palace] for driven RF and microwave simulations, eigenmodes, electrostatics, and boundary modes.
+This guide covers solver configuration, meshing, and result processing. Class and function links open the API reference.
 
 ## Solver settings
 
@@ -104,44 +107,12 @@ the grouped format. `NumericalConfig(**sim.numerical.model_dump())` accepts that
 format and copies the six common numerical controls into a flat legacy model.
 For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings.
 
-::: gsim.palace.SolverConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - order
-        - device
-        - linear
-
-::: gsim.palace.LinearSolverConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - tolerance
-        - max_iterations
-        - solver_type
-        - preconditioner
-
-::: gsim.palace.DrivenConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.EigenmodeConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.ElectrostaticConfig
-    options:
-      show_source: false
-      inherited_members: false
-
-::: gsim.palace.BoundaryModeConfig
-    options:
-      show_source: false
-      inherited_members: false
+- [`SolverConfig`][gsim.palace.SolverConfig]
+- [`LinearSolverConfig`][gsim.palace.LinearSolverConfig]
+- [`DrivenConfig`][gsim.palace.DrivenConfig]
+- [`EigenmodeConfig`][gsim.palace.EigenmodeConfig]
+- [`ElectrostaticConfig`][gsim.palace.ElectrostaticConfig]
+- [`BoundaryModeConfig`][gsim.palace.BoundaryModeConfig]
 
 See [result validation](../palace-validation.md) for independent solver,
 adaptive sampling, mode identity, and provenance checks.
@@ -177,116 +148,14 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 
 ## Result validation
 
-::: gsim.palace.validation
-    options:
-      show_source: false
-      members:
-        - validate_solution
-        - ModeSample
-        - ModeExpectation
-        - SolutionCheck
-        - AdaptiveCheck
-        - SolutionProvenance
-        - SolutionReport
+- [`validation`][gsim.palace.validation]
 
 ## Simulation Classes
 
-::: gsim.palace.DrivenSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_driven
-        - set_material
-        - solver
-        - set_solver
-        - add_port
-        - add_cpw_port
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - write_config
-        - run
-        - start
-        - upload
-        - get_status
-        - wait_for_results
-
-::: gsim.palace.EigenmodeSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_eigenmode
-        - set_material
-        - solver
-        - set_solver
-        - add_port
-        - add_cpw_port
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - run
-
-::: gsim.palace.ElectrostaticSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_electrostatic
-        - set_material
-        - solver
-        - set_solver
-        - add_terminal
-        - nets
-        - add_pec
-        - mesh
-        - plot_mesh
-        - plot_stack
-        - show_stack
-        - preview
-        - validate_config
-        - validate_mesh
-        - run
-        - load_capacitance
-
-::: gsim.palace.BoundaryModeSim
-    options:
-      show_source: false
-      inherited_members: true
-      members:
-        - solver
-        - set_solver
-        - set_boundary_mode
-        - set_cross_section
-        - set_output_dir
-        - set_geometry
-        - set_stack
-        - set_material
-        - mesh
-        - validate_config
-        - validate_mesh
-        - write_config
-        - run
+- [`DrivenSim`][gsim.palace.DrivenSim]
+- [`EigenmodeSim`][gsim.palace.EigenmodeSim]
+- [`ElectrostaticSim`][gsim.palace.ElectrostaticSim]
+- [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
 
 ## Floquet eigenmodes
 
@@ -319,22 +188,61 @@ config generation also support `z` for supplied mesh metadata.
 `compute_floquet_wave_vector()` now require an explicit length on the config or as a `periodic_length` argument; the old `l0`
 argument and frequency-based length estimate are removed. Old mesh results without translation metadata must be regenerated.
 
+## Electrostatic terminals
+
+An `ElectrostaticSim` terminal selects conductors by connected net, by region or by
+layer. A net is the metal that touches on one layer plus the metal that vias join on
+other layers, so two electrodes on one layer are two nets (see `sim.nets()`).
+
+```python
+sim.add_terminal("TOP", net="PLUS")  # net by port name, or by its name in sim.nets()
+sim.add_terminal("LEFT", region=(0, 0, 20, 20), layer="m1")  # nets with an m1 shape in the box
+sim.add_terminal("SHIELD", net="net3", floating=True)  # solved, then eliminated
+sim.add_terminal("T1", layer="metal5")  # a whole layer, as before
+sim.unassigned_conductors = "ground"  # the default; or "floating"
+print(sim.resolve_terminals())  # check the selection before meshing
+cap = sim.load_capacitance(sim.run())  # floating terminals are eliminated
+cap.between("TOP", "LEFT")
+cap.to_ground("LEFT")
+cap.pairs()  # every pair and every terminal-to-ground value, as a table
+```
+
+- **Net names** are the names of the ports on the net joined by `+`, or `net<k>`
+  (`k` counts from 1 in layout order). `net=` matches the whole name or any one port
+  name; if several nets carry the same port name they all go into that terminal.
+  `net<k>` changes when the layout is edited, so prefer port names or `region=`.
+  GDS text labels are not used.
+- **`region=`** is a box `(xmin, ymin, xmax, ymax)` or a list of at least three
+  `(x, y)` points, in um. It selects every net with a conductor or via shape that
+  overlaps the region, only on `layer` when that is given. It always selects whole
+  nets, because part of a conductor cannot be at another potential.
+- **`layer=` alone** keeps the old behaviour while no terminal uses `net`, `region` or
+  `floating`: every shape on that layer, and vias by z-overlap. Once any terminal uses
+  nets, `layer=` means every net with a shape on that layer, including the metal that
+  vias join to it on other layers. `net=` cannot be combined with `region=` or `layer=`.
+- **Conductors in no terminal** are grounded, as before. With
+  `unassigned_conductors="floating"` each becomes an extra terminal named after its
+  net. PEC blocks are always grounded. A net in two terminals is an error.
+- **Floating conductors** are solved as terminals, one extra Palace excitation each,
+  and `load_capacitance` removes them with a Schur complement of the Maxwell matrix,
+  `C_tt - C_tf C_ff^-1 C_ft`, which is exact for electrostatics. Pass
+  `eliminate_floating=False` to keep them. The rows are the terminals in the order
+  they were added, then the automatic floating terminals in net order.
+- **Vias and merging.** `mesh()` merges vias closer than `merge_via_distance` (2 um by
+  default). If that would join the vias of two nets it raises a `ValueError` naming the
+  via layer and the nets; set `merge_via_distance` below the gap between them.
+- **Changing the selection style.** A mesh made for layer terminals cannot serve net
+  terminals and the other way round; `write_config()` raises and asks you to call
+  `mesh()` again. In net mode `write_config()` also writes `terminals.json`, which
+  `load_capacitance` reads when the simulation object is new.
+- **Reading the results.** `cap.between(a, b)` is the capacitance between two
+  electrodes and `cap.to_ground(a)` the one to ground; `cap.pairs()` lists both kinds
+  apart. If no conductor is grounded, `to_ground` comes out near zero.
+
 ## Capacitance
 
-::: gsim.palace.CapacitanceMatrices
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - between
-        - to_ground
-        - maxwell_frame
-        - mutual_frame
-        - problems
-
-::: gsim.palace.load_capacitance
-    options:
-      show_source: false
+- [`CapacitanceMatrices`][gsim.palace.CapacitanceMatrices]
+- [`load_capacitance`][gsim.palace.load_capacitance]
 
 ## Saved fields and S-parameters
 
@@ -418,8 +326,9 @@ metadata["mesh"]["kappa"]["max"]  # numerical distortion, not formatted text
 problem type, solver settings and refinement controls. The result object is a
 snapshot from meshing. Consumers should accept additional metadata keys so new
 measurements can be added. Allocation rules remain in DataLab; these are sizing
-hints. The current cloud API does not accept a separate metadata parameter, so
-the metadata travels as an input artifact pending that API integration.
+hints. Compatible SDKs also forward it as a separate submission parameter;
+older SDK interfaces retain fixed-resource submission. See
+[cloud sizing metadata](cloud.md#sizing-metadata) for the calibration assumptions.
 The root-level `metadata.json` name is reserved for these diagnostics. It is
 excluded from the Palace result-cache key so measurements can evolve without
 rerunning identical mesh/config inputs. The full `compute_dir_digest()` includes
@@ -434,168 +343,55 @@ Use it alongside SICN's signed validity check and solution convergence; κ alone
 does not measure simulation accuracy. A numerically singular center is displayed
 as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 
-::: gsim.palace.MeshConfig
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - coarse
-        - default
-        - fine
-
-::: gsim.palace.generate_mesh
-    options:
-      show_source: false
+- [`MeshConfig`][gsim.palace.MeshConfig]
+- [`generate_mesh`][gsim.palace.generate_mesh]
 
 ## Nets
 
-::: gsim.palace.Nets
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - net_at
-
-::: gsim.palace.Net
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - layers
-
-::: gsim.palace.extract_nets
-    options:
-      show_source: false
+- [`Nets`][gsim.palace.Nets]
+- [`Net`][gsim.palace.Net]
+- [`extract_nets`][gsim.palace.extract_nets]
 
 ## Stack
 
-::: gsim.palace.LayerStack
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
-
-::: gsim.palace.Layer
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`LayerStack`][gsim.palace.LayerStack]
+- [`Layer`][gsim.palace.Layer]
 
 ## Circuit Synthesis
 
-::: gsim.palace.CircuitSynthesis
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - nodes
-        - L_inv
-        - R_inv
-        - C
-        - port_labels
-        - port_indices
-        - internal_indices
-        - port_loads
-        - port_names
-        - Y
-        - port_admittance
-        - port_impedance
-        - s_parameters
-        - port_reference_impedances
-        - eigenfrequencies
-        - fit_rlc
-
-::: gsim.palace.fit_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.differential_impedance
-    options:
-      show_source: false
-
-::: gsim.palace.initial_guess_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.z_rlc
-    options:
-      show_source: false
-
-::: gsim.palace.load_circuit_synthesis
-    options:
-      show_source: false
+- [`CircuitSynthesis`][gsim.palace.CircuitSynthesis]
+- [`fit_rlc`][gsim.palace.fit_rlc]
+- [`differential_impedance`][gsim.palace.differential_impedance]
+- [`initial_guess_rlc`][gsim.palace.initial_guess_rlc]
+- [`z_rlc`][gsim.palace.z_rlc]
+- [`load_circuit_synthesis`][gsim.palace.load_circuit_synthesis]
 
 ## Fitting
 
-::: gsim.palace.RLCFit
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - R
-        - L
-        - C
-        - f0
-        - Q
-        - rms_error
-        - z
-        - y
-        - to_dict
-
-::: gsim.palace.VectorFit
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - raw
-        - network
-        - poles
-        - residues
-        - zeros
-        - n_poles
-        - is_stable
-        - rms_error
-        - is_passive
-        - passivity_test
-        - passivity_enforce
-        - get_spurious
-        - s
-        - z
-        - y
-        - write_spice
+- [`RLCFit`][gsim.palace.RLCFit]
+- [`VectorFit`][gsim.palace.VectorFit]
 
 ## Parameter Conversions
 
-::: gsim.palace.s_to_z
-    options:
-      show_source: false
-
-::: gsim.palace.z_to_s
-    options:
-      show_source: false
-
-::: gsim.palace.s_to_y
-    options:
-      show_source: false
-
-::: gsim.palace.y_to_s
-    options:
-      show_source: false
-
-::: gsim.palace.z_to_y
-    options:
-      show_source: false
-
-::: gsim.palace.y_to_z
-    options:
-      show_source: false
-
-::: gsim.palace.is_complete
-    options:
-      show_source: false
+- [`s_to_z`][gsim.palace.s_to_z]
+- [`z_to_s`][gsim.palace.z_to_s]
+- [`s_to_y`][gsim.palace.s_to_y]
+- [`y_to_s`][gsim.palace.y_to_s]
+- [`z_to_y`][gsim.palace.z_to_y]
+- [`y_to_z`][gsim.palace.y_to_z]
+- [`is_complete`][gsim.palace.is_complete]
 
 ## Transmission-line analysis
 
 See [Transmission-line analysis](../transmission_line_analysis.md) for using
 `load_sparams(...).to_skrf()` with scikit-rf's multiline TRL calibration,
 physical impedance normalization and independent-length checks.
+
+## Terminal S-parameters
+
+See [Terminal (multi-pin) Wave Ports](../terminal_wave_ports.md) for the
+conventions and a worked example.
+
+::: gsim.palace.terminal
+    options:
+      show_source: false

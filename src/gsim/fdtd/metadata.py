@@ -1,8 +1,9 @@
-"""Mesh bounds and user grid settings accompanying FDTD inputs."""
+"""Mesh bounds and client grid counts accompanying FDTD inputs."""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +80,7 @@ def _mesh_bounds(mesh_path: Path, manifest: MeshManifest) -> dict[str, list[floa
 def generate_metadata(
     manifest: MeshManifest, config: FDTDConfig, mesh_path: str | Path
 ) -> dict[str, Any]:
-    """Describe the written mesh and requested grid without predicting resources."""
+    """Describe the written mesh and grid without deciding cloud resources."""
     _validate_manifest(manifest, config)
     return {
         "schema_version": 1,
@@ -88,7 +89,49 @@ def generate_metadata(
         "grid": {
             "nanometers_per_cell": config.grid.nanometers_per_cell,
             "pml_cells": config.grid.pml_cells,
+            "non_pml_bounds": config.grid.non_pml_bounds.model_dump(mode="json"),
+            "cell_counts": _cell_counts(config),
         },
+    }
+
+
+def _cell_counts(config: FDTDConfig) -> dict[str, Any]:
+    """Estimate the engine's z16 layout; the server must verify this hint."""
+    # Match FDTD's MaterialGridBuilderV2::ComputeGridShape / ComputeAxisLayout:
+    # https://github.com/doplaydo/FDTD/blob/c7d7443/src/fdtd_grid_layout.cc
+    # The field path aligns Z to kMaxSimdWidth=16 on every CPU architecture.
+    bounds = config.grid.non_pml_bounds
+    cell_size = config.grid.nanometers_per_cell
+    interior = [
+        math.ceil((upper - lower) / cell_size)
+        for lower, upper in zip(bounds.min, bounds.max, strict=True)
+    ]
+    alignment = [1, 1, 16]
+    aligned_interior = [
+        ((cells + group - 1) // group) * group
+        for cells, group in zip(interior, alignment, strict=True)
+    ]
+    pml_per_face = [
+        ((config.grid.pml_cells + group - 1) // group) * group for group in alignment
+    ]
+    total = [
+        cells + 2 * (pml + guard)
+        for cells, pml, guard in zip(
+            aligned_interior, pml_per_face, alignment, strict=True
+        )
+    ]
+    return {
+        "scope": "client_estimate",
+        "layout": "fdtd-z16-v1",
+        "interior_cells_xyz": interior,
+        "alignment_cells_xyz": [
+            aligned - cells
+            for aligned, cells in zip(aligned_interior, interior, strict=True)
+        ],
+        "pml_cells_per_face_xyz": pml_per_face,
+        "guard_cells_per_face_xyz": alignment,
+        "total_cells_xyz": total,
+        "total_cells": math.prod(total),
     }
 
 

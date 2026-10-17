@@ -292,19 +292,123 @@ def _filter_start_points_in_bounds(
     return points[keep]
 
 
+def _normalize_cycles(
+    *,
+    cycle: int | None,
+    cycles: int | Sequence[int] | None,
+) -> list[int | None]:
+    """Return the ordered list of ParaView cycles to render."""
+    if cycles is not None:
+        return [cycles] if isinstance(cycles, int) else list(cycles)
+    return [cycle]
+
+
+def _resolve_scalar_values(
+    sliced: pv.DataSet,
+    field: str,
+    scalar: str,
+    axes: list[int],
+) -> tuple[np.ndarray, str, bool]:
+    """Return ``(values, name, signed)`` for the requested colour scalar.
+
+    ``scalar`` is ``"magnitude"`` (vector length), ``"real"`` (phase-locked
+    signed real part of the horizontal in-plane component) or a component
+    name (``"x"``, ``"y"``, ``"z"``).
+    """
+    raw = np.asarray(sliced.point_data[field])
+    if scalar == "magnitude":
+        if raw.ndim == 2:
+            return np.linalg.norm(raw, axis=1), f"|{field}|", False
+        return raw.astype(float), field, False
+
+    vec = _complex_vector(sliced, field)
+    if vec.ndim != 2 or vec.shape[1] not in {2, 3}:
+        msg = (
+            f"scalar={scalar!r} needs a vector field, got shape {vec.shape} "
+            f"for '{field}'."
+        )
+        raise ValueError(msg)
+
+    if scalar == "real":
+        h_idx = axes[0] if vec.shape[1] == 3 else 0
+        comp = vec[:, h_idx]
+        name = f"Re({field}[{_axis_name(h_idx)}])"
+    else:
+        idx = {"x": 0, "y": 1, "z": 2}.get(scalar.lower())
+        if idx is None or idx >= vec.shape[1]:
+            msg = (
+                f"Unknown scalar={scalar!r}. Use 'magnitude', 'real' or a "
+                "component among 'x', 'y', 'z'."
+            )
+            raise ValueError(msg)
+        comp = vec[:, idx]
+        name = f"Re({field}[{scalar.lower()}])"
+
+    # Phase-lock so the plotted polarity is meaningful for complex fields.
+    ref = np.angle(np.nansum(comp))
+    values = np.real(comp * np.exp(-1j * ref))
+    return values, name, True
+
+
+def _auto_clim(values: np.ndarray, *, signed: bool) -> tuple[float, float] | None:
+    """Colour limits from the 98th percentile, symmetric when *signed*."""
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return None
+    vmax = float(np.percentile(np.abs(finite), 98))
+    if vmax <= 0:
+        return None
+    return (-vmax, vmax) if signed else (0.0, vmax)
+
+
+def _crop_inplane(
+    sliced: pv.DataSet,
+    *,
+    axes: list[int],
+    chip_bounds: tuple[float, float, float, float],
+) -> pv.DataSet:
+    """Crop a planar slice to an in-plane box ``(h_min, h_max, v_min, v_max)``.
+
+    *axes* are the slice's own in-plane axes, as returned by
+    :func:`_slice_plane`.  They are not derived from the requested ``normal``:
+    a native-2D dataset is flat in one axis and ``_slice_plane`` keeps that
+    plane regardless of ``normal``.  Filtering on the point coordinates also
+    avoids a zero-thickness clip box on flat data.
+    """
+    h_min, h_max, v_min, v_max = chip_bounds
+    points = np.asarray(sliced.points, dtype=float)
+    if points.size == 0:
+        msg = f"chip_bounds={chip_bounds} removed all data."
+        raise ValueError(msg)
+    h = points[:, axes[0]]
+    v = points[:, axes[1]]
+    inside = (h >= h_min) & (h <= h_max) & (v >= v_min) & (v <= v_max)
+    if not inside.any():
+        msg = f"chip_bounds={chip_bounds} removed all data."
+        raise ValueError(msg)
+    cropped = sliced.extract_points(np.flatnonzero(inside))
+    if cropped.n_points == 0:
+        msg = f"chip_bounds={chip_bounds} removed all data."
+        raise ValueError(msg)
+    return cropped
+
+
 def plot_fields_2d(
     source: str | Path | dict | pv.DataSet,
     *,
     field: str = "E_real",
+    scalar: str = "magnitude",
     normal: Axis = "x",
     origin: float = 0.0,
     excitation: int = 1,
     cycle: int | None = None,
+    cycles: int | Sequence[int] | None = None,
     boundary: bool = False,
     physical_groups: Sequence[str] | None = None,
-    cmap: ColormapOptions = "hot",
+    chip_bounds: tuple[float, float, float, float] | None = None,
+    cmap: ColormapOptions | None = None,
     clim: tuple[float, float] | None = None,
-    title: str = "|E|",
+    title: str | Sequence[str] = "|E|",
     show_edges: bool = False,
     opacity: float = 1.0,
     show: bool = True,
@@ -327,14 +431,30 @@ def plot_fields_2d(
         source: Simulation output directory, path to ``.pvtu`` / ``.vtu``,
             or a pre-loaded ``pv.DataSet``.
         field: Field name to plot (e.g. ``"E_real"``, ``"E_imag"``).
+        scalar: Colour scalar.  ``"magnitude"`` (default) plots the vector
+            length; ``"real"`` plots the phase-locked signed real part of
+            the horizontal in-plane component, whose positive/negative
+            lobes reveal the field polarity across the gaps (e.g. whether
+            the two grounds swing in phase); ``"x"``, ``"y"`` or ``"z"``
+            plot the real part of that vector component.
         normal: Slice normal (``"x"``, ``"y"``, ``"z"``).
         origin: Slice origin along the normal axis.
+        cycles: ParaView cycle number(s) to plot.  A list renders one panel
+            per cycle in a subplot grid (useful for comparing eigenmodes),
+            and takes precedence over *cycle*.
         physical_groups: Optional list of physical group names to
             restrict the plot to (e.g. ``["n_rib", "p_rib", "slab90"]``).
-        cmap: Colour-map name passed to PyVista.
+        chip_bounds: Optional in-plane crop ``(h_min, h_max, v_min, v_max)``
+            in the order of the slice's in-plane axes (e.g. y- then z-axis
+            for a volumetric x-normal slice; x- then y-axis for native-2D
+            flat data), to cut the airbox out of the view.
+        cmap: Colour-map name passed to PyVista.  Defaults to ``"RdBu"``
+            for signed scalars and ``"hot"`` otherwise.
         clim: Optional ``(vmin, vmax)`` for the color scale.  If None,
-            ``vmax`` is set to the 98th percentile of the data.
-        title: Plot title.
+            ``vmax`` is set to the 98th percentile of the data (symmetric
+            about zero for signed scalars).
+        title: Plot title.  With *cycles*, a sequence gives one title per
+            panel; a string is suffixed with the cycle number.
         show_edges: Toggle mesh edges on/off.
         opacity: Opacity of the mesh (0-1).
         show: If True, display the plot (live view or static image); if
@@ -361,90 +481,103 @@ def plot_fields_2d(
     _ensure_pyvista()
     import pyvista as pv
 
-    dataset = _source_to_dataset(
-        source,
-        excitation=excitation,
-        cycle=cycle,
-        boundary=boundary,
-    )
+    cycle_list = _normalize_cycles(cycle=cycle, cycles=cycles)
+    multi = len(cycle_list) > 1
+    ncols = min(len(cycle_list), 2) if multi else 1
+    nrows = -(-len(cycle_list) // ncols) if multi else 1
+    if multi:
+        pl = pv.Plotter(shape=(nrows, ncols), window_size=[1200 * ncols, 900 * nrows])
+    else:
+        pl = pv.Plotter(window_size=[1200, 900])
 
-    if physical_groups is not None:
-        if not isinstance(source, (str, Path)):
-            msg = "physical_groups requires a file path (not a DataSet or dict)"
-            raise TypeError(msg)
-        source_path = Path(source)
-        output_dir = source_path if source_path.is_dir() else source_path.parent
-        attribute_values = resolve_physical_groups(output_dir, physical_groups)
-
-        if "attribute" not in dataset.cell_data:
-            msg = (
-                "Dataset has no cell_data['attribute'] "
-                "— cannot filter by physical group"
-            )
-            raise ValueError(msg)
-        attrs = np.asarray(dataset.cell_data["attribute"])
-        keep = np.where(np.isin(attrs, np.asarray(attribute_values)))[0]
-        if keep.size == 0:
-            msg = (
-                f"No cells found for physical_groups={physical_groups} "
-                f"(attrs={attribute_values})"
-            )
-            raise ValueError(msg)
-        logger.info(
-            "Selected %d / %d cells for physical_groups=%s",
-            len(keep),
-            dataset.n_cells,
-            physical_groups,
+    for index, cyc in enumerate(cycle_list):
+        dataset = _source_to_dataset(
+            source,
+            excitation=excitation,
+            cycle=cyc,
+            boundary=boundary,
         )
-        dataset = dataset.extract_cells(keep)
 
-    # Slice to the cross-section plane.
-    sliced, _used_normal, _axis_idx, _axes = _slice_plane(
-        dataset,
-        normal=normal,
-        origin=origin,
-    )
+        if physical_groups is not None:
+            if not isinstance(source, (str, Path)):
+                msg = "physical_groups requires a file path (not a DataSet or dict)"
+                raise TypeError(msg)
+            source_path = Path(source)
+            output_dir = source_path if source_path.is_dir() else source_path.parent
+            attribute_values = resolve_physical_groups(output_dir, physical_groups)
 
-    if field not in sliced.point_data:
-        available = list(sliced.point_data.keys())
-        msg = f"Field '{field}' not found in dataset. Available: {available}"
-        raise ValueError(msg)
+            if "attribute" not in dataset.cell_data:
+                msg = (
+                    "Dataset has no cell_data['attribute'] "
+                    "— cannot filter by physical group"
+                )
+                raise ValueError(msg)
+            attrs = np.asarray(dataset.cell_data["attribute"])
+            keep = np.where(np.isin(attrs, np.asarray(attribute_values)))[0]
+            if keep.size == 0:
+                msg = (
+                    f"No cells found for physical_groups={physical_groups} "
+                    f"(attrs={attribute_values})"
+                )
+                raise ValueError(msg)
+            logger.info(
+                "Selected %d / %d cells for physical_groups=%s",
+                len(keep),
+                dataset.n_cells,
+                physical_groups,
+            )
+            dataset = dataset.extract_cells(keep)
 
-    # Determine the 2D scalar to plot (magnitude for vector fields).
-    raw = np.asarray(sliced.point_data[field])
-    if raw.ndim == 2:
-        scalars = np.linalg.norm(raw, axis=1)
-        scalar_name = f"|{field}|"
-        sliced.point_data[scalar_name] = scalars
-    else:
-        scalar_name = field
+        # Slice to the cross-section plane, then crop to *chip_bounds* using
+        # that slice's own in-plane axes (correct for native-2D flat data).
+        sliced, _used_normal, axis_idx, axes = _slice_plane(
+            dataset,
+            normal=normal,
+            origin=origin,
+        )
 
-    # Clamp color scale to 98th percentile (3D-style), unless user overrides.
-    if clim is not None:
-        _clim = clim
-    else:
-        s = np.asarray(sliced.point_data[scalar_name])
-        finite = s[np.isfinite(s)]
-        if finite.size > 0:
-            vmax = float(np.percentile(finite, 98))
-            _clim = (0.0, vmax) if vmax > 0 else None
+        if chip_bounds is not None:
+            sliced = _crop_inplane(sliced, axes=axes, chip_bounds=chip_bounds)
+
+        if field not in sliced.point_data:
+            available = list(sliced.point_data.keys())
+            msg = f"Field '{field}' not found in dataset. Available: {available}"
+            raise ValueError(msg)
+
+        values, scalar_name, signed = _resolve_scalar_values(
+            sliced,
+            field,
+            scalar,
+            axes,
+        )
+        sliced.point_data[scalar_name] = values
+
+        resolved_cmap = cmap if cmap is not None else ("RdBu" if signed else "hot")
+        _clim = clim if clim is not None else _auto_clim(values, signed=signed)
+
+        if multi:
+            pl.subplot(index // ncols, index % ncols)
+            if isinstance(title, (list, tuple)):
+                panel_title = str(title[index])
+            else:
+                panel_title = f"{title} — cycle {cyc}"
         else:
-            _clim = None
+            panel_title = title if isinstance(title, str) else str(title[0])
 
-    # Camera: face the 2D plane directly (always, not just for zoom).
-    pl = pv.Plotter(window_size=[1200, 900])
-    pl.add_mesh(
-        sliced,
-        scalars=scalar_name,
-        cmap=cmap,
-        clim=_clim,
-        show_edges=show_edges,
-        opacity=opacity,
-        scalar_bar_args={"title": scalar_name, "vertical": True},
-    )
-    pl.add_title(title, font_size=12)
+        pl.add_mesh(
+            sliced,
+            scalars=scalar_name,
+            cmap=resolved_cmap,
+            clim=_clim,
+            show_edges=show_edges,
+            opacity=opacity,
+            scalar_bar_args={"title": scalar_name, "vertical": True},
+        )
+        pl.add_title(panel_title, font_size=12)
 
-    _apply_front_camera(pl, np.asarray(sliced.points), _axis_idx)
+        # Camera: face the 2D plane directly (always, not just for zoom).
+        _apply_front_camera(pl, np.asarray(sliced.points), axis_idx)
+
     if screenshot is not None:
         pl.screenshot(str(screenshot))
         pl.close()

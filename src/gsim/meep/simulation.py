@@ -444,7 +444,8 @@ class Simulation(BaseModel):
         """Validate the simulation configuration.
 
         Returns:
-            ValidationResult with errors/warnings.
+            ValidationResult with errors, warnings and info (the active
+            stopping mode).
         """
         from gsim.common import ValidationResult
 
@@ -508,29 +509,33 @@ class Simulation(BaseModel):
                 "No stack configured. Will use active PDK with defaults."
             )
 
-        # Inform about stopping mode
+        # The active stopping mode is information, not a problem
+        info: list[str] = []
         s = self.solver
         if s.stopping == "energy_decay":
-            warnings_list.append(
+            info.append(
                 f"Stopping: energy_decay (dt={s.stopping_dt}, "
                 f"decay_by={s.stopping_threshold}, cap={s.max_time})"
             )
         elif s.stopping == "field_decay":
-            warnings_list.append(
+            info.append(
                 f"Stopping: field_decay (component={s.stopping_component}, "
                 f"dt={s.stopping_dt}, decay_by={s.stopping_threshold}, "
                 f"cap={s.max_time})"
             )
         elif s.stopping == "dft_decay":
-            warnings_list.append(
+            info.append(
                 f"Stopping: dft_decay (tol={s.stopping_threshold}, "
                 f"min_time={s.stopping_min_time}, cap={s.max_time})"
             )
         elif s.stopping == "fixed":
-            warnings_list.append(f"Stopping: fixed (time={s.max_time})")
+            info.append(f"Stopping: fixed (time={s.max_time})")
 
         return ValidationResult(
-            valid=len(errors) == 0, errors=errors, warnings=warnings_list
+            valid=len(errors) == 0,
+            errors=errors,
+            warnings=warnings_list,
+            info=info,
         )
 
     # -------------------------------------------------------------------------

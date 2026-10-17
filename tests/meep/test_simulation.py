@@ -318,6 +318,15 @@ class TestValidation:
         result = sim.validate_config()
         assert any("No stack" in w for w in result.warnings)
 
+    def test_stopping_mode_is_info_not_warning(self):
+        sim = Simulation()
+        result = sim.validate_config()
+        assert not any(w.startswith("Stopping:") for w in result.warnings)
+        assert result.info == [
+            "Stopping: energy_decay (dt=20.0, decay_by=0.01, cap=2000.0)"
+        ]
+        assert "Info:\n  - Stopping: energy_decay" in str(result)
+
     def test_string_monitors(self):
         sim = Simulation()
         sim.monitors = ["o1", "o2", "o3"]

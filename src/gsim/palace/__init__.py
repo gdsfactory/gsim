@@ -118,6 +118,12 @@ from gsim.palace.mesh import (
 from gsim.palace.mesh.nets import Net, Nets, extract_nets
 from gsim.palace.mesh.validation import check_lumped_port_contact
 
+# Saved boundary-mode fields, and the line parameters they carry
+from gsim.palace.mode_fields import (
+    BoundaryModeField,
+    load_boundary_mode_field,
+)
+
 # Models (new submodule)
 from gsim.palace.models import (
     BoundaryModeConfig,
@@ -139,6 +145,7 @@ from gsim.palace.models import (
     PortConfig,
     SimulationResult,
     SolverConfig,
+    SymmetryPlaneConfig,
     TerminalConfig,
     TransientConfig,
     TwoTerminalPortConfig,
@@ -176,8 +183,19 @@ from gsim.palace.results import (
 # Runtime / binary resolution (self-contained; can auto-download a Palace CPU runtime)
 from gsim.palace.runtime import (
     install_palace_runtime,
+    local_abort_report,
+    require_palace_binary,
     resolve_palace_binary,
     resolve_palace_library_dir,
+)
+
+# Terminal (multi-pin) port S-parameters from modal S-parameters
+from gsim.palace.terminal import (
+    currents_from_reaction,
+    degenerate_mode_groups,
+    modal_to_terminal_s,
+    terminal_to_modal_s,
+    uniform_line_modal_s,
 )
 from gsim.viz import (
     close_interactive_view,
@@ -193,6 +211,7 @@ __all__ = [
     "MATERIALS_DB",
     "BoundaryFieldData",
     "BoundaryModeConfig",
+    "BoundaryModeField",
     "BoundaryModeSim",
     "BoundaryModeSolverConfig",
     "CPWPortConfig",
@@ -234,6 +253,7 @@ __all__ = [
     "SolverConfig",
     "Stack",
     "StackLayer",
+    "SymmetryPlaneConfig",
     "TerminalConfig",
     "TransientConfig",
     "TwoTerminalPortConfig",
@@ -253,6 +273,8 @@ __all__ = [
     "configure_interlayer_port",
     "configure_two_terminal_port",
     "configure_via_port",
+    "currents_from_reaction",
+    "degenerate_mode_groups",
     "differential_impedance",
     "extract_axis_slice",
     "extract_boundary_cells",
@@ -273,6 +295,7 @@ __all__ = [
     "interactive_mode",
     "is_complete",
     "load_boundary_field_data",
+    "load_boundary_mode_field",
     "load_capacitance",
     "load_circuit_synthesis",
     "load_field_context",
@@ -281,6 +304,8 @@ __all__ = [
     "load_sparams",
     "load_stack_yaml",
     "load_volume_field_data",
+    "local_abort_report",
+    "modal_to_terminal_s",
     "parse_layer_stack",
     "plot_boundary_field",
     "plot_cross_section",
@@ -294,6 +319,7 @@ __all__ = [
     "print_stack",
     "print_stack_table",
     "refinement_convergence",
+    "require_palace_binary",
     "resolve_boundary_type_attributes",
     "resolve_entity_attributes",
     "resolve_palace_binary",
@@ -306,6 +332,8 @@ __all__ = [
     "s_to_z",
     "set_interactive_mode",
     "set_trame_backend",
+    "terminal_to_modal_s",
+    "uniform_line_modal_s",
     "y_to_s",
     "y_to_z",
     "z_rlc",

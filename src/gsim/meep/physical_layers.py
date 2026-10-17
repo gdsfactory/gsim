@@ -86,18 +86,9 @@ def _matching_layer_level(
 
 def _evaluate_level_region(component: Any, level: Any) -> Any:
     """Evaluate one GDSFactory physical level from its source expression."""
-    import gdsfactory as gf
-    from kfactory import kdb
+    from gsim.common.polygon import layer_level_region
 
-    if getattr(level, "background", False):
-        background = kdb.Region(component.kdb_cell.bbox())
-        for excluded_layer in getattr(level, "background_exclude_layers", ()):
-            layer_tuple = gf.get_layer_tuple(excluded_layer)
-            layer_index = component.kcl.layer(*layer_tuple)
-            background -= kdb.Region(component.kdb_cell.begin_shapes_rec(layer_index))
-        return background
-
-    return level.layer.get_shapes(component)
+    return layer_level_region(component, level)
 
 
 def _source_layer_region(component: Any, gds_layer: tuple[int, int]) -> Any:

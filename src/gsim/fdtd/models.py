@@ -46,6 +46,8 @@ class MeshManifest:
     volumes: dict[str, MeshGroup]
     layers: dict[str, MeshGroup]
     ports: dict[str, PortMeshGroup]
+    domain_min_nm: tuple[float, float, float]
+    domain_max_nm: tuple[float, float, float]
 
 
 @dataclass(frozen=True)

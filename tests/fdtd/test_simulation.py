@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import gmsh
 import meshio
 import numpy as np
 import pytest
 
 from gsim import fdtd
 from gsim.fdtd.models import FDTDConfigError, FDTDGeometryError
+from gsim.fdtd.simulation import ArtifactSimulation
 
 
 def _physical_group_points(mesh: meshio.Mesh, name: str, cell_type: str) -> np.ndarray:
@@ -59,7 +62,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
         pml_cells=16,
         num_wavelengths=3,
         default_port="o1",
@@ -69,7 +72,13 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert resolved.materials["Si"].source == "project"
     assert resolved.materials["Si"].refractive_index == pytest.approx(3.475687046)
 
-    artifacts = simulation.write(tmp_path)
+    with pytest.warns(UserWarning, match="dispersion is not sent") as caught:
+        artifacts = simulation.write(tmp_path)
+    assert {
+        warning.filename
+        for warning in caught
+        if "dispersion is not sent" in str(warning.message)
+    } == {__file__}
     document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
     mesh = meshio.read(artifacts.mesh_path)
 
@@ -104,8 +113,98 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert port_points[:, 2].max() == pytest.approx(220)
     assert len(_internal_horizontal_boundary_faces(mesh, "core")) == 0
 
+    background_points = _physical_group_points(mesh, "background", "tetra")
+    non_pml_bounds = document["grid"]["non_pml_bounds"]
+    assert non_pml_bounds["min"] == pytest.approx(background_points.min(axis=0))
+    assert non_pml_bounds["max"] == pytest.approx(background_points.max(axis=0))
+
     mesh_header = artifacts.mesh_path.read_text(encoding="utf8").splitlines()
     assert mesh_header[mesh_header.index("$MeshFormat") + 1] == "2.2 0 8"
+
+
+def test_enabled_dispersion_writes_dispersive_models(
+    tmp_path,
+    fdtd_pdk_module,
+) -> None:
+    simulation = fdtd.Simulation(
+        pdk=fdtd_pdk_module,
+        mesh_size_nm=750,
+        domain={"padding": 0.25},
+        pml_cells=16,
+        num_wavelengths=3,
+        default_port="o1",
+    )
+    simulation.materials(dispersion=True)
+    simulation.geometry("straight", settings={"length": 2.0})
+
+    artifacts = simulation.write(tmp_path)
+    document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
+
+    silicon_table = document["materials"]["Si"]["dispersion"]["table"]
+    assert np.interp(
+        1550, silicon_table["wavelength_nm"], silicon_table["n"]
+    ) == pytest.approx(3.475687046, abs=1e-5)
+    assert document["materials"]["SiO2"]["dispersion"]["sellmeier"]["b"] == [
+        0.6961663,
+        0.4079426,
+        0.8974794,
+    ]
+    assert document["background_refractive_index"] == pytest.approx(1.4440236217)
+
+
+def test_write_keeps_background_level_without_polygons(
+    tmp_path,
+    fdtd_pdk_module,
+) -> None:
+    buried_oxide = fdtd_pdk_module.PDK.layer_stack.layers["buried_oxide"]
+    object.__setattr__(buried_oxide, "background", True)
+    object.__setattr__(buried_oxide, "background_exclude_layers", ())
+    simulation = fdtd.Simulation(
+        pdk=fdtd_pdk_module,
+        mesh_size_nm=750,
+        domain={"padding": 0.25},
+        pml_cells=16,
+        num_wavelengths=3,
+        default_port="o1",
+    )
+    resolved = simulation.geometry("straight", settings={"length": 2.0})
+
+    assert resolved.layers["buried_oxide"].geometry.area == pytest.approx(2.0 * 0.5)
+
+    artifacts = simulation.write(tmp_path)
+    mesh = meshio.read(artifacts.mesh_path)
+
+    assert "buried_oxide" in mesh.field_data
+    assert "buried_oxide" in artifacts.manifest.layers
+
+
+@pytest.mark.parametrize("simulation_class", [fdtd.Simulation, ArtifactSimulation])
+def test_write_uses_lf_line_endings(
+    tmp_path, fdtd_pdk_module, monkeypatch, simulation_class
+) -> None:
+    """The cloud solver crashes on CRLF meshes, so Windows output must be LF."""
+    gmsh_write = gmsh.write
+
+    def write_like_windows(path: str) -> None:
+        # Gmsh already writes CRLF on Windows; force it on every platform.
+        gmsh_write(path)
+        mesh_path = Path(path)
+        content = mesh_path.read_bytes().replace(b"\r\n", b"\n")
+        mesh_path.write_bytes(content.replace(b"\n", b"\r\n"))
+
+    monkeypatch.setattr(gmsh, "write", write_like_windows)
+    simulation = simulation_class(
+        pdk=fdtd_pdk_module,
+        mesh_size_nm=750,
+        default_port="o1",
+    )
+    simulation.geometry("straight", settings={"length": 2.0})
+
+    artifacts = simulation.write(tmp_path)
+
+    # The config check only bites on the Windows CI runner.
+    assert b"\r" not in artifacts.mesh_path.read_bytes()
+    assert b"\r" not in artifacts.config_path.read_bytes()
 
 
 def test_write_requires_geometry(tmp_path) -> None:
@@ -135,6 +234,12 @@ def test_explicit_domain_bounds_set_background_box(
 
     assert background_points.min(axis=0) == pytest.approx([0.0, -500.0, -400.0])
     assert background_points.max(axis=0) == pytest.approx([2000.0, 500.0, 600.0])
+
+    document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
+    assert document["grid"]["non_pml_bounds"] == {
+        "min": pytest.approx([0.0, -500.0, -400.0]),
+        "max": pytest.approx([2000.0, 500.0, 600.0]),
+    }
 
 
 def test_explicit_domain_bounds_must_contain_geometry(
@@ -239,7 +344,7 @@ def test_vertical_port_becomes_fiber_monitor_not_material_port(
         pdk=fdtd_pdk_module,
         default_port="o1",
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
     )
     simulation.geometry("vertical_coupler")
 
@@ -268,7 +373,7 @@ def test_vertical_default_port_uses_gaussian_beam(
         pdk=fdtd_pdk_module,
         default_port="o2",
         mesh_size_nm=750,
-        background_padding_um=0.25,
+        domain={"padding": 0.25},
     )
     simulation.source(
         vertical_monitor_heatmap=fdtd.Heatmap(
@@ -323,7 +428,7 @@ def test_write_restores_options_from_existing_gmsh_session(
             pdk=fdtd_pdk_module,
             default_port="o1",
             mesh_size_nm=750,
-            background_padding_um=0.25,
+            domain={"padding": 0.25},
         )
         simulation.geometry("straight", settings={"length": 2.0})
         simulation.write(tmp_path)

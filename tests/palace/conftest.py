@@ -4,11 +4,49 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import gdsfactory as gf
+import gmsh
 import pytest
 import yaml
 
+from gsim.common.stack import Layer, LayerStack
+
 _MESH_COUNT_KEYS = ("elements", "nodes", "tetrahedra")
 _MESH_COUNT_RTOL = 0.01
+
+
+@pytest.fixture
+def port_stack():
+    """Two metal levels with a one-micrometer interlayer gap."""
+    gf.gpdk.PDK.activate()
+    return LayerStack(
+        layers={
+            name: Layer(
+                name=name,
+                gds_layer=(index, 0),
+                zmin=bottom,
+                zmax=top,
+                thickness=top - bottom,
+                material="aluminum",
+                layer_type="conductor",
+            )
+            for index, (name, bottom, top) in enumerate(
+                [("m1", 1, 2), ("m2", 3, 5)], start=1
+            )
+        }
+    )
+
+
+@pytest.fixture
+def kernel():
+    """Provide a real OpenCASCADE model and release it after each test."""
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.model.add("primitives")
+    try:
+        yield gmsh.model.occ
+    finally:
+        gmsh.finalize()
 
 
 class MeshRegressionFixture:

@@ -15,6 +15,9 @@ from pydantic import (
     model_validator,
 )
 
+from gsim.common.config import MutableModel as _MutableModel
+from gsim.fdtd.domain import Padding, padding_pair
+
 Vector3 = tuple[float, float, float]
 Axis = Literal["x", "y", "z"]
 SignedAxis = Literal["+x", "-x", "+y", "-y", "+z", "-z"]
@@ -22,19 +25,6 @@ Waveform = Literal["pulse", "continuous_wave"]
 HeatmapQuantity = Literal[
     "abs_e", "intensity", "abs_h", "ex", "ey", "ez", "hx", "hy", "hz"
 ]
-
-
-class _MutableModel(BaseModel):
-    """Validated model that supports concise batch updates."""
-
-    model_config = ConfigDict(validate_assignment=True, extra="forbid")
-
-    def __call__(self, **updates: Any) -> Self:
-        """Validate and apply several settings atomically."""
-        updated = type(self).model_validate({**self.model_dump(), **updates})
-        for field_name in type(self).model_fields:
-            object.__setattr__(self, field_name, getattr(updated, field_name))
-        return self
 
 
 class Geometry(BaseModel):
@@ -85,10 +75,17 @@ class Material(_MutableModel):
 
 
 class Materials(_MutableModel):
-    """Background material and optional refractive-index overrides."""
+    """Background material, refractive-index overrides, and dispersion handling.
+
+    By default each material reaches the solver as its index at the source
+    wavelength, and one warning names every card that varies over the source
+    band. ``dispersion=True`` sends such cards as dispersive models instead;
+    the deployed GDSFactory FDTD solver does not accept those yet.
+    """
 
     background: str = Field(default="SiO2", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)
+    dispersion: bool = False
 
     @field_validator("overrides", mode="before")
     @classmethod
@@ -307,9 +304,23 @@ class Monitors:
 
 
 class Domain(_MutableModel):
-    """Simulation-domain padding and absorbing boundary settings."""
+    """Physical domain padding in um, axis bounds, and PML settings.
 
-    padding_um: float = Field(default=1.0, gt=0)
+    A scalar pads both sides equally; a pair specifies (negative, positive).
+    Per-axis padding overrides the shared fallback. Explicit bounds and
+    explicit padding on the same axis are mutually exclusive.
+    """
+
+    padding: Padding = Field(default=1.0, description="Shared padding fallback in um.")
+    padding_x: Padding | None = Field(
+        default=None, description="X padding in um: scalar or (-x, +x) pair."
+    )
+    padding_y: Padding | None = Field(
+        default=None, description="Y padding in um: scalar or (-y, +y) pair."
+    )
+    padding_z: Padding | None = Field(
+        default=None, description="Z padding in um: scalar or (below, above) pair."
+    )
     pml_cells: int = Field(default=32, ge=0)
     x_bounds: tuple[float, float] | None = Field(
         default=None,
@@ -323,6 +334,14 @@ class Domain(_MutableModel):
         default=None,
         description="Optional physical Z-domain bounds in micrometers.",
     )
+
+    @field_validator("padding", "padding_x", "padding_y", "padding_z")
+    @classmethod
+    def validate_padding(cls, value: Padding | None) -> Padding | None:
+        """Allow zero padding while rejecting negative or nonfinite sides."""
+        if value is not None:
+            padding_pair(value)
+        return value
 
     @field_validator("x_bounds", "y_bounds", "z_bounds")
     @classmethod
@@ -338,6 +357,33 @@ class Domain(_MutableModel):
         if lower >= upper:
             raise ValueError("domain lower bound must be smaller than upper bound")
         return value
+
+    @model_validator(mode="after")
+    def validate_axis_controls(self) -> Self:
+        """Reject competing bounds and padding on an explicitly sized axis."""
+        for axis in ("x", "y", "z"):
+            if (
+                getattr(self, f"{axis}_bounds") is not None
+                and getattr(self, f"padding_{axis}") is not None
+            ):
+                raise ValueError(
+                    f"Choose domain.{axis}_bounds or domain.padding_{axis}; "
+                    "they cannot be combined on the same axis."
+                )
+        return self
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Keep failed assignments of competing axis controls atomic."""
+        if name in {
+            "padding_x",
+            "padding_y",
+            "padding_z",
+            "x_bounds",
+            "y_bounds",
+            "z_bounds",
+        } and hasattr(self, "__pydantic_fields_set__"):
+            type(self).model_validate({**self.model_dump(), name: value})
+        super().__setattr__(name, value)
 
 
 class Solver(_MutableModel):

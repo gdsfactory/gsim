@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -102,14 +103,21 @@ def _is_headless() -> bool:
 
 
 def _start_xvfb() -> None:
-    """Start a virtual frame buffer when ``pyvirtualdisplay`` is available."""
+    """Start a virtual frame buffer when ``pyvirtualdisplay`` is available.
+
+    Xvfb only exists on Linux. Windows and macOS never set ``DISPLAY`` and
+    render off-screen without it, so they skip the attempt.
+    """
+    if not sys.platform.startswith("linux"):
+        return
     try:
         from pyvirtualdisplay import Display  # pyright: ignore[reportMissingImports]
 
         display = Display(visible=False, size=(1440, 900))
         display.start()
     except Exception:  # optional dependency / headless host
-        logger.warning("pyvirtualdisplay not available; continuing without Xvfb")
+        # Off-screen rendering still works, so this is not a warning.
+        logger.debug("pyvirtualdisplay not available; continuing without Xvfb")
 
 
 def _ensure_pyvista():

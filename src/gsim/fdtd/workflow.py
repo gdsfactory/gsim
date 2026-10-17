@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from math import isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Self
 
 import gdsfactory as gf
 from pdk_schema import Index, ScalarValue
@@ -24,11 +25,13 @@ from gsim.fdtd.api import (
     Domain,
     GaussianBeamSource,
     Geometry,
+    Heatmap,
     LineCurrentSource,
     Materials,
     Monitors,
     PlaneMonitor,
     PortSource,
+    SignedAxis,
     Solver,
     SourceType,
 )
@@ -178,7 +181,6 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                 "vertical_aperture_width_um",
             ),
             "vertical_port_waist_radius_um": (source, "vertical_waist_radius_um"),
-            "background_padding_um": (domain, "padding_um"),
             "pml_cells": (domain, "pml_cells"),
             "x_bounds": (domain, "x_bounds"),
             "y_bounds": (domain, "y_bounds"),
@@ -212,6 +214,94 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
     def job_id(self) -> str | None:
         """Cloud job identifier after upload or run."""
         return self._job_id
+
+    def add_monitors(
+        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+    ) -> Self:
+        """Add center-wavelength port intensity images and an optional XY overview.
+
+        Args:
+            xy: Include the component-wide XY overview (default: True).
+            z_um: Overview height in micrometers. None uses the resolved geometry's
+                vertical midpoint. Ignored when xy is False.
+            margin_um: Nonnegative cladding margin on each side of a port's
+                active cross section, in micrometers (default: 0.75).
+
+        Returns:
+            This simulation, with the diagnostic planes added to its monitors.
+
+        Notes:
+            Optical port windows follow the port width and owning PDK layer's
+            vertical bounds, plus margin_um, three Yee cells inward from each
+            port. Each plane records only the source center wavelength,
+            without additional flux measurements. Guided S-parameter measurements
+            remain implicit. Existing monitors are preserved; duplicate names
+            raise ValueError before any planes are added. This method does not
+            mesh, submit or run a simulation.
+        """
+        if not isfinite(margin_um) or margin_um < 0:
+            raise ValueError("margin_um must be finite and nonnegative")
+        resolved = self._resolve_geometry()
+        wavelength_um = self.source.wavelength_um
+        offset_um = 3 * self.solver.cell_size_nm / 1000
+        planes: list[PlaneMonitor] = []
+        for port in resolved.ports.values():
+            if port.port_type != "optical":
+                continue
+            nx, ny, _ = port.normal
+            if port.layer_key is None:
+                raise FDTDGeometryError(
+                    f"Optical port {port.name!r} has no owning layer"
+                )
+            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            width_um = port.width + 2 * margin_um
+            height_um = z_upper - z_lower + 2 * margin_um
+            normal: SignedAxis = (
+                ("+x" if nx > 0 else "-x") if nx else ("+y" if ny > 0 else "-y")
+            )
+            planes.append(
+                PlaneMonitor(
+                    name=f"port_{port.name}",
+                    center_um=(
+                        port.center[0] - nx * offset_um,
+                        port.center[1] - ny * offset_um,
+                        port.center[2],
+                    ),
+                    size_um=(0, width_um, height_um)
+                    if nx
+                    else (width_um, 0, height_um),
+                    normal=normal,
+                    flux=False,
+                    wavelengths_um=[wavelength_um],
+                    heatmap=Heatmap(
+                        quantity="intensity", wavelengths_um=[wavelength_um]
+                    ),
+                )
+            )
+        if xy:
+            if z_um is None:
+                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+            component = resolved.component
+            planes.append(
+                PlaneMonitor(
+                    name="overview_xy",
+                    center_um=(component.dx, component.dy, z_um),
+                    size_um=(component.dxsize, component.dysize, 0),
+                    normal="+z",
+                    flux=False,
+                    wavelengths_um=[wavelength_um],
+                    heatmap=Heatmap(
+                        quantity="intensity", wavelengths_um=[wavelength_um]
+                    ),
+                )
+            )
+        existing_names = {monitor.name for monitor in self.monitors}
+        for plane in planes:
+            if plane.name in existing_names:
+                raise ValueError(f"monitor {plane.name!r} already exists")
+        for plane in planes:
+            self.monitors.add(plane)
+        return self
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve current geometry at the current source wavelength."""
@@ -277,6 +367,7 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
                 snapshots[name],
                 refractive_index=material.refractive_index,
                 extinction_coefficient=0.0,
+                card=_constant_material_card(name, material.refractive_index),
             )
         return snapshots
 
@@ -295,7 +386,10 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             resolved,
             mesh_path,
             background_material=self.materials.background,
-            background_padding_um=self.domain.padding_um,
+            padding=self.domain.padding,
+            padding_x=self.domain.padding_x,
+            padding_y=self.domain.padding_y,
+            padding_z=self.domain.padding_z,
             mesh_size_nm=self.geometry.mesh_size_nm,
             geometry_tolerance_nm=self.geometry.geometry_tolerance_nm,
             x_bounds=self.domain.x_bounds,
@@ -306,6 +400,7 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
         config_path.write_text(
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",
+            newline="\n",
         )
         write_metadata(manifest, config, mesh_path)
         self._last_artifacts = SimulationArtifacts(

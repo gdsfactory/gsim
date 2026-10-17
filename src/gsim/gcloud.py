@@ -642,6 +642,8 @@ def wait_for_results(
 
     # Track how many lines we printed last time (for overwriting multi-job)
     prev_lines = 0
+    # Highest percentage shown per job, so the bar never moves backwards
+    shown_progress: dict[str, int] = {}
 
     # Log cursors for streaming (one per job)
     log_cursors: dict[str, str | None] = dict.fromkeys(job_ids, None)
@@ -655,6 +657,7 @@ def wait_for_results(
                 prev_lines,
                 end_times=end_times,
                 estimated_runtime_seconds=estimated_runtime_seconds,
+                shown_progress=shown_progress,
             )
 
         time.sleep(poll_interval)
@@ -691,6 +694,7 @@ def wait_for_results(
             end_times=end_times,
             final=True,
             estimated_runtime_seconds=estimated_runtime_seconds,
+            shown_progress=shown_progress,
         )
 
     # Download + parse all
@@ -727,6 +731,16 @@ def _output_mode() -> str:
     return "pipe"
 
 
+# Progress shown for each lifecycle state before the solver starts running,
+# in the order the cloud service reports them.
+_PRE_RUN_PROGRESS = {
+    "created": 5,
+    "pending": 10,
+    "queued": 15,
+    "starting": 30,
+}
+
+
 def _print_status_table(
     jobs: dict[str, Any],
     start_times: dict[str, float],
@@ -735,6 +749,7 @@ def _print_status_table(
     end_times: dict[str, float] | None = None,
     final: bool = False,
     estimated_runtime_seconds: float | None = None,
+    shown_progress: dict[str, int] | None = None,
 ) -> int:
     """Print job status, updating in place.
 
@@ -743,6 +758,10 @@ def _print_status_table(
       *last* state, giving one clean line in rendered docs.
     * **TTY (terminal)** — uses carriage-return / ANSI cursor-up to overwrite.
     * **Pipe / plain CI** — only prints the final status.
+
+    ``shown_progress`` maps job IDs to the highest percentage already
+    displayed. Pass the same dict on every poll so a job's bar never moves
+    backwards; it is updated in place.
 
     Returns the number of lines printed (for the TTY path to erase).
     """
@@ -770,7 +789,7 @@ def _print_status_table(
         mins, secs = divmod(int(t), 60)
         return f"{mins}m {secs:02d}s"
 
-    def _progress(jid: str, job: Any) -> tuple[int, str]:
+    def _lifecycle_progress(jid: str, job: Any) -> tuple[int, str]:
         """Return a conservative lifecycle-based completion estimate.
 
         The cloud API reports lifecycle states but not solver iteration counts.
@@ -790,9 +809,16 @@ def _print_status_table(
                 mins, secs = divmod(round(remaining), 60)
                 return percent, f"running, ETA {mins}m {secs:02d}s"
             return 50, "running"
-        if status == "queued":
-            return 15, "queued"
-        return 5, status or "starting"
+        return _PRE_RUN_PROGRESS.get(status, 5), status or "starting"
+
+    def _progress(jid: str, job: Any) -> tuple[int, str]:
+        percent, phase = _lifecycle_progress(jid, job)
+        # If the service reports a lower state than before (out of order or
+        # unknown), keep the highest value shown; the label still follows it.
+        if shown_progress is not None:
+            percent = max(percent, shown_progress.get(jid, 0))
+            shown_progress[jid] = percent
+        return percent, phase
 
     def _bar(percent: int, width: int = 20) -> str:
         filled = round(width * percent / 100)

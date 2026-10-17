@@ -1,8 +1,9 @@
 # Validate Palace result evidence
 
-`validate_solution` reports core solver convergence, optional error estimation, adaptive sampling, process exit and OOM
-evidence, mode checks, and input provenance independently. A zero exit code does not establish physical validity. The
-function reads supplied evidence and never changes tolerances or reruns a simulation.
+[`validate_solution`][gsim.palace.validation.validate_solution] reports core solver convergence, optional error
+estimation, adaptive sampling, process exit and OOM evidence, mode checks, and input provenance independently. A zero
+exit code does not establish physical validity. The function reads supplied evidence and never changes tolerances or
+reruns a simulation.
 
 ```python
 import json
@@ -71,6 +72,27 @@ For BoundaryMode results, construct `ModeSample` records from the selected mode'
 ratio of consistently oriented voltage integrals whose parity you want to check. The API does not infer that ratio from
 a log or prescribe a CPW convention. A requested but absent ratio is `unknown`. Explicit samples replace log
 observations; pass all observations you want checked.
+
+## Compare meshes between runs
+
+Gmsh gives the same mesh twice only for some settings. With the default `algorithm_3d="delaunay"` and
+`surface_threads=1`, the mesh does not depend on `threads`. `surface_threads` above 1 is faster but gives a different
+mesh on every run, and with `algorithm_3d="hxt"` the mesh depends on the thread count. This is a Gmsh limitation
+(gmsh#2255): `Mesh.Reproducible` only covers HXT's initial Delaunay step, and a fixed random seed cannot fix the order in
+which threads finish. gsim logs a warning for both non-reproducible settings.
+
+`sim.mesh()` records an ID-independent mesh hash, the Gmsh options used and the Gmsh and gsim versions:
+
+```python
+result = sim.mesh(threads=4, surface_threads=1)
+result.mesh_stats["mesh_hash"]
+result.mesh_stats["versions"]["gmsh"]
+result.mesh_stats["gmsh_options"]["Mesh.MaxNumThreads2D"]
+```
+
+Equal hashes mean the same nodes (to 1e-4 um) and the same elements in each physical group. Compare hashes only between
+runs with the same Gmsh version on the same kind of host; the stats do not record the host. A different hash under
+reproducible settings points at a change in the geometry, the mesh settings or the Gmsh build.
 
 ## Evidence and limits
 

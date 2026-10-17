@@ -9,10 +9,14 @@ This module contains Pydantic models for port definitions:
 
 from __future__ import annotations
 
+import math
 import warnings
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from shapely import Polygon
 
 
 class PortConfig(BaseModel):
@@ -58,46 +62,6 @@ class PortConfig(BaseModel):
         "Positive = away from boundary, into conductor.",
     )
 
-    # BoundaryMode postprocessing (2D voltage/impedance paths). These paths do
-    # not affect the 2D eigenproblem; Palace uses them only to post-process the
-    # mode voltage (mode-V.csv) and characteristic impedance (mode-Z.csv).
-    voltage_path: list[list[float]] | None = Field(
-        default=None,
-        description="Open signal->ground coordinate path (um) for BoundaryMode "
-        "voltage/impedance postprocessing. Points may be 2D (cross-section "
-        "coordinates h, v) or 3D (layout x, y, z).",
-    )
-    current_path: list[list[float]] | None = Field(
-        default=None,
-        description="Closed-loop coordinate path (um) for the BoundaryMode "
-        "current line integral (impedance postprocessing only).",
-    )
-    nsamples: int = Field(
-        default=100,
-        ge=1,
-        description="Number of samples for the BoundaryMode line integrals.",
-    )
-    center: tuple[float, float] | None = Field(
-        default=None,
-        description="Explicit (x, y) port center (um). Used to auto-derive a "
-        "BoundaryMode voltage path when voltage_path is not given.",
-    )
-    orientation: float = Field(
-        default=0.0,
-        description="Port orientation in degrees (0 = +x).",
-    )
-    width: float | None = Field(
-        default=None,
-        gt=0,
-        description="Port width (um). Used to auto-derive a BoundaryMode "
-        "voltage path when voltage_path is not given.",
-    )
-    order: int = Field(
-        default=0,
-        description="Declaration order across lumped and CPW ports. Used to "
-        "index BoundaryMode postprocessing entries deterministically.",
-    )
-
     @model_validator(mode="before")
     @classmethod
     def normalize_legacy_geometry(cls, data: Any) -> Any:
@@ -114,11 +78,7 @@ class PortConfig(BaseModel):
     @model_validator(mode="after")
     def validate_layer_config(self) -> Self:
         """Validate layer configuration based on geometry type."""
-        if (
-            self.geometry == "inplane"
-            and self.layer is None
-            and self.voltage_path is None
-        ):
+        if self.geometry == "inplane" and self.layer is None:
             raise ValueError("Inplane ports require 'layer' to be specified")
         if self.geometry == "interlayer" and (
             self.from_layer is None or self.to_layer is None
@@ -186,55 +146,98 @@ class CPWPortConfig(BaseModel):
     impedance: float = Field(default=50.0, gt=0)
     excited: bool = True
 
-    # BoundaryMode postprocessing (2D voltage/impedance paths).
-    voltage_paths: list[list[list[float]]] | None = Field(
-        default=None,
-        description="Explicit open signal->ground coordinate paths (um) for "
-        "BoundaryMode postprocessing, one per CPW gap. Points may be 2D "
-        "(cross-section coordinates h, v) or 3D (layout x, y, z). When omitted "
-        "and a port center is available, the two gap paths are auto-derived.",
-    )
-    current_path: list[list[float]] | None = Field(
-        default=None,
-        description="Closed-loop coordinate path (um) for the BoundaryMode "
-        "current line integral (impedance postprocessing only).",
-    )
-    nsamples: int = Field(
-        default=100,
-        ge=1,
-        description="Number of samples for the BoundaryMode line integrals.",
-    )
-    center: tuple[float, float] | None = Field(
-        default=None,
-        description="Explicit (x, y) signal-center (um). Used to auto-derive "
-        "BoundaryMode gap voltage paths when voltage_paths is not given.",
-    )
-    orientation: float = Field(
-        default=0.0,
-        description="Port orientation in degrees (0 = +x).",
-    )
-    order: int = Field(
-        default=0,
-        description="Declaration order across lumped and CPW ports. Used to "
-        "index BoundaryMode postprocessing entries deterministically.",
-    )
-
 
 class TerminalConfig(BaseModel):
     """Configuration for a terminal (for electrostatic capacitance extraction).
 
     Terminals define conductor surfaces for capacitance matrix extraction
-    in electrostatic simulations.
+    in electrostatic simulations. A terminal selects conductors in one of
+    three ways, and at least one of ``layer``, ``net`` and ``region`` is
+    needed:
+
+    - ``layer`` alone: every conductor shape on that layer (the layer mode;
+      two separate electrodes on one layer are then one terminal).
+    - ``net``: the connected conductor with that name, metal and vias on every
+      layer it spans (see ``ElectrostaticSim.nets()``).
+    - ``region``: every connected conductor with a shape inside the region,
+      optionally only on ``layer``.
+
+    ``net`` cannot be combined with ``region`` or ``layer``.
 
     Attributes:
         name: Terminal name
-        layer: Target conductor layer
+        layer: Target conductor layer. With ``region`` it limits the shapes
+            that are tested against the region.
+        net: Name of a net (the names of its ports joined by ``+``, or
+            ``net<k>``), or the name of a port on it.
+        region: Box ``(xmin, ymin, xmax, ymax)`` or list of at least three
+            ``(x, y)`` points of a polygon, in um.
+        floating: The conductor is not driven: it is solved as a terminal and
+            eliminated from the capacitance matrix afterwards.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     name: str
-    layer: str
+    layer: str | None = None
+    net: str | None = None
+    region: tuple[float, float, float, float] | list[tuple[float, float]] | None = None
+    floating: bool = False
+
+    @model_validator(mode="after")
+    def _validate_selection(self) -> Self:
+        """Check that the terminal selects conductors in exactly one way."""
+        if self.layer is None and self.net is None and self.region is None:
+            raise ValueError(
+                f"Terminal '{self.name}' needs layer, net or region to select "
+                "its conductors"
+            )
+        if self.net is not None and (self.region is not None or self.layer is not None):
+            raise ValueError(
+                f"Terminal '{self.name}': net cannot be combined with region or layer"
+            )
+        if self.region is not None:
+            self._validate_region()
+        return self
+
+    def _validate_region(self) -> None:
+        """Check the box or polygon of ``region``."""
+        region = self.region
+        if region is None:
+            return
+        if isinstance(region, tuple):
+            x0, y0, x1, y1 = region
+            if not all(math.isfinite(v) for v in region):
+                raise ValueError(f"Terminal '{self.name}': region must be finite")
+            if not (x0 < x1 and y0 < y1):
+                raise ValueError(
+                    f"Terminal '{self.name}': a region box needs xmin < xmax and "
+                    f"ymin < ymax, got {region}"
+                )
+            return
+        if len(region) < 3:
+            raise ValueError(
+                f"Terminal '{self.name}': a region polygon needs at least 3 "
+                f"points, got {len(region)}"
+            )
+        if not all(math.isfinite(v) for point in region for v in point):
+            raise ValueError(f"Terminal '{self.name}': region must be finite")
+        polygon = self.region_polygon()
+        if polygon is None or not polygon.is_valid or polygon.area <= 0:
+            raise ValueError(
+                f"Terminal '{self.name}': the region polygon is degenerate or "
+                "self-intersecting"
+            )
+
+    def region_polygon(self) -> Polygon | None:
+        """The region as a shapely polygon (um), or None when there is none."""
+        from shapely import Polygon, box
+
+        if self.region is None:
+            return None
+        if isinstance(self.region, tuple):
+            return box(*self.region)
+        return Polygon(self.region)
 
 
 class ImpedanceBoundaryConfig(BaseModel):

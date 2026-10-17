@@ -32,8 +32,13 @@ from .geometry import (
 )
 from .groups import assign_physical_groups
 from .metadata import write_metadata
+from .net_groups import check_via_merging, split_groups_by_net
+from .nets import extract_nets
+from .symmetry import clamp_xy_bounds
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from gsim.common.stack import LayerStack
     from gsim.palace.models import (
         BoundaryModeConfig,
@@ -43,10 +48,16 @@ if TYPE_CHECKING:
         NumericalConfig,
         SolverConfig,
     )
+    from gsim.palace.models.cross_section import _LayerPairSpec
     from gsim.palace.models.pec import PECBlockConfig
+    from gsim.palace.models.symmetry import SymmetryPlaneConfig
     from gsim.palace.ports.config import PalacePort
 
 logger = logging.getLogger(__name__)
+
+#: First gmsh field id given to a refinement box of a native-2D mesh; the
+#: refinement lines' Distance and Threshold fields hold ids 1 and 2.
+_FIRST_BOX_FIELD_ID: int = 10
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +171,7 @@ class MeshResult:
     fmax: float = 100e9
     periodic_axis: str | None = None
     periodic_translation: tuple[float, float, float] | None = None
+    symmetry_plane: dict | None = None
 
 
 def _extract_native_boundarymode_rectangles(
@@ -287,6 +299,8 @@ def _generate_native_boundarymode_groups(
     airbox_z_above: float | None,
     airbox_z_below: float | None,
     airbox_material: str = "air",
+    contact_specs: list[_LayerPairSpec] | None = None,
+    interface_specs: list[_LayerPairSpec] | None = None,
 ) -> dict:
     """Build a native 2D gmsh model and groups for BoundaryMode."""
     if cross_section.axis not in {"x", "y"}:
@@ -323,6 +337,14 @@ def _generate_native_boundarymode_groups(
         hmin, hmax = bounds[0], bounds[3]
     vmin, vmax = bounds[2], bounds[5]
 
+    # An explicit window clips the meshed domain to a sub-region of the
+    # section (in-plane and/or vertical), replacing the bbox-plus-margins
+    # extent; the background box is sized to the window as well.
+    if cross_section.window is not None:
+        hmin, hmax = cross_section.window
+    if cross_section.window_z is not None:
+        vmin, vmax = cross_section.window_z
+
     if hmax <= hmin or vmax <= vmin:
         raise ValueError("Native BoundaryMode 2D domain has invalid bounds.")
 
@@ -330,10 +352,10 @@ def _generate_native_boundarymode_groups(
     layer_inputs: list[tuple[str, int]] = []
 
     for rect in section_rects:
-        h0 = float(rect["h0"])
-        h1 = float(rect["h1"])
-        v0 = float(rect["v0"])
-        v1 = float(rect["v1"])
+        h0 = max(float(rect["h0"]), hmin)
+        h1 = min(float(rect["h1"]), hmax)
+        v0 = max(float(rect["v0"]), vmin)
+        v1 = min(float(rect["v1"]), vmax)
         if h1 <= h0 or v1 <= v0:
             continue
         stag = kernel.addRectangle(h0, v0, 0.0, h1 - h0, v1 - v0)
@@ -597,6 +619,9 @@ def _generate_native_boundarymode_groups(
             # segfault in MFEM's GetBdrElementFace.  Filter them out by
             # checking gmsh adjacencies: keep a curve only if at least one
             # adjacent surface actually has a volume physical group.
+            # getAdjacencies returns (upward, downward): the adjacent
+            # surfaces are the first element, the curve's end points the
+            # second.
             filtered_curves: set[int] = set()
             n_internal = 0
             for ctag in pec_curves:
@@ -605,8 +630,6 @@ def _generate_native_boundarymode_groups(
                 except Exception:
                     filtered_curves.add(ctag)
                     continue
-                # getAdjacencies returns (upward, downward); for a curve the
-                # upward adjacencies (index 0) are the adjacent surfaces.
                 adj_surfaces = set(adj[0]) if len(adj) > 0 else set()
                 if not adj_surfaces:
                     filtered_curves.add(ctag)
@@ -720,6 +743,63 @@ def _generate_native_boundarymode_groups(
                     "tags": sorted(shared),
                     "length_um": total_length,
                 }
+
+    # --- Named line groups: contacts and interfaces ---------------------------
+    # Both are declared as layer pairs; the shared curves between the two
+    # layers' meshed regions become a dim-1 physical group carrying the
+    # declared name. A contact's name is what DEVSIM binds add_gmsh_contact
+    # to; an interface's is what it binds add_gmsh_interface to. They are
+    # tagged the same way and recorded apart, so nothing downstream has to
+    # tell them apart by name.
+    if contact_specs or interface_specs:
+        metal_boundary_curves: dict[str, set[int]] = {}
+        for group_key in ("conductor_surfaces", "pec_surfaces"):
+            for layer_name, info in groups[group_key].items():
+                metal_boundary_curves.setdefault(layer_name, set()).update(
+                    int(t) for t in info.get("tags", [])
+                )
+
+        def _layer_curves(layer_name: str, kind: str, spec_name: str) -> set[int]:
+            curves = vol_boundary_curves.get(layer_name)
+            if curves is None:
+                curves = metal_boundary_curves.get(layer_name)
+            if curves is None:
+                available = sorted(
+                    set(vol_boundary_curves) | set(metal_boundary_curves)
+                )
+                raise ValueError(
+                    f"{kind} '{spec_name}': layer '{layer_name}' has no "
+                    f"meshed region in this cross-section. Available layers: "
+                    f"{available}"
+                )
+            return curves
+
+        def _tag_line_groups(
+            specs: list[_LayerPairSpec], *, kind: str, key: str
+        ) -> None:
+            groups[key] = {}
+            for spec in specs:
+                shared_curves = _layer_curves(
+                    spec.layer_a, kind, spec.name
+                ) & _layer_curves(spec.layer_b, kind, spec.name)
+                if not shared_curves:
+                    raise ValueError(
+                        f"{kind} '{spec.name}': layers '{spec.layer_a}' and "
+                        f"'{spec.layer_b}' share no interface curves in this "
+                        "cross-section (regions do not touch)."
+                    )
+                pg = gmsh.model.addPhysicalGroup(1, sorted(shared_curves))
+                gmsh.model.setPhysicalName(1, pg, spec.name)
+                groups[key][spec.name] = {
+                    "phys_group": pg,
+                    "tags": sorted(shared_curves),
+                    "layers": (spec.layer_a, spec.layer_b),
+                }
+
+        _tag_line_groups(list(contact_specs or []), kind="Contact", key="contact_lines")
+        _tag_line_groups(
+            list(interface_specs or []), kind="Interface", key="interface_lines"
+        )
 
     outer_curves: set[int] = set()
     for stag in outer_parts:
@@ -1137,11 +1217,14 @@ def generate_mesh(
     numerical_config: SolverConfig | NumericalConfig | None = None,
     boundary_mode_config: BoundaryModeConfig | None = None,
     cross_section: CrossSectionPlaneConfig | None = None,
+    contact_specs: list[_LayerPairSpec] | None = None,
+    interface_specs: list[_LayerPairSpec] | None = None,
     write_config: bool = True,
     planar_conductors: bool = False,
     pec_blocks: list[PECBlockConfig] | None = None,
     absorbing_boundary: bool = True,
     periodic_axis: str | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
     merge_via_distance: float = 2.0,
     curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
     curve_fit_layers: list[str] | None = None,
@@ -1153,9 +1236,11 @@ def generate_mesh(
     high_order_optimize: bool = True,
     verbosity: int = 3,
     decimate_tolerance: float | None = None,
+    refinement_boxes: Sequence[tuple[float, float, float, float, float]] = (),
     algorithm_3d: Literal["delaunay", "hxt"] = "delaunay",
     threads: int = 1,
     surface_threads: int = 1,
+    split_conductors_by_net: bool = False,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1186,11 +1271,19 @@ def generate_mesh(
             for solver settings
         boundary_mode_config: Optional BoundaryModeConfig for 2D mode problems
         cross_section: Explicit x/y cross-section plane for native BoundaryMode
+        contact_specs: Named contact layer pairs whose shared interface curves
+            are tagged as dim-1 physical groups (native BoundaryMode only)
+        interface_specs: Named semiconductor-semiconductor layer pairs whose
+            shared curves are tagged the same way, recorded apart from the
+            contacts (native BoundaryMode only)
         write_config: Whether to write config.json (default True)
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
         periodic_axis: ("x" or "y") for meshing constraints on opposite domain sides
+        symmetry_plane: Optional PEC/PMC symmetry plane; only the kept half of
+            the domain is meshed. Not supported with ``boundarymode`` or with
+            a ``periodic_axis`` equal to the plane axis.
         merge_via_distance: Max gap between vias to merge (um)
         curve_fit_mode: Patterned dielectric boundary mode: line/spline/bspline
         curve_fit_layers: Layer names where curve fitting is applied
@@ -1204,10 +1297,17 @@ def generate_mesh(
         decimate_tolerance: Relative tolerance for polygon decimation
             (None = no decimation; typical 0.001-0.01)
         verbosity: Sets gmsh verbosity level
+        refinement_boxes: Native-2D cross-section meshes only: boxes held to
+            an element size, each ``(h_min, h_max, z_min, z_max, size)`` in um
         algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt"
         threads: Threads for 3D meshing
         surface_threads: Threads for 1D and 2D meshing; above 1 the mesh
             differs from run to run
+        split_conductors_by_net: Electrostatic terminals by net: give each
+            conductor, planar-conductor and via-boundary group one physical
+            group per electrical net (``<name>@<net>``) and list the nets
+            in ``groups["nets"]``. Needs ``write_config=False``, since the
+            config needs the terminals. Ignored for boundary mode.
 
     Returns:
         MeshResult with paths and metadata
@@ -1217,11 +1317,54 @@ def generate_mesh(
 
     msh_path = output_dir / f"{model_name}.msh"
 
+    if symmetry_plane is not None:
+        if simulation_type == "boundarymode":
+            raise ValueError("Symmetry planes are not supported for boundarymode.")
+        if periodic_axis == symmetry_plane.axis:
+            raise ValueError(
+                f"periodic_axis={periodic_axis!r} conflicts with a symmetry plane "
+                "on the same axis: one of the periodic walls would be the plane."
+            )
+        logger.info(
+            "Half model, plane %s=%s %s (%s). Expect ~half the DOFs.",
+            symmetry_plane.axis,
+            symmetry_plane.position,
+            symmetry_plane.kind.upper(),
+            "even/common mode" if symmetry_plane.kind == "pmc" else "odd/differential",
+        )
+
     # Extract geometry
     logger.info("Extracting geometry...")
-    geometry = extract_geometry(component, stack, decimate_tolerance=decimate_tolerance)
+    geometry = extract_geometry(
+        component,
+        stack,
+        decimate_tolerance=decimate_tolerance,
+        symmetry_plane=symmetry_plane,
+    )
     logger.info("  Polygons: %s", len(geometry.polygons))
     logger.info("  Bbox: %s", geometry.bbox)
+
+    if refinement_boxes and simulation_type != "boundarymode":
+        raise ValueError(
+            "refinement_boxes apply to native-2D cross-section meshes only."
+        )
+
+    # Terminals by net: find the nets and make sure that via merging keeps them
+    # apart, before any meshing work is done.
+    nets = None
+    if split_conductors_by_net and simulation_type != "boundarymode":
+        if write_config:
+            raise ValueError(
+                "split_conductors_by_net needs write_config=False: the config "
+                "is written afterwards, from the terminals."
+            )
+        nets = extract_nets(
+            geometry,
+            stack,
+            [p for p in component.ports if p.port_type == "electrical"],
+        )
+        logger.info("  Nets: %s", len(nets))
+        check_via_merging(geometry, stack, nets, merge_via_distance)
 
     # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
     gmsh.initialize(readConfigFiles=False)
@@ -1268,6 +1411,8 @@ def generate_mesh(
                 airbox_z_above=airbox_z_above,
                 airbox_z_below=airbox_z_below,
                 airbox_material=airbox_material,
+                contact_specs=contact_specs,
+                interface_specs=interface_specs,
             )
 
             refinement_lines = sorted(
@@ -1332,6 +1477,17 @@ def generate_mesh(
                     )
                 )
                 next_field_id += 2
+            # The cross-section is meshed in its own (h, z) plane. Box fields
+            # follow the line fields so the ids never collide.
+            first_box_id = max(_FIRST_BOX_FIELD_ID, next_field_id)
+            for offset, (h_min, h_max, z_min, z_max, size) in enumerate(
+                refinement_boxes
+            ):
+                field_id = first_box_id + offset
+                gmsh_utils.setup_box_refinement(
+                    field_id, h_min, z_min, -1.0, h_max, z_max, 1.0, size, max_mesh_size
+                )
+                field_ids.append(field_id)
             if field_ids:
                 gmsh_utils.finalize_mesh_fields(field_ids)
             else:
@@ -1414,13 +1570,16 @@ def generate_mesh(
             curve_fit_tolerance_um=curve_fit_tolerance_um,
             curve_fit_min_points=curve_fit_min_points,
             curve_fit_corner_angle_deg=curve_fit_corner_angle_deg,
+            symmetry_plane=symmetry_plane,
         )
 
         # Add PEC blocks if configured
         pec_block_tags: dict = {}
         if pec_blocks:
             logger.info("Adding PEC blocks...")
-            pec_block_tags = add_pec_blocks(kernel, component, pec_blocks, stack)
+            pec_block_tags = add_pec_blocks(
+                kernel, component, pec_blocks, stack, symmetry_plane
+            )
 
         logger.info("Adding ports...")
         domain_bounds = resolve_mesh_domain_bounds(
@@ -1433,6 +1592,7 @@ def generate_mesh(
             airbox_margin_y=airbox_margin_y,
             airbox_z_above=airbox_z_above,
             airbox_z_below=airbox_z_below,
+            symmetry_plane=symmetry_plane,
         )
         domain_bbox = (
             geometry.bbox[0] - margin_x,
@@ -1440,12 +1600,15 @@ def generate_mesh(
             geometry.bbox[2] + margin_x,
             geometry.bbox[3] + margin_y,
         )
+        if symmetry_plane is not None:
+            domain_bbox = clamp_xy_bounds(domain_bbox, symmetry_plane)
         port_tags, port_info = add_ports(
             kernel,
             ports,
             stack,
             domain_bbox=domain_bbox,
             domain_bounds=domain_bounds,
+            symmetry_plane=symmetry_plane,
         )
 
         logger.info("Adding dielectrics...")
@@ -1460,6 +1623,7 @@ def generate_mesh(
             airbox_margin_y=airbox_margin_y,
             airbox_z_above=airbox_z_above,
             airbox_z_below=airbox_z_below,
+            symmetry_plane=symmetry_plane,
         )
 
         logger.info("Adding patterned dielectric layers...")
@@ -1492,6 +1656,13 @@ def generate_mesh(
             stack=stack,
         )
         pg_map = gmsh_utils.run_boolean_pipeline(entities)
+
+        # Before set_periodic_mesh, so plane faces are never periodic candidates.
+        symmetry_info: dict | None = None
+        if symmetry_plane is not None:
+            symmetry_info = gmsh_utils.assign_symmetry_plane_group(
+                pg_map, symmetry_plane
+            )
 
         if periodic_axis in {"x", "y"}:
             periodic_info = gmsh_utils.set_periodic_mesh(pg_map, periodic_axis)
@@ -1529,6 +1700,16 @@ def generate_mesh(
         groups["refinement_lines"] = {
             k: v for k, v in groups.get("refinement_lines", {}).items() if v.get("tags")
         }
+
+        if symmetry_info is not None:
+            groups["boundary_surfaces"]["symmetry"] = {
+                "phys_group": [symmetry_info["phys_group"]],
+                "tags": symmetry_info["tags"],
+                "axis": symmetry_info["axis"],
+                "position": symmetry_info["position"],
+                "kind": symmetry_info["kind"],
+                "keep": symmetry_info["keep"],
+            }
 
         if periodic_info:
             donor_surfaces = periodic_info.get("master_surfaces")
@@ -1616,6 +1797,13 @@ def generate_mesh(
                         exc,
                     )
 
+        # One physical group per net instead of per layer
+        if nets is not None:
+            logger.info("Splitting conductor groups by net...")
+            split_groups_by_net(
+                groups, nets, stack, merge_via_distance=merge_via_distance
+            )
+
         # Collect mesh statistics
         mesh_stats = collect_mesh_stats(
             field_order=numerical_config.order if numerical_config else 2,
@@ -1669,6 +1857,9 @@ def generate_mesh(
         fmax=fmax,
         periodic_axis=periodic_axis,
         periodic_translation=periodic_translation,
+        symmetry_plane=(
+            dict(groups["boundary_surfaces"]["symmetry"]) if symmetry_info else None
+        ),
     )
 
     return result

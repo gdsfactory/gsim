@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import itertools
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,6 +22,7 @@ __all__ = [
     "PortGeometryError",
     "check_lumped_port_contact",
     "check_lumped_port_geometry",
+    "check_port_surfaces_in_domain",
     "validate_mesh",
 ]
 
@@ -327,6 +330,109 @@ def check_lumped_port_geometry(
     return errors
 
 
+@contextmanager
+def _temporary_mesh_model(mesh_path: Path) -> Generator[None]:
+    """Load a mesh into a throwaway Gmsh model, leaving any open model as it was."""
+    import gmsh
+
+    started = not gmsh.isInitialized()
+    if started:
+        gmsh.initialize(readConfigFiles=False)
+    previous_model = gmsh.model.getCurrent()
+    temporary_model = f"gsim_mesh_check_{uuid4().hex}"
+    model_added = False
+    try:
+        gmsh.model.add(temporary_model)
+        model_added = True
+        gmsh.merge(str(mesh_path))
+        yield
+    finally:
+        if model_added:
+            gmsh.model.setCurrent(temporary_model)
+            gmsh.model.remove()
+        if previous_model:
+            gmsh.model.setCurrent(previous_model)
+        if started:
+            gmsh.finalize()
+
+
+def _format_extent(lo: np.ndarray, hi: np.ndarray) -> str:
+    """Format a bounding box as ``x=[..], y=[..], z=[..]``."""
+    return ", ".join(
+        f"{axis}=[{a:g}, {b:g}]" for axis, a, b in zip("xyz", lo, hi, strict=True)
+    )
+
+
+def check_port_surfaces_in_domain(
+    mesh_path: Path,
+    port_surfaces: dict,
+    palace_ports: list | None = None,
+) -> list[str]:
+    """Check that every port surface lies inside the meshed volume.
+
+    A port surface outside every volume still gets meshed and written to
+    the mesh file, but Palace cannot attach it to any element and the job
+    dies without a log. This happens when ports sit on the design edge and
+    the domain ends there (no airbox margin).
+
+    Returns one error per port with nodes that belong to no volume element.
+    """
+    import gmsh
+
+    names = {f"P{i}": port.name for i, port in enumerate(palace_ports or [], start=1)}
+    errors: list[str] = []
+    with _temporary_mesh_model(mesh_path):
+        _, _, volume_blocks = gmsh.model.mesh.getElements(3)
+        volume_nodes = (
+            np.unique(np.concatenate(volume_blocks))
+            if volume_blocks
+            else np.array([], dtype=np.uint64)
+        )
+        all_tags, all_coords, _ = gmsh.model.mesh.getNodes()
+        all_coords = all_coords.reshape(-1, 3)
+        in_volume = np.isin(all_tags, volume_nodes)
+        if in_volume.any():
+            domain = _format_extent(
+                all_coords[in_volume].min(axis=0), all_coords[in_volume].max(axis=0)
+            )
+        else:
+            domain = "empty"
+
+        for port_key, info in port_surfaces.items():
+            groups = [
+                element.get("phys_group") for element in info.get("elements", [])
+            ] or [info.get("phys_group")]
+            tags_list, coords_list = [], []
+            for phys_group in groups:
+                if phys_group is None:
+                    continue
+                tags, coords = gmsh.model.mesh.getNodesForPhysicalGroup(
+                    2, int(phys_group)
+                )
+                tags_list.append(tags)
+                coords_list.append(np.asarray(coords).reshape(-1, 3))
+            if not tags_list:
+                continue
+            tags = np.concatenate(tags_list)
+            coords = np.concatenate(coords_list)
+            outside = ~np.isin(tags, volume_nodes)
+            if not outside.any():
+                continue
+            label = f"Port {port_key}"
+            if port_key in names:
+                label += f" ('{names[port_key]}')"
+            errors.append(
+                f"{label} lies outside the meshed domain: {int(outside.sum())} of "
+                f"{len(tags)} surface nodes touch no volume element. "
+                f"Port extent {_format_extent(coords.min(axis=0), coords.max(axis=0))}"
+                f"; meshed domain {domain}. Palace cannot run with this mesh. "
+                "Add air around the design with set_airbox(margin_x=..., "
+                "margin_y=..., z_above=...) so the port lies inside it "
+                "(set_stack(air_above=...) is ignored)."
+            )
+    return errors
+
+
 def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
     """Count mesh nodes shared by each lumped port and a conductor surface.
 
@@ -348,16 +454,7 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
 
     import gmsh
 
-    started = not gmsh.isInitialized()
-    if started:
-        gmsh.initialize(readConfigFiles=False)
-    previous_model = gmsh.model.getCurrent()
-    temporary_model = f"gsim_port_contact_{uuid4().hex}"
-    model_added = False
-    try:
-        gmsh.model.add(temporary_model)
-        model_added = True
-        gmsh.merge(str(sim_dir / "palace.msh"))
+    with _temporary_mesh_model(sim_dir / "palace.msh"):
         surface_groups = gmsh.model.getPhysicalGroups(2)
         groups = {
             gmsh.model.getPhysicalName(dim, tag): tag for dim, tag in surface_groups
@@ -395,14 +492,6 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
                 )
             port_nodes = set().union(*(nodes(tag) for tag in tags))
             contacts[index] = len(port_nodes & conductor_nodes)
-    finally:
-        if model_added:
-            gmsh.model.setCurrent(temporary_model)
-            gmsh.model.remove()
-        if previous_model:
-            gmsh.model.setCurrent(previous_model)
-        if started:
-            gmsh.finalize()
 
     orphaned = [index for index, count in contacts.items() if count == 0]
     if orphaned:
@@ -410,6 +499,25 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
             f"lumped ports {orphaned} share no nodes with conductor surfaces"
         )
     return contacts
+
+
+def _check_symmetry_config(symmetry: dict, boundaries: dict) -> list[str]:
+    """Check that the plane is PMC/PEC in ``Boundaries`` and not absorbing."""
+    key = "PMC" if symmetry["kind"] == "pmc" else "PEC"
+    pgs = symmetry["phys_group"]
+    expected = set(pgs if isinstance(pgs, list) else [pgs])
+    errors = []
+    if missing := expected - set(boundaries.get(key, {}).get("Attributes", [])):
+        errors.append(
+            f"config.json: symmetry plane attributes {sorted(missing)} "
+            f"are missing from Boundaries.{key}."
+        )
+    if bad := expected & set(boundaries.get("Absorbing", {}).get("Attributes", [])):
+        errors.append(
+            f"config.json: symmetry plane attributes {sorted(bad)} "
+            "are listed under Boundaries.Absorbing."
+        )
+    return errors
 
 
 def validate_mesh(sim) -> ValidationResult:
@@ -467,7 +575,23 @@ def validate_mesh(sim) -> ValidationResult:
             "No absorbing boundary found. This is expected if airbox_margin=0."
         )
 
+    symmetry = groups.get("boundary_surfaces", {}).get("symmetry")
+    if symmetry:
+        warnings_list.append(
+            f"Symmetry plane: {symmetry['axis']}={symmetry['position']} "
+            f"{symmetry['kind'].upper()} (keep {symmetry['keep']}), "
+            f"phys_group={symmetry['phys_group']}"
+        )
+
     last_ports = getattr(sim, "_last_ports", None)
+    if port_surfaces and mesh_result.mesh_path.exists():
+        errors.extend(
+            check_port_surfaces_in_domain(
+                mesh_path=mesh_result.mesh_path,
+                port_surfaces=port_surfaces,
+                palace_ports=last_ports,
+            )
+        )
     if last_ports and groups.get("port_surfaces") and mesh_result.mesh_path.exists():
         errors.extend(
             check_lumped_port_geometry(
@@ -508,6 +632,8 @@ def validate_mesh(sim) -> ValidationResult:
                     )
                 ):
                     errors.append("config.json has no LumpedPort nor Waveport entries.")
+                if symmetry:
+                    errors.extend(_check_symmetry_config(symmetry, boundaries))
             except json.JSONDecodeError as e:
                 errors.append(f"config.json is invalid JSON: {e}")
 

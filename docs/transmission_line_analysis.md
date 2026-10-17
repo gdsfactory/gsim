@@ -8,7 +8,8 @@ uv pip install 'scikit-rf>=2.1'
 ```
 
 Import algorithms from `skrf.calibration`, rather than the removed top-level aliases. Convert each independently
-simulated standard and DUT using its actual port reference impedance:
+simulated standard and DUT with [`load_sparams`][gsim.palace.results.load_sparams], using its actual port reference
+impedance:
 
 ```pycon
 >>> from gsim.palace import load_sparams

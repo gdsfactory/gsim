@@ -10,6 +10,7 @@ from typing import Any
 import gmsh
 
 from gsim.common.pdk import ResolvedLayer, ResolvedPassivePcell, ResolvedPort
+from gsim.fdtd.domain import Padding, background_bounds_nm
 from gsim.fdtd.mesh_geometry import GEOMETRY_TOLERANCE_NM, UM_TO_NM
 from gsim.fdtd.mesh_loft import add_layer_volumes
 from gsim.fdtd.mesh_validation import validate_mesh
@@ -50,6 +51,20 @@ def _restore_gmsh_options(option_values: Mapping[str, float]) -> None:
         gmsh.option.setNumber(option_name, value)
 
 
+def _force_lf_line_endings(path: Path) -> None:
+    """Rewrite an ASCII file with LF line endings.
+
+    Gmsh writes ASCII meshes in text mode, so they come out CRLF on Windows.
+    The FDTD solver's MSH reader only accepts LF.
+
+    ASCII only: this relies on ``generate_mesh`` setting ``Mesh.Binary = 0``.
+    On a binary mesh it would corrupt any data bytes that happen to be CRLF.
+    """
+    content = path.read_bytes()
+    if b"\r\n" in content:
+        path.write_bytes(content.replace(b"\r\n", b"\n"))
+
+
 def _priority_by_mesh_order(
     layers: Mapping[str, ResolvedLayer],
 ) -> dict[str, int]:
@@ -60,85 +75,6 @@ def _priority_by_mesh_order(
         for index, mesh_order in enumerate(unique_orders)
     }
     return {name: order_priority[layer.mesh_order] for name, layer in layers.items()}
-
-
-def background_bounds_nm(
-    resolved: ResolvedPassivePcell,
-    background_material: str,
-    padding_um: float,
-    *,
-    x_bounds: tuple[float, float] | None = None,
-    y_bounds: tuple[float, float] | None = None,
-    z_bounds: tuple[float, float] | None = None,
-) -> tuple[float, float, float, float, float, float]:
-    """Build a port-aligned background box from PDK and optional axis bounds."""
-    lower, upper = resolved.bounds
-    port_axes = {
-        next(index for index, value in enumerate(port.normal) if value)
-        for port in resolved.ports.values()
-        if not port.is_vertical
-    }
-    x_padding = 0.0 if 0 in port_axes else padding_um
-    y_padding = 0.0 if 1 in port_axes else padding_um
-
-    if z_bounds is not None:
-        z_lower, z_upper = z_bounds
-    else:
-        background_z_bounds = []
-        for level in resolved.layer_stack.layers.values():
-            if level.material != background_material or level.thickness == 0:
-                continue
-            level_zmax = float(level.zmin + level.thickness)
-            background_z_bounds.append(
-                (
-                    min(float(level.zmin), level_zmax),
-                    max(float(level.zmin), level_zmax),
-                )
-            )
-        if background_z_bounds:
-            z_lower = min(lower[2], *(bounds[0] for bounds in background_z_bounds))
-            z_upper = max(upper[2], *(bounds[1] for bounds in background_z_bounds))
-        else:
-            z_lower = lower[2] - padding_um
-            z_upper = upper[2] + padding_um
-
-    automatic_bounds = (
-        lower[0] - x_padding,
-        lower[1] - y_padding,
-        z_lower,
-        upper[0] + x_padding,
-        upper[1] + y_padding,
-        z_upper,
-    )
-    explicit_bounds = (x_bounds, y_bounds, z_bounds)
-    final_bounds = list(automatic_bounds)
-    for axis, (axis_name, requested_bounds) in enumerate(
-        zip(("x", "y", "z"), explicit_bounds, strict=True)
-    ):
-        if requested_bounds is None:
-            continue
-        requested_lower, requested_upper = requested_bounds
-        if requested_lower >= requested_upper:
-            raise FDTDGeometryError(
-                f"domain.{axis_name}_bounds lower bound must be smaller than "
-                "its upper bound."
-            )
-        if requested_lower > lower[axis] or requested_upper < upper[axis]:
-            raise FDTDGeometryError(
-                f"domain.{axis_name}_bounds {requested_bounds} must contain "
-                f"the geometry bounds ({lower[axis]}, {upper[axis]})."
-            )
-        final_bounds[axis] = requested_lower
-        final_bounds[axis + 3] = requested_upper
-
-    return (
-        final_bounds[0] * UM_TO_NM,
-        final_bounds[1] * UM_TO_NM,
-        final_bounds[2] * UM_TO_NM,
-        final_bounds[3] * UM_TO_NM,
-        final_bounds[4] * UM_TO_NM,
-        final_bounds[5] * UM_TO_NM,
-    )
 
 
 def _add_physical_group(dimension: int, tags: list[int], name: str) -> int:
@@ -316,16 +252,17 @@ def generate_mesh(
     mesh_path: Path,
     *,
     background_material: str,
-    background_padding_um: float,
+    padding: Padding,
     mesh_size_nm: float,
     geometry_tolerance_nm: float,
+    padding_x: Padding | None = None,
+    padding_y: Padding | None = None,
+    padding_z: Padding | None = None,
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
 ) -> MeshManifest:
     """Generate an exact-boundary transfer mesh with coarse volume tetrahedra."""
-    if background_padding_um <= 0:
-        raise FDTDGeometryError("background_padding_um must be positive.")
     if mesh_size_nm <= 0:
         raise FDTDGeometryError("mesh_size_nm must be positive.")
     if not 0 < geometry_tolerance_nm <= 30:
@@ -337,6 +274,17 @@ def generate_mesh(
             "Layer name 'background' is reserved by GDSFactory FDTD."
         )
 
+    background_bounds = background_bounds_nm(
+        resolved,
+        background_material,
+        padding,
+        padding_x=padding_x,
+        padding_y=padding_y,
+        padding_z=padding_z,
+        x_bounds=x_bounds,
+        y_bounds=y_bounds,
+        z_bounds=z_bounds,
+    )
     initialized_here = not bool(gmsh.isInitialized())
     caller_option_values = {} if initialized_here else _snapshot_gmsh_options()
     if initialized_here:
@@ -347,14 +295,6 @@ def generate_mesh(
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("gsim_fdtd")
         kernel = gmsh.model.occ
-        background_bounds = background_bounds_nm(
-            resolved,
-            background_material,
-            background_padding_um,
-            x_bounds=x_bounds,
-            y_bounds=y_bounds,
-            z_bounds=z_bounds,
-        )
         guided_ports = {
             name: port for name, port in resolved.ports.items() if not port.is_vertical
         }
@@ -420,6 +360,8 @@ def generate_mesh(
             },
             layers=layer_groups,
             ports=port_groups,
+            domain_min_nm=(xmin, ymin, zmin),
+            domain_max_nm=(xmax, ymax, zmax),
         )
 
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
@@ -436,6 +378,7 @@ def generate_mesh(
         gmsh.model.mesh.generate(3)
         _validate_material_entity_mesh(layer_volume_tags, geometry_tolerance_nm)
         gmsh.write(str(mesh_path))
+        _force_lf_line_endings(mesh_path)
     except FDTDGeometryError:
         raise
     except Exception as error:

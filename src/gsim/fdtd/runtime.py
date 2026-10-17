@@ -66,11 +66,15 @@ class RuntimeConfigMixin:
     """Serialize sources, monitors, and solver controls for GDSFactory FDTD."""
 
     source: SourceType
-    resolved: ResolvedPassivePcell
     materials: Materials
     monitors: Monitors
     domain: Domain
     solver: Solver
+
+    @property
+    def resolved(self) -> ResolvedPassivePcell:
+        """Return canonical geometry supplied by the concrete simulation."""
+        raise NotImplementedError
 
     def _background_bounds_nm(
         self,
@@ -79,7 +83,10 @@ class RuntimeConfigMixin:
         return background_bounds_nm(
             self.resolved,
             self.materials.background,
-            self.domain.padding_um,
+            self.domain.padding,
+            padding_x=self.domain.padding_x,
+            padding_y=self.domain.padding_y,
+            padding_z=self.domain.padding_z,
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
@@ -249,7 +256,7 @@ class RuntimeConfigMixin:
             ):
                 raise FDTDConfigError(
                     f"Vertical port {name!r} aperture exceeds the background domain; "
-                    "increase domain.padding_um or reduce its aperture width."
+                    "increase domain.padding_x/padding_y or reduce its aperture width."
                 )
             polarization = self._vertical_polarization(port)
             focal_point = (center_x_nm, center_y_nm, device_z_nm)
@@ -440,6 +447,7 @@ class RuntimeConfigMixin:
                 max_wall_seconds=self.solver.max_wall_seconds,
                 excitation=excitation,
                 monitors=monitors,
+                dispersion=self.materials.dispersion,
             )
         except ValidationError as error:
             raise FDTDConfigError(

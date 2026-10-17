@@ -1,5 +1,7 @@
 # gsim
 
+[![codecov](https://codecov.io/gh/gdsfactory/gsim/branch/main/graph/badge.svg)](https://codecov.io/gh/gdsfactory/gsim)
+
 Photonic FDTD and RF/microwave simulation for GDSFactory, powered by [GDSFactory+](https://gdsfactory.com).
 
 | Engine                            | Status and use                                                                    |
@@ -32,7 +34,7 @@ result = simulation.run(check_cache=True)
 result.plot_plotly()
 ```
 
-[Start with the MMI tutorial](nbs/fdtd_mmi_gpdk.md) or browse the [GDSFactory FDTD API](api/fdtd.md).
+[Start with the MMI tutorial](nbs/fdtd_mmi_gpdk.md) or read the [GDSFactory FDTD guide](api/fdtd.md).
 
 ## GDSFactory FDTD roadmap
 
@@ -54,7 +56,7 @@ is available.
 `gsim.palace` is the FEM engine for driven RF and microwave simulations, eigenmodes, electrostatics, and impedance
 extraction.
 
-[Start with the Palace CPW tutorial](nbs/palace_cpw_lumped.md) or browse the [Palace API](api/palace.md).
+[Start with the Palace CPW tutorial](nbs/palace_cpw_lumped.md) or read the [Palace guide](api/palace.md).
 
 ## Installation
 
@@ -62,7 +64,15 @@ extraction.
 pip install gsim
 ```
 
-## API reference
+## API guides
 
 [GDSFactory FDTD](api/fdtd.md) · [Meep](api/meep.md) · [Palace](api/palace.md) · [Common](api/common.md) ·
 [Cloud](api/cloud.md)
+
+## API reference
+
+The API reference is generated from the Python source and docstrings. Browse [`gsim.fdtd`][gsim.fdtd],
+[`gsim.meep`][gsim.meep], [`gsim.palace`][gsim.palace], [`gsim.common`][gsim.common], or
+[`gsim.gcloud`][gsim.gcloud]. Start with [`fdtd.Simulation`][gsim.fdtd.Simulation],
+[`meep.Simulation`][gsim.meep.Simulation], or [`palace.DrivenSim`][gsim.palace.DrivenSim]. API entries link back to
+guides that reference them.

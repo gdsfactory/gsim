@@ -30,9 +30,9 @@ test:
 cov:
   uv run pytest --cov=gsim --cov-report=term-missing:skip-covered --cov-report=xml
 
-# Copy the root CHANGELOG into docs/ so zensical can build it (docs_dir is docs/)
+# Generate the docs changelog from published GitHub release notes.
 sync-changelog:
-  cp CHANGELOG.md docs/CHANGELOG.md
+  uv run python scripts/generate_changelog.py
 
 docs: sync-changelog
   uv run python scripts/plot_material_indices.py

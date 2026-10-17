@@ -571,3 +571,25 @@ def test_set_interactive_mode_toggles_flag() -> None:
     assert viz.interactive_mode() is True
     viz.set_interactive_mode(False)
     assert viz.interactive_mode() is False
+
+
+def test_start_xvfb_skipped_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows and macOS have no Xvfb, so no import is attempted."""
+    monkeypatch.setattr(viz.sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "pyvirtualdisplay", None)
+
+    viz._start_xvfb()  # would raise ImportError if attempted
+
+
+def test_start_xvfb_missing_is_not_a_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A missing pyvirtualdisplay on Linux is logged below WARNING."""
+    monkeypatch.setattr(viz.sys, "platform", "linux")
+    monkeypatch.setitem(sys.modules, "pyvirtualdisplay", None)
+
+    with caplog.at_level("DEBUG", logger=viz.__name__):
+        viz._start_xvfb()
+
+    assert "continuing without Xvfb" in caplog.text
+    assert all(r.levelno < 30 for r in caplog.records)

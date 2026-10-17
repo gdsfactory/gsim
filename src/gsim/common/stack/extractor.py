@@ -81,6 +81,8 @@ class ValidationResult(BaseModel):
     valid: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    info: list[str] = Field(default_factory=list)
+    """Informational notes (e.g. the active settings); not problems."""
 
     def __bool__(self) -> bool:
         """Returns True if the validation passed, False otherwise."""
@@ -99,6 +101,9 @@ class ValidationResult(BaseModel):
         if self.warnings:
             lines.append("Warnings:")
             lines.extend([f"  - {w}" for w in self.warnings])
+        if self.info:
+            lines.append("Info:")
+            lines.extend([f"  - {i}" for i in self.info])
         return "\n".join(lines)
 
 

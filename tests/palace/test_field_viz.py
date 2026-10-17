@@ -148,3 +148,126 @@ def test_axis_name_mapping() -> None:
     assert field_viz._axis_name(0) == "x"
     assert field_viz._axis_name(1) == "y"
     assert field_viz._axis_name(2) == "z"
+
+
+def test_plot_fields_2d_cycles_subplot_grid(
+    monkeypatch: pytest.MonkeyPatch,
+    planar_vector_dataset: pv.DataSet,
+) -> None:
+    """A list of ``cycles`` should render one panel per cycle."""
+    loaded: list[tuple[str | dict, int, int | None, bool]] = []
+
+    def _fake_load_fields(
+        source: str | dict,
+        *,
+        excitation: int,
+        cycle: int | None,
+        boundary: bool,
+    ) -> pv.DataSet:
+        loaded.append((source, excitation, cycle, boundary))
+        return planar_vector_dataset
+
+    monkeypatch.setattr(field_viz, "load_fields", _fake_load_fields)
+
+    plotter = field_viz.plot_fields_2d(
+        "dummy-output-dir",
+        cycles=[1, 2],
+        normal="z",
+        origin=0.0,
+        show=False,
+    )
+
+    assert [item[2] for item in loaded] == [1, 2]
+    assert len(plotter.renderers) == 2
+    plotter.close()
+
+
+def test_plot_fields_2d_scalar_real_is_signed(
+    planar_vector_dataset: pv.DataSet,
+) -> None:
+    """Scalar selectors should resolve without a paired imag array."""
+    values, name, signed = field_viz._resolve_scalar_values(
+        planar_vector_dataset, "E_real", "real", [0, 1]
+    )
+    assert signed is True
+    assert name.startswith("Re(E_real")
+    assert values.shape[0] == planar_vector_dataset.n_points
+
+    for scalar in ("magnitude", "z"):
+        _, _, is_signed = field_viz._resolve_scalar_values(
+            planar_vector_dataset, "E_real", scalar, [0, 1]
+        )
+        assert is_signed is (scalar != "magnitude")
+
+    plotter = field_viz.plot_fields_2d(
+        planar_vector_dataset,
+        scalar="real",
+        normal="z",
+        origin=0.0,
+        show=False,
+    )
+    assert isinstance(plotter, pv.Plotter)
+    plotter.close()
+
+
+def test_plot_fields_2d_unknown_scalar_raises(
+    planar_vector_dataset: pv.DataSet,
+) -> None:
+    """An unsupported scalar selector should fail clearly."""
+    with pytest.raises(ValueError, match="Unknown scalar"):
+        field_viz.plot_fields_2d(
+            planar_vector_dataset,
+            scalar="phase",
+            normal="z",
+            origin=0.0,
+            show=False,
+        )
+
+
+def test_plot_fields_2d_chip_bounds_crops(
+    planar_vector_dataset: pv.DataSet,
+) -> None:
+    """``chip_bounds`` should crop the in-plane extent on flat data.
+
+    Native-2D data is thin in one axis, so ``_slice_plane`` keeps that plane
+    and ignores ``normal``.  The crop must use the slice's own in-plane axes:
+    with the fixture flat in z, ``normal="x"`` used to crop the wrong axes
+    (and raise on the zero-thickness box).
+    """
+    for normal in ("z", "x"):
+        plotter = field_viz.plot_fields_2d(
+            planar_vector_dataset,
+            normal=normal,
+            origin=0.0,
+            chip_bounds=(-1.0, 1.0, -1.0, 1.0),
+            show=False,
+        )
+        assert isinstance(plotter, pv.Plotter)
+        plotter.close()
+
+    with pytest.raises(ValueError, match="removed all data"):
+        field_viz.plot_fields_2d(
+            planar_vector_dataset,
+            normal="z",
+            origin=0.0,
+            chip_bounds=(100.0, 101.0, 100.0, 101.0),
+            show=False,
+        )
+
+
+def test_crop_inplane_uses_slice_axes(planar_vector_dataset: pv.DataSet) -> None:
+    """The crop follows the slice axes, not the requested ``normal``."""
+    sliced, _used_normal, _axis_idx, axes = field_viz._slice_plane(
+        planar_vector_dataset,
+        normal="x",  # mismatches the fixture's flat (z) axis
+        origin=0.0,
+    )
+    assert axes == [0, 1]  # in-plane axes are x, y
+    cropped = field_viz._crop_inplane(
+        sliced, axes=axes, chip_bounds=(-1.0, 1.0, -1.0, 1.0)
+    )
+    assert 0 < cropped.n_points < sliced.n_points
+    points = np.asarray(cropped.points)
+    # Points are kept to within one cell of the box on the two in-plane axes.
+    assert np.abs(points[:, 0]).max() <= 1.3
+    assert np.abs(points[:, 1]).max() <= 1.3

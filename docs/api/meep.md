@@ -1,39 +1,15 @@
-# Meep API
+# Meep guide
+
+Use [`gsim.meep`][gsim.meep] to configure photonic FDTD simulations and inspect their results.
 
 ## Simulation
 
-::: gsim.meep.Simulation
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - geometry
-        - source
-        - domain
-        - solver
-        - validate_config
-        - write_config
-        - plot_2d
-        - plot_3d
-        - run
-        - start
-        - upload
-        - get_status
-        - wait_for_results
+- [`Simulation`][gsim.meep.Simulation]
 
 ## Configuration
 
-::: gsim.meep.Geometry
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
-
-::: gsim.meep.Domain
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`Geometry`][gsim.meep.Geometry]
+- [`Domain`][gsim.meep.Domain]
 
 `x_bounds`, `y_bounds`, and `z_bounds` set exact PML-inner intervals in
 absolute micrometers; PML is added outside them. Leave an axis as `"auto"`
@@ -51,11 +27,7 @@ sim.domain(
 Do not combine an explicit bound with `margin_x` or `margin_y` on the same
 axis. In XZ 2D simulations Y is collapsed, so `y_bounds` is not active.
 
-::: gsim.meep.ModeSource
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`ModeSource`][gsim.meep.ModeSource]
 
 ## 3D port placement
 
@@ -83,21 +55,8 @@ They are supported in 3D and XZ simulations, but not in top-down XY 2D where Z
 is collapsed. For mixed-height devices, set explicit bounds that contain every
 port layer; automatic Z cropping currently follows one optical reference layer.
 
-::: gsim.meep.PortVerticalOverride
-    options:
-      show_source: false
-      inherited_members: false
-      members: false
+- [`PortVerticalOverride`][gsim.meep.PortVerticalOverride]
 
 ## Results
 
-::: gsim.meep.SParameterResult
-    options:
-      show_source: false
-      inherited_members: false
-      members:
-        - from_csv
-        - from_directory
-        - plot
-        - show_animation
-        - show_diagnostics
+- [`SParameterResult`][gsim.meep.SParameterResult]

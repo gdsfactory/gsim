@@ -204,6 +204,52 @@ def test_resolves_component_from_gdsfactory_generic_pdk() -> None:
     assert set(result.ports) == {"o1", "o2"}
 
 
+def mark_background(level: LayerLevel, exclude_layers: tuple = ()) -> None:
+    """Flag a level as background, also on gdsfactory without the field."""
+    object.__setattr__(level, "background", True)
+    object.__setattr__(level, "background_exclude_layers", exclude_layers)
+
+
+@pytest.mark.parametrize(
+    ("exclude_layers", "expected_area"),
+    [((), 3.0 * 1.5), (((2, 0),), 3.0 * 1.5 - 0.5 * 0.25)],
+)
+def test_background_level_without_polygons_fills_bounding_box(
+    exclude_layers: tuple,
+    expected_area: float,
+) -> None:
+    pdk = make_test_pdk()
+    blanket = LayerLevel(
+        layer=LogicalLayer(layer=(4, 0)),
+        thickness=2,
+        zmin=-2,
+        mesh_order=5,
+        material="SiO2",
+    )
+    mark_background(blanket, exclude_layers)
+    assert pdk.layer_stack is not None
+    pdk.layer_stack.layers["blanket"] = blanket
+
+    result = resolve_passive_pcell(demo_component(), pdk=pdk)
+
+    resolved = result.layers["blanket"]
+    assert resolved.geometry.area == pytest.approx(expected_area)
+    assert resolved.geometry.bounds == pytest.approx((-0.5, -0.75, 2.5, 0.75))
+    assert resolved.material == "SiO2"
+    assert (resolved.zmin, resolved.zmax) == (-2, 0)
+    assert resolved.mesh_order == 5
+
+
+def test_background_level_replaces_its_source_polygons() -> None:
+    pdk = make_test_pdk()
+    assert pdk.layer_stack is not None
+    mark_background(pdk.layer_stack.layers["core_key"])
+
+    result = resolve_passive_pcell(demo_component(), pdk=pdk)
+
+    assert result.layers["core_key"].geometry.area == pytest.approx(3.0 * 1.5)
+
+
 @pytest.mark.parametrize(
     ("core_material", "message"),
     [(None, "no material"), ("silicon", "No MaterialCard")],

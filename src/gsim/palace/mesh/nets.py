@@ -75,6 +75,8 @@ class Nets:
     _shapes: dict[str, list[tuple[Polygon, Net]]] = field(
         default_factory=dict, repr=False
     )
+    # one STRtree per layer, built when first needed
+    _trees: dict[str, STRtree] = field(default_factory=dict, repr=False)
 
     def __len__(self) -> int:
         """Number of nets."""
@@ -121,6 +123,103 @@ class Nets:
             if shape.covers(point):
                 return net
         return None
+
+    def _layer_tree(self, layer: str) -> STRtree | None:
+        """The STRtree of the shapes on a layer, None when it has none.
+
+        Raises:
+            KeyError: If ``layer`` is not a conductor or via layer of the stack.
+        """
+        if layer not in self._shapes:
+            msg = (
+                f"unknown conductor or via layer {layer!r}; "
+                f"the layers are {sorted(self._shapes)}"
+            )
+            raise KeyError(msg)
+        if not self._shapes[layer]:
+            return None
+        if layer not in self._trees:
+            self._trees[layer] = STRtree([shape for shape, _ in self._shapes[layer]])
+        return self._trees[layer]
+
+    def has_layer(self, layer: str) -> bool:
+        """Whether ``layer`` is a conductor or via layer of the stack."""
+        return layer in self._shapes
+
+    def find(self, name: str) -> tuple[Net, ...]:
+        """The nets a name refers to: ``Net.name`` exactly, or a port name.
+
+        Several nets are returned when more than one carries the port.
+
+        Raises:
+            KeyError: If no net has that name; the message lists the names.
+        """
+        found = tuple(net for net in self.nets if net.name == name or name in net.ports)
+        if not found:
+            available = sorted(
+                {net.name for net in self.nets}
+                | {port for net in self.nets for port in net.ports}
+            )
+            msg = f"no net or port named {name!r}; the names are {available}"
+            raise KeyError(msg)
+        return found
+
+    def nets_in(
+        self, region: Polygon, layers: Iterable[str] | None = None
+    ) -> tuple[Net, ...]:
+        """The nets with a shape that overlaps a region, in net order.
+
+        A shape counts when the area it shares with the region is larger than
+        a numerical guard (1e-9 um^2), so shapes that only touch the region do
+        not.
+
+        Args:
+            region: Polygon in um.
+            layers: Only look at shapes on these layers; default all conductor
+                and via layers.
+
+        Raises:
+            KeyError: If a layer is not a conductor or via layer of the stack.
+        """
+        names = list(self._shapes) if layers is None else list(layers)
+        hit: set[int] = set()
+        for layer in names:
+            tree = self._layer_tree(layer)
+            if tree is None:
+                continue
+            items = self._shapes[layer]
+            for index in tree.query(region, predicate="intersects").tolist():
+                shape, net = items[index]
+                if shape.intersection(region).area > _MIN_CONTACT_AREA_UM2:
+                    hit.add(id(net))
+        return tuple(net for net in self.nets if id(net) in hit)
+
+    def nets_near(
+        self, x: float, y: float, layer: str, distance: float
+    ) -> list[tuple[float, Net]]:
+        """Nets with a shape on a layer within ``distance`` (um) of a point.
+
+        Returns:
+            ``(distance to the net, net)`` pairs, nearest first; a point on a
+            shape has distance 0. A net with several shapes in reach is listed
+            once, at its nearest shape.
+
+        Raises:
+            KeyError: If ``layer`` is not a conductor or via layer of the stack.
+        """
+        tree = self._layer_tree(layer)
+        if tree is None:
+            return []
+        point = Point(x, y)
+        items = self._shapes[layer]
+        best: dict[int, float] = {}
+        for index in tree.query(point, predicate="dwithin", distance=distance).tolist():
+            shape, net = items[index]
+            gap = float(shape.distance(point))
+            best[id(net)] = min(gap, best.get(id(net), gap))
+        position = {id(net): k for k, net in enumerate(self.nets)}
+        ordered = sorted(best.items(), key=lambda item: (item[1], position[item[0]]))
+        return [(gap, self.nets[position[key]]) for key, gap in ordered]
 
 
 def _connected(a, b, shape_a: Polygon, shape_b: Polygon) -> bool:

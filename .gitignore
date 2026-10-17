@@ -3,6 +3,7 @@
 sim-data-*/
 palace-sim-*/
 meep-sim-*/
+tcad-sim-*/
 sim_*/
 
 uv.lock
@@ -73,7 +74,6 @@ dist/
 docs/_build/
 docs/nbs/
 docs/site/
-docs/CHANGELOG.md
 downloads/
 eggs/
 env.bak/

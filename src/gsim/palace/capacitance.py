@@ -72,6 +72,81 @@ class CapacitanceMatrices:
         index = self._index(name)
         return float(self.mutual[index, index])
 
+    def pairs(self) -> pd.DataFrame:
+        """Every capacitance, electrode to electrode and electrode to ground.
+
+        One row per pair of terminals (:meth:`between`), then one row per
+        terminal against ``"ground"`` (:meth:`to_ground`), so the two kinds
+        are reported apart.
+
+        Returns:
+            A table with the columns ``first``, ``second`` and
+            ``capacitance_F``.
+        """
+        import pandas as pd
+
+        rows = [
+            (first, second, self.between(first, second))
+            for index, first in enumerate(self.terminals)
+            for second in self.terminals[index + 1 :]
+        ]
+        rows.extend((name, "ground", self.to_ground(name)) for name in self.terminals)
+        return pd.DataFrame(rows, columns=["first", "second", "capacitance_F"])
+
+    def eliminate(self, names: Sequence[str]) -> CapacitanceMatrices:
+        """Remove floating terminals with a Schur complement of the Maxwell matrix.
+
+        A floating conductor holds no net charge. With ``C`` split into the
+        terminals that stay (``t``) and the floating ones (``f``), the matrix
+        the others see is ``C_tt - C_tf C_ff^-1 C_ft``, which is exact for an
+        electrostatic problem. The mutual matrix is rebuilt from it (off
+        diagonal ``-C_ij``, diagonal the row sum), the inverse is the block of
+        the full inverse that belongs to the remaining terminals, and the
+        voltages and energies, which belong to the excitations of the removed
+        terminals too, are dropped.
+
+        Args:
+            names: Terminals to remove.
+
+        Returns:
+            The matrices of the remaining terminals; ``self`` when ``names``
+            is empty.
+
+        Raises:
+            KeyError: If a name is not a terminal.
+            ValueError: If a name is repeated, no terminal would remain, or
+                the floating terminals have no capacitance to anything (a
+                singular block).
+        """
+        drop = [self._index(name) for name in names]
+        if not drop:
+            return self
+        if len(set(drop)) != len(drop):
+            msg = f"the terminals to eliminate must be different: {list(names)}"
+            raise ValueError(msg)
+        keep = [i for i in range(len(self.terminals)) if i not in drop]
+        if not keep:
+            msg = "cannot eliminate every terminal"
+            raise ValueError(msg)
+        c = self.maxwell
+        try:
+            solved = np.linalg.solve(c[np.ix_(drop, drop)], c[np.ix_(drop, keep)])
+        except np.linalg.LinAlgError:
+            msg = (
+                "cannot eliminate "
+                f"{list(names)}: their block of the Maxwell matrix is singular"
+            )
+            raise ValueError(msg) from None
+        reduced = c[np.ix_(keep, keep)] - c[np.ix_(keep, drop)] @ solved
+        ground = reduced.sum(axis=1)
+        mutual = -(reduced - np.diag(np.diag(reduced))) + np.diag(ground)
+        return CapacitanceMatrices(
+            terminals=tuple(self.terminals[i] for i in keep),
+            maxwell=np.asarray(reduced, dtype=np.float64),
+            mutual=mutual,
+            inverse=None if self.inverse is None else self.inverse[np.ix_(keep, keep)],
+        )
+
     def maxwell_frame(self) -> pd.DataFrame:
         """The Maxwell matrix as a DataFrame indexed by terminal name."""
         import pandas as pd
