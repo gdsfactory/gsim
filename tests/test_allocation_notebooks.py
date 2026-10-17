@@ -53,6 +53,45 @@ def test_palace_uses_measured_counts_not_target_counts(tmp_path):
     }
 
 
+def test_fdtd_cloud_bounds_match_mesh_and_preserve_solver_settings(tmp_path):
+    mesh_path = tmp_path / "mesh.vtu"
+    meshio.write(
+        mesh_path,
+        meshio.Mesh(
+            points=np.array(
+                [
+                    [-100, 0, 0],
+                    [100, 0, 0],
+                    [0, 200, 0],
+                    [0, 0, 300],
+                    [9999, 9999, 9999],
+                ]
+            ),
+            cells=[("tetra", np.array([[0, 1, 2, 3]]))],
+        ),
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "grid": {"nanometers_per_cell": 50, "pml_cells": 2},
+                "run": {"max_timesteps": 10},
+            }
+        )
+    )
+
+    helpers.write_fdtd_grid_bounds(mesh_path, config_path)
+
+    config = json.loads(config_path.read_text())
+    assert config["grid"]["non_pml_bounds"] == {
+        "min": [-100, 0, 0],
+        "max": [100, 200, 300],
+    }
+    assert config["grid"]["nanometers_per_cell"] == 50
+    assert config["grid"]["pml_cells"] == 2
+    assert config["run"] == {"max_timesteps": 10}
+
+
 @pytest.fixture
 def cloud_case(tmp_path, monkeypatch):
     monkeypatch.setenv("SIMULATION_API_URL", "https://simulation.example/v1")

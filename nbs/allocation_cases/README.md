@@ -40,6 +40,9 @@ solves were launched during notebook validation.
 FDTD targets can round up by one cell along an axis because its written geometry bounds and grid spacing are
 floating-point values. The request always uses the measured count rather than the nominal target.
 
+The FDTD examples also add `grid.non_pml_bounds` from the written mesh. The current cloud build requires this explicit
+field, while the gsim source used here does not emit it yet.
+
 ## Run
 
 Install the project dependencies, including the `docs` and `test` dependency groups for a notebook kernel and the public

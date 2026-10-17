@@ -13,12 +13,25 @@ import meshio
 import numpy as np
 
 
-def fdtd_requirements(mesh_path: Path, config_path: Path) -> dict:
-    """Count the requested Yee cells, including PML, from written inputs."""
+def fdtd_grid_bounds(mesh_path: Path) -> dict:
+    """Measure bounds using only vertices referenced by the written mesh."""
     mesh = meshio.read(mesh_path)
     vertices = np.unique(np.concatenate([block.data.ravel() for block in mesh.cells]))
     points = mesh.points[vertices]
-    extent_nm = points.max(axis=0) - points.min(axis=0)
+    return {"min": points.min(axis=0).tolist(), "max": points.max(axis=0).tolist()}
+
+
+def write_fdtd_grid_bounds(mesh_path: Path, config_path: Path) -> None:
+    """Add the explicit non-PML bounds required by the current cloud FDTD build."""
+    config = json.loads(config_path.read_text())
+    config["grid"]["non_pml_bounds"] = fdtd_grid_bounds(mesh_path)
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def fdtd_requirements(mesh_path: Path, config_path: Path) -> dict:
+    """Count the requested Yee cells, including PML, from written inputs."""
+    bounds = fdtd_grid_bounds(mesh_path)
+    extent_nm = np.asarray(bounds["max"]) - np.asarray(bounds["min"])
     grid = json.loads(config_path.read_text())["grid"]
     dimensions = [
         math.ceil(float(extent) / grid["nanometers_per_cell"]) + 2 * grid["pml_cells"]
