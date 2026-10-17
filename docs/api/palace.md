@@ -13,18 +13,50 @@ import gsim.palace as pa
 
 sim = pa.EigenmodeSim()
 sim.solver.order = 1
-sim.solver.linear.tolerance = 1e-6
+sim.solver.linear.tolerance = 1e-9
 sim.solver.linear.max_iterations = 400
 sim.solver.eigenmode.num_modes = 2
 sim.solver.eigenmode.target = 4e9  # Hz; required before meshing/exporting
-sim.solver.eigenmode.tolerance = 1e-8
+sim.solver.eigenmode.tolerance = 1e-9
 sim.solver.eigenmode.save = 2
 ```
 
 The linear tolerance controls each linear solve. The eigenmode tolerance controls
-eigenvalue convergence. They are independent. Field order defaults to **2**, linear
-tolerance to **1e-6**, and maximum linear iterations to **400**. The backend and
-preconditioner default to `"Default"`, and the device defaults to `"CPU"`.
+eigenvalue convergence. They are independent. All Palace simulation types default
+to **GMRES with complex MUMPS multigrid**, field order **2**, **400** maximum linear
+iterations, and `"CPU"`. Linear tolerance defaults to **1e-6**, except for
+`EigenmodeSim`, whose linear and eigenvalue tolerances both default to **1e-9**.
+
+The configurable multigrid controls live under `sim.solver.linear`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `solver_type` | `"MUMPS"` | Coarse solver backend; `"Default"` asks Palace to choose. |
+| `mg_max_levels` | `100` | Maximum multigrid levels; Palace uses the available hierarchy. Set 1 for a full-system solve. |
+| `pc_mat_real` | `False` | Set True to use a real approximation of the preconditioner matrix. |
+| `complex_coarse_solve` | `True` | Use a complex coarse solve for complex-valued problems. |
+
+Real-only problems such as electrostatics still solve real equations. The complex
+controls do not turn materials or fields into complex quantities in those problems.
+MUMPS no longer forces one Krylov iteration, disables multigrid, or disables the
+mesh error estimator or divergence-free projection. Explicit settings are exported
+without backend-specific overrides.
+
+```python
+sim.solver.linear.pc_mat_real = True
+sim.solver.linear.complex_coarse_solve = False  # lower-memory real approximation
+sim.solver.linear.mg_max_levels = 1  # full-system solve; can need much more RAM
+```
+
+`solver_type="SuperLU"`, `"STRUMPACK"`, and `"Default"` remain available.
+`preconditioner="AMS"` or `"BoomerAMG"` applies when `solver_type="Default"`.
+Use `pc_mat_real=True` and `complex_coarse_solve=False` to request a real
+preconditioner with another backend. These settings can also be supplied to
+`set_solver(...)` or in the constructor's `solver={"linear": ...}` group.
+
+The defaults are a starting point. Check convergence and mesh resolution for each
+problem, especially when extracting quality factors. Driven adaptive-sweep controls
+are separate and retain their existing defaults.
 
 You can also supply grouped settings at construction:
 
@@ -52,18 +84,19 @@ boundary.solver.boundary_mode.freq = 5e9
 boundary.solver.boundary_mode.num_modes = 2
 ```
 
-All four share six controls: `order`, `device`, and
-`linear.{solver_type, preconditioner, tolerance, max_iterations}`.
+All four share nine controls: `order`, `device`, and
+`linear.{solver_type, preconditioner, tolerance, max_iterations, mg_max_levels,
+pc_mat_real, complex_coarse_solve}`.
 
 | Simulation | Problem group | Problem settings | Total settings |
 | --- | --- | --- | --- |
-| DrivenSim | `solver.driven` | 12 | 18 |
-| EigenmodeSim | `solver.eigenmode` | 8 | 14 |
-| ElectrostaticSim | `solver.electrostatic` | 1 | 7 |
-| BoundaryModeSim | `solver.boundary_mode` | 7 | 13 |
+| DrivenSim | `solver.driven` | 12 | 21 |
+| EigenmodeSim | `solver.eigenmode` | 8 | 17 |
+| ElectrostaticSim | `solver.electrostatic` | 1 | 10 |
+| BoundaryModeSim | `solver.boundary_mode` | 7 | 16 |
 
 `sim.set_solver(...)` replaces the common controls using the same defaults as
-`SolverConfig()`, while preserving the problem-specific settings. Assign individual
+the simulation constructor, including its linear tolerance, while preserving the problem-specific settings. Assign individual
 attributes to retain other common values. The generated Palace JSON continues to
 use `Solver.Order`, `Solver.Device`, `Solver.Linear`, and the applicable problem block.
 
@@ -104,7 +137,7 @@ including its problem group; a new eigenmode group defaults to `target=None`.
 
 `sim.numerical` is a deprecated alias for `sim.solver`, so its `model_dump()` uses
 the grouped format. `NumericalConfig(**sim.numerical.model_dump())` accepts that
-format and copies the six common numerical controls into a flat legacy model.
+format and copies the nine common numerical controls into a flat legacy model.
 For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings.
 
 - [`SolverConfig`][gsim.palace.SolverConfig]

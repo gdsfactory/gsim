@@ -18,6 +18,9 @@ COMMON = {
     "max_iterations": 123,
     "solver_type": "Default",
     "preconditioner": "AMS",
+    "mg_max_levels": 100,
+    "pc_mat_real": False,
+    "complex_coarse_solve": True,
     "device": "CPU",
 }
 CASES = [
@@ -78,8 +81,8 @@ def test_complete_config_matches_main_baseline(
         },
     )
     output = sim.write_config(validate_mesh=False)
-    # Recorded through the old API on main at 0950c7f. Byte comparison also
-    # protects key ordering, which participates in the cloud input hash.
+    # Legacy and grouped APIs must export the same configuration. Byte comparison
+    # also protects key ordering, which participates in the cloud input hash.
     reference = Path(__file__).with_suffix("") / f"{group}.txt"
     # The JSON writer uses native line endings, including CRLF on Windows.
     expected = reference.read_text().removesuffix("\n").replace("\n", os.linesep)

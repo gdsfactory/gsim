@@ -15,6 +15,7 @@ def test_numerical_export_selects_preconditioner_type(exporter, preconditioner):
         order=3,
         tolerance=1e-8,
         max_iterations=120,
+        solver_type="Default",
         preconditioner=preconditioner,
         device="GPU",
     )
@@ -27,6 +28,9 @@ def test_numerical_export_selects_preconditioner_type(exporter, preconditioner):
             "KSPType": "GMRES",
             "Tol": 1e-8,
             "MaxIts": 120,
+            "MGMaxLevels": 100,
+            "PCMatReal": False,
+            "ComplexCoarseSolve": True,
         },
     }
 
@@ -43,16 +47,8 @@ def test_explicit_solver_takes_precedence(exporter, solver_type):
         "KSPType": "GMRES",
         "Tol": 1e-6,
         "MaxIts": 400,
+        "MGMaxLevels": 100,
+        "PCMatReal": False,
+        "ComplexCoarseSolve": True,
     }
-    if solver_type == "MUMPS":
-        expected.update(
-            MaxIts=1,
-            MGMaxLevels=1,
-            EstimatorMaxIts=0,
-            EstimatorTol=1e-6,
-            DivFreeTol=1e-6,
-            DivFreeMaxIts=0,
-            PCMatReal=False,
-            ComplexCoarseSolve=True,
-        )
     assert linear == expected
