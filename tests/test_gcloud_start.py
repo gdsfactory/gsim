@@ -329,7 +329,8 @@ class TestWaitForResultsSingle:
 
         shown: dict[str, int] = {}
         percents = []
-        for status in (SimStatus.QUEUED, SimStatus.STARTING, SimStatus.RUNNING):
+        # SDK 2.x can return startup states as strings without enum members.
+        for status in (SimStatus.QUEUED, "starting", SimStatus.RUNNING):
             job = FakeJob(job_name="meep-progress", status=status)
             _print_status_table(
                 {"job-1": job}, {"job-1": 0.0}, final=True, shown_progress=shown

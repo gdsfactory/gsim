@@ -13,7 +13,7 @@ classifiers = [
 ]
 dependencies = [
   "gdsfactory>=9,<10",
-  "gdsfactoryplus>=1.8.20,<3",
+  "gdsfactoryplus>=2.1.467,<3",
   "gmsh",
   "meshio>=5.0.0",
   "nbformat>=4.2.0",

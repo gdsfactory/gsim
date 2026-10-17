@@ -37,6 +37,7 @@ from gsim.fdtd.api import (
 )
 from gsim.fdtd.cloud import CloudWorkflowMixin
 from gsim.fdtd.mesh import generate_mesh
+from gsim.fdtd.metadata import write_metadata
 from gsim.fdtd.models import (
     FDTDConfigError,
     FDTDGeometryError,
@@ -401,6 +402,7 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             encoding="utf8",
             newline="\n",
         )
+        write_metadata(manifest, config, mesh_path)
         self._last_artifacts = SimulationArtifacts(
             mesh_path=mesh_path,
             config_path=config_path,

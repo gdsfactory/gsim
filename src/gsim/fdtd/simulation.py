@@ -26,6 +26,7 @@ from gsim.fdtd.config import (
 )
 from gsim.fdtd.domain import Padding, padding_pair
 from gsim.fdtd.mesh import background_bounds_nm, generate_mesh
+from gsim.fdtd.metadata import write_metadata
 from gsim.fdtd.models import (
     FDTDConfigError,
     FDTDGeometryError,
@@ -334,6 +335,7 @@ class Simulation:
             encoding="utf8",
             newline="\n",
         )
+        write_metadata(manifest, config, mesh_path)
         return SimulationArtifacts(
             mesh_path=mesh_path,
             config_path=config_path,
