@@ -258,7 +258,7 @@ class EigenmodeConfig(BaseModel):
         "resonance for faster convergence.",
     )
     tolerance: float = Field(
-        default=1e-6,
+        default=1e-9,
         gt=0,
         description="Eigenvalue solver relative convergence tolerance.",
     )

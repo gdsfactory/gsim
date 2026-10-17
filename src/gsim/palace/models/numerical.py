@@ -35,6 +35,11 @@ class NumericalConfig(BaseModel):
     preconditioner: Literal["Default", "AMS", "BoomerAMG"] = deepcopy(
         LinearSolverConfig.model_fields["preconditioner"]
     )
+    mg_max_levels: int = deepcopy(LinearSolverConfig.model_fields["mg_max_levels"])
+    pc_mat_real: bool = deepcopy(LinearSolverConfig.model_fields["pc_mat_real"])
+    complex_coarse_solve: bool = deepcopy(
+        LinearSolverConfig.model_fields["complex_coarse_solve"]
+    )
     device: Literal["CPU", "GPU"] = deepcopy(SolverConfig.model_fields["device"])
 
     def __init__(self, **data: Any) -> None:
@@ -62,6 +67,9 @@ class NumericalConfig(BaseModel):
             max_iterations=self.max_iterations,
             solver_type=self.solver_type,
             preconditioner=self.preconditioner,
+            mg_max_levels=self.mg_max_levels,
+            pc_mat_real=self.pc_mat_real,
+            complex_coarse_solve=self.complex_coarse_solve,
         ).to_palace_config()
 
     def to_solver_config(self) -> dict[str, object]:

@@ -18,7 +18,10 @@
             "Type": "AMS",
             "KSPType": "GMRES",
             "Tol": 1e-08,
-            "MaxIts": 123
+            "MaxIts": 123,
+            "MGMaxLevels": 100,
+            "PCMatReal": false,
+            "ComplexCoarseSolve": true
         },
         "Order": 1,
         "Device": "CPU",
