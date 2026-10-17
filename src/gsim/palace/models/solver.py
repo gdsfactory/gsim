@@ -55,10 +55,23 @@ class LinearSolverConfig(BaseModel):
         default=400, ge=1, description="Maximum Krylov solver iterations."
     )
     solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = Field(
-        default="Default", description="Linear solver backend; Default auto-selects."
+        default="MUMPS", description="Linear solver backend; Default auto-selects."
     )
     preconditioner: Literal["Default", "AMS", "BoomerAMG"] = Field(
         default="Default", description="Preconditioner used with the Default backend."
+    )
+    mg_max_levels: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum multigrid levels; 1 uses a full-system solve.",
+    )
+    pc_mat_real: bool = Field(
+        default=False,
+        description="Use a real approximation for the preconditioner matrix.",
+    )
+    complex_coarse_solve: bool = Field(
+        default=True,
+        description="Use a complex coarse solve for complex-valued problems.",
     )
 
     def to_palace_config(self) -> dict[str, Any]:
@@ -68,18 +81,10 @@ class LinearSolverConfig(BaseModel):
             "KSPType": "GMRES",
             "Tol": self.tolerance,
             "MaxIts": self.max_iterations,
+            "MGMaxLevels": self.mg_max_levels,
+            "PCMatReal": self.pc_mat_real,
+            "ComplexCoarseSolve": self.complex_coarse_solve,
         }
-        if self.solver_type == "MUMPS":
-            config.update(
-                MaxIts=1,
-                MGMaxLevels=1,
-                EstimatorMaxIts=0,
-                EstimatorTol=1e-6,
-                DivFreeTol=1e-6,
-                DivFreeMaxIts=0,
-                PCMatReal=False,
-                ComplexCoarseSolve=True,
-            )
         if self.solver_type == "Default" and self.preconditioner != "Default":
             config["Type"] = self.preconditioner
         return config
@@ -223,7 +228,20 @@ class DrivenSolverConfig(SolverConfig):
 class EigenmodeSolverConfig(SolverConfig):
     """Common and eigenvalue settings for EigenmodeSim."""
 
+    linear: LinearSolverConfig = Field(
+        default_factory=lambda: LinearSolverConfig(tolerance=1e-9)
+    )
     eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_eigenmode_linear_tolerance(cls, values: Any) -> Any:
+        """Use the eigenmode tolerance unless the caller supplies an override."""
+        if isinstance(values, dict) and "tolerance" not in values:
+            linear = values.get("linear", {})
+            if isinstance(linear, dict):
+                return {**values, "linear": {"tolerance": 1e-9, **linear}}
+        return values
 
 
 class ElectrostaticSolverConfig(SolverConfig):

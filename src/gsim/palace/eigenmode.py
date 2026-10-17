@@ -151,7 +151,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         *,
         num_modes: int = 10,
         target: float | None = None,
-        tolerance: float = 1e-6,
+        tolerance: float = 1e-9,
         save: int = 0,
         floquet: bool = False,
         phi_target: float = math.pi / 2,

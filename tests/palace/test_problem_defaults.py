@@ -72,4 +72,13 @@ def test_generated_fallback_problem_config(tmp_path, simulation_type):
             "AdaptiveTol": 0.02,
         }
     else:
-        assert solver["Eigenmode"] == {"N": 10, "Tol": 1e-6, "Target": 60.0}
+        assert solver["Eigenmode"] == {"N": 10, "Tol": 1e-9, "Target": 60.0}
+    assert solver["Linear"] == {
+        "Type": "MUMPS",
+        "KSPType": "GMRES",
+        "Tol": 1e-9 if simulation_type == "eigenmode" else 1e-6,
+        "MaxIts": 400,
+        "MGMaxLevels": 100,
+        "PCMatReal": False,
+        "ComplexCoarseSolve": True,
+    }

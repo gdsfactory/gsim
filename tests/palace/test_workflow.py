@@ -659,6 +659,7 @@ class TestNumericalConfig:
         sim.solver.linear.tolerance = 2e-7
         sim.solver.linear.max_iterations = 777
         sim.solver.linear.preconditioner = "AMS"
+        sim.solver.linear.solver_type = "Default"
 
         sim.mesh(preset="coarse")
         sim.solver.driven.num_points = 11
@@ -729,11 +730,9 @@ class TestNumericalConfig:
         assert linear["Type"] == "MUMPS"
         assert linear["KSPType"] == "GMRES"
         assert linear["Tol"] == 1e-8
-        assert linear["MaxIts"] == 1
-        assert linear["MGMaxLevels"] == 1
-        assert linear["EstimatorMaxIts"] == 0
-        assert linear["EstimatorTol"] == 1e-6
-        assert linear["DivFreeTol"] == 1e-6
-        assert linear["DivFreeMaxIts"] == 0
+        assert linear["MaxIts"] == 400
+        assert linear["MGMaxLevels"] == 100
+        assert "EstimatorMaxIts" not in linear
+        assert "DivFreeMaxIts" not in linear
         assert linear["PCMatReal"] is False
         assert linear["ComplexCoarseSolve"] is True

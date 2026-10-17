@@ -284,7 +284,7 @@ def generate_palace_config(
         # Legacy behavior - compute from fmax
         solver_eigenmode = {
             "N": 10,
-            "Tol": 1.0e-6,
+            "Tol": 1.0e-9,
             "Target": fmax / 1e9,
         }
 
@@ -303,18 +303,14 @@ def generate_palace_config(
     if numerical_config is not None:
         solver_conf = dict(numerical_config.to_solver_config())
     else:
-        # Backward-compatible defaults for direct generate_palace_config() calls
-        # that do not provide a NumericalConfig.
-        solver_conf = {
-            "Linear": {
-                "Type": "Default",
-                "KSPType": "GMRES",
-                "Tol": 1e-6,
-                "MaxIts": 1000,
-            },
-            "Order": 2,
-            "Device": "CPU",
-        }
+        from gsim.palace.models.solver import EigenmodeSolverConfig, SolverConfig
+
+        defaults = (
+            EigenmodeSolverConfig()
+            if simulation_type == "eigenmode"
+            else SolverConfig()
+        )
+        solver_conf = defaults.to_solver_config()
 
     if simulation_type == "driven":
         solver_conf["Driven"] = solver_driven

@@ -139,7 +139,7 @@ def test_simulation_defaults_are_independent():
     second = pa.EigenmodeSim()
     first.solver.linear.tolerance = 1e-8
     first.solver.eigenmode.target = 4e9
-    assert second.solver.linear.tolerance == 1e-6
+    assert second.solver.linear.tolerance == 1e-9
     assert second.solver.eigenmode.target is None
 
 
@@ -180,8 +180,11 @@ def test_numerical_serialization_retains_old_flat_format():
         "device": "CPU",
         "tolerance": 1e-8,
         "max_iterations": 400,
-        "solver_type": "Default",
+        "solver_type": "MUMPS",
         "preconditioner": "Default",
+        "mg_max_levels": 100,
+        "pc_mat_real": False,
+        "complex_coarse_solve": True,
     }
     assert numerical.model_dump(include={"order", "tolerance"}) == {
         "order": 3,
@@ -193,6 +196,9 @@ def test_numerical_serialization_retains_old_flat_format():
         "max_iterations",
         "solver_type",
         "preconditioner",
+        "mg_max_levels",
+        "pc_mat_real",
+        "complex_coarse_solve",
         "device",
     ]
     with pytest.warns(DeprecationWarning, match="numerical constructor.*solver"):
@@ -208,17 +214,25 @@ def test_palace_solver_serialization_preserves_cache_inputs():
     """Equivalent settings must keep the original config bytes for cache hits."""
     expected = (
         '{"Linear": {"Type": "AMS", "KSPType": "GMRES", "Tol": 1e-08, '
-        '"MaxIts": 123}, "Order": 3, "Device": "CPU"}'
+        '"MaxIts": 123, "MGMaxLevels": 100, "PCMatReal": false, '
+        '"ComplexCoarseSolve": true}, "Order": 3, "Device": "CPU"}'
     )
     solver = pa.SolverConfig(
         order=3,
         linear=pa.LinearSolverConfig(
-            tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+            tolerance=1e-8,
+            max_iterations=123,
+            solver_type="Default",
+            preconditioner="AMS",
         ),
     )
     with pytest.warns(DeprecationWarning, match="NumericalConfig.*SolverConfig"):
         numerical = pa.NumericalConfig(
-            order=3, tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+            order=3,
+            tolerance=1e-8,
+            max_iterations=123,
+            solver_type="Default",
+            preconditioner="AMS",
         )
     assert json.dumps(solver.to_solver_config()) == expected
     assert json.dumps(numerical.to_solver_config()) == expected
