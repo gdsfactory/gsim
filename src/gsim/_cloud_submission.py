@@ -98,7 +98,7 @@ def upload_sized_simulation(
     its module and package layouts. Start, polling and downloads stay in the SDK.
     No resource tiers or CPU/memory policy are duplicated in the client.
     """
-    transport = getattr(sim, "web", sim)
+    transport: Any = getattr(sim, "web", sim)
     job_name = f"{job_type}-{secrets.token_hex(4)}"
     payload: dict[str, Any] = {
         "job_name": job_name,
