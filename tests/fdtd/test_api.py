@@ -145,7 +145,7 @@ def test_run_without_wait_uses_fine_grained_cloud_lifecycle(
     simulation = fdtd.Simulation()
     calls: list[tuple] = []
 
-    def write_files(directory: Path) -> None:
+    def write_files(directory: Path, **_kwargs: object) -> None:
         directory.joinpath("config.json").write_text("{}", encoding="utf8")
 
     monkeypatch.setattr(simulation, "write", write_files)
