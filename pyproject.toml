@@ -13,8 +13,9 @@ classifiers = [
 ]
 dependencies = [
   "gdsfactory>=9,<10",
-  "gdsfactoryplus>=2.1.467,<3",
+  "gdsfactoryplus>=1.8.20,<3",
   "gmsh",
+  "httpx>=0.28.0",
   "meshio>=5.0.0",
   "nbformat>=4.2.0",
   "nest_asyncio2",
