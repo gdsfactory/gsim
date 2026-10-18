@@ -358,8 +358,10 @@ def extract_geometry(
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
     layer_bboxes = {}
 
-    # Get polygons from component
-    polygons_by_index = component.get_polygons()
+    # Preserve named aliases: tuple-based lookup can select an empty duplicate.
+    polygons_by_index = component.get_polygons(
+        layers=list(component.kcl.layout.layer_indexes())
+    )
 
     if decimate_tolerance is not None:
         from gsim.common.polygon_utils import decimate
@@ -1445,7 +1447,9 @@ def extract_pec_polygons(
     Returns:
         List of (pts_x, pts_y, holes) tuples in microns
     """
-    polygons_by_index = component.get_polygons()
+    polygons_by_index = component.get_polygons(
+        layers=list(component.kcl.layout.layer_indexes())
+    )
 
     layout = component.kcl.layout
     index_to_gds = {}
