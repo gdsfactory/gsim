@@ -94,6 +94,53 @@ def test_mode_arrays_are_lazy_and_shape_checked(tmp_path):
         mode.plot("Ey", part="wrong")
 
 
+@pytest.mark.parametrize(
+    ("component", "part"),
+    [("Ey", "abs"), ("Ey", "real"), ("Ey", "imag"), ("abs_h", "abs")],
+)
+def test_mode_plot_selects_field_part_on_existing_axes(tmp_path, component, part):
+    document, expected = mode_document(tmp_path)
+    path = tmp_path / "sparams.json"
+    path.write_text(json.dumps(document))
+    mode = FDTDResult.from_file(path).source_mode
+    assert mode is not None
+    if component == "abs_h":
+        expected_image = np.sqrt(
+            sum(np.abs(expected[name]) ** 2 for name in ("Hx", "Hy", "Hz"))
+        )
+    else:
+        values = expected[component]
+        expected_image = {
+            "abs": np.abs(values),
+            "real": values.real,
+            "imag": values.imag,
+        }[part]
+    figure, axes = plt.subplots()
+    try:
+        assert mode.plot(component, part=part, ax=axes, cmap="magma") == (figure, axes)
+        np.testing.assert_allclose(
+            np.asarray(axes.images[0].get_array()), expected_image
+        )
+        assert axes.images[0].get_cmap().name == "magma"
+    finally:
+        plt.close(figure)
+
+
+def test_mode_loads_downloaded_sidecars_from_file_map(tmp_path):
+    document, expected = mode_document(tmp_path)
+    path = tmp_path / "sparams.json"
+    path.write_text(json.dumps(document))
+    download_directory = tmp_path / "downloaded"
+    download_directory.mkdir()
+    files = {
+        filename: (tmp_path / filename).rename(download_directory / filename)
+        for filename in ("Ex_real.npy", "Ex_imag.npy")
+    }
+    mode = FDTDResult.from_file(path, files=files).source_mode
+    assert mode is not None
+    np.testing.assert_array_equal(mode.load("Ex"), expected["Ex"])
+
+
 def test_dry_run_cannot_report_s_parameters(tmp_path):
     document, _ = mode_document(tmp_path)
     document["s_parameters"] = {"S(o1,o1)": [{"re": 0, "im": 0}]}
