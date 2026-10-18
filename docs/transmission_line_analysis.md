@@ -1,10 +1,17 @@
 # Transmission-line analysis with scikit-rf
 
 Use scikit-rf directly for TRL, multiline TRL and fixture de-embedding. gsim supplies the Palace result conversion;
-calibration algorithms and propagation extraction stay in scikit-rf. This example is tested with **scikit-rf 2.1.0**:
+calibration algorithms and propagation extraction stay in scikit-rf. This example requires **scikit-rf 2.1 or newer**:
 
 ```bash
 uv pip install 'scikit-rf>=2.1'
+```
+
+IHP's SAX dependency requires scikit-rf below version 2. Run calibration analysis in a separate environment from IHP.
+From a gsim checkout, run this guide's tests with:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-rf-analysis uv run --no-default-groups --group rf-analysis pytest tests/palace/test_transmission_guide.py
 ```
 
 Import algorithms from `skrf.calibration`, rather than the removed top-level aliases. Convert each independently

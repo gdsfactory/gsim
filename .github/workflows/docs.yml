@@ -74,7 +74,7 @@ jobs:
             uv sync --no-default-groups --group docs --group palace-inductor
             ;;
           nbs/palace_*.ipynb)
-            uv pip install ihp-gdsfactory==0.2.8
+            uv pip install ihp-gdsfactory==2.0.1
             ;;
           nbs/tcad_*.ipynb)
             uv sync --no-default-groups --group docs --extra tcad

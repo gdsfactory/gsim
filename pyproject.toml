@@ -81,17 +81,22 @@ lint = [
 ]
 palace-inductor = [
   "circulax==0.2.3",
-  "ihp-gdsfactory==0.2.8",
+  "ihp-gdsfactory==2.0.1",
   "klujax==0.5.0",
 ]
+rf-analysis = [
+  "pandas",
+  "pytest>=8.3.0",
+  "pytest-cov>=6.0.0",
+  "scikit-rf>=2.1",
+]
 test = [
-  "ihp-gdsfactory>=0.2.8",
+  "ihp-gdsfactory>=2.0.1",
   "pytest>=8.3.0",
   "pytest-cov>=6.0.0",
   "pytest-randomly>=3.16.0",
   "pytest-regressions>=2.5.0",
   "pytest-xdist>=3.6.0",
-  "scikit-rf>=2.1",
 ]
 
 [build-system]
@@ -326,3 +331,10 @@ unresolved-import = "ignore"
 
 [tool.ty.src]
 include = ["src"]
+
+[tool.uv]
+# IHP's SAX dependency requires scikit-rf<2; the calibration guide needs >=2.1.
+conflicts = [
+  [{ group = "test" }, { group = "rf-analysis" }],
+  [{ group = "palace-inductor" }, { group = "rf-analysis" }],
+]
