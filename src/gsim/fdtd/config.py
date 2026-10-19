@@ -304,6 +304,7 @@ class RunConfig(_StrictModel):
     max_timesteps: int | None = Field(default=None, gt=0)
     energy_decay_fraction: float = Field(gt=0, lt=1)
     max_wall_seconds: float = Field(ge=0)
+    dry_run: bool = False
 
 
 class FDTDConfig(_StrictModel):

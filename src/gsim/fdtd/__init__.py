@@ -23,6 +23,7 @@ from gsim.fdtd.models import (
     MeshManifest,
     SimulationArtifacts,
 )
+from gsim.fdtd.modes import SourceModeResult
 from gsim.fdtd.normalization import (
     CouplingEfficiencyResult,
     fiber_coupling_efficiency,
@@ -79,6 +80,7 @@ __all__ = [
     "Simulation",
     "SimulationArtifacts",
     "Solver",
+    "SourceModeResult",
     "fiber_coupling_efficiency",
     "gaussian_coupling_efficiency",
 ]

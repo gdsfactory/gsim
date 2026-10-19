@@ -371,7 +371,9 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             )
         return snapshots
 
-    def write(self, output_dir: str | Path) -> SimulationArtifacts:
+    def write(
+        self, output_dir: str | Path, *, dry_run: bool = False
+    ) -> SimulationArtifacts:
         """Write ``mesh.msh`` and ``config.json`` for cloud execution."""
         resolved = self._resolve_geometry()
         if isinstance(self.source, PortSource):
@@ -397,6 +399,11 @@ class Simulation(CloudWorkflowMixin, RuntimeConfigMixin):
             z_bounds=self.domain.z_bounds,
         )
         config = self._config(manifest, material_snapshots)
+        config.run.dry_run = dry_run
+        if dry_run:
+            # Bound work on older cloud images that ignore run.dry_run. Their
+            # results are rejected by wait_for_results(), never used as previews.
+            config.run.max_timesteps = 1
         config_path.write_text(
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",
