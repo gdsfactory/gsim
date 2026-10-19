@@ -45,10 +45,12 @@ solvers can have different memory needs and convergence behavior; these tiers
 are not validated sizing guarantees for every solver. The full diagnostic sidecar,
 including solver settings, remains in the input ZIP. The deployed prepare API reads
 the compact counts, not `sizing_metadata` or `input_manifest`. Palace field-DOF
-estimates describe the mesh before Palace preprocessing. With AMR and an explicit
-`MaxSize`, gsim sends the larger of that bound and the input estimate. Unbounded
-refinement can grow beyond the initial estimate; the compact API does not validate
-its peak resource needs.
+estimates describe the mesh before Palace preprocessing. When AMR is enabled
+(`MaxIts > 0`), cloud sizing requires a finite, positive integer
+`Model.Refinement.MaxSize`. Set `sim.set_refinement(max_dofs=...)`, or disable AMR
+with `sim.set_refinement(max_its=0)`. gsim sends the larger of the configured limit
+and the input estimate; DataLab selects CPU and RAM from those counts. These counts
+do not guarantee peak resource needs for every solver or refinement run.
 
 ## Result caching
 
