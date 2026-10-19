@@ -15,7 +15,7 @@ through dn/dT, and the phase follows over the heater length::
     sim.waveguides.add(name="arm", position_um=0.0)
     sim.waveguides.add(name="neighbour", position_um=10.0)
     result = sim.solve(wavelength_um=1.55)
-    result.p_pi, result.crosstalk["neighbour"]
+    result.p_pi_mw, result.crosstalk_rad["neighbour"]
     step = sim.solve_transient(power_mw=20.0, duration_us=100.0)
     print(result.report(step))
 
@@ -170,7 +170,7 @@ class Simulation:
         >>> sim.heater(layers="heater", length_um=320.0)
         >>> sim.waveguides.add(name="arm", position_um=0.0)
         >>> result = sim.solve(wavelength_um=1.55)
-        >>> step = sim.solve_transient(power_mw=result.p_pi, duration_us=60.0)
+        >>> step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
 
     :meth:`solve` gives the steady figures (P_pi, crosstalk, resistance,
     V_pi, temperature field) and :meth:`solve_transient` the switching
@@ -268,7 +268,7 @@ class Simulation:
         solver = self.solver
         result = steady.result
         shifter = result.phase_shifter
-        optical = self._optical(self.waveguides[shifter], thermal, result.wavelength)
+        optical = self._optical(self.waveguides[shifter], thermal, result.wavelength_um)
 
         weights = _first_order_weights(steady.shift.mode0, optical)
         n_dofs = thermal.unit_rise.size
@@ -284,7 +284,7 @@ class Simulation:
         ]
         sampler = np.vstack([shift_weights, *probes])
 
-        drive = power_per_length(power, result.length)
+        drive = power_per_length(power, result.length_um)
         history = solve_transient(
             thermal.mesh.mesh,
             thermal.conductivity,
@@ -306,8 +306,8 @@ class Simulation:
             * math.pi
             * history.values[:, 0]
             * scale
-            * result.length
-            / result.wavelength,
+            * result.length_um
+            / result.wavelength_um,
             dtype=np.float64,
         )
         steady_phase = result.phase(power)[shifter]
@@ -320,16 +320,16 @@ class Simulation:
                 stacklevel=2,
             )
         return StepResponse(
-            time=history.time_us,
-            power=float(power),
+            time_us=history.time_us,
+            power_mw=power,
             phase_shifter=shifter,
-            phase=phase,
-            steady_phase=steady_phase,
-            temperature={
+            phase_rad=phase,
+            steady_phase_rad=steady_phase,
+            temperature_k={
                 name: history.values[:, i + 1] for i, name in enumerate(strips)
             },
-            tau=rise_time_10_90(history.time_us, phase),
-            tau_1e=time_constant_1e(history.time_us, phase),
+            tau_us=rise_time_10_90(history.time_us, phase),
+            tau_1e_us=time_constant_1e(history.time_us, phase),
         )
 
     # ------------------------------------------------------------------ internals
@@ -765,13 +765,13 @@ class Simulation:
         }
         result = ThermalResult(
             phase_shifter=shifter.name,
-            wavelength=wavelength,
-            length=length_um,
-            p_pi=p_pi,
-            efficiency=math.pi / p_pi,
-            resistance=resistance,
-            v_pi=math.sqrt(p_pi_w * resistance),
-            crosstalk={
+            wavelength_um=wavelength,
+            length_um=length_um,
+            p_pi_mw=p_pi,
+            efficiency_rad_per_mw=math.pi / p_pi,
+            resistance_ohm=resistance,
+            v_pi_v=math.sqrt(p_pi_w * resistance),
+            crosstalk_rad={
                 name: phase
                 for name, phase in phases_at_pi.items()
                 if name != shifter.name
@@ -781,12 +781,14 @@ class Simulation:
                 for name, phase in phases_at_pi.items()
                 if name != shifter.name
             },
-            thermal_resistance={
+            thermal_resistance_k_per_mw={
                 name: float(rise) * per_mw
                 for name, rise in zip(strips, rise_at_cores, strict=True)
             },
-            dneff_per_power={name: s * per_mw for name, s in slopes.items()},
-            dneff_first_order={name: s * per_mw for name, s in first_order.items()},
+            dneff_per_mw={name: s * per_mw for name, s in slopes.items()},
+            dneff_first_order_per_mw={
+                name: s * per_mw for name, s in first_order.items()
+            },
             heater_layers=self.heater.layers,
             mesh=thermal.mesh,
             rise_per_power_per_length=thermal.unit_rise,

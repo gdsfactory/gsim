@@ -157,19 +157,19 @@ def test_the_canonical_script_gives_labelled_physics(canonical):
     _sim, result, step = canonical
 
     assert isinstance(result, ThermalResult)
-    assert 15.0 < result.p_pi < 30.0
-    assert result.efficiency == pytest.approx(math.pi / result.p_pi)
-    assert 0.0 < result.crosstalk["neighbour"] < math.pi
-    assert result.v_pi == pytest.approx(
-        math.sqrt(result.p_pi * 1e-3 * result.resistance)
+    assert 15.0 < result.p_pi_mw < 30.0
+    assert result.efficiency_rad_per_mw == pytest.approx(math.pi / result.p_pi_mw)
+    assert 0.0 < result.crosstalk_rad["neighbour"] < math.pi
+    assert result.v_pi_v == pytest.approx(
+        math.sqrt(result.p_pi_mw * 1e-3 * result.resistance_ohm)
     )
-    tmap = result.temperature(power=result.p_pi)
+    tmap = result.temperature(power_mw=result.p_pi_mw)
     assert isinstance(tmap, TemperatureMap)
     # The heater is the hottest thing in the cross-section.
     assert tmap.peak("heater") == pytest.approx(tmap.peak())
 
     assert isinstance(step, StepResponse)
-    assert step.tau > 0.0
+    assert step.tau_us > 0.0
     report = result.report(step)
     assert isinstance(report, HeaterReport)
     text = str(report)
@@ -180,9 +180,9 @@ def test_the_canonical_script_gives_labelled_physics(canonical):
 
 def test_the_phase_shifter_picks_up_exactly_pi_at_p_pi(canonical):
     _sim, result, _step = canonical
-    phase = result.phase(result.p_pi)
+    phase = result.phase(result.p_pi_mw)
     assert phase["arm"] == pytest.approx(math.pi, rel=1e-9)
-    assert phase["neighbour"] == pytest.approx(result.crosstalk["neighbour"])
+    assert phase["neighbour"] == pytest.approx(result.crosstalk_rad["neighbour"])
 
 
 def test_the_temperature_map_and_step_response_plot_on_matplotlib_axes(canonical):
@@ -192,7 +192,7 @@ def test_the_temperature_map_and_step_response_plot_on_matplotlib_axes(canonical
     import matplotlib.pyplot as plt
 
     _sim, result, step = canonical
-    ax = result.temperature(power=result.p_pi).plot()
+    ax = result.temperature(power_mw=result.p_pi_mw).plot()
     assert ax.get_xlabel().startswith("y")
     assert step.plot().get_xlabel() == "Time (µs)"
     plt.close("all")
@@ -208,18 +208,18 @@ def femwell_result() -> ThermalResult:
 
 
 def test_femwell_tin_heater_p_pi_matches_femwell_within_3_percent(femwell_result):
-    assert femwell_result.p_pi == pytest.approx(FEMWELL_P_PI_MW, rel=0.03)
+    assert femwell_result.p_pi_mw == pytest.approx(FEMWELL_P_PI_MW, rel=0.03)
 
 
 def test_resistance_is_length_over_conductance_of_the_drawn_heater(femwell_result):
     by_hand = 320e-6 / (SIGMA_TIN * HEATER_W * 1e-6 * HEATER_T * 1e-6)
-    assert femwell_result.resistance == pytest.approx(by_hand, rel=1e-9)
+    assert femwell_result.resistance_ohm == pytest.approx(by_hand, rel=1e-9)
     assert by_hand == pytest.approx(496.9, abs=0.1)
 
 
 def test_doubling_power_doubles_the_temperature_rise(femwell_result):
-    one = femwell_result.temperature(power=10.0)
-    two = femwell_result.temperature(power=20.0)
+    one = femwell_result.temperature(power_mw=10.0)
+    two = femwell_result.temperature(power_mw=20.0)
     np.testing.assert_allclose(two.values, 2.0 * one.values, rtol=1e-12)
     assert two.at(0.0, 0.11) == pytest.approx(2.0 * one.at(0.0, 0.11))
 
@@ -227,18 +227,20 @@ def test_doubling_power_doubles_the_temperature_rise(femwell_result):
 def test_thermal_resistance_is_the_core_rise_per_milliwatt(femwell_result):
     # Core centre rise per mW of total heater power over 320 um. From the
     # map at 1 mW: same number, different route through the units.
-    rise = femwell_result.temperature(power=1.0).at(0.0, CORE_T / 2)
-    assert femwell_result.thermal_resistance["arm"] == pytest.approx(rise)
+    rise = femwell_result.temperature(power_mw=1.0).at(0.0, CORE_T / 2)
+    assert femwell_result.thermal_resistance_k_per_mw["arm"] == pytest.approx(rise)
     # Order of magnitude by hand: dT_pi = lambda / (2 L dn/dT) = 13 K at P_pi.
-    assert femwell_result.thermal_resistance["arm"] == pytest.approx(
+    assert femwell_result.thermal_resistance_k_per_mw["arm"] == pytest.approx(
         13.0 / FEMWELL_P_PI_MW, rel=0.15
     )
 
 
 def test_p_pi_does_not_depend_on_the_heater_length(femwell_result):
     short = femwell_sim(length=100.0).solve(wavelength_um=WAVELENGTH)
-    assert short.p_pi == pytest.approx(femwell_result.p_pi, rel=2e-3)
-    assert short.resistance == pytest.approx(femwell_result.resistance * 100 / 320)
+    assert short.p_pi_mw == pytest.approx(femwell_result.p_pi_mw, rel=2e-3)
+    assert short.resistance_ohm == pytest.approx(
+        femwell_result.resistance_ohm * 100 / 320
+    )
 
 
 def test_p_pi_scales_with_the_oxide_conductivity_override(femwell_result):
@@ -247,7 +249,7 @@ def test_p_pi_scales_with_the_oxide_conductivity_override(femwell_result):
     sim.solver(precision="fast")
     stiffer = sim.solve(wavelength_um=WAVELENGTH)
     # Heat leaves through the oxide: P_pi ~ k_oxide to first order.
-    assert 1.8 < stiffer.p_pi / femwell_result.p_pi < 2.05
+    assert 1.8 < stiffer.p_pi_mw / femwell_result.p_pi_mw < 2.05
 
 
 # --------------------------------------------------------------- analytic references
@@ -314,7 +316,7 @@ def uniform_result() -> ThermalResult:
 
 def test_surface_rise_matches_the_ln_coth_strip_solution(uniform_result):
     power = 1.0  # mW over 100 um: P' = 10 W/m
-    tmap = uniform_result.temperature(power=power)
+    tmap = uniform_result.temperature(power_mw=power)
     x = np.linspace(1.0, 2.0 * H_OX, 11)
     fem = tmap.at(x, np.full_like(x, H_OX))
     exact = np.array([strip_on_surface(xi, 10.0) for xi in x])
@@ -322,7 +324,7 @@ def test_surface_rise_matches_the_ln_coth_strip_solution(uniform_result):
 
 
 def test_crosstalk_tail_decays_over_2h_over_pi(uniform_result):
-    tmap = uniform_result.temperature(power=1.0)
+    tmap = uniform_result.temperature(power_mw=1.0)
     x = np.linspace(2 * H_OX, 4 * H_OX, 21)
     rise = tmap.at(x, np.full_like(x, 1.5))
     slope = np.polyfit(x, np.log(rise), 1)[0]
@@ -346,7 +348,9 @@ def uniform_by_degree() -> dict[int, ThermalResult]:
 def test_degree_2_converges_closer_to_degree_3_than_degree_1(uniform_by_degree):
     x = np.array([1.0, 2.0, 4.0, 8.0])
     z = np.full_like(x, H_OX)
-    rise = {d: r.temperature(power=1.0).at(x, z) for d, r in uniform_by_degree.items()}
+    rise = {
+        d: r.temperature(power_mw=1.0).at(x, z) for d, r in uniform_by_degree.items()
+    }
     error_1 = np.max(np.abs(rise[1] / rise[3] - 1))
     error_2 = np.max(np.abs(rise[2] / rise[3] - 1))
     assert error_2 < 1e-3
@@ -359,11 +363,11 @@ def test_a_degree_2_temperature_map_peaks_and_plots(uniform_by_degree):
     mpl.use("Agg")
     import matplotlib.pyplot as plt
 
-    tmap = uniform_by_degree[2].temperature(power=1.0)
+    tmap = uniform_by_degree[2].temperature(power_mw=1.0)
     assert tmap.values.size > tmap.mesh.mesh.p.shape[1]
     assert tmap.peak("heater") == pytest.approx(tmap.peak())
     assert tmap.peak("heater") == pytest.approx(
-        uniform_by_degree[3].temperature(power=1.0).peak("heater"), rel=1e-3
+        uniform_by_degree[3].temperature(power_mw=1.0).peak("heater"), rel=1e-3
     )
     tmap.plot()
     plt.close("all")
@@ -373,8 +377,8 @@ def test_a_degree_2_step_response_matches_degree_1(canonical):
     sim, _result, step = canonical
     with solver_settings(sim, precision="fast", degree=2):
         quadratic = sim.solve_transient(power_mw=20.0, duration_us=60.0)
-    assert quadratic.tau == pytest.approx(step.tau, rel=0.03)
-    assert quadratic.phase[-1] == pytest.approx(step.phase[-1], rel=0.02)
+    assert quadratic.tau_us == pytest.approx(step.tau_us, rel=0.03)
+    assert quadratic.phase_rad[-1] == pytest.approx(step.phase_rad[-1], rel=0.02)
 
 
 def test_the_solver_rejects_an_unsupported_degree():
@@ -387,23 +391,23 @@ def test_the_solver_rejects_an_unsupported_degree():
 
 def test_the_step_response_settles_to_the_steady_phase(canonical):
     _sim, result, step = canonical
-    assert step.time[0] == 0.0
-    assert step.time[-1] == pytest.approx(60.0)
-    assert step.phase[0] == 0.0
+    assert step.time_us[0] == 0.0
+    assert step.time_us[-1] == pytest.approx(60.0)
+    assert step.phase_rad[0] == 0.0
     steady = result.phase(20.0)["arm"]
-    assert step.steady_phase == pytest.approx(steady, rel=1e-9)
-    assert step.phase[-1] == pytest.approx(steady, rel=0.01)
-    assert step.tau_1e < step.tau
-    assert set(step.temperature) == {"arm", "neighbour"}
+    assert step.steady_phase_rad == pytest.approx(steady, rel=1e-9)
+    assert step.phase_rad[-1] == pytest.approx(steady, rel=0.01)
+    assert step.tau_1e_us < step.tau_us
+    assert set(step.temperature_k) == {"arm", "neighbour"}
     # The arm under the heater warms first and most.
-    assert step.temperature["arm"][-1] > step.temperature["neighbour"][-1]
+    assert step.temperature_k["arm"][-1] > step.temperature_k["neighbour"][-1]
 
 
 def test_tau_is_stable_under_precision(canonical):
     sim, _result, step = canonical
     with solver_settings(sim, precision="default"):
         finer = sim.solve_transient(power_mw=20.0, duration_us=60.0)
-    assert finer.tau == pytest.approx(step.tau, rel=0.03)
+    assert finer.tau_us == pytest.approx(step.tau_us, rel=0.03)
 
 
 def test_a_too_short_transient_warns_to_lengthen_it(canonical):
@@ -476,12 +480,12 @@ def test_editing_a_concern_in_place_invalidates_the_kept_solve():
 
     sim.heater.length_um = 640.0
     longer = sim.solve(wavelength_um=WAVELENGTH)
-    assert longer.length == 640.0
-    assert longer.resistance == pytest.approx(2.0 * first.resistance, rel=1e-9)
+    assert longer.length_um == 640.0
+    assert longer.resistance_ohm == pytest.approx(2.0 * first.resistance_ohm, rel=1e-9)
 
     sim.materials["tin"] = {"conductivity": SIGMA_TIN / 2}
     halved = sim.solve(wavelength_um=WAVELENGTH)
-    assert halved.resistance == pytest.approx(4.0 * first.resistance, rel=1e-9)
+    assert halved.resistance_ohm == pytest.approx(4.0 * first.resistance_ohm, rel=1e-9)
 
 
 def test_a_transient_only_solver_change_keeps_the_steady_solve(canonical):
@@ -500,7 +504,7 @@ def test_an_edit_to_the_component_in_place_is_seen():
     # Window: the conductors are in parallel, so R halves.
     _rect(sim.geometry.component, 5.0, HEATER_W, (47, 0))
     second = sim.solve(wavelength_um=WAVELENGTH)
-    assert second.resistance == pytest.approx(first.resistance / 2, rel=1e-9)
+    assert second.resistance_ohm == pytest.approx(first.resistance_ohm / 2, rel=1e-9)
 
 
 def test_the_concerns_accept_mappings_and_validate_them():
@@ -568,7 +572,7 @@ def test_two_heater_strips_conduct_in_parallel():
     result = sim.solve(wavelength_um=WAVELENGTH)
     # Same total conductor cross-section as the single 2 um strip.
     by_hand = 320e-6 / (SIGMA_TIN * 2 * 1e-6 * HEATER_T * 1e-6)
-    assert result.resistance == pytest.approx(by_hand, rel=1e-9)
+    assert result.resistance_ohm == pytest.approx(by_hand, rel=1e-9)
 
 
 def test_a_heater_layer_the_cut_misses_is_left_out_with_a_warning():
@@ -579,8 +583,8 @@ def test_a_heater_layer_the_cut_misses_is_left_out_with_a_warning():
     sim.solver(precision="fast")
     with pytest.warns(UserWarning, match="lead"):
         result = sim.solve(wavelength_um=WAVELENGTH)
-    assert result.peak_temperature == pytest.approx(
-        result.temperature(result.p_pi).peak("heater")
+    assert result.peak_temperature_k == pytest.approx(
+        result.temperature(result.p_pi_mw).peak("heater")
     )
     assert "Peak heater rise" in str(result.report())
 
@@ -592,39 +596,39 @@ def test_crosstalk_ratio_is_the_victim_phase_over_the_shifter_phase(canonical):
     _sim, result, _step = canonical
     # At P_pi the phase shifter turns exactly pi.
     assert result.crosstalk_ratio == {
-        "neighbour": pytest.approx(result.crosstalk["neighbour"] / math.pi)
+        "neighbour": pytest.approx(result.crosstalk_rad["neighbour"] / math.pi)
     }
     assert 0.0 < result.crosstalk_ratio["neighbour"] < 1.0
     assert "Crosstalk ratio, neighbour" in str(result.report())
 
 
 def test_temperatures_are_rises_unless_an_ambient_is_given(femwell_result):
-    tmap = femwell_result.temperature(power=10.0)
+    tmap = femwell_result.temperature(power_mw=10.0)
     rise = tmap.at(0.0, 0.11)
     assert 0.0 < rise < 50.0
-    assert tmap.at(0.0, 0.11, ambient=293.15) == pytest.approx(293.15 + rise)
+    assert tmap.at(0.0, 0.11, ambient_k=293.15) == pytest.approx(293.15 + rise)
     np.testing.assert_allclose(
-        tmap.at([0.0, 1.0], [0.11, 0.11], ambient=300.0),
+        tmap.at([0.0, 1.0], [0.11, 0.11], ambient_k=300.0),
         300.0 + tmap.at([0.0, 1.0], [0.11, 0.11]),
     )
-    assert tmap.peak(ambient=300.0) == pytest.approx(300.0 + tmap.peak())
-    assert tmap.peak("heater", ambient=300.0) == pytest.approx(
+    assert tmap.peak(ambient_k=300.0) == pytest.approx(300.0 + tmap.peak())
+    assert tmap.peak("heater", ambient_k=300.0) == pytest.approx(
         300.0 + tmap.peak("heater")
     )
     with pytest.raises(ValueError, match="kelvin"):
-        tmap.peak(ambient=-20.0)
+        tmap.peak(ambient_k=-20.0)
 
 
 def test_drive_power_from_a_voltage_or_a_current(femwell_result):
-    r = femwell_result.resistance
+    r = femwell_result.resistance_ohm
     # V = 5 V across R: V^2 / R; I = 10 mA through R: I^2 R (in mW).
-    assert femwell_result.drive_power(voltage=5.0) == pytest.approx(25.0 / r * 1e3)
-    assert femwell_result.drive_power(current=0.01) == pytest.approx(1e-4 * r * 1e3)
-    assert femwell_result.drive_power(voltage=femwell_result.v_pi) == pytest.approx(
-        femwell_result.p_pi
+    assert femwell_result.drive_power(voltage_v=5.0) == pytest.approx(25.0 / r * 1e3)
+    assert femwell_result.drive_power(current_a=0.01) == pytest.approx(1e-4 * r * 1e3)
+    assert femwell_result.drive_power(voltage_v=femwell_result.v_pi_v) == pytest.approx(
+        femwell_result.p_pi_mw
     )
     with pytest.raises(ValueError, match="exactly one"):
-        femwell_result.drive_power(voltage=1.0, current=0.01)
+        femwell_result.drive_power(voltage_v=1.0, current_a=0.01)
     with pytest.raises(ValueError, match="exactly one"):
         femwell_result.drive_power()
 
@@ -642,7 +646,7 @@ def test_an_anisotropic_conductivity_matters_only_on_the_heater():
     sim = femwell_sim()
     sim.solver(precision="fast")
     stack_of(sim).materials["si_core"]["conductivity"] = [1e3, 1e3, 10.0]
-    assert 15.0 < sim.solve(wavelength_um=WAVELENGTH).p_pi < 30.0
+    assert 15.0 < sim.solve(wavelength_um=WAVELENGTH).p_pi_mw < 30.0
 
     sim = femwell_sim()
     sim.solver(precision="fast")
@@ -659,7 +663,7 @@ def test_an_optical_override_skips_an_invalid_stack_entry_like_the_rest():
     sim.materials["oxide"] = {"permittivity": 1.444**2}
     sim.solver(precision="fast")
     result = sim.solve(wavelength_um=WAVELENGTH)
-    assert 15.0 < result.p_pi < 30.0
+    assert 15.0 < result.p_pi_mw < 30.0
 
 
 def test_a_material_override_replaces_one_spelled_in_another_case():
@@ -730,13 +734,13 @@ def test_the_step_plot_marks_the_10_90_points_and_the_1e_time(canonical):
     ax = step.plot()
     marks = {line.get_label(): line for line in ax.get_lines()}
     t10, t90 = marks["10 % and 90 %"].get_xdata()
-    assert t90 - t10 == pytest.approx(step.tau)
+    assert t90 - t10 == pytest.approx(step.tau_us)
     np.testing.assert_allclose(
         marks["10 % and 90 %"].get_ydata(),
-        [0.1 * step.phase[-1], 0.9 * step.phase[-1]],
+        [0.1 * step.phase_rad[-1], 0.9 * step.phase_rad[-1]],
     )
     (t_1e,) = marks["1/e"].get_xdata()
-    assert t_1e == pytest.approx(step.tau_1e)
+    assert t_1e == pytest.approx(step.tau_1e_us)
     plt.close("all")
 
 
@@ -747,7 +751,9 @@ def test_the_temperature_plot_zooms_to_given_limits(canonical):
     import matplotlib.pyplot as plt
 
     _sim, result, _step = canonical
-    ax = result.temperature(power=result.p_pi).plot(xlim=(-3.0, 3.0), zlim=(-1.0, 3.0))
+    ax = result.temperature(power_mw=result.p_pi_mw).plot(
+        xlim=(-3.0, 3.0), zlim=(-1.0, 3.0)
+    )
     assert ax.get_xlim() == (-3.0, 3.0)
     assert ax.get_ylim() == (-1.0, 3.0)
     plt.close("all")
