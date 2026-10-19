@@ -48,23 +48,62 @@ def _conductor_polygons_by_layer(
     return grouped
 
 
-def _min_bbox_dim(component, stack: LayerStack) -> float | None:
-    """Smallest bbox width/height across all conductor polygons (um)."""
-    min_dim = math.inf
-    for polys in _conductor_polygons_by_layer(component, stack).values():
-        for poly in polys:
-            points = list(poly.each_point_hull())
-            if len(points) < 3:
-                continue
-            xs = [pt.x * component.kcl.layout.dbu for pt in points]
-            ys = [pt.y * component.kcl.layout.dbu for pt in points]
-            w = max(xs) - min(xs)
-            h = max(ys) - min(ys)
-            if w > 0:
-                min_dim = min(min_dim, w)
-            if h > 0:
-                min_dim = min(min_dim, h)
-    return min_dim if math.isfinite(min_dim) else None
+def _conductor_regions(component, stack: LayerStack) -> list[kdb.Region]:
+    """Merge touching and overlapping conductor polygons within each layer."""
+    regions = [
+        kdb.Region(polygons).merged()
+        for polygons in _conductor_polygons_by_layer(component, stack).values()
+    ]
+    return [region for region in regions if not region.is_empty()]
+
+
+def _min_resolved_distance(pairs: kdb.EdgePairs) -> float:
+    """Smallest positive distance resolved by the layout grid, in dbu."""
+    distances = (pair.distance() for pair in pairs)
+    return min(
+        (distance for distance in distances if distance >= 1.0), default=math.inf
+    )
+
+
+def _min_width(regions: list[kdb.Region]) -> float:
+    """Find narrow traces/necks using opposing edges; return a size in dbu."""
+    # Bounding boxes provide a fallback for shapes without parallel edges and
+    # bound the search. Merging first avoids measuring the width of input tiles.
+    width = min(
+        (
+            min(polygon.bbox().width(), polygon.bbox().height())
+            for region in regions
+            for polygon in region.each()
+        ),
+        default=math.inf,
+    )
+    if not math.isfinite(width) or width <= 0:
+        return math.inf
+    threshold = math.ceil(width) + 1
+    for region in regions:
+        pairs = region.width_check(
+            threshold,
+            False,
+            kdb.Region.Projection,
+            1.0,  # Nearly parallel edges; ignore acute-corner zero-width artifacts.
+        )
+        width = min(width, _min_resolved_distance(pairs))
+    return width
+
+
+def _min_gap(regions: list[kdb.Region], threshold: int) -> float:
+    """Check both inter-polygon gaps and notches/holes in a single polygon."""
+    if threshold <= 0:
+        return math.inf
+    return min(
+        (
+            _min_resolved_distance(
+                region.space_check(threshold, False, kdb.Region.Euclidian)
+            )
+            for region in regions
+        ),
+        default=math.inf,
+    )
 
 
 def min_conductor_gap(
@@ -72,83 +111,42 @@ def min_conductor_gap(
     stack: LayerStack,
     max_gap_um: float = 500.0,
 ) -> float | None:
-    """Smallest edge-to-edge gap between conductor polygons (um).
+    """Smallest resolved same-layer conductor gap, notch, or hole width (um).
 
-    Uses klayout's ``kdb.Region.space_check`` with the Euclidean metric to
-    find the minimum distance between distinct polygons on the same
-    conductor layer. Field concentration happens in these gaps, so mesh
-    refinement should resolve them.
-
-    Note:
-        Only same-layer gaps are considered. Cross-layer gap measurement
-        is significantly more complex (it would require projecting
-        polygons onto a common plane and accounting for z-separation)
-        and is not attempted here; for the CPW pathology this targets
-        (signal + coplanar grounds), same-layer is sufficient.
+    Merge touching/overlapping polygons before checking spacing. This includes
+    opposing edges of one connected conductor, as well as separate conductors.
+    Zero distances and distances below one layout database unit are ignored.
+    Cross-layer spacing is not measured.
 
     Args:
         component: gdsfactory Component whose polygons are inspected.
-        stack: Layer stack (used to identify conductor layers).
-        max_gap_um: Upper bound on gaps to detect, in um. Gaps larger
-            than this are ignored. A generous default (500 um) covers
-            any realistic on-chip feature.
+        stack: Layer stack used to identify conductor layers.
+        max_gap_um: Gaps at or above this search limit are ignored (um).
 
     Returns:
-        Minimum same-layer conductor gap in um, or ``None`` when no
-        conductor layer has a detectable gap (e.g. a single polygon,
-        or no conductors declared).
+        Minimum detected spacing in um, or None if there is no detectable gap.
     """
-    grouped = _conductor_polygons_by_layer(component, stack)
-    if not grouped:
-        return None
-
-    dbu = component.kcl.layout.dbu  # um per integer unit
-    threshold_dbu = round(max_gap_um / dbu)
-
-    min_gap = math.inf
-    for polys in grouped.values():
-        if len(polys) < 2:
-            continue
-        region = kdb.Region()
-        for poly in polys:
-            region.insert(poly)
-        pairs = region.space_check(
-            threshold_dbu,
-            False,  # whole_edges
-            kdb.Region.Euclidian,
-        )
-        for ep in pairs:
-            d_um = ep.distance() * dbu
-            if d_um > 0:
-                min_gap = min(min_gap, d_um)
-
-    return min_gap if math.isfinite(min_gap) else None
+    regions = _conductor_regions(component, stack)
+    dbu = component.kcl.layout.dbu
+    gap = _min_gap(regions, round(max_gap_um / dbu))
+    return gap * dbu if math.isfinite(gap) else None
 
 
 def min_conductor_feature_size(component, stack: LayerStack) -> float | None:
-    """Smallest conductor feature to resolve, in um.
+    """Estimate the smallest same-layer conductor feature to resolve (um).
 
-    Returns the minimum of:
+    Use opposing, nearly parallel edges for trace/neck widths, plus spacing
+    checks for gaps, notches, and holes. Merged polygon bounding boxes provide
+    a fallback. Distances below one database unit are ignored. Only gaps below
+    500 um are searched; cross-layer spacing and arbitrary tapered/curved widths
+    are not measured. This is a sizing heuristic, not an accuracy guarantee.
 
-    * the smallest polygon bbox width / height across all conductor
-      layers, and
-    * the smallest edge-to-edge gap between same-layer conductor
-      polygons (see :func:`min_conductor_gap`).
-
-    The gap is just as important as polygon width for mesh refinement:
-    in a CPW, the 15 um gap between signal and ground is the real
-    field-concentration site even when the trace itself is wider.
-
-    Returns None if the component has no polygons on conductor layers,
-    or the stack declares no conductors.
+    Returns None if no conductor polygons are found.
     """
-    bbox_min = _min_bbox_dim(component, stack)
-    gap_min = min_conductor_gap(component, stack)
-
-    candidates = [v for v in (bbox_min, gap_min) if v is not None]
-    if not candidates:
-        return None
-    return min(candidates)
+    regions = _conductor_regions(component, stack)
+    dbu = component.kcl.layout.dbu
+    feature = min(_min_width(regions), _min_gap(regions, round(500.0 / dbu)))
+    return feature * dbu if math.isfinite(feature) else None
 
 
 def auto_refined_mesh_size(
@@ -157,15 +155,12 @@ def auto_refined_mesh_size(
     preset_size: float,
     cells_per_feature: int = 2,
 ) -> float:
-    """Pick ``refined_mesh_size`` scaled to the smallest conductor feature.
+    """Scale a preset to the smallest detected conductor width or spacing.
 
-    "Smallest conductor feature" is the minimum of polygon bbox dimension
-    and inter-polygon gap on each conductor layer — whichever is tighter.
-
-    Returns ``min(preset_size, min_feature / cells_per_feature)`` so designs
-    with small features get proportionally refined meshes while large designs
-    keep the preset's size. Falls back to ``preset_size`` when no conductor
-    polygons are found.
+    Return ``min(preset_size, min_feature / cells_per_feature)``. Fall back to
+    the preset when no feature is found or cells_per_feature is nonpositive.
+    The feature detector is a same-layer heuristic; convergence requires
+    comparing simulation results across mesh refinements.
     """
     min_feature = min_conductor_feature_size(component, stack)
     if min_feature is None or cells_per_feature <= 0:

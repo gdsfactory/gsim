@@ -408,6 +408,20 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 - [`MeshConfig`][gsim.palace.MeshConfig]
 - [`generate_mesh`][gsim.palace.generate_mesh]
 
+### Feature-based sizing
+
+Automatic sizing uses a same-layer geometry heuristic. Touching and overlapping
+conductor polygons are merged before measuring widths and spacing. Nearly
+parallel opposing edges reveal narrow traces and necks; spacing checks also
+include notches and holes within one connected conductor. Polygon bounding boxes
+provide a fallback for shapes without suitable opposing edges.
+
+Zero distances and distances below one layout database unit are ignored. Gap
+searches are limited to 500 um; cross-layer gaps and arbitrary tapered or curved
+widths are not measured. These limitations make the estimate useful for choosing
+an initial mesh, rather than establishing simulation accuracy. Compare results
+across refinements before relying on resonance frequencies, Q, or S-parameters.
+
 ## Nets
 
 - [`Nets`][gsim.palace.Nets]
