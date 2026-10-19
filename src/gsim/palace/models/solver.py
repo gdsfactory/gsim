@@ -237,8 +237,20 @@ class EigenmodeSolverConfig(SolverConfig):
     @classmethod
     def default_eigenmode_linear_tolerance(cls, values: Any) -> Any:
         """Use the eigenmode tolerance unless the caller supplies an override."""
+        if isinstance(values, SolverConfig) and not isinstance(values, cls):
+            # Preserve nested assignments and whether tolerance was explicit.
+            values = {**values.model_dump(), "linear": values.linear}
+        elif isinstance(values, BaseModel) and not isinstance(values, cls):
+            values = values.model_dump(exclude_unset=True)
         if isinstance(values, dict) and "tolerance" not in values:
             linear = values.get("linear", {})
+            if isinstance(linear, LinearSolverConfig):
+                if "tolerance" not in linear.model_fields_set:
+                    return {
+                        **values,
+                        "linear": linear.model_copy(update={"tolerance": 1e-9}),
+                    }
+                return values
             if isinstance(linear, dict):
                 return {**values, "linear": {"tolerance": 1e-9, **linear}}
         return values

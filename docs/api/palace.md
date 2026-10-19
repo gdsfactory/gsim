@@ -26,6 +26,9 @@ eigenvalue convergence. They are independent. All Palace simulation types defaul
 to **GMRES with complex MUMPS multigrid**, field order **2**, **400** maximum linear
 iterations, and `"CPU"`. Linear tolerance defaults to **1e-6**, except for
 `EigenmodeSim`, whose linear and eigenvalue tolerances both default to **1e-9**.
+An omitted linear tolerance uses the simulation-specific default through grouped
+dictionaries, settings models, and legacy `numerical` constructors or assignments.
+An explicitly supplied tolerance, including `1e-6`, is preserved.
 
 The configurable multigrid controls live under `sim.solver.linear`:
 
@@ -90,7 +93,7 @@ pc_mat_real, complex_coarse_solve}`.
 
 | Simulation | Problem group | Problem settings | Total settings |
 | --- | --- | --- | --- |
-| DrivenSim | `solver.driven` | 12 | 21 |
+| DrivenSim | `solver.driven` | 13 | 22 |
 | EigenmodeSim | `solver.eigenmode` | 8 | 17 |
 | ElectrostaticSim | `solver.electrostatic` | 1 | 10 |
 | BoundaryModeSim | `solver.boundary_mode` | 7 | 16 |
@@ -117,6 +120,21 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 | `sim.driven.fmin` | `sim.solver.driven.fmin` |
 | `sim.electrostatic.save_fields` | `sim.solver.electrostatic.save_fields` |
 | `sim.boundary_mode.freq` | `sim.solver.boundary_mode.freq` |
+
+### MUMPS behavior change
+
+Reloading a saved gsim settings model with `solver_type="MUMPS"` now uses the saved
+iteration limit and the new multigrid defaults when multigrid controls are absent.
+Previously, gsim forced `MaxIts=1` and `MGMaxLevels=1`, regardless of the saved
+iteration limit. Old settings still load, but their generated Palace configuration
+and solve behavior can change. Explicit saved tolerances are retained.
+
+For a full-system solve, set `mg_max_levels=1`; set `max_iterations=1` to also
+request the former iteration limit. This does not reproduce the entire old block:
+gsim no longer writes the forced `EstimatorMaxIts=0`, `EstimatorTol=1e-6`,
+`DivFreeMaxIts=0`, or `DivFreeTol=1e-6`. Those auxiliary controls are not currently
+exposed by the settings API, so Palace applies its defaults. Exposing them is
+deferred; there is no automatic legacy-mode fallback.
 
 Calling `set_numerical()` without an explicit order now uses **2**, matching the
 constructor and `set_solver()`. Pass `order=1` to retain the previous setter behavior.

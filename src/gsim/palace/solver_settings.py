@@ -50,8 +50,10 @@ class SolverSettingsMixin:
         legacy = {name: values.pop(name) for name in _PROBLEM_GROUPS if name in values}
         if legacy:
             solver = values.get("solver", {})
-            if isinstance(solver, BaseModel):
-                solver = solver.model_dump()
+            if isinstance(solver, SolverConfig):
+                solver = {**solver.model_dump(), "linear": solver.linear}
+            elif isinstance(solver, BaseModel):
+                solver = solver.model_dump(exclude_unset=True)
             if not isinstance(solver, dict):
                 raise ValueError("solver must be a SolverConfig or dictionary")
             solver = solver.copy()
@@ -182,7 +184,7 @@ class SolverSettingsMixin:
         if isinstance(value, SolverConfig):
             value = {name: getattr(value, name) for name in SolverConfig.model_fields}
         elif isinstance(value, NumericalConfig):
-            value = value.model_dump()
+            value = value.model_dump(exclude_unset=True)
         common = SolverConfig.model_validate(value)
         # Replace atomically so callers retaining the old object can restore it.
         # Keep problem model objects so references to those settings stay live.
