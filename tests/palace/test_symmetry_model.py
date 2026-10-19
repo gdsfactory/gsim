@@ -33,14 +33,20 @@ def test_axis_z_rejected():
         SymmetryPlaneConfig(axis="z")
 
 
-def test_off_grid_position_rejected():
-    """Positions off the 1 nm grid are rejected."""
-    with pytest.raises(ValidationError, match="1 nm grid"):
-        SymmetryPlaneConfig(position=0.0004)
+def test_position_grid_validation_is_deferred_until_layout_is_known():
+    """A model cannot assume the owning layout has a 1 nm database unit."""
+    assert SymmetryPlaneConfig(position=0.0004).position == 0.0004
+
+
+@pytest.mark.parametrize("position", [float("inf"), float("-inf"), float("nan")])
+def test_nonfinite_position_rejected(position):
+    """Symmetry planes need a finite physical position."""
+    with pytest.raises(ValidationError, match="finite"):
+        SymmetryPlaneConfig(position=position)
 
 
 def test_on_grid_position_accepted():
-    """Positions on the 1 nm grid pass despite float noise."""
+    """Finite positions are stored without rounding."""
     assert SymmetryPlaneConfig(position=12.345).position == 12.345
 
 

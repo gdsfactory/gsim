@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
-
-_GRID_TOL = 1e-6  # in database units (nm)
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SymmetryPlaneConfig(BaseModel):
@@ -14,7 +12,8 @@ class SymmetryPlaneConfig(BaseModel):
 
     Attributes:
         axis: Axis normal to the plane (``"x"`` or ``"y"``).
-        position: Plane position along ``axis`` in um, on the 1 nm grid.
+        position: Plane position along ``axis`` in um. Alignment to the owning
+            layout's database grid is checked during geometry extraction.
         kind: ``"pmc"`` (even/common mode) or ``"pec"`` (odd/differential mode).
         keep: Which side of the plane is simulated.
         verify_symmetry: Check that the layout is mirror-symmetric.
@@ -23,18 +22,7 @@ class SymmetryPlaneConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     axis: Literal["x", "y"] = "y"
-    position: float = 0.0
+    position: float = Field(default=0.0, allow_inf_nan=False)
     kind: Literal["pec", "pmc"] = "pmc"
     keep: Literal["positive", "negative"] = "positive"
     verify_symmetry: bool = True
-
-    @field_validator("position")
-    @classmethod
-    def _position_on_grid(cls, value: float) -> float:
-        """Require the position to lie on the 1 nm database grid."""
-        nm = value * 1000.0
-        if abs(nm - round(nm)) > _GRID_TOL:
-            raise ValueError(
-                f"Symmetry plane position {value} um is not on the 1 nm grid"
-            )
-        return value

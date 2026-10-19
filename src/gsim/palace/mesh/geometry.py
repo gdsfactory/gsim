@@ -28,6 +28,7 @@ from .symmetry import (
     clamp_xy_bounds,
     classify_interval,
     clip_polygon,
+    plane_position_dbu,
 )
 
 if TYPE_CHECKING:
@@ -292,7 +293,7 @@ def _clamp_regions_to_plane(
     return clamped
 
 
-def _parse_klayout_polygon(poly, dbu: float = 0.001) -> tuple[list, list, list] | None:
+def _parse_klayout_polygon(poly, dbu: float) -> tuple[list, list, list] | None:
     """Convert a KLayout polygon to ``(pts_x, pts_y, holes)`` in um.
 
     Use the owning layout's database unit for hulls and holes.
@@ -314,9 +315,7 @@ def _parse_klayout_polygon(poly, dbu: float = 0.001) -> tuple[list, list, list] 
     return pts_x, pts_y, holes
 
 
-def _verify_symmetry(
-    regions: dict, plane: SymmetryPlaneConfig, dbu: float = 0.001
-) -> None:
+def _verify_symmetry(regions: dict, plane: SymmetryPlaneConfig, dbu: float) -> None:
     """Raise ``ValueError`` if layers are not mirror-symmetric about the plane."""
     if not plane.verify_symmetry:
         return
@@ -358,6 +357,8 @@ def extract_geometry(
             on the kept side.
     """
     dbu = component.kcl.layout.dbu
+    if symmetry_plane is not None:
+        plane_position_dbu(symmetry_plane, dbu=dbu)
     full_regions: dict[tuple[int, int], kdb.Region] = {}
     polygons = []
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
@@ -377,7 +378,7 @@ def extract_geometry(
         for layer_index, polys in polygons_by_index.items():
             total_before += sum(p.num_points_hull() for p in polys)
             decimated_by_index[layer_index] = decimate(
-                polys, relative_tolerance=decimate_tolerance, verbose=True
+                polys, relative_tolerance=decimate_tolerance, verbose=True, dbu=dbu
             )
             total_after += sum(
                 p.num_points_hull() for p in decimated_by_index[layer_index]
@@ -1454,6 +1455,8 @@ def extract_pec_polygons(
     """
     layout = component.kcl.layout
     dbu = layout.dbu
+    if symmetry_plane is not None:
+        plane_position_dbu(symmetry_plane, dbu=dbu)
     polygons_by_index = component.get_polygons(layers=list(layout.layer_indexes()))
 
     index_to_gds = {}

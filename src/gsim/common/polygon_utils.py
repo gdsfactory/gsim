@@ -23,28 +23,31 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def klayout_to_shapely(polygon_kdb: kdb.Polygon) -> Polygon:
-    """Convert a KLayout polygon (with optional holes) to a Shapely Polygon."""
-    exterior_coords = [
-        (gf.kcl.to_um(pt.x), gf.kcl.to_um(pt.y)) for pt in polygon_kdb.each_point_hull()
-    ]
+def klayout_to_shapely(
+    polygon_kdb: kdb.Polygon, *, dbu: float | None = None
+) -> Polygon:
+    """Convert a polygon to microns using its layout dbu (global by default)."""
+    dbu = gf.kcl.layout.dbu if dbu is None else dbu
+    exterior_coords = [(pt.x * dbu, pt.y * dbu) for pt in polygon_kdb.each_point_hull()]
     holes = []
     for hole_idx in range(polygon_kdb.holes()):
         hole_coords = [
-            (gf.kcl.to_um(pt.x), gf.kcl.to_um(pt.y))
-            for pt in polygon_kdb.each_point_hole(hole_idx)
+            (pt.x * dbu, pt.y * dbu) for pt in polygon_kdb.each_point_hole(hole_idx)
         ]
         holes.append(hole_coords)
 
     return Polygon(exterior_coords, holes) if holes else Polygon(exterior_coords)
 
 
-def shapely_to_klayout(shapely_poly: Polygon) -> kdb.Polygon | None:
+def shapely_to_klayout(
+    shapely_poly: Polygon, *, dbu: float | None = None
+) -> kdb.Polygon | None:
     """Convert a Shapely Polygon back to a KLayout polygon.
 
     Returns ``None`` if the polygon is empty, invalid, or has fewer than
     3 exterior vertices.
     """
+    dbu = gf.kcl.layout.dbu if dbu is None else dbu
     try:
         if shapely_poly.is_empty or not shapely_poly.is_valid:
             return None
@@ -56,8 +59,7 @@ def shapely_to_klayout(shapely_poly: Polygon) -> kdb.Polygon | None:
             return None
 
         exterior_points = [
-            kdb.Point(int(gf.kcl.to_dbu(x)), int(gf.kcl.to_dbu(y)))
-            for x, y in exterior_coords
+            kdb.Point(round(x / dbu), round(y / dbu)) for x, y in exterior_coords
         ]
         polygon = kdb.Polygon(kdb.SimplePolygon(exterior_points))
 
@@ -65,8 +67,7 @@ def shapely_to_klayout(shapely_poly: Polygon) -> kdb.Polygon | None:
             hole_coords = list(hole_ring.coords[:-1])
             if len(hole_coords) >= 3:
                 hole_points = [
-                    kdb.Point(int(gf.kcl.to_dbu(x)), int(gf.kcl.to_dbu(y)))
-                    for x, y in hole_coords
+                    kdb.Point(round(x / dbu), round(y / dbu)) for x, y in hole_coords
                 ]
                 polygon.insert_hole(hole_points)
 
@@ -82,15 +83,18 @@ def shapely_to_klayout(shapely_poly: Polygon) -> kdb.Polygon | None:
 # ---------------------------------------------------------------------------
 
 
-def _adaptive_tolerance(polygon_kdb: kdb.Polygon, relative: float = 0.01) -> float:
+def _adaptive_tolerance(
+    polygon_kdb: kdb.Polygon, relative: float = 0.01, *, dbu: float | None = None
+) -> float:
     """Calculate an adaptive simplification tolerance based on polygon size.
 
     Uses the smaller bounding-box dimension scaled by *relative*.  Complex
     polygons (many vertices) get a slightly more aggressive tolerance.
     """
+    dbu = gf.kcl.layout.dbu if dbu is None else dbu
     bbox = polygon_kdb.bbox()
-    w = gf.kcl.to_um(bbox.width())
-    h = gf.kcl.to_um(bbox.height())
+    w = bbox.width() * dbu
+    h = bbox.height() * dbu
     min_dim = min(w, h)
 
     n = polygon_kdb.num_points_hull()
@@ -110,22 +114,25 @@ def _adaptive_tolerance(polygon_kdb: kdb.Polygon, relative: float = 0.01) -> flo
 def simplify_polygon(
     polygon_kdb: kdb.Polygon,
     tolerance: float = 1.0,
+    *,
+    dbu: float | None = None,
 ) -> kdb.Polygon:
     """Simplify a single KLayout polygon via Shapely's Douglas-Peucker.
 
     Args:
         polygon_kdb: Source polygon.
         tolerance: Simplification tolerance in µm.
+        dbu: Owning layout's database unit in µm; defaults to the global layout.
 
     Returns:
         Simplified polygon (or a copy of the original on failure).
     """
     try:
-        shapely_poly = klayout_to_shapely(polygon_kdb)
+        shapely_poly = klayout_to_shapely(polygon_kdb, dbu=dbu)
         simplified: BaseGeometry = shapely_poly.simplify(
             tolerance, preserve_topology=True
         )
-        result = shapely_to_klayout(simplified)  # type: ignore[arg-type]
+        result = shapely_to_klayout(simplified, dbu=dbu)  # type: ignore[arg-type]
         return result if result is not None else polygon_kdb.dup()
     except Exception:
         return polygon_kdb.dup()
@@ -136,6 +143,7 @@ def decimate(
     relative_tolerance: float = 0.001,
     *,
     verbose: bool = False,
+    dbu: float | None = None,
 ) -> list[kdb.Polygon]:
     """Reduce vertex count of a list of KLayout polygons.
 
@@ -146,6 +154,7 @@ def decimate(
         polygons: Input polygon list.
         relative_tolerance: Fraction of polygon size used as tolerance.
         verbose: Print per-polygon reduction statistics.
+        dbu: Owning layout's database unit in µm; defaults to the global layout.
 
     Returns:
         List of (possibly simplified) polygons.
@@ -158,8 +167,8 @@ def decimate(
         total_before += n
 
         if n > 20:
-            tol = _adaptive_tolerance(poly, relative_tolerance)
-            reduced = simplify_polygon(poly, tolerance=tol)
+            tol = _adaptive_tolerance(poly, relative_tolerance, dbu=dbu)
+            reduced = simplify_polygon(poly, tolerance=tol, dbu=dbu)
             rn = reduced.num_points_hull()
             if verbose and rn != n:
                 logger.debug(

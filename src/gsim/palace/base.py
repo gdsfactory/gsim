@@ -820,7 +820,8 @@ class PalaceSimMixin(SolverSettingsMixin):
 
         Args:
             axis: Axis normal to the plane.
-            position: Plane position along ``axis`` in um (1 nm grid).
+            position: Plane position along ``axis`` in um, aligned to the
+                owning layout's database grid. Checked during geometry extraction.
             kind: ``"pmc"`` (even mode) or ``"pec"`` (odd mode).
             keep: Side of the plane that is simulated.
             verify_symmetry: Check that the layout is mirror-symmetric.

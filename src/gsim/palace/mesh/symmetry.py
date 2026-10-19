@@ -7,6 +7,7 @@ The plane is described by a :class:`~gsim.palace.models.symmetry.SymmetryPlaneCo
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Literal
 
 import klayout.db as kdb
@@ -89,9 +90,18 @@ def check_plane_inside_domain(
         )
 
 
-def _to_dbu(value_um: float, dbu: float) -> int:
-    """Convert um to integer database units."""
-    return round(value_um / dbu)
+def plane_position_dbu(plane: SymmetryPlaneConfig, *, dbu: float) -> int:
+    """Convert a plane position to layout units, rejecting off-grid positions."""
+    if not math.isfinite(dbu) or dbu <= 0:
+        raise ValueError("Layout database unit must be finite and positive")
+    scaled_position = plane.position / dbu
+    coordinate = round(scaled_position)
+    if not math.isclose(scaled_position, coordinate, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError(
+            f"Symmetry plane position {plane.position:g} um is not on the layout's "
+            f"{dbu:g} um grid"
+        )
+    return coordinate
 
 
 def _half_box(
@@ -101,7 +111,7 @@ def _half_box(
     dbu: float,
 ) -> kdb.Box:
     """Box covering one side of the plane, spanning ``bbox`` plus one unit."""
-    pos = _to_dbu(plane.position, dbu)
+    pos = plane_position_dbu(plane, dbu=dbu)
     positive = (side == "kept") == (plane.keep == "positive")
     if plane.axis == "x":
         lo, hi = (pos, bbox.right + 1) if positive else (bbox.left - 1, pos)
@@ -111,7 +121,7 @@ def _half_box(
 
 
 def clip_region(
-    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float
 ) -> kdb.Region:
     """Keep the part of a region on the kept side of the plane."""
     if region.is_empty():
@@ -124,7 +134,7 @@ def clip_region(
 
 
 def clip_polygon(
-    polygon: kdb.Polygon, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+    polygon: kdb.Polygon, plane: SymmetryPlaneConfig, *, dbu: float
 ) -> list[kdb.Polygon]:
     """Clip one polygon (holes included) to the kept side of the plane.
 
@@ -135,10 +145,10 @@ def clip_polygon(
 
 
 def mirror_region(
-    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float
 ) -> kdb.Region:
     """Mirror a region about the plane."""
-    shift = 2 * _to_dbu(plane.position, dbu)
+    shift = 2 * plane_position_dbu(plane, dbu=dbu)
     if plane.axis == "y":
         return region.transformed(kdb.Trans.M0).moved(0, shift)
     return region.transformed(kdb.Trans.M90).moved(shift, 0)
@@ -148,7 +158,7 @@ def asymmetric_layers(
     regions: Mapping[object, kdb.Region],
     plane: SymmetryPlaneConfig,
     *,
-    dbu: float = 0.001,
+    dbu: float,
 ) -> list[object]:
     """Return the keys of layers that are not mirror-symmetric about the plane.
 
