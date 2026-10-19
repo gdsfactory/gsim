@@ -50,6 +50,29 @@ estimates describe the mesh before Palace preprocessing. With AMR and an explici
 refinement can grow beyond the initial estimate; the compact API does not validate
 its peak resource needs.
 
+## Palace size limits and out-of-memory failures
+
+There is no single tetrahedron or field-DOF count that guarantees a Palace model
+will fit in memory. The active cloud resource profiles determine which problem
+sizes the prepare endpoint accepts. Supported sized submissions are checked before
+gsim creates or uploads the input ZIP; a rejection includes DataLab's explanation.
+Contact support for the current supported capacity if your model exceeds it.
+
+Inspect `sim.mesh()`'s **Estimated Field DOFs**, or
+`result.metadata["mesh"]["field_dofs"]["estimated_field_dofs"]`, before submission.
+The estimate uses the configured field order, rather than mesh file size alone.
+Acceptance is not a memory guarantee: solver settings, mesh preprocessing and
+refinement can change peak memory beyond the sizing estimate.
+
+`wait_for_results()` raises `RuntimeError` for a failed job, including in
+`verbose="quiet"` mode. Exit 137 means SIGKILL, often an out-of-memory kill;
+the error includes the backend reason, available solver logs and recovery advice.
+Coarsen the mesh, reduce the model size, or lower Palace's field order with
+`sim.solver.order` and recheck convergence. Cloud resources are selected
+automatically; contact support with the job ID if more memory is needed.
+Jobs without supported sizing metadata use fixed resources and do not receive
+the prepare endpoint's problem-size check.
+
 ## Result caching
 
 Passing `check_cache=True` to `sim.run()` looks for a completed cloud job with

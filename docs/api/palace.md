@@ -388,8 +388,8 @@ metadata["mesh"]["kappa"]["max"]  # numerical distortion, not formatted text
 problem type, solver settings and refinement controls. The result object is a
 snapshot from meshing. Consumers should accept additional metadata keys so new
 measurements can be added. Allocation rules remain in DataLab; these are sizing
-hints. Compatible SDKs also forward it as a separate submission parameter;
-older SDK interfaces retain fixed-resource submission. See
+hints. gsim sends supported tetrahedron and field-DOF counts to DataLab before
+upload, including with older SDK versions. See
 [cloud sizing metadata](cloud.md#sizing-metadata) for the calibration assumptions.
 The root-level `metadata.json` name is reserved for these diagnostics. It is
 excluded from the Palace result-cache key so measurements can evolve without

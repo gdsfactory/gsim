@@ -85,6 +85,25 @@ def _write_archive(input_dir: Path, files: list[Path], archive_path: Path) -> No
             archive.write(path, path.relative_to(input_dir))
 
 
+def _raise_for_prepare_status(response: httpx.Response) -> None:
+    """Preserve DataLab's actionable rejection message in HTTP errors."""
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as error:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        if isinstance(message, str) and message.strip():
+            raise httpx.HTTPStatusError(
+                f"{error}\nDataLab: {message.strip()}",
+                request=error.request,
+                response=error.response,
+            ) from error
+        raise
+
+
 def upload_sized_simulation(
     input_dir: Path,
     job_type: str,
@@ -115,7 +134,7 @@ def upload_sized_simulation(
             headers=transport._headers(),  # noqa: SLF001
             json=payload,
         )
-        response.raise_for_status()
+        _raise_for_prepare_status(response)
         prepared = response.json()["data"]
         with tempfile.TemporaryDirectory(prefix="gsim-upload-") as temporary_dir:
             archive_path = Path(temporary_dir) / "source.zip"

@@ -59,12 +59,15 @@ def upload_transport(monkeypatch):
             recorded["prepare"].append(json.loads(request.content))
             return httpx.Response(
                 recorded["prepare_status"],
-                json={
-                    "data": {
-                        "job_id": "submitted",
-                        "upload_url": "https://storage.example.com/source.zip",
-                    }
-                },
+                json=recorded.get(
+                    "prepare_error",
+                    {
+                        "data": {
+                            "job_id": "submitted",
+                            "upload_url": "https://storage.example.com/source.zip",
+                        }
+                    },
+                ),
             )
         assert request.method == "PUT"
         assert str(request.url) == "https://storage.example.com/source.zip"
@@ -218,6 +221,11 @@ def test_oversized_rejection_does_not_upload_or_fall_back(
 ):
     _inputs(tmp_path, solver)
     upload_transport["prepare_status"] = 400
+    message = "Problem size exceeds the largest supported resource profile"
+    upload_transport["prepare_error"] = {
+        "message": message,
+        "unrelated_field": "private-response-data",
+    }
     monkeypatch.setattr(
         _cloud_submission,
         "_write_archive",
@@ -226,8 +234,36 @@ def test_oversized_rejection_does_not_upload_or_fall_back(
     with pytest.raises(httpx.HTTPStatusError) as error:
         gcloud.upload(tmp_path, solver, verbose=False)
     assert error.value.response.status_code == 400
+    assert error.value.request.method == "POST"
+    assert message in str(error.value)
+    assert "private-response-data" not in str(error.value)
     assert len(upload_transport["prepare"]) == 1
     assert upload_transport["archive"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"<html>private-response-data</html>",
+        b'["private-response-data"]',
+        b'{"message": {"detail": "private-response-data"}}',
+        b'{"message": "  "}',
+        b'{"detail": "private-response-data"}',
+    ],
+)
+def test_prepare_errors_without_api_message_keep_http_diagnostics(body):
+    response = httpx.Response(
+        400,
+        content=body,
+        request=httpx.Request("POST", "https://example.test/job/prepare"),
+    )
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        _cloud_submission._raise_for_prepare_status(response)
+    assert error.value.response is response
+    assert error.value.request is response.request
+    assert "400 Bad Request" in str(error.value)
+    assert "DataLab:" not in str(error.value)
+    assert "private-response-data" not in str(error.value)
 
 
 def test_prepare_forbidden_preserves_cloud_access_error(tmp_path, upload_transport):

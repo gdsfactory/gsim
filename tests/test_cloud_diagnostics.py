@@ -10,6 +10,51 @@ from gsim import gcloud
 from tests.test_gcloud_start import FakeJob
 
 
+@pytest.mark.parametrize("status", ["failed", "completed"])
+@pytest.mark.parametrize("verbose", ["quiet", "status", "full"])
+def test_wait_for_results_explains_palace_oom(tmp_path, monkeypatch, status, verbose):
+    failed_job = FakeJob(
+        id="job-oom-137",
+        status=status,
+        exit_code=137,
+        status_reason="OutOfMemoryError: container killed",
+    )
+    monkeypatch.setattr(
+        gcloud.sim,
+        "get_job",
+        Mock(side_effect=[FakeJob(status="running", exit_code=None), failed_job]),
+    )
+    download = Mock()
+    parse = Mock()
+    monkeypatch.setattr(gcloud.sim, "download_results", download)
+    monkeypatch.setattr(gcloud, "_parse_result", parse)
+    monkeypatch.setattr(gcloud.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        gcloud,
+        "_get_job_logs_callable",
+        lambda: Mock(return_value={"items": [], "page_info": {}}),
+    )
+
+    with pytest.raises(RuntimeError) as error:
+        gcloud.wait_for_results("job-1", verbose=verbose, parent_dir=tmp_path)
+
+    message = str(error.value)
+    for detail in [
+        "exit code 137",
+        "Job ID: job-oom-137",
+        "SIGKILL",
+        "out of memory",
+        "coarser mesh",
+        "sim.solver.order",
+        "Recheck convergence",
+        "OutOfMemoryError: container killed",
+        "No output artifacts",
+    ]:
+        assert detail in message
+    download.assert_not_called()
+    parse.assert_not_called()
+
+
 @pytest.mark.parametrize("artifacts", ["directory", "no-log", "download-error"])
 def test_failed_job_retains_download_diagnostics(tmp_path, monkeypatch, artifacts):
     directory = tmp_path / "artifacts"
