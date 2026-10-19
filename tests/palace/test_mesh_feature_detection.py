@@ -122,3 +122,54 @@ def test_gap_search_limit_is_preserved():
     )
     assert min_conductor_gap(component, stack, max_gap_um=10) is None
     assert min_conductor_gap(component, stack, max_gap_um=16) == pytest.approx(15.0)
+
+
+def test_perforated_conductor_sizes_from_narrow_webs():
+    """A dense hole grid must not enumerate gaps out to the 500 um limit."""
+    component, stack = _layout(0.001, [])
+    polygon = kdb.Polygon(kdb.Box(0, 0, 146000, 146000))
+    for column in range(24):
+        for row in range(24):
+            x, y = 2000 + 6000 * column, 2000 + 6000 * row
+            polygon.insert_hole(kdb.Box(x, y, x + 4000, y + 4000))
+    component.kdb_cell.shapes(component.kcl.layout.layer(201, 0)).insert(polygon)
+    assert min_conductor_feature_size(component, stack) == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("dbu", [0.001, 0.01, 0.0005])
+def test_one_grid_notch_does_not_force_auto_refinement(dbu):
+    notch_left = 50.0
+    component, stack = _layout(
+        dbu,
+        [
+            [
+                (0, 0),
+                (100, 0),
+                (100, 100),
+                (notch_left + dbu, 100),
+                (notch_left + dbu, 20),
+                (notch_left, 20),
+                (notch_left, 100),
+                (0, 100),
+            ]
+        ],
+    )
+    assert min_conductor_gap(component, stack) is None
+    assert auto_refined_mesh_size(component, stack, 5.0) == pytest.approx(5.0)
+
+
+@pytest.mark.parametrize("width_dbu", [1, 2, 10])
+def test_small_trace_detection_floor(width_dbu):
+    dbu = 0.001
+    width = width_dbu * dbu
+    component, stack = _layout(dbu, [[(0, 0), (1, 0), (1, width), (0, width)]])
+    if width_dbu == 1:
+        assert min_conductor_feature_size(component, stack) is None
+    else:
+        assert min_conductor_feature_size(component, stack) == pytest.approx(width)
+
+
+@pytest.mark.parametrize("max_gap_um", [0, -1])
+def test_nonpositive_gap_search_limit(max_gap_um):
+    component, stack = _layout(0.001, [_SHAPES["notch"]])
+    assert min_conductor_gap(component, stack, max_gap_um=max_gap_um) is None

@@ -358,6 +358,13 @@ Presets select mesh-size targets near conductors and in the bulk. Explicit
 `auto_size=True` only scales a preset when `refined_mesh_size` is omitted;
 an explicit size is always preserved, even with `auto_size=True`.
 
+Feature detection merges touching polygons on each conductor layer before
+checking trace/neck widths and gaps, including notches and holes. Distances
+below two layout database units are ignored as grid artifacts. Gap searches
+for sizing stop at the smallest width already found (and at 500 um); larger
+gaps cannot change the size. Cross-layer spacing and arbitrary tapered or
+curved widths are not measured.
+
 Resolution warnings compare the **effective** size with the detected conductor
 feature divided by `cells_per_feature` (2 by default). They suggest a smaller
 explicit size when an override is present. This feature-based rule is a heuristic;

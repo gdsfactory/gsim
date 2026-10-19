@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# One-grid notches/slivers can be rounding artifacts, not meshing targets.
+_MIN_FEATURE_DBU = 2.0
+
 
 def _conductor_gds_tuples(stack: LayerStack) -> set[tuple[int, int]]:
     """Return the set of ``(layer, datatype)`` tuples for conductor layers."""
@@ -58,10 +61,11 @@ def _conductor_regions(component, stack: LayerStack) -> list[kdb.Region]:
 
 
 def _min_resolved_distance(pairs: kdb.EdgePairs) -> float:
-    """Smallest positive distance resolved by the layout grid, in dbu."""
+    """Smallest distance spanning at least two layout database units."""
     distances = (pair.distance() for pair in pairs)
     return min(
-        (distance for distance in distances if distance >= 1.0), default=math.inf
+        (distance for distance in distances if distance >= _MIN_FEATURE_DBU),
+        default=math.inf,
     )
 
 
@@ -69,15 +73,15 @@ def _min_width(regions: list[kdb.Region]) -> float:
     """Find narrow traces/necks using opposing edges; return a size in dbu."""
     # Bounding boxes provide a fallback for shapes without parallel edges and
     # bound the search. Merging first avoids measuring the width of input tiles.
-    width = min(
-        (
-            min(polygon.bbox().width(), polygon.bbox().height())
-            for region in regions
-            for polygon in region.each()
-        ),
-        default=math.inf,
+    bbox_widths = (
+        min(polygon.bbox().width(), polygon.bbox().height())
+        for region in regions
+        for polygon in region.each()
     )
-    if not math.isfinite(width) or width <= 0:
+    width = min(
+        (size for size in bbox_widths if size >= _MIN_FEATURE_DBU), default=math.inf
+    )
+    if not math.isfinite(width):
         return math.inf
     threshold = math.ceil(width) + 1
     for region in regions:
@@ -115,7 +119,7 @@ def min_conductor_gap(
 
     Merge touching/overlapping polygons before checking spacing. This includes
     opposing edges of one connected conductor, as well as separate conductors.
-    Zero distances and distances below one layout database unit are ignored.
+    Distances below two layout database units are ignored as grid artifacts.
     Cross-layer spacing is not measured.
 
     Args:
@@ -137,7 +141,7 @@ def min_conductor_feature_size(component, stack: LayerStack) -> float | None:
 
     Use opposing, nearly parallel edges for trace/neck widths, plus spacing
     checks for gaps, notches, and holes. Merged polygon bounding boxes provide
-    a fallback. Distances below one database unit are ignored. Only gaps below
+    a fallback. Distances below two database units are ignored. Only gaps below
     500 um are searched; cross-layer spacing and arbitrary tapered/curved widths
     are not measured. This is a sizing heuristic, not an accuracy guarantee.
 
@@ -145,7 +149,15 @@ def min_conductor_feature_size(component, stack: LayerStack) -> float | None:
     """
     regions = _conductor_regions(component, stack)
     dbu = component.kcl.layout.dbu
-    feature = min(_min_width(regions), _min_gap(regions, round(500.0 / dbu)))
+    width = _min_width(regions)
+    # Gaps at or above the width cannot lower the result. A broad space_check
+    # can enumerate millions of irrelevant edge pairs on perforated ground.
+    gap_limit = (
+        min(round(500.0 / dbu), math.ceil(width))
+        if math.isfinite(width)
+        else round(500.0 / dbu)
+    )
+    feature = min(width, _min_gap(regions, gap_limit))
     return feature * dbu if math.isfinite(feature) else None
 
 
