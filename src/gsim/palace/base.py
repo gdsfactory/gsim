@@ -2148,11 +2148,6 @@ class PalaceSimMixin(SolverSettingsMixin):
                 mesh_config.refined_mesh_size,
                 mesh_config.max_mesh_size,
             )
-            if node_count > 75_000:
-                logger.warning(
-                    "Mesh has %s nodes (>75,000) \u2014 simulation may be slow.",
-                    f"{node_count:,}",
-                )
 
         return result
 
