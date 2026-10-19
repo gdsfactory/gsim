@@ -146,6 +146,52 @@ def test_cell_counts_use_non_pml_domain_and_include_aligned_pml_and_guards(tmp_p
 
 
 @pytest.mark.parametrize(
+    ("extents", "interior", "alignment", "total", "cell_count"),
+    [
+        (
+            (0.1 * 3 * 1000, 0.1 * 3 * 1000, 0.1 * 3 * 1600),
+            [10, 10, 16],
+            [0, 0, 0],
+            [46, 46, 112],
+            236992,
+        ),
+        (
+            (np.nextafter(300.0, 0), 300.0, np.nextafter(480.0, 0)),
+            [10, 10, 16],
+            [0, 0, 0],
+            [46, 46, 112],
+            236992,
+        ),
+        (
+            (300.001, 300.1, 480.001),
+            [11, 11, 17],
+            [0, 0, 15],
+            [47, 47, 128],
+            282752,
+        ),
+    ],
+)
+def test_cell_counts_normalize_integer_noise_and_preserve_fractional_extents(
+    tmp_path, extents, interior, alignment, total, cell_count
+):
+    metadata = fdtd_metadata.generate_metadata(
+        _manifest(),
+        _config(cell=30, pml=17, bounds=((0, 0, 0), extents)),
+        _mesh(tmp_path),
+    )
+    assert metadata["grid"]["cell_counts"] == {
+        "scope": "client_estimate",
+        "layout": "fdtd-z16-v1",
+        "interior_cells_xyz": interior,
+        "alignment_cells_xyz": alignment,
+        "pml_cells_per_face_xyz": [17, 17, 32],
+        "guard_cells_per_face_xyz": [1, 1, 16],
+        "total_cells_xyz": total,
+        "total_cells": cell_count,
+    }
+
+
+@pytest.mark.parametrize(
     ("domain_size", "cell_count"),
     [
         ((998, 998, 64), 96_000_000),

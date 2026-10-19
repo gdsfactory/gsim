@@ -201,15 +201,50 @@ def test_malformed_metadata_fails_before_preparation(
     assert upload_transport["prepare"] == []
 
 
-def test_amr_uses_explicit_field_dof_limit(tmp_path, upload_transport):
+@pytest.mark.parametrize("max_size", [100000, 8000000])
+def test_amr_uses_explicit_field_dof_limit(tmp_path, upload_transport, max_size):
     metadata = _inputs(tmp_path, "palace")
-    metadata["simulation"] = {"refinement": {"MaxIts": 3, "MaxSize": 8000000}}
+    metadata["simulation"] = {"refinement": {"MaxIts": 3, "MaxSize": max_size}}
     (tmp_path / "metadata.json").write_text(json.dumps(metadata))
     gcloud.upload(tmp_path, "palace", verbose=False)
-    assert (
-        upload_transport["prepare"][0]["sizing_requirements"]["palace"]["field_dofs"]
-        == 8000000
-    )
+    assert upload_transport["prepare"][0]["sizing_requirements"]["palace"][
+        "field_dofs"
+    ] == max(223152, max_size)
+
+
+@pytest.mark.parametrize(
+    "refinement", [{}, {"MaxIts": 0}, {"MaxIts": 0, "MaxSize": 8000000}]
+)
+def test_fixed_mesh_does_not_use_amr_limit(tmp_path, upload_transport, refinement):
+    metadata = _inputs(tmp_path, "palace")
+    metadata["simulation"] = {"refinement": refinement}
+    (tmp_path / "metadata.json").write_text(json.dumps(metadata))
+    gcloud.upload(tmp_path, "palace", verbose=False)
+    assert upload_transport["prepare"][0]["sizing_requirements"] == {
+        "palace": {"tetrahedra": 34862, "field_dofs": 223152}
+    }
+
+
+@pytest.mark.parametrize("max_size", [None, 0, -1, True, 1.5, "8000000", 2**64])
+@pytest.mark.parametrize("supported_mesh", [False, True])
+def test_unbounded_amr_fails_before_preparation(
+    tmp_path, upload_transport, max_size, supported_mesh
+):
+    metadata = _inputs(tmp_path, "palace")
+    refinement = {"MaxIts": 3}
+    if max_size is not None:
+        refinement["MaxSize"] = max_size
+    metadata["simulation"] = {"refinement": refinement}
+    if not supported_mesh:
+        metadata["mesh"]["field_dofs"] = {
+            "estimated_field_dofs": None,
+            "unavailable_reason": "Not a supported 3D EM mesh",
+        }
+    (tmp_path / "metadata.json").write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match=r"MaxSize.*max_dofs=.*max_its=0"):
+        gcloud.upload(tmp_path, "palace", verbose=False)
+    assert upload_transport["prepare"] == []
+    assert upload_transport["archive"] == []
 
 
 @pytest.mark.parametrize("solver", ["palace", "fdtd"])

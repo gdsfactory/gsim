@@ -102,8 +102,9 @@ def _cell_counts(config: FDTDConfig) -> dict[str, Any]:
     # The field path aligns Z to kMaxSimdWidth=16 on every CPU architecture.
     bounds = config.grid.non_pml_bounds
     cell_size = config.grid.nanometers_per_cell
+    # Discard floating-point noise at integer boundaries before rounding up.
     interior = [
-        math.ceil((upper - lower) / cell_size)
+        math.ceil(round((upper - lower) / cell_size, 6))
         for lower, upper in zip(bounds.min, bounds.max, strict=True)
     ]
     alignment = [1, 1, 16]

@@ -26,8 +26,8 @@ def read_sizing_requirements(
     """Translate the diagnostic sidecar into the deployed API's problem counts.
 
     Missing metadata and Palace meshes without a supported 3D field-DOF
-    estimate retain the SDK's fixed-resource path. Invalid counts are errors,
-    rather than silently submitting the simulation with fixed resources.
+    estimate retain the SDK's fixed-resource path. Unbounded AMR and invalid
+    counts are errors, rather than silently submitting with fixed resources.
     """
     solver = job_type.casefold()
     metadata_path = input_dir / "metadata.json"
@@ -46,17 +46,26 @@ def read_sizing_requirements(
                 }
             }
         mesh = metadata["mesh"]
+        refinement = metadata.get("simulation", {}).get("refinement", {})
+        max_field_dofs = None
+        if refinement.get("MaxIts", 0) > 0:
+            try:
+                max_field_dofs = _positive_count(refinement.get("MaxSize"), "MaxSize")
+            except ValueError as error:
+                raise ValueError(
+                    "Palace cloud sizing requires a positive 64-bit integer "
+                    "Model.Refinement.MaxSize when AMR is enabled (MaxIts > 0). "
+                    "Set sim.set_refinement(max_dofs=...) to a finite bound, "
+                    "or disable AMR with max_its=0."
+                ) from error
         estimate = mesh["field_dofs"]
         if estimate.get("estimated_field_dofs") is None and estimate.get(
             "unavailable_reason"
         ):
             return None
         field_dofs = _positive_count(estimate["estimated_field_dofs"], "field_dofs")
-        refinement = metadata.get("simulation", {}).get("refinement", {})
-        if refinement.get("MaxIts", 0) > 0 and "MaxSize" in refinement:
-            field_dofs = max(
-                field_dofs, _positive_count(refinement["MaxSize"], "MaxSize")
-            )
+        if max_field_dofs is not None:
+            field_dofs = max(field_dofs, max_field_dofs)
         return {
             solver: {
                 "tetrahedra": _positive_count(mesh["tetrahedra"], "tetrahedra"),
