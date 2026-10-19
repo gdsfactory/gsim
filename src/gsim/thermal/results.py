@@ -1,6 +1,6 @@
 """Results of a thermal phase-shifter solve, in gsim units.
 
-What :class:`~gsim.thermal.ThermalSim` hands back:
+What :class:`~gsim.thermal.Simulation` hands back:
 
 - :class:`ThermalResult` -- the steady answer: P_pi, efficiency, heater
   resistance and V_pi, crosstalk, thermal resistance at each waveguide,
@@ -112,7 +112,7 @@ class TemperatureMap:
         Args:
             position: In-plane coordinate(s) in um -- ``y`` for an
                 ``"x=..."`` cut, ``x`` for a ``"y=..."`` cut, as in
-                :meth:`ThermalSim.add_waveguide`.
+                :meth:`Waveguides.add <gsim.thermal.Waveguides.add>`.
             z: Height(s) in um, broadcast against ``position``.
             ambient: Ambient (heat-sink) temperature in K, usually 293.15.
                 ``None`` returns the rise above ambient; a value returns
