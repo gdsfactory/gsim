@@ -180,6 +180,7 @@ def load_stack_yaml(yaml_path: str | Path) -> LayerStack:
             ),
             material=layer_data["material"],
             layer_type=layer_data["type"],
+            sidewall_angle=layer_data.get("sidewall_angle", 0.0),
             mesh_resolution=layer_data.get("mesh_resolution", "medium"),
         )
 
