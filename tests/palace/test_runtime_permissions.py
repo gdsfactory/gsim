@@ -21,6 +21,27 @@ _BIN_NAMES = (
 )
 
 
+def test_missing_runtime_does_not_restore_permissions_or_download(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PALACETOOLKIT_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(runtime, "_palace_cpu_available", lambda: False)
+    monkeypatch.setattr(runtime, "_palace_toolkit_available", lambda: False)
+    restore_permissions = Mock(side_effect=AssertionError("Runtime is absent"))
+    install_runtime = Mock(side_effect=AssertionError("Downloads are disabled"))
+    monkeypatch.setattr(runtime, "_restore_bin_permissions", restore_permissions)
+    monkeypatch.setattr(runtime, "install_palace_runtime", install_runtime)
+
+    assert (
+        runtime.resolve_palace_binary(prefer_bundled=True, download_if_missing=False)
+        is None
+    )
+
+    restore_permissions.assert_not_called()
+    install_runtime.assert_not_called()
+    assert not list(tmp_path.iterdir())
+
+
 def test_installed_runtime_restores_all_launcher_permissions(tmp_path, monkeypatch):
     archive = io.BytesIO()
     with ZipFile(archive, "w") as wheel:
