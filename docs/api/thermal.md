@@ -13,33 +13,51 @@ pip install "gsim[femwell]"
 
 Importing `gsim.thermal` works without the extra. Meshing or solving needs it and raises an error that names the extra.
 
-## The canonical script
+## Configure and solve
 
-A TiN heater 2 µm above a 500 × 220 nm silicon strip, 320 µm long:
+The simulation is set up by physical concern, like [`gsim.tcad.Simulation`][gsim.tcad.Simulation] and
+[`gsim.fdtd.Simulation`][gsim.fdtd.Simulation]. A TiN heater 2 µm above a 500 × 220 nm silicon strip, 320 µm long:
 
 ```python
 import gdsfactory as gf
 
-from gsim.thermal import ThermalSim
+from gsim import thermal
 
 gf.gpdk.PDK.activate()
 xs = gf.cross_section.strip_heater_metal(width=0.5, heater_width=2.0)
 component = gf.components.straight(length=320.0, cross_section=xs)
 
-sim = ThermalSim()
-sim.set_geometry(component)
-sim.set_stack(stack)  # a gsim LayerStack: heights and materials of every layer
-sim.set_cross_section("x=160", window=(-30.0, 30.0))
-sim.set_heater("heater", length=320.0)
-sim.add_waveguide("arm", position=0.0)
+sim = thermal.Simulation()
+sim.geometry(component, stack=stack)  # a gsim LayerStack: heights and materials of every layer
+sim.domain(plane="x=160", window=(-30.0, 30.0))
+sim.heater(layers="heater", length_um=320.0)
+sim.waveguides.add(name="arm", position_um=0.0)
 
-result = sim.solve(wavelength=1.55)
-step = sim.solve_transient(power=result.p_pi, duration=60.0)
+result = sim.solve(wavelength_um=1.55)
+step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
 result.report(step)  # P_pi, efficiency, R, V_pi, peak heater rise, tau
 ```
 
 The [thermo-optic phase shifter tutorial](../nbs/thermal_phase_shifter.md) builds the `stack` for a published heater.
 It then compares the result with the paper's simulations and measurements, and checks convergence.
+
+Calling a concern applies several settings at once and validates them together; a failed call changes nothing. Single
+attributes can also be assigned, `sim.heater.length_um = 640.0`, and a whole concern replaced by a model or a mapping,
+`sim.solver = {"precision": "fast"}`. The constructor takes the same concerns as keyword arguments:
+
+```python
+sim = thermal.Simulation(
+    geometry={"component": component, "stack": stack},
+    domain={"plane": "x=160", "window": (-30.0, 30.0)},
+    heater={"layers": "heater", "length_um": 320.0},
+    waveguides=[{"name": "arm", "position_um": 0.0}],
+    solver={"precision": "fast"},
+)
+```
+
+The meshes are built on the first solve and kept, with the steady solve, until an input they depend on changes. Editing
+a concern, the stack or the component in place is enough: the next solve starts again from it. A change to the
+transient's time stepping alone keeps the steady solve.
 
 ## Units and conventions
 
@@ -51,58 +69,68 @@ It then compares the result with the paper's simulations and measurements, and c
 | Time                                 | µs                                 |
 | Resistance, voltage                  | Ω, V                               |
 | Phase                                | rad                                |
-| Material properties (`set_material`) | SI: W/m/K, J/kg/K, kg/m³, 1/K, S/m |
+| Material properties (`materials`)    | SI: W/m/K, J/kg/K, kg/m³, 1/K, S/m |
+| Heat transfer coefficient            | W/m²/K                             |
+
+Field and argument names carry their unit: `length_um`, `power_mw`, `p_pi_mw`, `tau_us`. Material properties and the
+heat transfer coefficient are SI, like the stack's material records.
 
 The model is linear in power, because k, ρc_p and dn/dT do not depend on temperature. One solve therefore gives every
 power. P_π does not depend on the heater length in 2D. The length only sets the resistance, V_π and the phase at a
 given power.
 
-## Setting up
+## Concerns
 
-- [`ThermalSim`][gsim.thermal.ThermalSim]: `set_geometry`, `set_stack`, `set_cross_section`, `set_heater`,
-  `add_waveguide`, `set_material`, `set_boundary`.
+- `geometry(component, *, stack=...)`: the gdsfactory component (heater and waveguides) and its gsim `LayerStack`.
+- `domain(...)`: `plane`, the cut (`"x=<um>"` or `"y=<um>"`), across the heater and the waveguides; `window`, the
+  in-plane `(min, max)` extent of the thermal Window in µm; `depth_um`, the Modelled depth.
+- `heater(...)`: `layers`, the stack layer name(s) of the heater conductors; `length_um`, the heater length.
+- `waveguides`: `add(name=, position_um=, layer=None, window=None, polarization="TE")`, `remove(name)`,
+  `sim.waveguides[name]`, iteration. The first waveguide added is the phase shifter (`waveguides.phase_shifter`); every
+  other one is a crosstalk victim. Each gets its own optical window around its drawn core.
+- `materials`: per-run overrides, `sim.materials["tin"] = {"conductivity": 1.6e6}`, keyed on the material name
+  (case-insensitive). The fields are `thermal_conductivity`, `specific_heat`, `mass_density`, `dn_dT`, `conductivity`
+  (electrical), `permittivity` and `loss_tangent`.
+- `boundary(...)`: `top` and `sides`, `"adiabatic"` (default) or `"convective"`; `heat_transfer_coefficient` (10 W/m²/K).
+- `solver(...)`: `precision`, `mesh_size_um`, `degree`, `time_steps` and `theta` (see below).
 
-The cut must be vertical (`"x=…"` or `"y=…"`) and cross the heater and the waveguides. Two parameters belong to the
-model, not to the device, and are worth a convergence check:
+The cut must be vertical and cross the heater and the waveguides. Two parameters belong to the model, not to the
+device, and are worth a convergence check:
 
-- **Window** (`window=`): the in-plane extent. Its sides are adiabatic, so make the half-width at least five times the
-  oxide thickness between the heater and the substrate.
-- **Modelled depth** (`depth=`): how much substrate lies under the stack. Its bottom is the heat sink, at ambient. A 2D
-  section has no steady state without a sink at a finite distance. The temperature rise also grows slowly (as a
-  logarithm) with depth, because a 2D model cannot spread heat along the heater the way the real chip does. The default
-  is the stack's substrate thickness.
+- **Window** (`domain.window`): the in-plane extent. Its sides are adiabatic, so make the half-width at least five times
+  the oxide thickness between the heater and the substrate.
+- **Modelled depth** (`domain.depth_um`): how much substrate lies under the stack. Its bottom is the heat sink, at
+  ambient. A 2D section has no steady state without a sink at a finite distance. The temperature rise also grows slowly
+  (as a logarithm) with depth, because a 2D model cannot spread heat along the heater the way the real chip does. The
+  default is the stack's substrate thickness.
 
-The first waveguide you add is the phase shifter. Every other waveguide is a crosstalk victim. Each waveguide gets its
-own optical window around its drawn core.
+A material override keys on the material name, so every layer made of that material changes. To give the 220 nm core a
+thin-film conductivity without changing the bulk substrate, give the core its own material name in the stack. The
+tutorial shows how.
 
-`set_material(name, **properties)` overrides a material for one simulation. It keys on the material name, so every
-layer made of that material changes. To give the 220 nm core a thin-film conductivity without changing the bulk
-substrate, give the core its own material name in the stack. The tutorial shows how.
+Free convection in air (h ≈ 10 W/m²/K) is negligible next to conduction into the substrate, which is why adiabatic is
+the default boundary.
 
-`set_boundary` chooses adiabatic or convective top and sides; settings you leave out keep their current value.
-Free convection in air (h ≈ 10 W/m²/K) is negligible next
-to conduction into the substrate, which is why adiabatic is the default.
+## Numerical settings
 
-## Numerical knobs
-
-- [`ThermalOptions`][gsim.thermal.ThermalOptions]: `precision="fast" | "default" | "accurate"` scales the mesh and
-  sets the number of transient time steps. `max_size` caps the element size per region, and `time_steps` overrides the
-  step count. `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh,
-  degree 2 cuts the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The
-  optical Mode solve does not depend on it.
+- [`Solver`][gsim.thermal.Solver]: `precision="fast" | "default" | "accurate"` scales the mesh and sets the number of
+  transient time steps. `mesh_size_um` caps the element size per region, and `time_steps` overrides the step count.
+  `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh, degree 2 cuts
+  the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The optical Mode solve
+  does not depend on it. `theta` picks the time scheme: 1 (backward Euler, default) or 0.5 (Crank-Nicolson).
 
 ## Results
 
-- [`ThermalResult`][gsim.thermal.ThermalResult]: `p_pi`, `efficiency`, `resistance`, `v_pi`, `crosstalk` (rad on each
-  victim at P_π), `crosstalk_ratio` (victim phase over phase-shifter phase), `thermal_resistance` (K/mW at each core),
-  `dneff_per_power`, `temperature(power)`, `phase(power)` and `drive_power(voltage=… | current=…)`, which turns a
-  drive voltage or current into heater power in mW.
-- [`TemperatureMap`][gsim.thermal.TemperatureMap]: the temperature rise at one power, with `at(position, z)`,
-  `peak(layer)` and `plot(xlim=, zlim=)`. Pass `ambient=` (in K, e.g. 293.15) to `at` or `peak` for an absolute
+- [`ThermalResult`][gsim.thermal.ThermalResult]: `p_pi_mw`, `efficiency_rad_per_mw`, `resistance_ohm`, `v_pi_v`,
+  `crosstalk_rad` (on each victim at P_π), `crosstalk_ratio` (victim phase over phase-shifter phase),
+  `thermal_resistance_k_per_mw` (at each core), `dneff_per_mw`, `temperature(power_mw)`, `phase(power_mw)` and
+  `drive_power(voltage_v=… | current_a=…)`, which turns a drive voltage or current into heater power in mW.
+- [`TemperatureMap`][gsim.thermal.TemperatureMap]: the temperature rise at one power, with `at(position_um, z_um)`,
+  `peak(layer)` and `plot(xlim=, zlim=)`. Pass `ambient_k=` (e.g. 293.15) to `at` or `peak` for an absolute
   temperature instead of the rise.
-- [`StepResponse`][gsim.thermal.StepResponse]: the phase over time after the heater is switched on. It gives
-  `tau` (the 10–90 % rise time) and `tau_1e` (the time to reach 1 − 1/e, about 63 %). In this linear model the fall time
-  equals the rise time.
+- [`StepResponse`][gsim.thermal.StepResponse]: the phase over time after the heater is switched on (`time_us`,
+  `phase_rad`, `temperature_k` at each core). It gives `tau_us` (the 10–90 % rise time) and `tau_1e_us` (the time to
+  reach 1 − 1/e, about 63 %). In this linear model the fall time equals the rise time.
 - [`HeaterReport`][gsim.thermal.HeaterReport]: the figures of merit in one table. It prints as text and renders as
   HTML in notebooks.
 
