@@ -292,31 +292,35 @@ def _clamp_regions_to_plane(
     return clamped
 
 
-def _parse_klayout_polygon(poly) -> tuple[list, list, list] | None:
-    """Convert a KLayout polygon to ``(pts_x, pts_y, holes)`` in um (nm / 1000).
+def _parse_klayout_polygon(poly, dbu: float = 0.001) -> tuple[list, list, list] | None:
+    """Convert a KLayout polygon to ``(pts_x, pts_y, holes)`` in um.
+
+    Use the owning layout's database unit for hulls and holes.
 
     Returns None for degenerate polygons with fewer than three hull points.
     """
     points = list(poly.each_point_hull())
     if len(points) < 3:
         return None
-    pts_x = [pt.x / 1000.0 for pt in points]
-    pts_y = [pt.y / 1000.0 for pt in points]
+    pts_x = [pt.x * dbu for pt in points]
+    pts_y = [pt.y * dbu for pt in points]
     holes = []
     for hole_idx in range(poly.holes()):
         hole_pts = list(poly.each_point_hole(hole_idx))
         if len(hole_pts) >= 3:
-            hx = [pt.x / 1000.0 for pt in hole_pts]
-            hy = [pt.y / 1000.0 for pt in hole_pts]
+            hx = [pt.x * dbu for pt in hole_pts]
+            hy = [pt.y * dbu for pt in hole_pts]
             holes.append((hx, hy))
     return pts_x, pts_y, holes
 
 
-def _verify_symmetry(regions: dict, plane: SymmetryPlaneConfig) -> None:
+def _verify_symmetry(
+    regions: dict, plane: SymmetryPlaneConfig, dbu: float = 0.001
+) -> None:
     """Raise ``ValueError`` if layers are not mirror-symmetric about the plane."""
     if not plane.verify_symmetry:
         return
-    bad = asymmetric_layers(regions, plane)
+    bad = asymmetric_layers(regions, plane, dbu=dbu)
     if bad:
         raise ValueError(
             f"Layers {bad} are not mirror-symmetric about "
@@ -353,6 +357,7 @@ def extract_geometry(
         ValueError: If the layout is not mirror-symmetric or nothing is left
             on the kept side.
     """
+    dbu = component.kcl.layout.dbu
     full_regions: dict[tuple[int, int], kdb.Region] = {}
     polygons = []
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
@@ -412,7 +417,7 @@ def extract_geometry(
             continue
 
         for poly in polys:
-            parsed = _parse_klayout_polygon(poly)
+            parsed = _parse_klayout_polygon(poly, dbu)
             if parsed is None:
                 continue
 
@@ -429,8 +434,8 @@ def extract_geometry(
                 full_regions.setdefault(gds_tuple, kdb.Region()).insert(poly)
                 pieces = [
                     p
-                    for piece in clip_polygon(poly, symmetry_plane)
-                    if (p := _parse_klayout_polygon(piece)) is not None
+                    for piece in clip_polygon(poly, symmetry_plane, dbu=dbu)
+                    if (p := _parse_klayout_polygon(piece, dbu)) is not None
                 ]
 
             for pts_x, pts_y, holes in pieces:
@@ -448,7 +453,7 @@ def extract_geometry(
                     bbox[3] = max(bbox[3], ymax)
 
     if symmetry_plane is not None:
-        _verify_symmetry(full_regions, symmetry_plane)
+        _verify_symmetry(full_regions, symmetry_plane, dbu)
         if not polygons:
             raise ValueError(
                 f"Symmetry plane {symmetry_plane.axis}={symmetry_plane.position} "
@@ -1447,11 +1452,10 @@ def extract_pec_polygons(
     Returns:
         List of (pts_x, pts_y, holes) tuples in microns
     """
-    polygons_by_index = component.get_polygons(
-        layers=list(component.kcl.layout.layer_indexes())
-    )
-
     layout = component.kcl.layout
+    dbu = layout.dbu
+    polygons_by_index = component.get_polygons(layers=list(layout.layer_indexes()))
+
     index_to_gds = {}
     for layer_index in layout.layer_indexes():
         if layout.is_valid_layer(layer_index):
@@ -1464,7 +1468,7 @@ def extract_pec_polygons(
         if index_to_gds.get(layer_index) != gds_layer:
             continue
         for poly in polys:
-            parsed = _parse_klayout_polygon(poly)
+            parsed = _parse_klayout_polygon(poly, dbu)
             if parsed is None:
                 continue
             if symmetry_plane is None:
@@ -1473,12 +1477,12 @@ def extract_pec_polygons(
             full_region.insert(poly)
             result.extend(
                 p
-                for piece in clip_polygon(poly, symmetry_plane)
-                if (p := _parse_klayout_polygon(piece)) is not None
+                for piece in clip_polygon(poly, symmetry_plane, dbu=dbu)
+                if (p := _parse_klayout_polygon(piece, dbu)) is not None
             )
 
     if symmetry_plane is not None:
-        _verify_symmetry({gds_layer: full_region}, symmetry_plane)
+        _verify_symmetry({gds_layer: full_region}, symmetry_plane, dbu)
 
     return result
 

@@ -1,7 +1,7 @@
 """Pure helpers for symmetry planes (no Gmsh).
 
-All lengths are in um unless a name says ``_nm``. The plane is described by a
-:class:`~gsim.palace.models.symmetry.SymmetryPlaneConfig`.
+Lengths are in um; KLayout region helpers also accept the owning layout's dbu.
+The plane is described by a :class:`~gsim.palace.models.symmetry.SymmetryPlaneConfig`.
 """
 
 from __future__ import annotations
@@ -89,16 +89,19 @@ def check_plane_inside_domain(
         )
 
 
-def _to_nm(value_um: float) -> int:
-    """Convert um to integer database units (nm)."""
-    return round(value_um * 1000.0)
+def _to_dbu(value_um: float, dbu: float) -> int:
+    """Convert um to integer database units."""
+    return round(value_um / dbu)
 
 
 def _half_box(
-    bbox: kdb.Box, plane: SymmetryPlaneConfig, side: Literal["kept", "removed"]
+    bbox: kdb.Box,
+    plane: SymmetryPlaneConfig,
+    side: Literal["kept", "removed"],
+    dbu: float,
 ) -> kdb.Box:
     """Box covering one side of the plane, spanning ``bbox`` plus one unit."""
-    pos = _to_nm(plane.position)
+    pos = _to_dbu(plane.position, dbu)
     positive = (side == "kept") == (plane.keep == "positive")
     if plane.axis == "x":
         lo, hi = (pos, bbox.right + 1) if positive else (bbox.left - 1, pos)
@@ -107,36 +110,45 @@ def _half_box(
     return kdb.Box(bbox.left - 1, lo, bbox.right + 1, hi)
 
 
-def clip_region(region: kdb.Region, plane: SymmetryPlaneConfig) -> kdb.Region:
+def clip_region(
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+) -> kdb.Region:
     """Keep the part of a region on the kept side of the plane."""
     if region.is_empty():
         return kdb.Region()
-    box = _half_box(region.bbox(), plane, "kept")
+    box = _half_box(region.bbox(), plane, "kept", dbu)
     if box.empty():
         return kdb.Region()
     # merged() turns the keyhole cuts left by boolean ops back into real holes
     return (region & kdb.Region(box)).merged()
 
 
-def clip_polygon(polygon: kdb.Polygon, plane: SymmetryPlaneConfig) -> list[kdb.Polygon]:
+def clip_polygon(
+    polygon: kdb.Polygon, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+) -> list[kdb.Polygon]:
     """Clip one polygon (holes included) to the kept side of the plane.
 
     Clipping a single polygon can split it into several pieces, or remove it
     entirely (empty list).
     """
-    return list(clip_region(kdb.Region(polygon), plane).each())
+    return list(clip_region(kdb.Region(polygon), plane, dbu=dbu).each())
 
 
-def mirror_region(region: kdb.Region, plane: SymmetryPlaneConfig) -> kdb.Region:
+def mirror_region(
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float = 0.001
+) -> kdb.Region:
     """Mirror a region about the plane."""
-    shift = 2 * _to_nm(plane.position)
+    shift = 2 * _to_dbu(plane.position, dbu)
     if plane.axis == "y":
         return region.transformed(kdb.Trans.M0).moved(0, shift)
     return region.transformed(kdb.Trans.M90).moved(shift, 0)
 
 
 def asymmetric_layers(
-    regions: Mapping[object, kdb.Region], plane: SymmetryPlaneConfig
+    regions: Mapping[object, kdb.Region],
+    plane: SymmetryPlaneConfig,
+    *,
+    dbu: float = 0.001,
 ) -> list[object]:
     """Return the keys of layers that are not mirror-symmetric about the plane.
 
@@ -147,7 +159,7 @@ def asymmetric_layers(
     for key, region in regions.items():
         if region.is_empty():
             continue
-        diff = (region ^ mirror_region(region, plane)).sized(-1)
+        diff = (region ^ mirror_region(region, plane, dbu=dbu)).sized(-1)
         if not diff.is_empty():
             bad.append(key)
     return bad

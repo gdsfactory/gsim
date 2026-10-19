@@ -39,7 +39,7 @@ def _conductor_polygons_by_layer(
             index_to_gds[layer_index] = (info.layer, info.datatype)
 
     grouped: dict[tuple[int, int], list[kdb.Polygon]] = {}
-    polygons_by_index = component.get_polygons()
+    polygons_by_index = component.get_polygons(layers=list(layout.layer_indexes()))
     for layer_index, polys in polygons_by_index.items():
         gds_tuple = index_to_gds.get(layer_index)
         if gds_tuple is None or gds_tuple not in conductor_gds:
@@ -56,8 +56,8 @@ def _min_bbox_dim(component, stack: LayerStack) -> float | None:
             points = list(poly.each_point_hull())
             if len(points) < 3:
                 continue
-            xs = [pt.x / 1000.0 for pt in points]
-            ys = [pt.y / 1000.0 for pt in points]
+            xs = [pt.x * component.kcl.layout.dbu for pt in points]
+            ys = [pt.y * component.kcl.layout.dbu for pt in points]
             w = max(xs) - min(xs)
             h = max(ys) - min(ys)
             if w > 0:
