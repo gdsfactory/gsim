@@ -10,15 +10,12 @@ boundary conditions and continuity to.
 
 from __future__ import annotations
 
-import hashlib
 import math
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Self, overload
+from typing import Any
 
-import numpy as np
-from pydantic import BaseModel
-
+from gsim.common.config import Concern, Same, component_digest, fingerprint
 from gsim.tcad.api import (
     MESH_FIELDS,
     Contact,
@@ -38,47 +35,6 @@ from gsim.tcad.mesh import UM_TO_CM, write_scaled_msh
 from gsim.tcad.results import BiasPoint, BiasSweepResult
 from gsim.tcad.runtime import devsim_output
 
-
-class _Concern[T]:
-    """A Simulation attribute that validates whatever replaces it.
-
-    A model concern takes a model, a mapping of its fields, or None for
-    its defaults; a collection takes the collection or a list of items.
-    """
-
-    def __init__(self, kind: type[T]) -> None:
-        """Remember the concern's type."""
-        self._kind = kind
-        self._attribute = ""
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        """Store the value under a private name."""
-        self._attribute = f"_{name}"
-
-    @overload
-    def __get__(self, instance: None, owner: type) -> Self: ...
-
-    @overload
-    def __get__(self, instance: object, owner: type) -> T: ...
-
-    def __get__(self, instance: object | None, owner: type) -> T | Self:
-        """Return the concern."""
-        if instance is None:
-            return self
-        return getattr(instance, self._attribute)
-
-    def __set__(self, instance: object, value: Any) -> None:
-        """Validate and store a replacement."""
-        kind: Any = self._kind
-        if isinstance(value, kind):
-            pass
-        elif issubclass(kind, BaseModel):
-            value = kind() if value is None else kind.model_validate(value)
-        else:
-            value = kind(value)
-        setattr(instance, self._attribute, value)
-
-
 _CONCERNS = (
     "geometry",
     "domain",
@@ -88,61 +44,6 @@ _CONCERNS = (
     "interfaces",
     "solver",
 )
-
-
-class _Same:
-    """Snapshot of an object compared by identity.
-
-    Holds the object, so its address cannot be reused by another one that
-    would then compare equal.
-    """
-
-    __slots__ = ("value",)
-
-    def __init__(self, value: Any) -> None:
-        """Hold the object."""
-        self.value = value
-
-    def __eq__(self, other: object) -> bool:
-        """The same object, not an equal one."""
-        return isinstance(other, _Same) and other.value is self.value
-
-    __hash__ = None  # ty: ignore[invalid-assignment]
-
-
-def _component_digest(component: Any) -> Any:
-    """The drawn polygons of a component, so an edit in place is seen."""
-    try:
-        polygons = component.get_polygons_points(by="tuple")
-    except Exception:
-        return None
-    digest = hashlib.sha256()
-    for layer in sorted(polygons, key=repr):
-        digest.update(repr(layer).encode())
-        for points in polygons[layer]:
-            digest.update(np.ascontiguousarray(points, dtype=np.float64).tobytes())
-    return digest.hexdigest()
-
-
-def _freeze(value: Any) -> Any:
-    """A comparable snapshot of a configuration value.
-
-    Models and containers are taken apart, arrays by their bytes; any
-    other object (a function) by identity.
-    """
-    if isinstance(value, _Same):
-        return value
-    if isinstance(value, BaseModel):
-        return (type(value).__name__, _freeze(dict(value)))
-    if isinstance(value, Mapping):
-        return tuple((key, _freeze(item)) for key, item in value.items())
-    if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    if isinstance(value, np.ndarray):
-        return ("ndarray", value.shape, value.dtype.str, value.tobytes())
-    if value is None or isinstance(value, (str, bytes, int, float, complex, Path)):
-        return value
-    return _Same(value)
 
 
 class Simulation:
@@ -170,13 +71,13 @@ class Simulation:
     rebuilds the DEVSIM device on the existing mesh at the next solve.
     """
 
-    geometry = _Concern(Geometry)
-    domain = _Concern(Domain)
-    materials = _Concern(Materials)
-    doping = _Concern(Doping)
-    contacts = _Concern(Contacts)
-    interfaces = _Concern(Interfaces)
-    solver = _Concern(Solver)
+    geometry = Concern(Geometry)
+    domain = Concern(Domain)
+    materials = Concern(Materials)
+    doping = Concern(Doping)
+    contacts = Concern(Contacts)
+    interfaces = Concern(Interfaces)
+    solver = Concern(Solver)
 
     def __init__(
         self,
@@ -215,10 +116,10 @@ class Simulation:
     def _mesh_inputs(self) -> Any:
         """Snapshot of everything the mesh is built from."""
         component = self.geometry.component
-        return _freeze(
+        return fingerprint(
             (
-                _Same(component),
-                _component_digest(component),
+                Same(component),
+                component_digest(component),
                 self.geometry.stack,
                 self.domain,
                 list(self.contacts),
@@ -229,7 +130,7 @@ class Simulation:
 
     def _device_inputs(self) -> Any:
         """Snapshot of everything the DEVSIM device is built from."""
-        return _freeze(
+        return fingerprint(
             (
                 self.materials,
                 list(self.doping),
