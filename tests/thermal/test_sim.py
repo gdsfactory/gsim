@@ -312,6 +312,64 @@ def test_crosstalk_tail_decays_over_2h_over_pi(uniform_result):
     assert -1.0 / slope == pytest.approx(2 * H_OX / math.pi, rel=0.02)
 
 
+# --------------------------------------------------------------- element degree
+
+
+@pytest.fixture(scope="module")
+def uniform_by_degree() -> dict[int, ThermalResult]:
+    """The uniform-oxide sim at fast precision, solved at every degree."""
+    sim = uniform_oxide_sim()
+    return {
+        degree: sim.solve(
+            wavelength=WAVELENGTH,
+            options=ThermalOptions(precision="fast", degree=degree),
+        )
+        for degree in (1, 2, 3)
+    }
+
+
+def test_degree_2_converges_closer_to_degree_3_than_degree_1(uniform_by_degree):
+    x = np.array([1.0, 2.0, 4.0, 8.0])
+    z = np.full_like(x, H_OX)
+    rise = {d: r.temperature(power=1.0).at(x, z) for d, r in uniform_by_degree.items()}
+    error_1 = np.max(np.abs(rise[1] / rise[3] - 1))
+    error_2 = np.max(np.abs(rise[2] / rise[3] - 1))
+    assert error_2 < 1e-3
+    assert error_2 < error_1 / 10
+
+
+def test_a_degree_2_temperature_map_peaks_and_plots(uniform_by_degree):
+    import matplotlib as mpl
+
+    mpl.use("Agg")
+    import matplotlib.pyplot as plt
+
+    tmap = uniform_by_degree[2].temperature(power=1.0)
+    assert tmap.values.size > tmap.mesh.mesh.p.shape[1]
+    assert tmap.peak("heater") == pytest.approx(tmap.peak())
+    assert tmap.peak("heater") == pytest.approx(
+        uniform_by_degree[3].temperature(power=1.0).peak("heater"), rel=1e-3
+    )
+    tmap.plot()
+    plt.close("all")
+
+
+def test_a_degree_2_step_response_matches_degree_1(canonical):
+    sim, _result, step = canonical
+    quadratic = sim.solve_transient(
+        power=20.0,
+        duration=60.0,
+        options=ThermalOptions(precision="fast", degree=2),
+    )
+    assert quadratic.tau == pytest.approx(step.tau, rel=0.03)
+    assert quadratic.phase[-1] == pytest.approx(step.phase[-1], rel=0.02)
+
+
+def test_options_reject_an_unsupported_degree():
+    with pytest.raises(ValueError, match="degree"):
+        ThermalOptions(degree=4)
+
+
 # --------------------------------------------------------------- transient
 
 

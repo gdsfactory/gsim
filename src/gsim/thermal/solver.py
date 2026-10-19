@@ -8,8 +8,8 @@ arrays in SI units, and named boundary facet groups
 Physics (v1, 2D cross-section of an infinitely long heater):
 
 - The unknown is the temperature **rise** dT above ambient (K), solved
-  with P1 Lagrange elements; there is no absolute temperature in the
-  linear problem.
+  with Lagrange elements of degree 2 (default), 1 or 3; there is no
+  absolute temperature in the linear problem.
 - ``-div(k grad dT) = q`` with dT = 0 on the heat-sink facets (Dirichlet),
   ``-k d(dT)/dn = h dT`` on convective facets (Robin) and adiabatic
   everywhere else. The transient adds ``rho*c_p d(dT)/dt``.
@@ -23,6 +23,12 @@ are in µs. Internally the weak form is assembled in a µm-consistent
 system — k in W/(µm·K), q in W/µm³, h in W/(µm²·K), rho*c_p in J/(µm³·K),
 time in s — so dT comes out in K. That conversion happens once, in
 :class:`HeatOperator`, and nowhere else.
+
+A solved dT is a vector of degrees of freedom (DOFs): the value at every
+mesh vertex, in ``mesh.p`` order, then -- for degree 2 and 3 -- the values
+at the extra Lagrange points on edges and inside triangles, in
+scikit-fem's order. Its length fixes the degree on a given mesh
+(:func:`lagrange_degree`), so a field carries its own degree.
 
 scikit-fem is imported lazily so ``import gsim.thermal`` works without
 it; the solve paths raise an ``ImportError`` naming the extra.
@@ -49,6 +55,9 @@ _Q_SI_TO_UM = 1e-18  # W/m³ -> W/µm³
 _H_SI_TO_UM = 1e-12  # W/(m²·K) -> W/(µm²·K)
 _RHOCP_SI_TO_UM = 1e-18  # J/(m³·K) -> J/(µm³·K)
 
+LAGRANGE_DEGREES: tuple[int, ...] = (1, 2, 3)
+"""Element degrees the heat solve supports."""
+
 
 def _skfem() -> Any:
     """Import scikit-fem, naming the optional extra when it is missing."""
@@ -61,6 +70,128 @@ def _skfem() -> Any:
             "(or: pip install scikit-fem)."
         ),
     )
+
+
+def _lagrange_element(degree: int) -> Any:
+    """The scikit-fem triangle Lagrange element of one degree."""
+    if degree not in LAGRANGE_DEGREES:
+        raise ValueError(f"degree must be one of {LAGRANGE_DEGREES}, got {degree!r}")
+    skfem = _skfem()
+    return {
+        1: skfem.ElementTriP1,
+        2: skfem.ElementTriP2,
+        3: skfem.ElementTriP3,
+    }[degree]()
+
+
+def dof_count(mesh: MeshTri, degree: int) -> int:
+    """Number of DOFs of a Lagrange field of one degree on a triangle mesh.
+
+    Args:
+        mesh: Triangle mesh.
+        degree: Element degree, one of :data:`LAGRANGE_DEGREES`.
+
+    Returns:
+        ``n_vertices`` for degree 1, plus one per edge for degree 2, plus
+        two per edge and one per triangle for degree 3.
+
+    Raises:
+        ValueError: On an unsupported degree.
+    """
+    if degree not in LAGRANGE_DEGREES:
+        raise ValueError(f"degree must be one of {LAGRANGE_DEGREES}, got {degree!r}")
+    n_vertices = int(mesh.p.shape[1])
+    n_edges = int(mesh.facets.shape[1])
+    n_triangles = int(mesh.t.shape[1])
+    return n_vertices + (degree - 1) * n_edges + (degree == 3) * n_triangles
+
+
+def lagrange_degree(mesh: MeshTri, n_dofs: int) -> int:
+    """The element degree of a field with ``n_dofs`` values on ``mesh``.
+
+    Args:
+        mesh: The mesh the field was solved on.
+        n_dofs: Length of the field's DOF vector.
+
+    Returns:
+        The degree, one of :data:`LAGRANGE_DEGREES`.
+
+    Raises:
+        ValueError: When no supported degree has that many DOFs.
+    """
+    for degree in LAGRANGE_DEGREES:
+        if dof_count(mesh, degree) == n_dofs:
+            return degree
+    expected = {d: dof_count(mesh, d) for d in LAGRANGE_DEGREES}
+    raise ValueError(
+        f"a field of {n_dofs} values matches no Lagrange degree on this mesh "
+        f"(DOFs by degree: {expected})"
+    )
+
+
+def element_dofs(mesh: MeshTri, degree: int) -> NDArray[np.int64]:
+    """Global DOF indices of every triangle, ``(n_local, n_elements)``.
+
+    Rows follow the element's local basis functions: the three vertices
+    first, then edge and interior points.
+
+    Args:
+        mesh: Triangle mesh.
+        degree: Element degree, one of :data:`LAGRANGE_DEGREES`.
+
+    Returns:
+        The DOF index of every local basis function of every triangle.
+    """
+    from skfem.assembly import Dofs
+
+    dofs = Dofs(mesh, _lagrange_element(degree))
+    return np.asarray(dofs.element_dofs, dtype=np.int64)
+
+
+def shape_values(
+    degree: int, reference_points: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Local Lagrange basis functions at points of the reference triangle.
+
+    Args:
+        degree: Element degree, one of :data:`LAGRANGE_DEGREES`.
+        reference_points: ``(2, N)`` points in the reference triangle
+            with vertices (0, 0), (1, 0), (0, 1) -- the second and third
+            barycentric coordinates of a physical point.
+
+    Returns:
+        ``(n_local, N)`` values, rows in the order of :func:`element_dofs`.
+    """
+    element = _lagrange_element(degree)
+    ref = np.asarray(reference_points, dtype=np.float64)
+    return np.stack(
+        [element.lbasis(ref, i)[0] for i in range(element.doflocs.shape[0])]
+    )
+
+
+def piecewise_linear(
+    mesh: MeshTri, values: ArrayLike
+) -> tuple[MeshTri, NDArray[np.float64]]:
+    """A Lagrange field as vertex values on a refined mesh, for plotting.
+
+    Degree 1 comes back as is; degree p is sampled on the mesh refined
+    p - 1 times, which places a vertex on every Lagrange point.
+
+    Args:
+        mesh: The mesh the field was solved on.
+        values: The field's DOF vector; its length gives the degree.
+
+    Returns:
+        The (refined) mesh and one value per its vertex.
+    """
+    field = np.asarray(values, dtype=np.float64)
+    degree = lagrange_degree(mesh, field.size)
+    if degree == 1:
+        return mesh, field
+    skfem = _skfem()
+    basis = skfem.Basis(mesh, _lagrange_element(degree))
+    refined, refined_values = basis.refinterp(field, nrefs=degree - 1)
+    return refined, np.asarray(refined_values, dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -247,7 +378,7 @@ def _facets_of(
 class HeatOperator:
     """Factorised steady heat operator, reusable across many sources.
 
-    Assembles ``-div(k grad dT)`` with P1 Lagrange elements on a µm mesh,
+    Assembles ``-div(k grad dT)`` with Lagrange elements on a µm mesh,
     dT = 0 on the ``sink`` facets (eliminated), a Robin term ``h dT``
     on each ``convective`` group and adiabatic facets everywhere else,
     then factorises it once, on the first :meth:`solve`, with
@@ -263,12 +394,16 @@ class HeatOperator:
         sink: Facet group name(s) held at dT = 0 (heat sink).
         convective: Facet group name -> heat-transfer coefficient h
             (W/(m²·K), >= 0) of a Robin condition towards ambient.
+        degree: Lagrange element degree: 1 (linear), 2 (default) or 3.
+            Higher degrees converge faster with mesh size where the
+            field is smooth, at more DOFs per triangle.
 
     Raises:
         ValueError: On a shape mismatch, a non-positive or non-finite
             conductivity, an unknown or out-of-range facet group, a
-            negative h, or when there is no heat path to ambient (no
-            sink facets and no positive h), which leaves dT undefined.
+            negative h, an unsupported degree, or when there is no heat
+            path to ambient (no sink facets and no positive h), which
+            leaves dT undefined.
     """
 
     def __init__(
@@ -279,15 +414,17 @@ class HeatOperator:
         boundary_facets: Mapping[str, ArrayLike],
         sink: str | Sequence[str] = "bottom",
         convective: Mapping[str, float] | None = None,
+        degree: int = 2,
     ) -> None:
         """Assemble the operator; see the class docstring for arguments."""
         skfem = _skfem()
+        element = _lagrange_element(degree)
 
         if mesh.t.shape[0] != 3 or mesh.p.shape[0] != 2:
             raise ValueError("mesh must be a 2D triangle mesh (skfem.MeshTri)")
         self.mesh = mesh
+        self.degree = degree
         self.n_elements = int(mesh.t.shape[1])
-        self.n_nodes = int(mesh.p.shape[1])
         k = _element_array(
             "conductivity_W_per_mK", conductivity_W_per_mK, self.n_elements
         ).astype(float)
@@ -317,8 +454,8 @@ class HeatOperator:
                 "convective group with h > 0, otherwise the steady dT is undefined"
             )
 
-        p1 = skfem.ElementTriP1()
-        self._basis = skfem.Basis(mesh, p1)
+        self._basis = skfem.Basis(mesh, element)
+        self.n_dofs = int(self._basis.N)
         p0_basis = self._basis.with_element(skfem.ElementTriP0())
 
         @skfem.BilinearForm
@@ -330,7 +467,7 @@ class HeatOperator:
             return w.c * u * v
 
         @skfem.BilinearForm
-        def _p0_to_p1(u, v, _):
+        def _p0_to_dofs(u, v, _):
             return u * v
 
         self._mass_form = _mass
@@ -340,32 +477,33 @@ class HeatOperator:
         )
         for facets, h in robin.values():
             if h > 0 and facets.size:
-                fbasis = skfem.FacetBasis(mesh, p1, facets=facets)
+                fbasis = skfem.FacetBasis(mesh, element, facets=facets)
                 stiffness = stiffness + _mass.assemble(fbasis, c=h * _H_SI_TO_UM)
         self.stiffness = stiffness.tocsr()
-        # Maps per-element q (W/µm³) to the P1 load vector: integral of q phi_j dA.
-        self._load = skfem.asm(_p0_to_p1, p0_basis, self._basis).tocsr()
+        # Maps per-element q (W/µm³) to the load vector: integral of q phi_j dA.
+        self._load = skfem.asm(_p0_to_dofs, p0_basis, self._basis).tocsr()
 
-        # P1 dofs are the mesh vertices, so the sink nodes are the facet ends.
-        self.sink_nodes = np.unique(mesh.facets[:, sink_idx].ravel())
-        free = np.ones(self.n_nodes, bool)
-        free[self.sink_nodes] = False
-        self.free_nodes = np.flatnonzero(free)
+        # Every DOF on a sink facet: its end vertices and, for degree > 1,
+        # the Lagrange points along it.
+        self.sink_dofs = np.unique(self._basis.get_dofs(sink_idx).all())
+        free = np.ones(self.n_dofs, bool)
+        free[self.sink_dofs] = False
+        self.free_dofs = np.flatnonzero(free)
         self._lu: Any = None
 
     def restrict(self, matrix: Any) -> Any:
-        """Restrict a nodal matrix to the free (non-sink) nodes.
+        """Restrict a DOF matrix to the free (non-sink) DOFs.
 
         Args:
-            matrix: Sparse ``(n_nodes, n_nodes)`` matrix.
+            matrix: Sparse ``(n_dofs, n_dofs)`` matrix.
 
         Returns:
             The free-free block as CSC, ready to factorise.
         """
-        return matrix[self.free_nodes][:, self.free_nodes].tocsc()
+        return matrix[self.free_dofs][:, self.free_dofs].tocsc()
 
     def mass_matrix(self, heat_capacity_J_per_m3K: ArrayLike) -> Any:
-        """Assemble the consistent P1 heat-capacity matrix.
+        """Assemble the consistent heat-capacity matrix.
 
         The matrix is ``integral of rho*c_p phi_i phi_j``.
 
@@ -389,13 +527,13 @@ class HeatOperator:
         ).tocsr()
 
     def load_vector(self, heat_W_per_m3: ArrayLike) -> NDArray[np.float64]:
-        """Assemble the nodal load ``integral of q phi_j`` (W/µm) of a per-element q.
+        """Assemble the load ``integral of q phi_j`` (W/µm) of a per-element q.
 
         Args:
             heat_W_per_m3: Volumetric heat per element (W/m³).
 
         Returns:
-            The P1 load vector in the internal µm units.
+            The load vector, one entry per DOF, in the internal µm units.
 
         Raises:
             ValueError: On a shape mismatch or non-finite values.
@@ -414,14 +552,15 @@ class HeatOperator:
                 :attr:`JouleSource.heat_density`.
 
         Returns:
-            Nodal dT (K), aligned with the columns of ``mesh.p``; exactly
-            zero on the sink nodes.
+            dT (K) at every DOF; the first ``mesh.p.shape[1]`` are the
+            vertex values, aligned with the columns of ``mesh.p``.
+            Exactly zero on the sink DOFs.
         """
         load = self.load_vector(heat_W_per_m3)
         if self._lu is None:
             self._lu = _factorise(self.restrict(self.stiffness))
-        rise = np.zeros(self.n_nodes)
-        rise[self.free_nodes] = self._lu.solve(load[self.free_nodes])
+        rise = np.zeros(self.n_dofs)
+        rise[self.free_dofs] = self._lu.solve(load[self.free_dofs])
         return rise
 
 
@@ -433,6 +572,7 @@ def solve_steady(
     boundary_facets: Mapping[str, ArrayLike],
     sink: str | Sequence[str] = "bottom",
     convective: Mapping[str, float] | None = None,
+    degree: int = 2,
 ) -> NDArray[np.float64]:
     """Steady temperature rise of a 2D cross-section (one-shot).
 
@@ -446,9 +586,11 @@ def solve_steady(
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0.
         convective: Facet group name -> h (W/(m²·K)) of a Robin condition.
+        degree: Lagrange element degree: 1, 2 (default) or 3.
 
     Returns:
-        Nodal dT (K), aligned with the columns of ``mesh.p``.
+        dT (K) at every DOF; the vertex values come first, aligned with
+        the columns of ``mesh.p``.
     """
     operator = HeatOperator(
         mesh,
@@ -456,6 +598,7 @@ def solve_steady(
         boundary_facets=boundary_facets,
         sink=sink,
         convective=convective,
+        degree=degree,
     )
     return operator.solve(heat_W_per_m3)
 
@@ -470,7 +613,7 @@ class TransientHistory:
     Attributes:
         time_us: Sample times (µs), ``steps + 1`` values from 0 to the
             duration; index 0 is the initial state dT = 0.
-        values: dT history (K): ``(steps + 1, n_nodes)`` nodal values
+        values: dT history (K): ``(steps + 1, n_dofs)`` DOF values
             when no ``sample`` was given, else the sampled values
             stacked along the first axis.
     """
@@ -492,6 +635,7 @@ def solve_transient(
     sink: str | Sequence[str] = "bottom",
     convective: Mapping[str, float] | None = None,
     sample: Callable[[NDArray[np.float64]], ArrayLike] | ArrayLike | None = None,
+    degree: int = 2,
 ) -> TransientHistory:
     """Temperature-rise response to a heat source stepped on at t = 0.
 
@@ -517,10 +661,11 @@ def solve_transient(
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0.
         convective: Facet group name -> h (W/(m²·K)) of a Robin condition.
-        sample: What to record per step. ``None`` keeps the full nodal
-            field (memory ``(steps + 1) x n_nodes``); an array of nodal
+        sample: What to record per step. ``None`` keeps the full DOF
+            vector (memory ``(steps + 1) x n_dofs``); an array of DOF
             weights records ``weights @ dT``; a callable records
             ``sample(dT)``.
+        degree: Lagrange element degree: 1, 2 (default) or 3.
 
     Returns:
         The sample times and the recorded dT history.
@@ -542,10 +687,11 @@ def solve_transient(
         boundary_facets=boundary_facets,
         sink=sink,
         convective=convective,
+        degree=degree,
     )
     mass = operator.mass_matrix(heat_capacity_J_per_m3K)
-    load = operator.load_vector(heat_W_per_m3)[operator.free_nodes]
-    record = _sampler(sample, operator.n_nodes)
+    load = operator.load_vector(heat_W_per_m3)[operator.free_dofs]
+    record = _sampler(sample, operator.n_dofs)
 
     dt_s = duration_us * 1e-6 / steps
     mass_free = operator.restrict(mass) / dt_s
@@ -553,12 +699,12 @@ def solve_transient(
     lu = _factorise((mass_free + theta * stiff_free).tocsc())
     explicit = (mass_free - (1.0 - theta) * stiff_free).tocsr()
 
-    rise = np.zeros(operator.n_nodes)
-    free = np.zeros(operator.free_nodes.size)
+    rise = np.zeros(operator.n_dofs)
+    free = np.zeros(operator.free_dofs.size)
     history = [record(rise)]
     for _ in range(int(steps)):
         free = lu.solve(explicit @ free + load)
-        rise[operator.free_nodes] = free
+        rise[operator.free_dofs] = free
         history.append(record(rise))
     return TransientHistory(
         time_us=np.linspace(0.0, duration_us, int(steps) + 1, dtype=np.float64),
@@ -568,7 +714,7 @@ def solve_transient(
 
 def _sampler(
     sample: Callable[[NDArray[np.float64]], ArrayLike] | ArrayLike | None,
-    n_nodes: int,
+    n_dofs: int,
 ) -> Callable[[NDArray[np.float64]], Any]:
     """Build the per-step recorder for ``solve_transient``'s ``sample``."""
     if sample is None:
@@ -576,9 +722,9 @@ def _sampler(
     if callable(sample):
         return lambda rise: np.asarray(sample(rise), dtype=float)
     weights = np.asarray(sample, dtype=float)
-    if weights.shape != (n_nodes,):
+    if weights.shape != (n_dofs,):
         raise ValueError(
-            f"sample weights must have shape ({n_nodes},) (one per mesh node), "
+            f"sample weights must have shape ({n_dofs},) (one per DOF), "
             f"got {weights.shape}"
         )
     return lambda rise: float(weights @ rise)

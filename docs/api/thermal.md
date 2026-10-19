@@ -87,7 +87,9 @@ to conduction into the substrate, which is why adiabatic is the default.
 
 - [`ThermalOptions`][gsim.thermal.ThermalOptions]: `precision="fast" | "default" | "accurate"` scales the mesh and
   sets the number of transient time steps. `max_size` caps the element size per region, and `time_steps` overrides the
-  step count.
+  step count. `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh,
+  degree 2 cuts the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The
+  optical Mode solve does not depend on it.
 
 ## Results
 
@@ -124,3 +126,7 @@ These lower-level building blocks are public for custom pipelines. They work on 
 - [`thermo_optic_permittivity`][gsim.thermal.thermo_optic_permittivity],
   [`solve_thermo_optic_shift`][gsim.thermal.solve_thermo_optic_shift], [`ModeShift`][gsim.thermal.ModeShift] and
   [`sample_temperature`][gsim.thermal.sample_temperature]
+
+A solved temperature rise is a vector of degrees of freedom (DOFs): the mesh vertices first, in `mesh.p` order, then the
+edge and interior points of a degree 2 or 3 solve. `sample_temperature` reads it at any point, and works out the
+degree from the vector's length.

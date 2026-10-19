@@ -5,8 +5,9 @@ The optical step of a thermal phase-shifter solve, as a pure core:
 - :func:`thermo_optic_permittivity` maps a per-element rise dT to the
   permittivity ``eps = (n0 + dn/dT * dT)^2`` (complex ``n0`` kept, so
   absorption is carried through unchanged);
-- :func:`sample_temperature` reads the P1 rise of the thermal solve at
-  arbitrary points of its own mesh -- exactly, by the P1 interpolant --
+- :func:`sample_temperature` reads the rise of the thermal solve at
+  arbitrary points of its own mesh -- exactly, by its Lagrange
+  interpolant, whatever the element degree --
   and :func:`element_centroids` gives the points an optical Window asks
   for;
 - :func:`solve_thermo_optic_shift` solves the optical Window's Mode with
@@ -31,6 +32,7 @@ from numpy.typing import ArrayLike, NDArray
 from gsim.common.modes import propagating_modes
 from gsim.femwell.adapter import boundary_field_ratio
 from gsim.femwell.runtime import require_femwell, require_skfem
+from gsim.thermal.solver import element_dofs, lagrange_degree, shape_values
 
 if TYPE_CHECKING:
     from gsim.thermal.mesh import CrossSectionMesh
@@ -39,6 +41,7 @@ __all__ = [
     "MAX_BOUNDARY_RATIO",
     "ModeShift",
     "element_centroids",
+    "interpolation_weights",
     "sample_temperature",
     "solve_thermo_optic_shift",
     "thermo_optic_permittivity",
@@ -105,19 +108,20 @@ def element_centroids(mesh: CrossSectionMesh) -> NDArray[np.float64]:
 
 def sample_temperature(
     thermal_mesh: CrossSectionMesh,
-    nodal_rise: ArrayLike,
+    rise: ArrayLike,
     points: ArrayLike,
 ) -> NDArray[np.float64]:
     """Temperature rise of a thermal solve at arbitrary points of its mesh.
 
-    The value is the P1 interpolant the thermal solve is made of, read
-    exactly: the containing triangle's barycentric weights on its three
-    nodal values. Nothing is extrapolated -- the thermal Window must
-    contain every point asked for.
+    The value is the Lagrange interpolant the thermal solve is made of,
+    read exactly: the containing triangle's basis functions on its DOF
+    values. Nothing is extrapolated -- the thermal Window must contain
+    every point asked for.
 
     Args:
         thermal_mesh: The mesh the thermal solve ran on.
-        nodal_rise: Temperature rise at every mesh node (K).
+        rise: Temperature rise at every DOF (K), as the solve returned
+            it; its length gives the element degree.
         points: ``(2, N)`` coordinates in um, in the mesh's
             ``(in-plane, z)`` axes.
 
@@ -125,22 +129,46 @@ def sample_temperature(
         The rise at every point (K).
 
     Raises:
-        ValueError: When ``nodal_rise`` does not have one value per node,
+        ValueError: When ``rise`` is not a DOF vector of the mesh,
             ``points`` is not ``(2, N)``, or a point lies outside the
             thermal mesh (the first such point is named).
     """
+    values = np.asarray(rise, dtype=np.float64)
+    if values.ndim != 1:
+        raise ValueError(f"rise must be a 1D DOF vector, got shape {values.shape}.")
+    dofs, phi = interpolation_weights(thermal_mesh, values.size, points)
+    return np.asarray((phi * values[dofs]).sum(axis=0), dtype=np.float64)
+
+
+def interpolation_weights(
+    thermal_mesh: CrossSectionMesh, n_dofs: int, points: ArrayLike
+) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+    """DOFs and basis-function weights that read a field at points.
+
+    A field ``u`` of ``n_dofs`` values on the mesh is, at point ``j``,
+    ``sum_i phi[i, j] * u[dofs[i, j]]``: linear in the DOFs whatever the
+    element degree.
+
+    Args:
+        thermal_mesh: The mesh the field lives on.
+        n_dofs: Length of the field's DOF vector; gives the degree.
+        points: ``(2, N)`` coordinates in um.
+
+    Returns:
+        ``dofs`` and ``phi``, both ``(n_local, N)``.
+
+    Raises:
+        ValueError: When ``n_dofs`` matches no element degree on the
+            mesh, ``points`` is not ``(2, N)``, or a point lies outside
+            the mesh (the first such point is named).
+    """
     m = thermal_mesh.mesh
-    rise = np.asarray(nodal_rise, dtype=np.float64)
-    if rise.shape != (m.p.shape[1],):
-        raise ValueError(
-            f"nodal_rise must have one value per mesh node ({m.p.shape[1]}), "
-            f"got shape {rise.shape}."
-        )
+    degree = lagrange_degree(m, n_dofs)
     pts = np.asarray(points, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[0] != 2:
         raise ValueError(f"points must have shape (2, N), got {pts.shape}.")
 
-    elements, weights = _locate(m.p, m.t, pts)
+    elements, bary = _locate(m.p, m.t, pts)
     missing = np.flatnonzero(elements < 0)
     if missing.size:
         x, z = pts[:, missing[0]]
@@ -150,8 +178,9 @@ def sample_temperature(
             f"{missing.size} of {pts.shape[1]} points are outside. The "
             "thermal Window must contain every optical Window."
         )
-    nodes = m.t[:, elements]
-    return np.asarray((weights * rise[nodes]).sum(axis=0), dtype=np.float64)
+    # Reference coordinates are the barycentrics of vertices 1 and 2.
+    phi = shape_values(degree, bary[1:])
+    return element_dofs(m, degree)[:, elements], phi
 
 
 def _barycentric(

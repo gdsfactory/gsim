@@ -35,6 +35,9 @@ from gsim.thermal.solver import (
     _crossing_time,
     _normalised_step,
     drive_power_per_length,
+    element_dofs,
+    lagrange_degree,
+    piecewise_linear,
 )
 
 if TYPE_CHECKING:
@@ -85,12 +88,15 @@ def _in_plane_axis(plane: str) -> str:
 class TemperatureMap:
     """Temperature rise on the thermal mesh at one heater power.
 
-    A generic scalar field: one value per mesh node, read anywhere in the
-    thermal Window by its P1 interpolant.
+    A generic scalar field: one value per degree of freedom (DOF) of the
+    heat solve, read anywhere in the thermal Window by its Lagrange
+    interpolant.
 
     Attributes:
         mesh: The meshed thermal Cross-section (coordinates in um).
-        values: Temperature rise above ambient at every mesh node (K).
+        values: Temperature rise above ambient at every DOF (K): the
+            mesh vertices first, in ``mesh.mesh.p`` order, then the
+            edge and interior points of a degree 2 or 3 solve.
         power: Total heater power the field belongs to (mW).
     """
 
@@ -143,7 +149,7 @@ class TemperatureMap:
                 the absolute peak temperature, rise plus ambient.
 
         Returns:
-            The largest nodal rise (or temperature) in K.
+            The largest DOF value of the rise (or temperature) in K.
 
         Raises:
             ValueError: When the mesh has no Region of that name, or
@@ -152,8 +158,10 @@ class TemperatureMap:
         offset = _absolute(ambient)
         if layer is None:
             return float(self.values.max()) + offset
-        nodes = np.unique(self.mesh.mesh.t[:, self.mesh.region_mask(layer)])
-        return float(self.values[nodes].max()) + offset
+        m = self.mesh.mesh
+        degree = lagrange_degree(m, self.values.size)
+        dofs = np.unique(element_dofs(m, degree)[:, self.mesh.region_mask(layer)])
+        return float(self.values[dofs].max()) + offset
 
     def plot(
         self,
@@ -181,9 +189,9 @@ class TemperatureMap:
 
         if ax is None:
             _, ax = plt.subplots()
-        m = self.mesh.mesh
+        m, values = piecewise_linear(self.mesh.mesh, self.values)
         triangulation = Triangulation(m.p[0], m.p[1], m.t.T)
-        image = ax.tripcolor(triangulation, self.values, shading="gouraud", cmap=cmap)
+        image = ax.tripcolor(triangulation, values, shading="gouraud", cmap=cmap)
         ax.figure.colorbar(image, ax=ax, label="Temperature rise (K)")
         ax.set_xlabel(f"{_in_plane_axis(self.mesh.plane)} (µm)")
         ax.set_ylabel("z (µm)")
@@ -412,7 +420,7 @@ class ThermalResult:
     heater_layers: tuple[str, ...] = field(repr=False)
     mesh: CrossSectionMesh = field(repr=False)
     rise_per_power_per_length: NDArray[np.float64] = field(repr=False)
-    """Nodal rise per heater power per length (K per W/m)."""
+    """DOF vector of the rise per heater power per length (K per W/m)."""
 
     def temperature(self, power: float) -> TemperatureMap:
         """Temperature rise over the Cross-section at one heater power.

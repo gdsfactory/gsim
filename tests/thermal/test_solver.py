@@ -109,8 +109,14 @@ def _centroid_y(mesh):
     return mesh.p[1, mesh.t].mean(axis=0)
 
 
+def _vertex_values(mesh, temperature):
+    """The vertex DOFs of a solved rise, which come first, in ``mesh.p`` order."""
+    return temperature[: mesh.p.shape[1]]
+
+
 def _top_value(mesh, temperature, height_um):
-    return float(np.mean(temperature[np.isclose(mesh.p[1], height_um)]))
+    vertex = _vertex_values(mesh, temperature)
+    return float(np.mean(vertex[np.isclose(mesh.p[1], height_um)]))
 
 
 def test_two_layer_slab_matches_series_thermal_resistance():
@@ -129,7 +135,7 @@ def test_two_layer_slab_matches_series_thermal_resistance():
     expected_top = q * t2 * um * t1 * um / k1 + q * (t2 * um) ** 2 / (2 * k2)
     assert expected_top == pytest.approx(18.571429, rel=1e-6)  # 12/1.4 + 10 K
     assert _top_value(mesh, dT, t1 + t2) == pytest.approx(expected_top, rel=5e-3)
-    assert np.allclose(dT[np.isclose(mesh.p[1], 0.0)], 0.0)
+    assert np.allclose(_vertex_values(mesh, dT)[np.isclose(mesh.p[1], 0.0)], 0.0)
 
 
 def test_convective_top_matches_1d_robin_analytic():
@@ -166,15 +172,13 @@ def test_convective_only_without_sink():
         sink=(),
         convective={"bottom": 1e5},
     )
-    assert float(np.mean(dT[np.isclose(mesh.p[1], 0.0)])) == pytest.approx(
-        1.0, rel=5e-3
-    )
+    assert _top_value(mesh, dT, 0.0) == pytest.approx(1.0, rel=5e-3)
     assert _top_value(mesh, dT, 10.0) == pytest.approx(1.5, rel=5e-3)
 
 
 def test_operator_is_linear_in_power_and_reusable():
     pytest.importorskip("skfem")
-    from gsim.thermal.solver import HeatOperator, solve_steady
+    from gsim.thermal.solver import HeatOperator, dof_count, solve_steady
 
     mesh, facets = _slab(4.0, 4.0, 8, 8)
     n = mesh.t.shape[1]
@@ -184,7 +188,7 @@ def test_operator_is_linear_in_power_and_reusable():
     q = np.where((yc > 3.0) & (np.abs(xc - 2.0) < 1.0), 1e13, 0.0)
     op = HeatOperator(mesh, k, boundary_facets=facets, convective={"top": 10.0})
     one = op.solve(q)
-    assert one.shape == (mesh.p.shape[1],)
+    assert one.shape == (dof_count(mesh, 2),)
     assert one.max() > 0
     np.testing.assert_allclose(op.solve(3.0 * q), 3.0 * one, rtol=1e-12)
     np.testing.assert_allclose(op.solve(np.zeros(n)), 0.0)
@@ -236,9 +240,14 @@ _TAU1_US = 46.318
 
 
 def _slab_problem():
+    from gsim.thermal.solver import dof_count
+
     mesh, facets = _slab(1.0, _L, 1, 40)
     n = mesh.t.shape[1]
-    top_weights = np.isclose(mesh.p[1], _L) / np.sum(np.isclose(mesh.p[1], _L))
+    # Mean of the top vertices, as weights on the default (degree 2) DOFs.
+    top = np.isclose(mesh.p[1], _L)
+    top_weights = np.zeros(dof_count(mesh, 2))
+    top_weights[: mesh.p.shape[1]] = top / top.sum()
     return mesh, facets, np.full(n, _K), np.full(n, _RHOCP), np.full(n, _Q), top_weights
 
 
@@ -263,7 +272,7 @@ def test_transient_converges_to_steady_state():
     assert hist.time_us.shape == (401,)
     assert hist.time_us[0] == 0.0
     assert hist.time_us[-1] == pytest.approx(10 * _TAU1_US)
-    assert hist.values.shape == (401, mesh.p.shape[1])
+    assert hist.values.shape == (401, steady.size)
     np.testing.assert_allclose(hist.values[0], 0.0)
     np.testing.assert_allclose(hist.values[-1], steady, rtol=5e-3, atol=1e-6)
 
@@ -345,4 +354,168 @@ def test_transient_rejects_bad_inputs(kwargs, match):
             theta=kwargs.get("theta", 1.0),
             boundary_facets=facets,
             sample=kwargs.get("sample"),
+        )
+
+
+# --- Element degree -----------------------------------------------------------
+
+
+def _window(mesh):
+    """A stand-in for a CrossSectionMesh around a bare skfem mesh."""
+    from types import SimpleNamespace
+
+    (x0, z0), (x1, z1) = mesh.p.min(axis=1), mesh.p.max(axis=1)
+    return SimpleNamespace(mesh=mesh, window=(x0, x1), z_range=(z0, z1))
+
+
+def _two_layer_exact(y_um, t1, t2, k1, k2, q):
+    """Exact rise of the two-layer slab of the series-resistance test (K)."""
+    um = 1e-6
+    flux = q * t2 * um
+    lower = flux * y_um * um / k1
+    s = np.clip(y_um - t1, 0.0, None) * um
+    upper = flux * t1 * um / k1 + (flux * s - q * s**2 / 2) / k2
+    return np.where(y_um <= t1, lower, upper)
+
+
+@pytest.mark.parametrize("degree", [2, 3])
+def test_degree_2_and_3_solve_the_piecewise_quadratic_slab_exactly(degree):
+    pytest.importorskip("skfem")
+    from gsim.thermal.optical import sample_temperature
+    from gsim.thermal.solver import solve_steady
+
+    # The rise is quadratic in each layer and the mesh follows the interface,
+    # so a quadratic element is exact on four rows of triangles.
+    t1, t2, k1, k2, q = 6.0, 2.0, 1.4, 0.2, 1e12
+    mesh, facets = _slab(2.0, t1 + t2, 1, 4)
+    yc = _centroid_y(mesh)
+    dT = solve_steady(
+        mesh,
+        np.where(yc < t1, k1, k2),
+        np.where(yc > t1, q, 0.0),
+        boundary_facets=facets,
+        degree=degree,
+    )
+    rng = np.random.default_rng(1)
+    points = np.vstack([rng.uniform(0, 2, 50), rng.uniform(0, t1 + t2, 50)])
+
+    values = sample_temperature(_window(mesh), dT, points)
+
+    exact = _two_layer_exact(points[1], t1, t2, k1, k2, q)
+    np.testing.assert_allclose(values, exact, rtol=1e-9, atol=1e-12)
+
+
+def test_degree_1_is_not_exact_on_the_same_slab():
+    pytest.importorskip("skfem")
+    from gsim.thermal.optical import sample_temperature
+    from gsim.thermal.solver import solve_steady
+
+    t1, t2, k1, k2, q = 6.0, 2.0, 1.4, 0.2, 1e12
+    mesh, facets = _slab(2.0, t1 + t2, 1, 4)
+    yc = _centroid_y(mesh)
+    dT = solve_steady(
+        mesh,
+        np.where(yc < t1, k1, k2),
+        np.where(yc > t1, q, 0.0),
+        boundary_facets=facets,
+        degree=1,
+    )
+    mid_top = np.array([[1.0], [7.0]])
+    value = sample_temperature(_window(mesh), dT, mid_top)[0]
+    assert abs(value / _two_layer_exact(7.0, t1, t2, k1, k2, q) - 1) > 1e-3
+
+
+@pytest.mark.parametrize("degree", [1, 2, 3])
+def test_the_interpolant_reproduces_polynomials_of_its_degree(degree):
+    pytest.importorskip("skfem")
+    from scipy.spatial import Delaunay
+    from skfem import Basis, MeshTri
+
+    from gsim.thermal.optical import sample_temperature
+    from gsim.thermal.solver import _lagrange_element
+
+    # An unstructured mesh, so edge orientations vary (degree 3 has two
+    # Lagrange points per edge and depends on them).
+    rng = np.random.default_rng(2)
+    corners = np.array([[0, 3, 0, 3], [0, 0, 2, 2]], float)
+    p = np.hstack([corners, rng.uniform([[0.1], [0.1]], [[2.9], [1.9]], (2, 40))])
+    mesh = MeshTri(p, Delaunay(p.T).simplices.T)
+    basis = Basis(mesh, _lagrange_element(degree))
+
+    def poly(x, z):
+        return 1.0 + 0.5 * x - 2.0 * z + 0.3 * x**degree - 0.7 * x * z ** (degree - 1)
+
+    rise = poly(*basis.doflocs)
+    points = np.vstack([rng.uniform(0, 3, 300), rng.uniform(0, 2, 300)])
+
+    values = sample_temperature(_window(mesh), rise, points)
+
+    np.testing.assert_allclose(values, poly(*points), rtol=0, atol=1e-11)
+
+
+def test_dof_counts_identify_the_degree():
+    pytest.importorskip("skfem")
+    from gsim.thermal.solver import dof_count, lagrange_degree, solve_steady
+
+    mesh, facets = _slab(2.0, 2.0, 2, 2)
+    n = mesh.t.shape[1]
+    for degree in (1, 2, 3):
+        dT = solve_steady(
+            mesh, np.ones(n), np.ones(n), boundary_facets=facets, degree=degree
+        )
+        assert dT.shape == (dof_count(mesh, degree),)
+        assert lagrange_degree(mesh, dT.size) == degree
+    with pytest.raises(ValueError, match="matches no Lagrange degree"):
+        lagrange_degree(mesh, mesh.p.shape[1] + 1)
+    with pytest.raises(ValueError, match="degree"):
+        solve_steady(mesh, np.ones(n), np.ones(n), boundary_facets=facets, degree=4)
+
+
+@pytest.mark.parametrize("degree", [2, 3])
+def test_every_dof_on_the_sink_is_held_at_zero(degree):
+    pytest.importorskip("skfem")
+    from skfem import Basis
+
+    from gsim.thermal.solver import _lagrange_element, solve_steady
+
+    mesh, facets = _slab(2.0, 2.0, 2, 2)
+    n = mesh.t.shape[1]
+    dT = solve_steady(
+        mesh, np.ones(n), np.full(n, 1e12), boundary_facets=facets, degree=degree
+    )
+    on_sink = np.isclose(Basis(mesh, _lagrange_element(degree)).doflocs[1], 0.0)
+    assert on_sink.sum() == 2 * degree + 1
+    np.testing.assert_array_equal(dT[on_sink], 0.0)
+    assert np.all(dT[~on_sink] > 0)
+
+
+def test_degree_2_transient_converges_to_the_degree_2_steady_state():
+    pytest.importorskip("skfem")
+    from gsim.thermal.solver import solve_steady, solve_transient
+
+    mesh, facets, k, rc, q, _ = _slab_problem()
+    hist = solve_transient(
+        mesh,
+        k,
+        rc,
+        q,
+        duration_us=10 * _TAU1_US,
+        steps=400,
+        boundary_facets=facets,
+        degree=2,
+    )
+    steady = solve_steady(mesh, k, q, boundary_facets=facets, degree=2)
+    assert hist.values.shape == (401, steady.size)
+    np.testing.assert_allclose(hist.values[-1], steady, rtol=5e-3, atol=1e-6)
+    with pytest.raises(ValueError, match="one per DOF"):
+        solve_transient(
+            mesh,
+            k,
+            rc,
+            q,
+            duration_us=1.0,
+            steps=1,
+            boundary_facets=facets,
+            sample=np.ones(mesh.p.shape[1]),
+            degree=2,
         )

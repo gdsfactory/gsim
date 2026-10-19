@@ -52,8 +52,8 @@ from gsim.femwell.runtime import require_femwell, require_skfem
 from gsim.thermal.mesh import CrossSectionMesh, _drawn_rects, build_cross_section_mesh
 from gsim.thermal.optical import (
     ModeShift,
-    _locate,
     element_centroids,
+    interpolation_weights,
     sample_temperature,
     solve_thermo_optic_shift,
 )
@@ -63,6 +63,7 @@ from gsim.thermal.results import (
     power_per_length,
 )
 from gsim.thermal.solver import (
+    LAGRANGE_DEGREES,
     HeatOperator,
     JouleSource,
     joule_heat_density,
@@ -126,12 +127,17 @@ class ThermalOptions:
             the precision.
         theta: Time scheme of the transient: 1.0 backward Euler (robust
             for a step drive), 0.5 Crank-Nicolson.
+        degree: Lagrange element degree of the heat solve: 1 (linear),
+            2 (quadratic, default) or 3. A higher degree reaches a given
+            accuracy on a coarser mesh; the optical Mode solve is
+            unaffected.
     """
 
     precision: Literal["fast", "default", "accurate"] = "default"
     max_size: Mapping[str, float] | None = None
     time_steps: int | None = None
     theta: float = 1.0
+    degree: int = 2
 
     def __post_init__(self) -> None:
         """Check the knobs before any mesh is built."""
@@ -151,6 +157,10 @@ class ThermalOptions:
                 "theta must lie in [0.5, 1] (0.5 Crank-Nicolson, 1 backward "
                 f"Euler), got {self.theta}."
             )
+        if self.degree not in LAGRANGE_DEGREES:
+            raise ValueError(
+                f"degree must be one of {LAGRANGE_DEGREES}, got {self.degree!r}."
+            )
 
     @property
     def size_factor(self) -> float:
@@ -169,6 +179,7 @@ class ThermalOptions:
         return (
             self.precision,
             tuple(sorted((self.max_size or {}).items())),
+            self.degree,
         )
 
 
@@ -514,15 +525,18 @@ class ThermalSim(BaseModel):
         optical = self._optical(self._spec(shifter), thermal, result.wavelength, opts)
 
         weights = _first_order_weights(steady.shift.mode0, optical)
-        nodal = _nodal_weights(thermal.mesh, element_centroids(optical.mesh), weights)
+        n_dofs = thermal.unit_rise.size
+        shift_weights = _dof_weights(
+            thermal.mesh, n_dofs, element_centroids(optical.mesh), weights
+        )
         strips = self._strips()
         probes = [
-            _nodal_weights(
-                thermal.mesh, np.array([[c] for c in strips[n].centre]), [1.0]
+            _dof_weights(
+                thermal.mesh, n_dofs, np.array([[c] for c in strips[n].centre]), [1.0]
             )
             for n in strips
         ]
-        sampler = np.vstack([nodal, *probes])
+        sampler = np.vstack([shift_weights, *probes])
 
         drive = power_per_length(power, result.length)
         history = solve_transient(
@@ -537,8 +551,9 @@ class ThermalSim(BaseModel):
             sink="bottom",
             convective=thermal.convective,
             sample=lambda rise: sampler @ rise,
+            degree=opts.degree,
         )
-        first_order_slope = float(nodal @ thermal.unit_rise)
+        first_order_slope = float(shift_weights @ thermal.unit_rise)
         scale = steady.slope / first_order_slope
         phase = np.asarray(
             2.0
@@ -751,6 +766,7 @@ class ThermalSim(BaseModel):
             boundary_facets=mesh.boundary_facets,
             sink="bottom",
             convective=convective,
+            degree=opts.degree,
         )
         thermal = _Thermal(
             mesh=mesh,
@@ -1054,24 +1070,21 @@ def _element_areas(mesh: CrossSectionMesh) -> NDArray[np.float64]:
     return np.asarray(0.5 * np.abs(cross), dtype=np.float64)
 
 
-def _nodal_weights(
-    mesh: CrossSectionMesh, points: NDArray[np.float64], weights: Any
+def _dof_weights(
+    mesh: CrossSectionMesh,
+    n_dofs: int,
+    points: NDArray[np.float64],
+    weights: Any,
 ) -> NDArray[np.float64]:
-    """Nodal vector v with ``v @ rise == sum_i weights_i * rise(points_i)``.
+    """DOF vector v with ``v @ rise == sum_i weights_i * rise(points_i)``.
 
-    The P1 interpolant is linear in the nodal values, so a weighted sum of
-    point samples is one dot product with the mesh's nodal field.
+    The Lagrange interpolant is linear in the DOF values, so a weighted
+    sum of point samples is one dot product with the field's DOF vector.
     """
-    m = mesh.mesh
-    elements, bary = _locate(m.p, m.t, np.asarray(points, dtype=np.float64))
-    if np.any(elements < 0):
-        raise ValueError(
-            "A sample point lies outside the thermal Window; the thermal "
-            "Window must contain every optical Window."
-        )
-    nodal = np.zeros(m.p.shape[1])
-    np.add.at(nodal, m.t[:, elements], bary * np.asarray(weights, dtype=float))
-    return nodal
+    dofs, phi = interpolation_weights(mesh, n_dofs, points)
+    out = np.zeros(n_dofs)
+    np.add.at(out, dofs, phi * np.asarray(weights, dtype=float))
+    return out
 
 
 def _first_order_weights(mode0: Any, optical: _Optical) -> NDArray[np.float64]:

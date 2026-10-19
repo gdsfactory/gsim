@@ -115,6 +115,7 @@ def test_transient_matches_femwell_on_the_same_mesh(femwell_heater) -> None:
         boundary_facets={"bottom": mesh.boundaries["bottom"]},
         sink="bottom",
         sample=weights,
+        degree=1,  # femwell's thermal solvers are P1
     )
 
     np.testing.assert_allclose(history.values, femwell_core, rtol=0, atol=1e-9)
