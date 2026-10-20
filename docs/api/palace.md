@@ -423,7 +423,7 @@ parallel opposing edges reveal narrow traces and necks; spacing checks also
 include notches and holes within one connected conductor. Polygon bounding boxes
 provide a fallback for shapes without suitable opposing edges.
 
-Zero distances and distances below one layout database unit are ignored. Gap
+Zero distances and distances below two layout database units are ignored. Gap
 searches are limited to 500 um; cross-layer gaps and arbitrary tapered or curved
 widths are not measured. These limitations make the estimate useful for choosing
 an initial mesh, rather than establishing simulation accuracy. Compare results
