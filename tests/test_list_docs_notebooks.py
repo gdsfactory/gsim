@@ -15,6 +15,7 @@ from scripts.list_docs_notebooks import (
 
 EXPECTED_NOTEBOOKS = [
     "nbs/fdtd_mmi_gpdk.ipynb",
+    "nbs/fdtd_focusing_grating_coupler_gpdk.ipynb",
     "nbs/fdtd_directional_coupler.ipynb",
     "nbs/fdtd_waveguide_crossing.ipynb",
     "nbs/fdtd_broadband_directional_coupler.ipynb",

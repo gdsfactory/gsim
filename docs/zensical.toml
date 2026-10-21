@@ -4,6 +4,7 @@ nav = [
   { "Home" = "index.md" },
   { "Photonic FDTD" = [
     { "MMI Quickstart" = "nbs/fdtd_mmi_gpdk.md" },
+    { "3D Grating Coupler" = "nbs/fdtd_focusing_grating_coupler_gpdk.md" },
     { "Directional Coupler" = "nbs/fdtd_directional_coupler.md" },
     { "Waveguide Crossing" = "nbs/fdtd_waveguide_crossing.md" },
     { "Broadband Directional Coupler" = "nbs/fdtd_broadband_directional_coupler.md" },
