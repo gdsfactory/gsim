@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import meshio
+import numpy as np
 
 from gsim.fdtd.models import FDTDGeometryError, MeshManifest
 
@@ -38,6 +39,21 @@ def validate_mesh(mesh_path: Path, manifest: MeshManifest) -> None:
         )
 
     mesh = meshio.read(mesh_path, file_format="gmsh")
+    # Match the solver's all-node AABB containment check, including nodes that
+    # are not referenced by a material or port element.
+    bounds_tolerance_nm = 1e-7
+    if (
+        not np.isfinite(mesh.points).all()
+        or np.any(
+            mesh.points < np.asarray(manifest.domain_min_nm) - bounds_tolerance_nm
+        )
+        or np.any(
+            mesh.points > np.asarray(manifest.domain_max_nm) + bounds_tolerance_nm
+        )
+    ):
+        raise FDTDGeometryError(
+            "Mesh nodes must be contained in the non-PML domain bounds."
+        )
     actual_names = set(mesh.field_data)
     expected_names = _manifest_names(manifest)
     if actual_names != expected_names:

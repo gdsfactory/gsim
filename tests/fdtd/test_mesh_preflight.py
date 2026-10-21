@@ -21,6 +21,9 @@ from tests.fdtd.test_config import _manifest
         "port-tag",
         "volume-dimension",
         "port-dimension",
+        "bounds-min",
+        "bounds-max",
+        "nonfinite",
     ],
 )
 def test_mesh_preflight_rejects_incompatible_group_contracts(tmp_path, invalid):
@@ -45,6 +48,12 @@ def test_mesh_preflight_rejects_incompatible_group_contracts(tmp_path, invalid):
             "gmsh:geometrical": [np.array([1, 2]), np.array([3])],
         },
     )
+    if invalid in {"bounds-min", "bounds-max", "nonfinite"}:
+        mesh.points[4, 0] = {
+            "bounds-min": -0.001,
+            "bounds-max": 2000.001,
+            "nonfinite": np.nan,
+        }[invalid]
     meshio.write(path, mesh, file_format="gmsh22", binary=False)
     if invalid in {"sections", "format", "numbering"}:
         text = path.read_text()

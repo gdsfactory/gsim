@@ -86,6 +86,40 @@ def _add_physical_group(dimension: int, tags: list[int], name: str) -> int:
     return physical_tag
 
 
+def _clip_layer_to_background(
+    kernel: Any,
+    volume_tags: list[int],
+    background_tag: int,
+    bounds: tuple[float, float, float, float, float, float],
+) -> list[int]:
+    """Trim sidewall overhangs to the physical domain before assigning groups.
+
+    Disconnected polygons need not own a guided port, so port-conditioned
+    contours alone cannot enforce domain containment. Intersect the finished
+    solids instead, preserving the taper everywhere inside the domain.
+    """
+    bounded_tags = []
+    for tag in volume_tags:
+        solid_bounds = kernel.getBoundingBox(3, tag)
+        if all(
+            solid_bounds[axis] >= bounds[axis]
+            and solid_bounds[axis + 3] <= bounds[axis + 3]
+            for axis in range(3)
+        ):
+            bounded_tags.append(tag)
+            continue
+        entities, _ = kernel.intersect(
+            [(3, tag)], [(3, background_tag)], removeObject=True, removeTool=False
+        )
+        clipped_tags = [tag for dimension, tag in entities if dimension == 3]
+        if not clipped_tags:
+            raise FDTDGeometryError(
+                "A material volume has no solid intersection with the FDTD domain."
+            )
+        bounded_tags.extend(clipped_tags)
+    return bounded_tags
+
+
 def _port_surface_tags(
     port: Any,
     volume_tags: list[int],
@@ -318,6 +352,12 @@ def generate_mesh(
                 geometry_tolerance_nm=geometry_tolerance_nm,
             )
             for name, layer in resolved.layers.items()
+        }
+        layer_volume_tags = {
+            name: _clip_layer_to_background(
+                kernel, tags, background_tag, background_bounds
+            )
+            for name, tags in layer_volume_tags.items()
         }
         kernel.synchronize()
 
