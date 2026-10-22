@@ -314,6 +314,7 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             pdk=pdk,
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
+            port_layer_map=self.geometry.port_layer_map,
         )
         return self._resolved
 

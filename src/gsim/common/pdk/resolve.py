@@ -215,11 +215,27 @@ def _port_layer(port: Any) -> tuple[int, int]:
 
 
 def _port_candidates(
-    port: Any, layers: Mapping[str, ResolvedLayer]
+    port: Any,
+    layers: Mapping[str, ResolvedLayer],
+    port_layer_map: Mapping[tuple[int, int], str],
 ) -> list[ResolvedLayer]:
     """Find physical layers that own a port's position and GDS layer."""
     port_layer = _port_layer(port)
     center = Point(float(port.dcenter[0]), float(port.dcenter[1]))
+    if port_layer in port_layer_map:
+        layer_key = port_layer_map[port_layer]
+        mapped_layer = layers.get(layer_key)
+        if mapped_layer is None:
+            raise UnsupportedPortError(
+                f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
+                f"entry {layer_key!r}, which has no resolved geometry."
+            )
+        if not mapped_layer.geometry.buffer(_PORT_POSITION_TOLERANCE_UM).covers(center):
+            raise UnsupportedPortError(
+                f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
+                f"entry {layer_key!r}, but its center is outside resolved geometry."
+            )
+        return [mapped_layer]
     candidates = []
     for resolved_layer in layers.values():
         source_layers = _layer_tuples(resolved_layer.layer)
@@ -234,13 +250,14 @@ def _port_candidates(
 def _resolved_ports(
     component: Any,
     layers: Mapping[str, ResolvedLayer],
+    port_layer_map: Mapping[tuple[int, int], str],
 ) -> dict[str, ResolvedPort]:
     """Map every component port to one resolved physical layer."""
     resolved: dict[str, ResolvedPort] = {}
     for port in component.ports:
         orientation, normal = _port_orientation_and_normal(port)
         port_type = str(getattr(port, "port_type", ""))
-        candidates = _port_candidates(port, layers)
+        candidates = _port_candidates(port, layers, port_layer_map)
         is_vertical = port_type.startswith("vertical_")
         if not candidates and not is_vertical:
             raise UnsupportedPortError(
@@ -292,13 +309,16 @@ def resolve_passive_pcell(
     pdk: Any | None = None,
     settings: Mapping[str, Any] | None = None,
     wavelength_um: float = 1.55,
+    port_layer_map: Mapping[tuple[int, int], str] | None = None,
 ) -> ResolvedPassivePcell:
     """Resolve a passive component, fabrication stack, materials, and ports.
 
     The PDK LayerStack is authoritative. Only stack entries with geometry in the
     resolved component are evaluated, so unrelated process materials are not
     required. MaterialCards attached to the project PDK take precedence over
-    gsim's built-in fallbacks.
+    gsim's built-in fallbacks. ``port_layer_map`` associates a virtual port
+    layer with the key of a physical LayerStack entry. The port must still lie
+    on that entry's resolved geometry.
     """
     pdk_object, pdk_or_module = _resolve_pdk(pdk)
     resolved_component = _resolve_component(pdk_object, component, settings)
@@ -331,7 +351,7 @@ def resolve_passive_pcell(
                 f"Could not resolve material {material_name!r} used by layers "
                 f"{layer_names}: {error}"
             ) from error
-    ports = _resolved_ports(resolved_component, layers)
+    ports = _resolved_ports(resolved_component, layers, port_layer_map or {})
     return ResolvedPassivePcell(
         component=resolved_component,
         derived_component=derived_component,

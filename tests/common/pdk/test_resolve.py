@@ -47,6 +47,22 @@ def demo_component(length: float = 2.0, port_orientation: float = 0) -> gf.Compo
     return component
 
 
+def virtual_port_component(port_center: tuple[float, float] = (0, 0)) -> gf.Component:
+    component = gf.Component()
+    component.add_polygon(
+        [(0, -0.25), (2, -0.25), (2, 0.25), (0, 0.25)],
+        layer=(1, 0),
+    )
+    component.add_port(
+        name="o1",
+        center=port_center,
+        width=0.5,
+        orientation=180,
+        layer=(100, 0),
+    )
+    return component
+
+
 def make_test_pdk(
     *,
     core_material: str | None = "Si",
@@ -119,6 +135,42 @@ def test_resolves_named_component_stack_materials_and_ports() -> None:
     assert result.ports["o1"].normal == (-1, 0, 0)
     assert result.ports["o2"].normal == (1, 0, 0)
     assert result.ports["o1"].layer_key == "core_key"
+
+
+def test_virtual_port_layer_maps_to_physical_stack_geometry() -> None:
+    result = resolve_passive_pcell(
+        virtual_port_component(),
+        pdk=make_test_pdk(),
+        port_layer_map={(100, 0): "core_key"},
+    )
+
+    assert set(result.layers) == {"core_key"}
+    assert result.ports["o1"].layer_key == "core_key"
+    assert result.ports["o1"].material == "Si"
+    assert result.ports["o1"].center == (0, 0, 0.11)
+
+
+def test_unmapped_virtual_port_layer_is_rejected() -> None:
+    with pytest.raises(UnsupportedPortError, match="does not map"):
+        resolve_passive_pcell(virtual_port_component(), pdk=make_test_pdk())
+
+
+def test_virtual_port_map_requires_resolved_physical_layer() -> None:
+    with pytest.raises(UnsupportedPortError, match="has no resolved geometry"):
+        resolve_passive_pcell(
+            virtual_port_component(),
+            pdk=make_test_pdk(),
+            port_layer_map={(100, 0): "missing"},
+        )
+
+
+def test_virtual_port_map_requires_port_on_physical_geometry() -> None:
+    with pytest.raises(UnsupportedPortError, match="outside resolved geometry"):
+        resolve_passive_pcell(
+            virtual_port_component(port_center=(-0.1, 0)),
+            pdk=make_test_pdk(),
+            port_layer_map={(100, 0): "core_key"},
+        )
 
 
 def test_preserves_derived_geometry_and_authoritative_layer_fields() -> None:

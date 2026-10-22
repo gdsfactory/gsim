@@ -46,6 +46,17 @@ grid used by the FDTD solver and defaults to 60 nm. Source sweeps default to 101
 wavelengths. Guided-port monitors are implicit; one port source returns one
 S-matrix column.
 
+If a PDK uses a virtual routing layer for optical ports, map that GDS layer to
+the physical LayerStack entry that owns the guided core:
+
+```python
+sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
+```
+
+The marker layer is not added to the mesh. The mapped physical entry supplies
+the port's material and vertical position, and must contain the port location.
+Unmapped ports still need to match resolved LayerStack geometry directly.
+
 Linear PDK sidewall angles are represented as continuous ruled solids between
 their exact bottom and top contours. If polygon offsetting changes component,
 hole, or edge topology, meshing safely falls back to vertical slices bounded by
