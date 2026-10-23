@@ -12,6 +12,78 @@ from pydantic import ValidationError
 from gsim import fdtd, gcloud
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (
+            {"kind": "mode_order", "mode_order": 2},
+            {"kind": "mode_order", "mode_order": 2},
+        ),
+        (
+            {
+                "kind": "te_like",
+                "te_axis": "z",
+                "num_candidate_modes": 6,
+                "min_polarization_fraction": 0.7,
+            },
+            {
+                "kind": "te_like",
+                "te_axis": "z",
+                "num_candidate_modes": 6,
+                "min_polarization_fraction": 0.7,
+            },
+        ),
+    ],
+)
+def test_guided_mode_selection_serializes(
+    tmp_path: Path, fdtd_pdk_module, mode: dict, expected: dict
+) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight", mesh_size_nm=750)
+    simulation.source(port="o1", mode=mode)
+
+    artifacts = simulation.write(tmp_path)
+    document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
+
+    assert isinstance(simulation.source.mode, fdtd.ModeSelection)
+    assert document["excitation"]["mode"] == expected
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ({"kind": "mode_order"}, "mode_order is required"),
+        ({"kind": "mode_order", "mode_order": 0}, "greater than or equal to 1"),
+        ({"kind": "mode_order", "mode_order": 2, "te_axis": "z"}, "polarization"),
+        ({"kind": "te_like"}, "te_axis is required"),
+        ({"kind": "fundamental", "mode_order": 2}, "takes no additional"),
+    ],
+)
+def test_invalid_guided_mode_selection(mode: dict, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        fdtd.ModeSelection.model_validate(mode)
+
+
+def test_mode_selection_requires_guided_port(tmp_path: Path, fdtd_pdk_module) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("vertical_coupler", mesh_size_nm=750)
+    simulation.source(port="o2", mode={"kind": "mode_order", "mode_order": 2})
+
+    with pytest.raises(fdtd.FDTDConfigError, match="guided PDK port"):
+        simulation.write(tmp_path)
+
+
+def test_mode_selection_axis_must_be_transverse(
+    tmp_path: Path, fdtd_pdk_module
+) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight", mesh_size_nm=750)
+    simulation.source(port="o1", mode={"kind": "te_like", "te_axis": "x"})
+
+    with pytest.raises(fdtd.FDTDConfigError, match="te_axis must be transverse"):
+        simulation.write(tmp_path)
+
+
 def test_material_override_participates_in_gpdk_resolution() -> None:
     gf.gpdk.PDK.activate()
     simulation = fdtd.Simulation(pdk=gf.gpdk.PDK)
