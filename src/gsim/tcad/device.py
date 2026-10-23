@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from gsim.tcad.api import Contact, Interface, Materials, Solver, TCADMesh
 
 # DEVSIM keeps meshes and devices in one process-wide namespace, so every
-# sim (and every re-mesh) claims its own names: two Studies, or one Stage
-# re-run after a configuration change, would otherwise collide on the
+# sim (and every re-mesh) claims its own names: two simulations, or one
+# re-solved after a configuration change, would otherwise collide on the
 # second setup with "a mesh already exists with name ...".
 _DEVSIM_NAME_IDS = itertools.count()
 
