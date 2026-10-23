@@ -40,7 +40,9 @@ def assign_physical_groups(
         port_tags: Port surface tags (may have multiple surfaces for CPW)
         port_info: Port metadata including type info
         entities: Entity list used in run_boolean_pipeline
-        pg_map: name -> physical-group tag returned by run_boolean_pipeline
+        pg_map: name -> physical-group tag returned by run_boolean_pipeline.
+            The ``*__None`` groups are filtered in place: internal faces
+            (a volume on both sides) are removed from them.
         _stack: Layer stack used to identify via layers
 
     Returns:
@@ -381,6 +383,9 @@ def assign_physical_groups(
             groups["via_boundary_surfaces"] = via_boundary
 
     # --- Boundary surfaces (outer faces labelled *__None by the pipeline) ---
+    # Internal faces (a volume on both sides) must never be absorbing (#417).
+    # ``pg_map`` is updated in place, so the list below only sees outer faces.
+    gmsh_utils.drop_internal_none_surfaces(pg_map)
     boundary_pgs: list[int] = [
         pg for name, pg in pg_map.items() if name.endswith("__None")
     ]

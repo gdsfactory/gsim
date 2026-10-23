@@ -1432,3 +1432,69 @@ def mesh_hash(resolution_um: float = MESH_HASH_RESOLUTION_UM) -> str | None:
         digest.update("|".join(map(str, (*key, len(elements)))).encode() + b"|")
         digest.update(elements.astype("<u8").tobytes())
     return f"sha256:{digest.hexdigest()}"
+
+
+def drop_internal_none_surfaces(
+    pg_map: dict[str, int],
+    tol: float = 1e-3,
+) -> dict[str, list[int]]:
+    """Remove internal faces from the ``*__None`` surface groups.
+
+    A surface stays in its ``*__None`` group if it bounds exactly one
+    volume, or bounds none and lies flat on a face of the domain bounding
+    box. Other
+    surfaces (a volume on both sides, e.g. the face shared by two touching
+    conductor shells) are taken out, so they never become absorbing.
+    ``pg_map`` is updated in place.
+
+    Args:
+        pg_map: Mapping from physical-group name to physical-group tag.
+        tol: Flatness tolerance in um.
+
+    Returns:
+        ``{group name: [dropped surface tags]}`` for the groups that changed.
+    """
+    groups_2d = set(gmsh.model.getPhysicalGroups(2))
+    box = gmsh.model.getBoundingBox(-1, -1)
+
+    def _on_box(tag: int) -> bool:
+        bb = gmsh.model.getBoundingBox(2, tag)
+        return any(
+            abs(bb[i] - side) <= tol and abs(bb[i + 3] - side) <= tol
+            for i in range(3)
+            for side in (box[i], box[i + 3])
+        )
+
+    dropped: dict[str, list[int]] = {}
+    for name, pg in list(pg_map.items()):
+        if not name.endswith("__None"):
+            continue
+        # Tags may coincide across dimensions, so confirm the 2D group's name.
+        if (2, pg) not in groups_2d:
+            continue
+        if gmsh.model.getPhysicalName(2, pg) != name:
+            continue
+        tags = [int(t) for t in gmsh.model.getEntitiesForPhysicalGroup(2, pg)]
+        # A face with a volume on both sides is internal wherever it is; the
+        # bounding-box test only rescues faces that bound no volume at all.
+        n_volumes = {t: len(gmsh.model.getAdjacencies(2, t)[0]) for t in tags}
+        keep = [
+            t for t in tags if n_volumes[t] == 1 or (n_volumes[t] == 0 and _on_box(t))
+        ]
+        if len(keep) == len(tags):
+            continue
+        dropped[name] = sorted(set(tags) - set(keep))
+        gmsh.model.removePhysicalGroups([(2, pg)])
+        pg_map.pop(name)
+        if keep:
+            pg_map[name] = assign_physical_group(2, sorted(keep), name)
+        logger.warning(
+            "%d of %d surfaces of '%s' are internal (a volume on both sides) "
+            "and are left out of the absorbing boundary; this happens when "
+            "touching layers are both conductor shells, e.g. a via layer with "
+            "layer_type='conductor'",
+            len(dropped[name]),
+            len(tags),
+            name,
+        )
+    return dropped
