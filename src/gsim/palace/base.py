@@ -1089,6 +1089,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         mesh_config.algorithm_3d = existing_config.algorithm_3d
         mesh_config.threads = existing_config.threads
         mesh_config.surface_threads = existing_config.surface_threads
+        mesh_config.clip_merged_vias = existing_config.clip_merged_vias
 
         # Preserve planar_conductors from sim.mesh_config if not
         # explicitly provided via sim.mesh(planar_conductors=...)
@@ -1657,6 +1658,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
             merge_via_distance=mesh_config.merge_via_distance,
+            clip_merged_vias=mesh_config.clip_merged_vias,
             curve_fit_mode=mesh_config.curve_fit_mode,
             curve_fit_layers=mesh_config.curve_fit_layers,
             curve_fit_tolerance_um=mesh_config.curve_fit_tolerance_um,
@@ -1921,6 +1923,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     self._symmetry_planes[0] if self._symmetry_planes else None
                 ),
                 merge_via_distance=mesh_config.merge_via_distance,
+                clip_merged_vias=mesh_config.clip_merged_vias,
                 curve_fit_mode=mesh_config.curve_fit_mode,
                 curve_fit_layers=mesh_config.curve_fit_layers,
                 curve_fit_tolerance_um=mesh_config.curve_fit_tolerance_um,
@@ -1963,6 +1966,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         periodic_axis: str | None = None,
         decimate_tolerance: float | None = None,
         merge_via_distance: float | None = None,
+        clip_merged_vias: bool | None = None,
         curve_fit_mode: Literal["line", "spline", "bspline"] | None = None,
         curve_fit_layers: list[str] | None = None,
         curve_fit_tolerance_um: float | None = None,
@@ -2020,6 +2024,13 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 the vias, so a dense via array can grow to several times
                 its drawn area; a warning is logged when the area grows
                 by more than 5%.
+            clip_merged_vias: Clip each merged via polygon to the overlap of
+                the conductor layers directly below and above its layer, so
+                merging adds no via area outside the metal. The drawn cuts are
+                always kept, and contacts on substrate or dielectric stay as
+                drawn. Defaults to the value in ``sim.mesh_config`` (False). A
+                slab that lies entirely between two continuous metals is left
+                unchanged; ``merge_via_distance=0`` keeps every cut there.
             curve_fit_mode: Patterned dielectric boundary mode (line/spline/bspline).
             curve_fit_layers: Layer names where spline fitting is applied.
             curve_fit_tolerance_um: Point merge tolerance before fitting.
@@ -2096,6 +2107,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         if merge_via_distance is not None:
             mesh_config.merge_via_distance = merge_via_distance
+        if clip_merged_vias is not None:
+            mesh_config.clip_merged_vias = clip_merged_vias
 
         # Validate configuration
         validation = self.validate_config()

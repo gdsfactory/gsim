@@ -46,6 +46,13 @@ VIA_MERGE_AREA_WARN_RATIO = 1.05
 # Relative area change below which merged vias count as left as drawn
 _VIA_UNCHANGED_TOL = 1e-6
 
+# A via counts as touching a conductor when the z-ranges meet within this (um)
+_VIA_PLANE_TOL_UM = 1e-6
+
+# Landing pieces below this area (um^2) are numerical slivers and are not added
+# to a clipped via; a drawn cut is kept whatever its size
+_MIN_VIA_PIECE_UM2 = 1e-6
+
 
 def _contains_air_token(name: str | None) -> bool:
     """Return True when *name* reads as an air/vacuum region name."""
@@ -516,6 +523,77 @@ def _snap_via_z_range(
     return new_zmin, new_zmax
 
 
+def _shapes_to_via_polys(
+    geom, min_area: float = 0.0
+) -> list[tuple[list[float], list[float], list]]:
+    """``(pts_x, pts_y, holes)`` tuples of the polygon parts of a shapely geometry.
+
+    Accepts a Polygon, MultiPolygon or GeometryCollection. Points and lines
+    (what two shapes touching along an edge intersect in) are left out, and so
+    are polygons of *min_area* or less. The closing vertex is not repeated.
+
+    Args:
+        geom: Shapely geometry.
+        min_area: Polygons with an area of at most this (um^2) are dropped.
+
+    Returns:
+        Polygon list in the format of the mesher.
+    """
+    if geom.is_empty:
+        return []
+    if not isinstance(geom, ShapelyPolygon):
+        result: list[tuple[list[float], list[float], list]] = []
+        for part in getattr(geom, "geoms", []):
+            result.extend(_shapes_to_via_polys(part, min_area))
+        return result
+    if geom.area <= min_area:
+        return []
+    xs, ys = zip(*geom.exterior.coords[:-1], strict=True)  # drop closing duplicate
+    holes = []
+    for interior in geom.interiors:
+        hx, hy = zip(*interior.coords[:-1], strict=True)
+        holes.append((list(hx), list(hy)))
+    return [(list(xs), list(ys), holes)]
+
+
+def _via_neighbour_conductors(
+    stack: LayerStack, via_name: str
+) -> tuple[list[str], list[str]]:
+    """Names of the conductor layers directly below and above a via layer.
+
+    A conductor is *below* when its z-range touches or crosses the bottom
+    plane of the via, *above* when it does so at the top plane. The same
+    z-overlap test joins vias and conductors into nets.
+
+    Args:
+        stack: The layer stack.
+        via_name: Name of the via layer.
+
+    Returns:
+        ``(below, above)``, each in stack order.
+    """
+    via = stack.layers[via_name]
+    below: list[str] = []
+    above: list[str] = []
+    for name, layer in stack.layers.items():
+        if name == via_name or layer.layer_type != "conductor":
+            continue
+        tol = _VIA_PLANE_TOL_UM
+        if layer.zmin - tol <= via.zmin <= layer.zmax + tol:
+            below.append(name)
+        if layer.zmin - tol <= via.zmax <= layer.zmax + tol:
+            above.append(name)
+    return below, above
+
+
+def _polygons_by_gds_layer(polygons: list) -> dict[int, list[tuple]]:
+    """Group ``(layer, pts_x, pts_y, holes)`` polygons by GDS layer number."""
+    by_layer: dict[int, list[tuple]] = {}
+    for layernum, pts_x, pts_y, holes in polygons:
+        by_layer.setdefault(layernum, []).append((pts_x, pts_y, holes))
+    return by_layer
+
+
 def _merge_via_polygons(
     polys: list[tuple[list[float], list[float], list]],
     merge_distance: float,
@@ -554,19 +632,7 @@ def _merge_via_polygons(
     merged = buffer(unary_union(buffered), -offset, join_style="mitre")
 
     # Convert back to coordinate lists
-    result = []
-    # unary_union may return Polygon or MultiPolygon
-    geoms_attr = getattr(merged, "geoms", None)
-    geoms = list(geoms_attr) if geoms_attr is not None else [merged]
-    for geom in geoms:
-        if geom.is_empty:
-            continue
-        xs, ys = zip(*geom.exterior.coords[:-1], strict=True)  # drop closing duplicate
-        holes = []
-        for interior in geom.interiors:
-            hx, hy = zip(*interior.coords[:-1], strict=True)
-            holes.append((list(hx), list(hy)))
-        result.append((list(xs), list(ys), holes))
+    result = _shapes_to_via_polys(merged)
 
     n_before = len(polys)
     n_after = len(result)
@@ -631,11 +697,136 @@ def _distance_keeps_vias_as_drawn(
     return kept_area <= drawn_area * VIA_MERGE_AREA_WARN_RATIO
 
 
+def _side_footprint(
+    polygons_by_gds: dict[int, list[tuple]], stack: LayerStack, names: list[str]
+):
+    """Union of the polygons of the stack layers *names* (empty when none)."""
+    shapes = []
+    for name in names:
+        polys = polygons_by_gds.get(stack.layers[name].gds_layer[0], [])
+        shapes.extend(_via_shapes(polys))
+    return unary_union(shapes) if shapes else ShapelyPolygon()
+
+
+def _via_landing_area(
+    polygons_by_gds: dict[int, list[tuple]], stack: LayerStack, via_name: str
+):
+    """Overlap of the metal below and the metal above a via layer.
+
+    Args:
+        polygons_by_gds: Polygons grouped by GDS layer number.
+        stack: The layer stack.
+        via_name: Name of the via layer.
+
+    Returns:
+        Shapely geometry; empty when there is no conductor layer or no
+        polygon on one of the two sides.
+    """
+    below, above = _via_neighbour_conductors(stack, via_name)
+    if not below or not above:
+        return ShapelyPolygon()
+    lower = _side_footprint(polygons_by_gds, stack, below)
+    if lower.is_empty:
+        return ShapelyPolygon()
+    upper = _side_footprint(polygons_by_gds, stack, above)
+    if upper.is_empty:
+        return ShapelyPolygon()
+    return lower.intersection(upper)
+
+
+def _polygons_of(geom) -> list[ShapelyPolygon]:
+    """Polygon parts of any shapely geometry (lines and points dropped)."""
+    if geom.is_empty:
+        return []
+    if isinstance(geom, ShapelyPolygon):
+        return [geom]
+    parts: list[ShapelyPolygon] = []
+    for part in getattr(geom, "geoms", []):
+        parts.extend(_polygons_of(part))
+    return parts
+
+
+def _clip_merged_vias(
+    drawn: list[tuple[list[float], list[float], list]],
+    merged: list[tuple[list[float], list[float], list]],
+    landing,
+) -> list[tuple[list[float], list[float], list]]:
+    """Keep merged vias inside the landing area, never dropping a drawn cut.
+
+    Each merged polygon already inside *landing* is returned as it is. For the
+    others the result is the drawn via area plus the parts of the merged
+    polygon inside *landing* that share area with a drawn via. Merging then
+    never adds area outside the metal above and below, and a landing piece
+    without a cut does not become a floating via chunk. Only added pieces of
+    ``_MIN_VIA_PIECE_UM2`` or less are left out as slivers; a drawn cut is kept
+    however small it is.
+
+    Args:
+        drawn: The via polygons as drawn.
+        merged: What :func:`_merge_via_polygons` made of *drawn*.
+        landing: Shapely geometry, the overlap of the metals around the via.
+
+    Returns:
+        Via polygons in the same format.
+    """
+    if merged is drawn:
+        return drawn
+    drawn_union = unary_union(_via_shapes(drawn))
+    result: list[tuple[list[float], list[float], list]] = []
+    for poly, shape in zip(merged, _via_shapes(merged), strict=True):
+        outside = shape.difference(landing).area
+        if outside <= _VIA_UNCHANGED_TOL * shape.area:
+            result.append(poly)
+            continue
+        own = drawn_union.intersection(shape)
+        pieces = [
+            part
+            for part in _polygons_of(shape.intersection(landing))
+            if part.area > _MIN_VIA_PIECE_UM2 and part.intersection(own).area > 1e-9
+        ]
+        result.extend(_shapes_to_via_polys(unary_union([own, *pieces])))
+    return result
+
+
+def _merge_via_layer(
+    polys: list[tuple[list[float], list[float], list]],
+    merge_distance: float,
+    landing=None,
+    label: str = "via",
+) -> list[tuple[list[float], list[float], list]]:
+    """Merge nearby vias, then clip them to *landing* when it is given.
+
+    Args:
+        polys: The via polygons of one layer as drawn.
+        merge_distance: Merge distance in um.
+        landing: Overlap of the metals around the layer, or None to keep the
+            plain merge.
+        label: What to call the layer in the log line.
+
+    Returns:
+        Via polygons in the format of the mesher.
+    """
+    merged = _merge_via_polygons(polys, merge_distance)
+    if landing is None:
+        return merged
+    clipped = _clip_merged_vias(polys, merged, landing)
+    if clipped != merged:
+        logger.info(
+            "Via clipping of %s: %d merged polygons -> %d inside the metal "
+            "above and below",
+            label,
+            len(merged),
+            len(clipped),
+        )
+    return clipped
+
+
 def _warn_if_via_merge_inflates_area(
     layer_name: str,
     drawn: list[tuple[list[float], list[float], list]],
     merged: list[tuple[list[float], list[float], list]],
     merge_distance: float,
+    clip_merged_vias: bool = False,
 ) -> float | None:
     """Log one warning when merging made a via layer cover more area.
 
@@ -652,6 +843,8 @@ def _warn_if_via_merge_inflates_area(
         drawn: The via polygons as drawn, ``(pts_x, pts_y, holes)`` tuples.
         merged: What :func:`_merge_via_polygons` made of *drawn*.
         merge_distance: The merge distance used, in um.
+        clip_merged_vias: Whether the merged vias were clipped to the metal
+            around them. When they were not, the warning points to the option.
 
     Returns:
         merged area / drawn area, or None when merging did not run or left the
@@ -676,6 +869,14 @@ def _warn_if_via_merge_inflates_area(
     merged_area = float(merged_union.area)
     ratio = merged_area / drawn_area
     if ratio <= VIA_MERGE_AREA_WARN_RATIO:
+        logger.info(
+            "Via layer '%s': merging changed the via area by a factor of %.3f "
+            "(drawn %.4g um^2, merged %.4g um^2)",
+            layer_name,
+            ratio,
+            drawn_area,
+            merged_area,
+        )
         return ratio
 
     if n_merged < n_drawn:
@@ -705,10 +906,18 @@ def _warn_if_via_merge_inflates_area(
         fix = "merge_via_distance=0"
         what = f"kept {n_drawn} via polygons but reshaped them"
         why = "recesses and holes within the vias are filled in"
+    if clip_merged_vias:
+        hint = ""
+        why += "; clipping only keeps them inside the metal above and below"
+    else:
+        hint = (
+            " Set clip_merged_vias=True to keep merged vias inside the metal "
+            "above and below."
+        )
     logger.warning(
         "Via layer '%s': merge_via_distance=%g um %s and grew the via area by a "
         "factor of %.2f (drawn %.4g um^2, merged %.4g um^2), because %s. "
-        "Pass %s to keep the cuts as drawn.",
+        "Pass %s to keep the cuts as drawn.%s",
         layer_name,
         merge_distance,
         what,
@@ -717,6 +926,7 @@ def _warn_if_via_merge_inflates_area(
         merged_area,
         why,
         fix,
+        hint,
     )
     return ratio
 
@@ -852,6 +1062,7 @@ def add_metals(
     curve_fit_min_points: int = 8,
     curve_fit_corner_angle_deg: float = 45.0,
     symmetry_plane: SymmetryPlaneConfig | None = None,
+    clip_merged_vias: bool = False,
 ) -> dict:
     """Add metal, via, and shaped-dielectric geometries to gmsh.
 
@@ -886,6 +1097,12 @@ def add_metals(
         symmetry_plane: If set, conductor shell faces lying on the plane are
             dropped, so the cut face does not become a conductivity boundary.
             The polygons in *geometry* must already be clipped.
+        clip_merged_vias: If True, merged via polygons are clipped to the
+            overlap of the conductor layers directly below and above the via
+            layer (the drawn cuts are always kept), so merging adds no via
+            area outside the metal. With no metal on one side the cuts stay as
+            drawn. A slab that lies entirely between two continuous metals is
+            left as merged; only ``merge_via_distance=0`` keeps its cuts.
 
     Returns:
         Dict with layer_name -> {"volumes": [...], "surfaces_xy": [...],
@@ -900,11 +1117,7 @@ def add_metals(
     shaped_dielectric_names = _detect_shaped_dielectric_layers(geometry, stack)
 
     # Group polygons by layer
-    polygons_by_layer = {}
-    for layernum, pts_x, pts_y, holes in geometry.polygons:
-        if layernum not in polygons_by_layer:
-            polygons_by_layer[layernum] = []
-        polygons_by_layer[layernum].append((pts_x, pts_y, holes))
+    polygons_by_layer = _polygons_by_gds_layer(geometry.polygons)
 
     # Track conductor volumes for deferred surface extraction.
     # Surface loop tags are only queried *after* removeAllDuplicates()
@@ -917,6 +1130,9 @@ def add_metals(
         if not layer_infos:
             continue
         for layer_info in layer_infos:
+            # One GDS layer can back several stack layers. Each starts from the
+            # drawn polygons, not from what a via level before it merged or clipped.
+            polys = polygons_by_layer[layernum]
             layer_name = layer_info["name"]
             layer_type = layer_info["type"]
             zmin = layer_info["zmin"]
@@ -945,12 +1161,25 @@ def add_metals(
 
             # Merge nearby via polygons before creating gmsh surfaces
             if layer_type == "via":
-                polys = _merge_via_polygons(polys, merge_via_distance)
+                landing = None
+                if clip_merged_vias and merge_via_distance > 0 and len(polys) > 1:
+                    landing = _via_landing_area(polygons_by_layer, stack, layer_name)
+                below, above = _via_neighbour_conductors(stack, layer_name)
+                polys = _merge_via_layer(
+                    polys,
+                    merge_via_distance,
+                    landing,
+                    label=(
+                        f"'{layer_name}' (below: {', '.join(below) or 'none'}; "
+                        f"above: {', '.join(above) or 'none'})"
+                    ),
+                )
                 _warn_if_via_merge_inflates_area(
                     layer_name,
                     polygons_by_layer[layernum],
                     polys,
                     merge_via_distance,
+                    clip_merged_vias=clip_merged_vias,
                 )
 
             # Create surfaces for all polygons on this layer. Conductor, via

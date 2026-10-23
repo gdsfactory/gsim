@@ -1226,6 +1226,7 @@ def generate_mesh(
     periodic_axis: str | None = None,
     symmetry_plane: SymmetryPlaneConfig | None = None,
     merge_via_distance: float = 2.0,
+    clip_merged_vias: bool = False,
     curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
     curve_fit_layers: list[str] | None = None,
     curve_fit_tolerance_um: float = 0.0,
@@ -1289,6 +1290,12 @@ def generate_mesh(
             grow to several times its drawn area; a warning is logged
             when the area grows by more than 5%. Pass 0 to keep every
             via as drawn.
+        clip_merged_vias: Clip each merged via polygon to the overlap of the
+            conductor layers directly below and above its layer, so merging
+            adds no via area outside the metal (the drawn cuts are always
+            kept). Contacts on substrate or dielectric stay as drawn. A slab
+            that lies entirely between two continuous metals is not changed;
+            ``merge_via_distance=0`` is the way to mesh every cut there.
         curve_fit_mode: Patterned dielectric boundary mode: line/spline/bspline
         curve_fit_layers: Layer names where curve fitting is applied
         curve_fit_tolerance_um: Point merge tolerance before curve fitting
@@ -1368,7 +1375,13 @@ def generate_mesh(
             [p for p in component.ports if p.port_type == "electrical"],
         )
         logger.info("  Nets: %s", len(nets))
-        check_via_merging(geometry, stack, nets, merge_via_distance)
+        check_via_merging(
+            geometry,
+            stack,
+            nets,
+            merge_via_distance,
+            clip_merged_vias=clip_merged_vias,
+        )
 
     # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
     gmsh.initialize(readConfigFiles=False)
@@ -1577,6 +1590,7 @@ def generate_mesh(
             curve_fit_min_points=curve_fit_min_points,
             curve_fit_corner_angle_deg=curve_fit_corner_angle_deg,
             symmetry_plane=symmetry_plane,
+            clip_merged_vias=clip_merged_vias,
         )
 
         # Add PEC blocks if configured
