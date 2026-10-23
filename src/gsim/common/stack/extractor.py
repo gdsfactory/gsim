@@ -39,6 +39,7 @@ class Layer(BaseModel):
     layer_type: Literal["conductor", "via", "dielectric", "substrate"]
     sidewall_angle: float = 0.0  # degrees
     mesh_resolution: str | float = "medium"
+    mesh_order: int | None = None
 
     def get_mesh_size(self, base_size: float = 1.0) -> float:
         """Get mesh size in um for this layer.
@@ -72,6 +73,8 @@ class Layer(BaseModel):
         }
         if self.sidewall_angle != 0.0:
             d["sidewall_angle"] = self.sidewall_angle
+        if self.mesh_order is not None:
+            d["mesh_order"] = self.mesh_order
         return d
 
 

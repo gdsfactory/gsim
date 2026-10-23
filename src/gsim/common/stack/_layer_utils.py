@@ -13,14 +13,59 @@ from gdsfactory.technology import LayerLevel
 logger = logging.getLogger(__name__)
 
 
+def _tuple_from_layer_expression(layer: Any) -> tuple[int, int] | None:
+    """Recursively extract a concrete ``(layer, datatype)`` from an expression.
+
+    gdsfactory represents derived layers as objects with ``layer1``/``layer2``
+    operands (and sometimes a nested ``layer`` attribute).  Resolve the first
+    concrete leaf so metadata (drawn flags, source matching) remains stable even
+    when the boolean expression itself has no single GDS tuple.
+    """
+    if isinstance(layer, tuple) and len(layer) == 2:
+        return (int(layer[0]), int(layer[1]))
+
+    # LayerMap enums can subclass int (so their numeric value is a map index,
+    # not the GDS layer), but expose the real pair via layer/datatype.
+    inner_layer = getattr(layer, "layer", None)
+    inner_datatype = getattr(layer, "datatype", None)
+    if isinstance(inner_layer, int) and isinstance(inner_datatype, int):
+        return (int(inner_layer), int(inner_datatype))
+
+    if isinstance(layer, int) and not isinstance(layer, bool):
+        return (int(layer), 0)
+
+    nested = getattr(layer, "layer", None)
+    if nested is not None and nested is not layer:
+        result = _tuple_from_layer_expression(nested)
+        if result is not None:
+            return result
+
+    for attribute in ("layer1", "layer2"):
+        operand = getattr(layer, attribute, None)
+        if operand is not None:
+            result = _tuple_from_layer_expression(operand)
+            if result is not None:
+                return result
+
+    value = getattr(layer, "value", None)
+    if value is not None and value is not layer:
+        return _tuple_from_layer_expression(value)
+
+    if isinstance(layer, str) and "/" in layer:
+        parts = layer.split("/")
+        return (int(parts[0]), int(parts[1]))
+    return None
+
+
 def get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int] | None:
     """Extract GDS layer tuple (layer, datatype) from a gdsfactory LayerLevel.
 
     Returns ``None`` when the layer cannot be parsed (callers decide fallback).
 
     When the primary ``layer`` is a ``DerivedLayer`` (e.g. ``WG - GRA`` in
-    cspdk), falls back to ``derived_layer`` which typically holds the simple
-    GDS layer used for polygon extraction.
+    cspdk), falls back to a concrete leaf of the boolean expression and then to
+    ``derived_layer``, which typically holds the simple GDS layer used for
+    polygon extraction.
     """
     layer: Any = layer_level.layer
 
@@ -32,8 +77,19 @@ def get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int] | None:
 
     if hasattr(layer, "layer"):
         inner = layer.layer
+        if isinstance(inner, tuple) and len(inner) == 2:
+            return (int(inner[0]), int(inner[1]))
         if hasattr(inner, "layer") and hasattr(inner, "datatype"):
             return (int(inner.layer), int(inner.datatype))  # ty: ignore[invalid-argument-type]
+        # LayerMap enums can expose the concrete GDS pair through iteration even
+        # though ``int(enum)`` returns an unrelated map index (e.g. Cornerstone
+        # WG is enum value 5 but GDS (3, 0)).
+        try:
+            pair = tuple(inner)
+        except TypeError:
+            pair = None
+        if pair is not None and len(pair) == 2:
+            return (int(pair[0]), int(pair[1]))
         if isinstance(inner, int):
             datatype = getattr(layer, "datatype", 0)
             return (int(inner), int(datatype) if datatype else 0)
@@ -63,15 +119,19 @@ def get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int] | None:
     except (TypeError, ValueError):
         pass
 
-    # Fallback: DerivedLayer (e.g. cspdk core = WG - GRA) — use derived_layer
+    # Fallback: DerivedLayer (e.g. cspdk core = WG - GRA).  The declared
+    # derived_layer is the authoritative concrete mask for the level (core ->
+    # WG, grating -> GRA), which also keeps ports unambiguous when two derived
+    # levels share boolean operands.
     derived = getattr(layer_level, "derived_layer", None)
     if derived is not None and derived is not layer:
-        # Build a temporary LayerLevel with the derived_layer as its layer
-        # so we can recurse through the same parsing logic.
-        temp = LayerLevel(layer=derived, thickness=0, zmin=0)
-        result = get_gds_layer_tuple(temp)
+        result = _tuple_from_layer_expression(derived)
         if result is not None:
             return result
+
+    result = _tuple_from_layer_expression(layer)
+    if result is not None:
+        return result
 
     logger.warning("Could not parse layer %s", layer)
     return None
