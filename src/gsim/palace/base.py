@@ -45,6 +45,8 @@ from gsim.palace.models.results import (
 from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from gdsfactory.component import Component
 
     from gsim.palace.results import PalaceTextResults, SParams
@@ -1361,6 +1363,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 for wp in wave_ports
                 if not wp.layer
             )
+            errors.extend(self._multimode_wave_port_errors(wave_ports))
+            errors.extend(self._wave_port_face_errors(wave_ports))
 
         eigenmode = self._get_problem_settings("eigenmode")
         if eigenmode is not None and eigenmode.target is None:
@@ -1437,6 +1441,115 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
+
+    def _multimode_wave_port_errors(self, wave_ports: list[Any]) -> list[str]:
+        """Errors that only multimode wave ports can have.
+
+        Two ports on one face would be two surfaces in one place, and Palace
+        refuses two active ports on one attribute; a multimode port puts all
+        its modes on one surface instead, so the second port is refused here.
+        """
+        from gsim.palace.ports.modes import same_face_pairs
+
+        if not any(wp.modes for wp in wave_ports):
+            return []
+        errors: list[str] = []
+        if self.simulation_type != "driven":
+            errors.append(
+                "Multimode wave ports are only supported for driven simulations, "
+                f"not {self.simulation_type!r}."
+            )
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            return errors
+        by_name = {port.name: port for port in component.ports}
+        faces = [
+            (
+                wp.name,
+                (float(by_name[wp.name].center[0]), float(by_name[wp.name].center[1])),
+                float(by_name[wp.name].orientation or 0.0),
+            )
+            for wp in wave_ports
+            if wp.name in by_name
+        ]
+        errors.extend(
+            f"Wave ports {first!r} and {second!r} are on the same face; give a "
+            "face one wave port and list its modes with modes=..."
+            for first, second in same_face_pairs(faces)
+        )
+        return errors
+
+    def _wave_port_face_errors(self, wave_ports: list[Any]) -> list[str]:
+        """Errors for wave ports whose generated faces overlap.
+
+        The mesher builds one rectangle per wave port: a ``max_size`` port
+        spans the whole side of the domain whatever its centre, margins widen
+        a face. Where two rectangles overlap the boolean pass merges them, one
+        port keeps no surface and ``write_config()`` emits no ``WavePort``
+        entry for it. The rectangles are built here with the mesher's own
+        function. The domain margins are only known at ``mesh()``, so the
+        domain is left unbounded, which does not change which faces overlap.
+        The mesher repeats the check with the real domain.
+        """
+        component = self.geometry.component if self.geometry else None
+        if component is None or len(wave_ports) < 2:
+            return []
+        from gsim.palace.mesh.geometry import (
+            UNBOUNDED_DOMAIN,
+            overlapping_wave_ports,
+            wave_port_overlap_message,
+        )
+        from gsim.palace.ports.config import PalacePort, PortType
+        from gsim.palace.ports.modes import same_face_pairs
+
+        by_name = {port.name: port for port in component.ports}
+        ports = [
+            PalacePort(
+                name=wp.name,
+                port_type=PortType.WAVEPORT,
+                center=(
+                    float(by_name[wp.name].center[0]),
+                    float(by_name[wp.name].center[1]),
+                ),
+                width=float(by_name[wp.name].width),
+                orientation=float(by_name[wp.name].orientation or 0.0),
+                layer=wp.layer,
+                z_margin=wp.z_margin,
+                lateral_margin=wp.lateral_margin,
+                max_size=wp.max_size,
+            )
+            for wp in wave_ports
+            if wp.layer and wp.name in by_name
+        ]
+        if len(ports) < 2:
+            return []
+        # Resolving the stack must not leave a stack behind: set_stack() may
+        # still follow, and mesh() resolves it again.
+        previous = self.stack
+        try:
+            stack = self._resolve_stack()
+        except Exception:
+            return []  # the mesher reports a stack that does not resolve
+        finally:
+            self.stack = previous
+        # A pair on the same face is already reported by the multimode check
+        reported = (
+            {
+                frozenset(pair)
+                for pair in same_face_pairs(
+                    (p.name, p.center, p.orientation) for p in ports
+                )
+            }
+            if any(wp.modes for wp in wave_ports)
+            else set()
+        )
+        return [
+            wave_port_overlap_message(first, second)
+            for first, second in overlapping_wave_ports(
+                ports, stack, domain_bounds=UNBOUNDED_DOMAIN
+            )
+            if frozenset((first, second)) not in reported
+        ]
 
     def _find_gf_port(self, port_name: str):
         """Find a gdsfactory port by name."""
@@ -1576,6 +1689,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     eigensolver_ksp_tol=port_config.eigensolver_ksp_tol,
                     eigensolver_max_size=port_config.eigensolver_max_size,
                     eigensolver_verbose=port_config.eigensolver_verbose,
+                    modes=port_config.modes,
+                    excite_modes=port_config.excite_modes,
+                    pilot_paths=port_config.pilot_paths,
                 )
 
         # Configure two-terminal ports
@@ -2225,6 +2341,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             hints["_impedance_boundaries"] = self._impedance_boundaries
         if getattr(self, "metallic_boundaries", False):
             hints["_metallic_boundaries"] = True
+        if getattr(self, "conductor_boundary", "conductivity") == "pec":
+            hints["_conductor_boundary"] = "pec"
 
         # BoundaryMode voltage/impedance postprocessing paths. They do not
         # affect the 2D eigenproblem; the boundary-mode sim declares them.
@@ -2743,6 +2861,120 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 eigensolver_verbose=eigensolver_verbose,
             )
         )
+
+    def add_multimode_wave_port(
+        self,
+        name: str,
+        *,
+        modes: Sequence[int],
+        layer: str | None = None,
+        active_mode: int = 1,
+        excite: Literal["active", "all"] = "active",
+        pilot_paths: Mapping[int, Sequence[Sequence[float]]] | None = None,
+        z_margin: float = 0.0,
+        lateral_margin: float = 0.0,
+        max_size: bool = False,
+        excited: bool = True,
+        offset: float = 0.0,
+        eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None,
+        eigensolver_tol: float | None = None,
+        eigensolver_ksp_tol: float | None = None,
+        eigensolver_max_size: int | None = None,
+        eigensolver_verbose: int | None = None,
+    ) -> None:
+        """Add a wave port that follows several modes on one port face.
+
+        The port keeps one boundary surface. Palace gets one ``WavePort``
+        entry per mode on that surface: the entry of ``active_mode`` keeps the
+        port's own index and terminates the face, and every other mode is an
+        observation-only entry (``"Active": false``) with an index after all
+        the ports, so the active entry always has the lowest index of its
+        face, which Palace requires. Every entry solves its own 2D port
+        mode, and every entry is measured, so ``port-S.csv`` gets a column per
+        entry and excitation. The map from Palace index to (port, mode,
+        active) is written next to ``config.json`` as ``port_modes.json``.
+
+        Only the active entry loads the face. A wave that arrives in another
+        mode is not matched there, so the S-parameters of the observed modes
+        carry a reflection error of the order of the relative difference of
+        the wave numbers. The error is zero for the active mode. To get every
+        mode with the active-mode accuracy, run once per mode with that mode
+        as ``active_mode`` and use only the columns of the active entries.
+
+        Args:
+            name: Port name (must match a component port at the signal center).
+            modes: The Palace mode numbers (1-based) to follow on this face,
+                for example ``(1, 2, 3)``. Must contain ``active_mode``.
+            layer: Target conductor layer.
+            active_mode: The mode that terminates the face.
+            excite: ``"active"`` excites only the active entry (one excitation
+                per port); ``"all"`` excites every entry, which gives a column
+                per mode but excites the unmatched modes with an amplitude
+                that is off by the same mismatch.
+            pilot_paths: Optional ``{mode: points}``. Each path is an open
+                polyline of ``(x, y, z)`` points in um across the face, from
+                the signal (high-potential) conductor to the reference, and
+                becomes that entry's ``VoltagePath``: Palace flips the mode so
+                the line integral of ``E`` along it is positive, which pins the
+                sign of the mode, and writes the voltage to ``port-V.csv``.
+            z_margin: Margin in z direction.
+            lateral_margin: Margin in x/y directions.
+            max_size: Fill the full simulation domain boundary on that side.
+            excited: Whether the port is excited at all.
+            offset: Offset distance used for scattering parameter de-embedding.
+            eigensolver_type: Palace SolverType of the 2D mode eigenproblem.
+            eigensolver_tol: Palace EigenTol of the mode solve.
+            eigensolver_ksp_tol: Palace KSPTol of the mode solve.
+            eigensolver_max_size: Palace MaxSize of the mode solve.
+            eigensolver_verbose: Palace Verbose level of the mode solve.
+
+        Raises:
+            ValueError: If this is not a driven simulation, or the modes,
+                active mode or pilot paths are inconsistent.
+
+        Example:
+            >>> sim.add_multimode_wave_port(
+            ...     "o1",
+            ...     layer="metal3",
+            ...     modes=(1, 2, 3),
+            ...     active_mode=1,
+            ...     max_size=True,
+            ... )
+        """
+        if self.simulation_type != "driven":
+            raise ValueError(
+                "A multimode wave port is a driven-simulation feature, not "
+                f"{self.simulation_type!r}."
+            )
+        paths = (
+            {
+                int(mode): [[float(c) for c in point] for point in path]
+                for mode, path in pilot_paths.items()
+            }
+            if pilot_paths
+            else None
+        )
+        config = WavePortConfig(
+            name=name,
+            layer=layer,
+            z_margin=z_margin,
+            lateral_margin=lateral_margin,
+            max_size=max_size,
+            mode=active_mode,
+            modes=tuple(int(m) for m in modes),
+            active_mode=active_mode,
+            excite_modes=excite,
+            pilot_paths=paths,
+            excited=excited,
+            offset=offset,
+            eigensolver_type=eigensolver_type,
+            eigensolver_tol=eigensolver_tol,
+            eigensolver_ksp_tol=eigensolver_ksp_tol,
+            eigensolver_max_size=eigensolver_max_size,
+            eigensolver_verbose=eigensolver_verbose,
+        )
+        self.wave_ports = [p for p in self.wave_ports if p.name != name]
+        self.wave_ports.append(config)
 
 
 class _PalaceSimBase(PalaceSimMixin, BaseModel):

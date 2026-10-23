@@ -15,7 +15,7 @@ import itertools
 import math
 import statistics
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from gsim.palace._validation_models import ModeSample, SolutionCheck
 
@@ -40,6 +40,13 @@ frequency (only when the ports share a cross-section). The two identical ports
 of the real test logs agree exactly in the printed digits; the spurious pairs
 differ by 11 % and 49 %."""
 
+FACE_MODE_RTOL = 0.005
+"""Two modes of one face whose ``n_eff`` differ by less than this (relative)
+are reported as coinciding (``port_mode_faces``). It is the size of the
+port-to-port tolerance: the 2D solves of one face scatter by far less, and
+two physical modes of a line are further apart than that unless they are
+degenerate."""
+
 NEIGHBOUR_COUNT = 5
 """Number of nearest points (by frequency, same port, mode and excitation) whose
 median is the continuity reference. Up to two spurious neighbours are tolerated."""
@@ -53,6 +60,7 @@ MAX_EVIDENCE = 5
 
 CONTINUITY_CHECK = "port_mode_continuity"
 PORT_AGREEMENT_CHECK = "port_mode_ports"
+FACE_MODES_CHECK = "port_mode_faces"
 
 _Key = tuple[int, int, int | None]
 _Point = tuple[float, float]  # (frequency in GHz, effective index)
@@ -274,12 +282,106 @@ def _port_agreement(series: dict[_Key, list[_Point]], rtol: float) -> SolutionCh
     )
 
 
+def _face_modes(
+    series: dict[_Key, list[_Point]], faces: Mapping[int, str], rtol: float
+) -> SolutionCheck:
+    """Check that the modes of one face are distinct and ranked by wave number.
+
+    A multimode wave port has one Palace entry per mode on the same face, and
+    every entry solves its own 2D eigenproblem. Two entries that report the
+    same ``n_eff`` have most likely found the same mode twice (a degenerate
+    pair, awslabs/palace#328, in an arbitrary basis on each entry), so their
+    S-parameter columns cannot be told apart. Palace ranks the modes by
+    decreasing wave number, so a later mode with a larger ``n_eff`` than an
+    earlier one means the separate solves disagree about the order.
+
+    Entries are grouped by face, excitation and frequency; entries on different
+    faces are never compared with each other here (that is ``port_mode_ports``).
+    """
+    solves: dict[tuple[str, int | None, float], dict[int, list[float]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    unmapped: set[int] = set()
+    for (port, mode, excitation), points in series.items():
+        face = faces.get(port)
+        if face is None:
+            unmapped.add(port)
+            continue
+        for frequency, n_eff in points:
+            solves[face, excitation, frequency][mode].append(n_eff)
+    flagged: list[str] = []
+    compared = 0
+    for (face, excitation, frequency), by_mode in sorted(
+        solves.items(),
+        key=lambda item: (
+            item[0][0],
+            -1 if item[0][1] is None else item[0][1],
+            item[0][2],
+        ),
+    ):
+        where = "" if excitation is None else f", excitation {excitation}"
+        for first, second in itertools.combinations(sorted(by_mode), 2):
+            for n_first in by_mode[first]:
+                for n_second in by_mode[second]:
+                    if not (math.isfinite(n_first) and math.isfinite(n_second)):
+                        continue  # reported by the continuity check
+                    compared += 1
+                    scale = max(abs(n_first), abs(n_second))
+                    gap = n_first - n_second  # positive: modes in Palace's order
+                    where_at = f"face {face}{where}: modes {first} and {second}"
+                    detail = (
+                        f"n_eff {n_first:.4f} vs {n_second:.4f} at {frequency:.4g} GHz"
+                    )
+                    if abs(gap) <= rtol * scale:
+                        flagged.append(
+                            f"{where_at} coincide within {100 * rtol:.2g} % ({detail})"
+                        )
+                    elif gap < 0:
+                        flagged.append(
+                            f"{where_at} are out of order: the later mode has the "
+                            f"larger n_eff ({detail})"
+                        )
+    notes = (
+        (f"Ports without a face in the map were skipped: {sorted(unmapped)}.",)
+        if unmapped
+        else ()
+    )
+    if flagged:
+        return SolutionCheck(
+            FACE_MODES_CHECK,
+            "warning",
+            (*_summary(flagged, compared, "mode pairs"), *notes),
+        )
+    if not compared:
+        return SolutionCheck(
+            FACE_MODES_CHECK,
+            "unknown",
+            (
+                "No face has two modes solved at one frequency; nothing to compare.",
+                *notes,
+            ),
+        )
+    return SolutionCheck(
+        FACE_MODES_CHECK,
+        "passed",
+        (
+            (
+                f"{compared} mode pairs on the same face are distinct (more than "
+                f"{100 * rtol:.2g} % apart) and in order of decreasing n_eff."
+            ),
+            *notes,
+        ),
+    )
+
+
 def check_port_mode_continuity(
     samples: Sequence[ModeSample],
     *,
     compare_ports: bool = False,
     rtol: float = CONTINUITY_RTOL,
     port_rtol: float = PORT_AGREEMENT_RTOL,
+    faces: Mapping[int, str] | None = None,
+    face_rtol: float = FACE_MODE_RTOL,
 ) -> tuple[SolutionCheck, ...]:
     """Check that the selected wave-port mode varies smoothly with frequency.
 
@@ -312,17 +414,28 @@ def check_port_mode_continuity(
         rtol: Relative continuity tolerance of ``n_eff`` (absolute when the
             neighbour median is zero).
         port_rtol: Relative port-to-port tolerance of ``n_eff``.
+        faces: For multimode wave ports, the face each Palace port index
+            sits on (``gsim.palace.ports.modes.faces_by_index`` of the
+            ``port_modes.json`` sidecar). The entries of one face follow
+            different modes, so they are not compared with each other by
+            ``port_mode_ports``, which only compares entries that follow the
+            same mode. With ``faces`` the ``port_mode_faces`` check is added:
+            on every face the modes must be distinct in ``n_eff`` (within
+            ``face_rtol``) and ranked by decreasing ``n_eff``.
+        face_rtol: Relative ``n_eff`` distance below which two modes of one
+            face count as coinciding.
 
     Returns:
         ``()`` when no sample has a frequency (no driven wave-port solve),
         otherwise the ``port_mode_continuity`` check followed by the
-        ``port_mode_ports`` check when requested. Statuses are ``"passed"``,
+        ``port_mode_ports`` check when requested and the ``port_mode_faces``
+        check when ``faces`` is given. Statuses are ``"passed"``,
         ``"warning"`` or ``"unknown"``; this check never reports ``"failed"``.
 
     Raises:
         ValueError: If a tolerance is negative or not finite.
     """
-    for tolerance in (rtol, port_rtol):
+    for tolerance in (rtol, port_rtol, face_rtol):
         if not math.isfinite(tolerance) or tolerance < 0:
             raise ValueError("Port-mode tolerances must be finite and nonnegative.")
     series = _series(samples)
@@ -331,4 +444,6 @@ def check_port_mode_continuity(
     checks = [_continuity(series, rtol)]
     if compare_ports:
         checks.append(_port_agreement(series, port_rtol))
+    if faces is not None:
+        checks.append(_face_modes(series, faces, face_rtol))
     return tuple(checks)

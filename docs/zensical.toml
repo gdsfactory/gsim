@@ -32,6 +32,7 @@ nav = [
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
     { "Terminal (multi-pin) Wave Ports" = "terminal_wave_ports.md" },
+    { "Terminal Wave Ports in Palace" = "nbs/palace_terminal_waveport.md" },
     { "Palace Result Validation" = "palace-validation.md" },
     { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" }
   ] },

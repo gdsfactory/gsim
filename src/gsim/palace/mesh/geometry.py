@@ -7,6 +7,7 @@ and creating 3D geometry in gmsh.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import logging
 import math
 from dataclasses import dataclass, replace
@@ -32,7 +33,9 @@ from .symmetry import (
 )
 
 if TYPE_CHECKING:
-    from gsim.common.stack import LayerStack
+    from collections.abc import Iterable
+
+    from gsim.common.stack import Layer, LayerStack
     from gsim.palace.models.pec import PECBlockConfig
     from gsim.palace.models.symmetry import SymmetryPlaneConfig
     from gsim.palace.ports.config import PalacePort
@@ -2009,6 +2012,249 @@ def _check_port_extent(
     return cls
 
 
+WavePortFace = tuple[float, float, float, float, float, float]
+"""``(xmin, ymin, zmin, xmax, ymax, zmax)`` of a wave-port face in um."""
+
+UNBOUNDED_DOMAIN: WavePortFace = (
+    -math.inf,
+    -math.inf,
+    -math.inf,
+    math.inf,
+    math.inf,
+    math.inf,
+)
+"""Domain bounds for building wave-port faces before the margins are known: a
+``max_size`` port then spans the whole side, which is what it does in any
+domain."""
+
+WAVE_PORT_FACE_TOL_UM = 1e-6
+"""Two wave-port faces closer than this are in one plane, and an overlap has to
+be longer than this in both directions of the plane to count."""
+
+
+def wave_port_face(
+    port: PalacePort,
+    stack: LayerStack,
+    target_layer: Layer,
+    *,
+    domain_bbox: tuple[float, float, float, float] | None = None,
+    domain_bounds: WavePortFace | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
+) -> tuple[WavePortFace, bool, bool]:
+    """Build the rectangle :func:`add_ports` meshes for one wave port.
+
+    This is the single place that sizes a wave-port face (z envelope, lateral
+    extent, ``max_size``, margins, symmetry-plane clipping), so validation and
+    meshing agree on what the face is.
+
+    Args:
+        port: The wave port.
+        stack: Layer stack.
+        target_layer: The stack layer of ``port.layer``.
+        domain_bbox: ``(xmin, ymin, xmax, ymax)`` of the domain; used by a
+            ``max_size`` port when ``domain_bounds`` is not given.
+        domain_bounds: ``(xmin, ymin, zmin, xmax, ymax, zmax)`` of the domain.
+        symmetry_plane: Symmetry plane the face is clipped to, or None.
+
+    Returns:
+        ``((xmin, ymin, zmin, xmax, ymax, zmax), is_y_axis, cut_by_plane)``:
+        the face in um, whether it lies across the y axis (a sheet of constant
+        y), and whether the symmetry plane cut it.
+
+    Raises:
+        ValueError: For a ``max_size`` port without domain bounds, or a face in
+            the removed half of the symmetry plane.
+    """
+    x, y = port.center
+    hw = port.width / 2
+    zmin = target_layer.zmin
+    zmax = target_layer.zmax
+
+    # Build a robust z-envelope for waveports. When synthetic
+    # dielectric boxes are disabled, stack.get_z_range() can miss
+    # patterned core levels; include layer extents as well.
+    layer_zmin, layer_zmax = stack.get_z_range()
+    if stack.layers:
+        zmin_layers = min(layer.zmin for layer in stack.layers.values())
+        zmax_layers = max(layer.zmax for layer in stack.layers.values())
+        layer_zmin = min(layer_zmin, zmin_layers)
+        layer_zmax = max(layer_zmax, zmax_layers)
+
+    if port.max_size and domain_bounds is not None:
+        # Fill the full 3D simulation domain.
+        _, _, zmin, _, _, zmax = domain_bounds
+    elif port.max_size:
+        # Backward-compatible fallback when 3D bounds are unavailable.
+        zmin = layer_zmin
+        zmax = layer_zmax
+    else:
+        zmin = zmin - port.z_margin
+        zmax = zmax + port.z_margin
+        zmin = max(zmin, layer_zmin)
+        zmax = min(zmax, layer_zmax)
+        # Stack layers can reach past the meshed domain; a port
+        # face outside it has no volume to attach to.
+        if domain_bounds is not None:
+            zmin = max(zmin, domain_bounds[2])
+            zmax = min(zmax, domain_bounds[5])
+
+    # Guard against inverted/degenerate z extents.
+    if zmax <= zmin:
+        z_center = target_layer.zmin + 0.5 * target_layer.thickness
+        z_half = max(port.z_margin, 0.01)
+        zmin = z_center - z_half
+        zmax = z_center + z_half
+
+    angle = port.orientation % 360
+    is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
+
+    if port.max_size:
+        if domain_bounds is not None:
+            dom_xmin, dom_ymin, _, dom_xmax, dom_ymax, _ = domain_bounds
+        elif domain_bbox is not None:
+            dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
+        else:
+            raise ValueError(
+                f"Port '{port.name}' has max_size=True but "
+                "domain bounds were not provided to add_ports()"
+            )
+        if is_y_axis:
+            xmin = dom_xmin
+            xmax = dom_xmax
+            ymin = y
+            ymax = y
+        else:
+            xmin = x
+            xmax = x
+            ymin = dom_ymin
+            ymax = dom_ymax
+    elif is_y_axis:
+        xmin = x - hw - port.lateral_margin
+        xmax = x + hw + port.lateral_margin
+        ymin = y
+        ymax = y
+    else:
+        xmin = x
+        xmax = x
+        ymin = y - hw - port.lateral_margin
+        ymax = y + hw + port.lateral_margin
+
+    cut_by_plane = False
+    if symmetry_plane is not None:
+        cls = _check_port_extent(
+            port,
+            symmetry_plane,
+            (xmin, xmax),
+            (ymin, ymax),
+            allow_clip=True,
+        )
+        cut_by_plane = cls == "straddles"
+        xmin, ymin, xmax, ymax = clamp_xy_bounds(
+            (xmin, ymin, xmax, ymax), symmetry_plane
+        )
+
+    return (xmin, ymin, zmin, xmax, ymax, zmax), is_y_axis, cut_by_plane
+
+
+def _flat_axis(face: WavePortFace, tol: float) -> int | None:
+    """0 for a sheet of constant x, 1 for constant y, None for anything else."""
+    dx = face[3] - face[0]
+    dy = face[4] - face[1]
+    if dx <= tol < dy:
+        return 0
+    if dy <= tol < dx:
+        return 1
+    return None
+
+
+def wave_port_faces_overlap(
+    first: WavePortFace,
+    second: WavePortFace,
+    tol: float = WAVE_PORT_FACE_TOL_UM,
+) -> bool:
+    """Whether two wave-port faces share area.
+
+    Faces are vertical sheets. They overlap when they lie in one plane and
+    overlap by more than ``tol`` both along the plane and in z. Faces that only
+    touch along an edge, or that cross in perpendicular planes, do not overlap.
+    """
+    axis = _flat_axis(first, tol)
+    if axis is None or axis != _flat_axis(second, tol):
+        return False
+    if abs(first[axis] - second[axis]) > tol:
+        return False
+    along = 1 - axis  # the other horizontal axis: y for a sheet of constant x
+    for low, high in ((along, along + 3), (2, 5)):
+        if min(first[high], second[high]) - max(first[low], second[low]) <= tol:
+            return False
+    return True
+
+
+def overlapping_wave_ports(
+    ports: Iterable[PalacePort],
+    stack: LayerStack,
+    *,
+    domain_bbox: tuple[float, float, float, float] | None = None,
+    domain_bounds: WavePortFace | None = None,
+    symmetry_plane: SymmetryPlaneConfig | None = None,
+) -> list[tuple[str, str]]:
+    """Return the pairs of wave ports whose generated faces overlap.
+
+    Each wave port gets the face :func:`add_ports` would mesh for it. Where
+    two faces overlap, the boolean pass merges them into one surface, one of
+    the two ports ends up without a surface and ``write_config()`` emits no
+    ``WavePort`` entry for it.
+
+    Args:
+        ports: The ports of the simulation; only single-element wave ports on
+            a layer of the stack are looked at, as in :func:`add_ports`.
+        stack: Layer stack.
+        domain_bbox: See :func:`wave_port_face`.
+        domain_bounds: See :func:`wave_port_face`; ``UNBOUNDED_DOMAIN`` when
+            the domain is not known yet.
+        symmetry_plane: See :func:`wave_port_face`.
+
+    Returns:
+        ``(name, name)`` pairs in port order.
+    """
+    faces: list[tuple[str, WavePortFace]] = []
+    for port in ports:
+        if port.port_type != PortType.WAVEPORT or port.multi_element:
+            continue
+        target_layer = stack.layers.get(port.layer) if port.layer else None
+        if target_layer is None:
+            continue
+        face, _, _ = wave_port_face(
+            port,
+            stack,
+            target_layer,
+            domain_bbox=domain_bbox,
+            domain_bounds=domain_bounds,
+            symmetry_plane=symmetry_plane,
+        )
+        faces.append((port.name, face))
+    return [
+        (first_name, second_name)
+        for (first_name, first), (second_name, second) in itertools.combinations(
+            faces, 2
+        )
+        if wave_port_faces_overlap(first, second)
+    ]
+
+
+def wave_port_overlap_message(first: str, second: str) -> str:
+    """The error text for two wave ports with overlapping faces."""
+    return (
+        f"Wave ports {first!r} and {second!r} generate overlapping faces (a "
+        "max_size port spans the whole domain side, and margins widen a face). "
+        "Palace needs a separate surface per wave port; with overlapping faces "
+        "meshing leaves one port without a surface and writes no WavePort entry "
+        "for it. Move the ports apart or drop max_size / lateral_margin / "
+        "z_margin so the faces do not overlap; to follow several modes on one "
+        "face use add_multimode_wave_port()."
+    )
+
+
 def add_ports(
     kernel,
     ports: list[PalacePort],
@@ -2041,6 +2287,19 @@ def add_ports(
     port_tags = {}  # "P{num}" -> [surface_tag(s)]
     port_info = []
     port_num = 1
+
+    if overlaps := overlapping_wave_ports(
+        ports,
+        stack,
+        domain_bbox=domain_bbox,
+        domain_bounds=domain_bounds,
+        symmetry_plane=symmetry_plane,
+    ):
+        raise ValueError(
+            "\n".join(
+                wave_port_overlap_message(first, second) for first, second in overlaps
+            )
+        )
 
     for port in ports:
         if port.multi_element:
@@ -2288,88 +2547,16 @@ def add_ports(
                     }
                 )
             else:
-                # Build a robust z-envelope for waveports. When synthetic
-                # dielectric boxes are disabled, stack.get_z_range() can miss
-                # patterned core levels; include layer extents as well.
-                layer_zmin, layer_zmax = stack.get_z_range()
-                if stack.layers:
-                    zmin_layers = min(layer.zmin for layer in stack.layers.values())
-                    zmax_layers = max(layer.zmax for layer in stack.layers.values())
-                    layer_zmin = min(layer_zmin, zmin_layers)
-                    layer_zmax = max(layer_zmax, zmax_layers)
-
-                if port.max_size and domain_bounds is not None:
-                    # Fill the full 3D simulation domain.
-                    _, _, zmin, _, _, zmax = domain_bounds
-                elif port.max_size:
-                    # Backward-compatible fallback when 3D bounds are unavailable.
-                    zmin = layer_zmin
-                    zmax = layer_zmax
-                else:
-                    zmin = zmin - port.z_margin
-                    zmax = zmax + port.z_margin
-                    zmin = max(zmin, layer_zmin)
-                    zmax = min(zmax, layer_zmax)
-                    # Stack layers can reach past the meshed domain; a port
-                    # face outside it has no volume to attach to.
-                    if domain_bounds is not None:
-                        zmin = max(zmin, domain_bounds[2])
-                        zmax = min(zmax, domain_bounds[5])
-
-                # Guard against inverted/degenerate z extents.
-                if zmax <= zmin:
-                    z_center = target_layer.zmin + 0.5 * target_layer.thickness
-                    z_half = max(port.z_margin, 0.01)
-                    zmin = z_center - z_half
-                    zmax = z_center + z_half
-
-                angle = port.orientation % 360
-                is_y_axis = 45 <= angle < 135 or 225 <= angle < 315
-
-                if port.max_size:
-                    if domain_bounds is not None:
-                        dom_xmin, dom_ymin, _, dom_xmax, dom_ymax, _ = domain_bounds
-                    elif domain_bbox is not None:
-                        dom_xmin, dom_ymin, dom_xmax, dom_ymax = domain_bbox
-                    else:
-                        raise ValueError(
-                            f"Port '{port.name}' has max_size=True but "
-                            "domain bounds were not provided to add_ports()"
-                        )
-                    if is_y_axis:
-                        xmin = dom_xmin
-                        xmax = dom_xmax
-                        ymin = y
-                        ymax = y
-                    else:
-                        xmin = x
-                        xmax = x
-                        ymin = dom_ymin
-                        ymax = dom_ymax
-                elif is_y_axis:
-                    xmin = x - hw - port.lateral_margin
-                    xmax = x + hw + port.lateral_margin
-                    ymin = y
-                    ymax = y
-                else:
-                    xmin = x
-                    xmax = x
-                    ymin = y - hw - port.lateral_margin
-                    ymax = y + hw + port.lateral_margin
-
-                cut_by_plane = False
-                if symmetry_plane is not None:
-                    cls = _check_port_extent(
+                (xmin, ymin, zmin, xmax, ymax, zmax), is_y_axis, cut_by_plane = (
+                    wave_port_face(
                         port,
-                        symmetry_plane,
-                        (xmin, xmax),
-                        (ymin, ymax),
-                        allow_clip=True,
+                        stack,
+                        target_layer,
+                        domain_bbox=domain_bbox,
+                        domain_bounds=domain_bounds,
+                        symmetry_plane=symmetry_plane,
                     )
-                    cut_by_plane = cls == "straddles"
-                    xmin, ymin, xmax, ymax = clamp_xy_bounds(
-                        (xmin, ymin, xmax, ymax), symmetry_plane
-                    )
+                )
                 surfacetag = gmsh_utils.create_port_rectangle(
                     kernel, xmin, ymin, zmin, xmax, ymax, zmax
                 )
@@ -2400,7 +2587,9 @@ def add_ports(
 
 
 __all__ = [
+    "UNBOUNDED_DOMAIN",
     "GeometryData",
+    "WavePortFace",
     "add_dielectrics",
     "add_metals",
     "add_pec_blocks",
@@ -2410,4 +2599,8 @@ __all__ = [
     "extract_pec_polygons",
     "get_layer_info",
     "get_layer_infos",
+    "overlapping_wave_ports",
+    "wave_port_face",
+    "wave_port_faces_overlap",
+    "wave_port_overlap_message",
 ]
