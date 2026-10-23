@@ -32,6 +32,8 @@ def get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int] | None:
 
     if hasattr(layer, "layer"):
         inner = layer.layer
+        if isinstance(inner, tuple) and len(inner) == 2:
+            return (int(inner[0]), int(inner[1]))
         if hasattr(inner, "layer") and hasattr(inner, "datatype"):
             return (int(inner.layer), int(inner.datatype))  # ty: ignore[invalid-argument-type]
         if isinstance(inner, int):
