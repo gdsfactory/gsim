@@ -17,6 +17,7 @@ from pydantic import (
 
 from gsim.common.config import MutableModel as _MutableModel
 from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.mode_selection import ModeSelection
 
 Vector3 = tuple[float, float, float]
 Axis = Literal["x", "y", "z"]
@@ -165,6 +166,7 @@ class PortSource(Source):
 
     type: Literal["port"] = "port"
     port: str | None = Field(default=None, min_length=1)
+    mode: ModeSelection | None = None
     vertical_axis: Literal["+z", "-z"] = "+z"
     vertical_aperture_width_um: float | None = Field(default=None, gt=0)
     vertical_waist_radius_um: float | None = Field(default=None, gt=0)
@@ -407,6 +409,7 @@ __all__ = [
     "LineCurrentSource",
     "Material",
     "Materials",
+    "ModeSelection",
     "Monitors",
     "PlaneMonitor",
     "PortSource",
