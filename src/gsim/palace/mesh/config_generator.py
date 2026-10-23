@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import gmsh
 import numpy as np
@@ -21,11 +21,14 @@ from gsim.palace.mesh.metadata import (
     write_metadata,
 )
 from gsim.palace.mesh.quality import tetrahedron_distortion
+from gsim.palace.models.solver import _ESTIMATOR_KEYS
 from gsim.palace.ports.config import PortType
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from gsim.common.stack import LayerStack
     from gsim.palace.models import (
         BoundaryModeConfig,
@@ -266,6 +269,35 @@ def _to_section_frame(props: dict[str, Any], axis: str) -> dict[str, Any]:
     return out
 
 
+# Without AMR nothing reads the indicator precisely, so a loose tolerance is
+# enough. With AMR it drives refinement, so Palace's defaults apply.
+_ESTIMATOR_DEFAULTS_AMR_OFF: Mapping[str, float | int | bool] = {"EstimatorTol": 1e-2}
+_ESTIMATOR_DEFAULTS_AMR_ON: Mapping[str, float | int | bool] = {}
+
+
+def _resolve_estimator_settings(
+    linear: dict[str, Any], refinement: RefinementConfig
+) -> None:
+    """Fill unset error estimator keys in ``linear`` by AMR state, in place.
+
+    Explicit values win key by key. All estimator keys are re-appended in
+    Palace's read order so the written bytes do not depend on which were set.
+    """
+    amr_on = refinement.max_its > 0
+    defaults = _ESTIMATOR_DEFAULTS_AMR_ON if amr_on else _ESTIMATOR_DEFAULTS_AMR_OFF
+    for key in _ESTIMATOR_KEYS:
+        value = linear.pop(key, defaults.get(key))
+        if value is not None:
+            linear[key] = value
+    if amr_on and linear.get("EstimatorMaxIts") == 0:
+        logger.warning(
+            "estimator_max_iterations=0 with AMR on (refinement max_its=%d): "
+            "Palace's error indicator is not computed, so refinement follows "
+            "field energy instead of error and will not stop at refinement tol.",
+            refinement.max_its,
+        )
+
+
 def generate_palace_config(
     groups: dict,
     ports: list[PalacePort],
@@ -391,6 +423,9 @@ def generate_palace_config(
             else SolverConfig()
         )
         solver_conf = defaults.to_solver_config()
+    _resolve_estimator_settings(
+        cast("dict[str, Any]", solver_conf["Linear"]), refinement_config
+    )
 
     if simulation_type == "driven":
         solver_conf["Driven"] = solver_driven

@@ -81,4 +81,5 @@ def test_generated_fallback_problem_config(tmp_path, simulation_type):
         "MGMaxLevels": 100,
         "PCMatReal": False,
         "ComplexCoarseSolve": True,
+        "EstimatorTol": 1e-2,
     }

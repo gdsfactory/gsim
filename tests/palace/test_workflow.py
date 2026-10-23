@@ -732,6 +732,7 @@ class TestNumericalConfig:
         assert linear["Tol"] == 1e-8
         assert linear["MaxIts"] == 400
         assert linear["MGMaxLevels"] == 100
+        assert linear["EstimatorTol"] == 1e-2
         assert "EstimatorMaxIts" not in linear
         assert "DivFreeMaxIts" not in linear
         assert linear["PCMatReal"] is False

@@ -1,0 +1,34 @@
+GMRES solver converged in 7 iterations (avg. reduction factor: 1.169e-01)
+ Found 4 converged eigenvalues (sigma = -1.678850e-01)
+Computing solution error estimates and performing postprocessing
+
+     m,       Re{kn} (1/m),       Im{kn} (1/m),          Re{n_eff},          Im{n_eff},      Error (Bkwd.),       Error (Abs.)
+     1,      +1.822770e+03,      -2.284119e+01,      +1.739413e+00,      -2.179664e-02,      +3.127219e-12,      +6.381259e-04
+ Wrote mode 1 to disk (Paraview)
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 2.964e+00)!
+
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 1.363e-04)!
+
+     2,      +1.527003e+03,      -1.056580e+01,      +1.457172e+00,      -1.008261e-02,      +4.928321e-12,      +2.030267e-04
+ Wrote mode 2 to disk (Paraview)
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 2.457e+00)!
+
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 4.154e-04)!
+
+
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 1.000e+00, global unknowns = 13124
+ Max. iterations = 0, tol. = 1.000e-02

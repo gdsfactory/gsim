@@ -21,7 +21,8 @@
             "MaxIts": 123,
             "MGMaxLevels": 100,
             "PCMatReal": false,
-            "ComplexCoarseSolve": true
+            "ComplexCoarseSolve": true,
+            "EstimatorTol": 0.01
         },
         "Order": 1,
         "Device": "CPU",

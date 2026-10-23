@@ -236,3 +236,37 @@ def test_palace_solver_serialization_preserves_cache_inputs():
         )
     assert json.dumps(solver.to_solver_config()) == expected
     assert json.dumps(numerical.to_solver_config()) == expected
+
+
+def test_estimator_settings_are_not_legacy_flat_keywords():
+    legacy = {
+        "tolerance": 1e-8,
+        "max_iterations": 17,
+        "solver_type": "Default",
+        "preconditioner": "AMS",
+        "mg_max_levels": 1,
+        "pc_mat_real": True,
+        "complex_coarse_solve": False,
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        with pytest.raises(ValidationError, match="extra_forbidden"):
+            pa.SolverConfig.model_validate({"estimator_tolerance": 1e-2})
+    with pytest.warns(DeprecationWarning, match="Flat linear solver settings"):
+        solver = pa.SolverConfig.model_validate(legacy)
+    assert solver.linear == pa.LinearSolverConfig(**legacy)
+
+
+@pytest.mark.parametrize("sim_class", [pa.DrivenSim, pa.EigenmodeSim])
+def test_set_solver_sets_and_resets_estimator_settings(sim_class):
+    sim = sim_class()
+    sim.set_solver(
+        estimator_tolerance=1e-3, estimator_max_iterations=0, estimator_mg=True
+    )
+    assert sim.solver.linear.estimator_tolerance == 1e-3
+    assert sim.solver.linear.estimator_max_iterations == 0
+    assert sim.solver.linear.estimator_mg is True
+    sim.set_solver()
+    assert sim.solver.linear.estimator_tolerance is None
+    assert sim.solver.linear.estimator_max_iterations is None
+    assert sim.solver.linear.estimator_mg is None

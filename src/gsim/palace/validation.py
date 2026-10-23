@@ -193,7 +193,8 @@ def validate_solution(
         estimator_disabled: Set only when the actual config has
             ``Solver.Linear.EstimatorMaxIts=0``. An exact zero-iteration PCG
             and unit-residual warning pair is skipped only in an estimator
-            section or the adaptive offline phase, never a field correction.
+            section (including eigenmode and boundary-mode postprocessing)
+            or the adaptive offline phase, never a field correction.
         expected_excitations: Excitation IDs required to have adaptive outcomes.
             A missing or truncated outcome is unknown, not converged.
         mode_expectations: Optional mode IDs, complex wave numbers, and parity

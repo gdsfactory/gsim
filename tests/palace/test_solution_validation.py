@@ -11,6 +11,7 @@ from gsim.palace.validation import ModeExpectation, ModeSample, validate_solutio
 
 FIXTURES = Path(__file__).parent / "fixtures" / "validation"
 CORE_SUCCESS = "GMRES solver converged in 11 iterations"
+POSTPROCESSING = "Computing solution error estimates and performing postprocessing"
 ZERO_PAIR = (
     "PCG solver did NOT converge in 0 iterations\n"
     "\n\x1b[38;2;255;255;000m--> Warning!\x1b[0m\n"
@@ -89,6 +90,62 @@ def test_core_failures_after_estimator_are_not_suppressed(failure):
     report = validate_solution(log, estimator_disabled=True)
     assert report.core.status == "failed"
     assert report.estimator.status == "skipped"
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "eigenmode-disabled-estimator.txt",
+        "boundarymode-disabled-estimator.txt",
+        "electrostatic-disabled-estimator.txt",
+    ],
+)
+def test_disabled_estimator_sections_by_problem_type(fixture):
+    log = (FIXTURES / fixture).read_text(encoding="utf-8")
+    report = validate_solution(log, estimator_disabled=True)
+    assert (report.core.status, report.estimator.status) == ("passed", "skipped")
+    skipped = report.estimator.evidence[1:]
+    assert skipped
+    assert all(
+        item.endswith(": PCG solver did NOT converge in 0 iterations")
+        for item in skipped
+    )
+    report = validate_solution(log)
+    assert (report.core.status, report.estimator.status) == ("passed", "failed")
+
+
+def test_amr_marker_ends_postprocessing_estimator_section():
+    # AMR marker printed by Palace basesolver.cpp; synthetic regression.
+    report = validate_solution(
+        f"{POSTPROCESSING}\nAdaptive mesh refinement (AMR) iteration 1:\n"
+        "Linear eigensolve failed to converge due to DIVERGED_ITS",
+        estimator_disabled=True,
+    )
+    assert report.core.status == "failed"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "Correcting magnetic field\nPCG solver did NOT converge in 10 iterations",
+        "Field correction\n" + ZERO_PAIR,
+    ],
+)
+def test_field_correction_in_postprocessing_is_a_core_failure(failure):
+    # Synthetic: a labelled field correction inside the estimator section.
+    log = f"{POSTPROCESSING}\n" + ZERO_PAIR + failure
+    report = validate_solution(log, estimator_disabled=True)
+    assert report.core.status == "failed"
+    assert report.estimator.status == "skipped"
+
+
+def test_nonunit_pair_in_postprocessing_is_an_estimator_failure():
+    report = validate_solution(
+        f"{POSTPROCESSING}\n" + ZERO_PAIR.replace("1.000e+00", "2.000e+00"),
+        estimator_disabled=True,
+    )
+    assert report.estimator.status == "failed"
+    assert report.core.status == "unknown"
 
 
 def test_nonunit_residual_and_incomplete_pair_are_not_skipped():
@@ -265,6 +322,12 @@ def test_unreadable_input_is_unknown(tmp_path, monkeypatch):
 def test_crlf_log_preserves_evidence():
     log = (FIXTURES / "disabled-estimator.txt").read_text(encoding="utf-8")
     assert validate_solution(log.replace("\n", "\r\n")) == validate_solution(log)
+
+
+def test_crlf_postprocessing_log_preserves_evidence():
+    log = (FIXTURES / "eigenmode-disabled-estimator.txt").read_text(encoding="utf-8")
+    crlf = validate_solution(log.replace("\n", "\r\n"), estimator_disabled=True)
+    assert crlf == validate_solution(log, estimator_disabled=True)
 
 
 def test_unidentified_adaptive_outcome_does_not_satisfy_expected_excitation():

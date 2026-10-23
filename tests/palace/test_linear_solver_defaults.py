@@ -184,3 +184,35 @@ def test_multigrid_levels_validate_on_assignment():
     linear = pa.LinearSolverConfig()
     with pytest.raises(ValidationError):
         linear.mg_max_levels = 0
+
+
+def test_estimator_settings_are_written_last_in_palace_read_order():
+    default = pa.LinearSolverConfig().to_palace_config()
+    linear = pa.LinearSolverConfig(estimator_mg=True, estimator_tolerance=1e-3)
+    config = linear.to_palace_config()
+    assert list(config) == [*default, "EstimatorTol", "EstimatorMG"]
+    assert config["EstimatorTol"] == 1e-3
+    assert config["EstimatorMG"] is True
+    linear.estimator_max_iterations = 0
+    assert list(linear.to_palace_config())[-3:] == [
+        "EstimatorTol",
+        "EstimatorMaxIts",
+        "EstimatorMG",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("estimator_tolerance", 0), ("estimator_max_iterations", -1)],
+)
+def test_estimator_settings_validate_and_return_to_automatic(field, value):
+    with pytest.raises(ValidationError):
+        pa.LinearSolverConfig(**{field: value})
+    linear = pa.LinearSolverConfig(estimator_max_iterations=0, estimator_mg=False)
+    with pytest.raises(ValidationError):
+        setattr(linear, field, value)
+    assert linear.to_palace_config()["EstimatorMaxIts"] == 0
+    linear.estimator_max_iterations = None
+    linear.estimator_mg = None
+    assert "EstimatorMaxIts" not in linear.to_palace_config()
+    assert "EstimatorMG" not in linear.to_palace_config()

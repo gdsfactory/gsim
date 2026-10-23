@@ -85,12 +85,16 @@ class SolverSettingsMixin:
         mg_max_levels: int = _DEFAULT_SOLVER.linear.mg_max_levels,
         pc_mat_real: bool = _DEFAULT_SOLVER.linear.pc_mat_real,
         complex_coarse_solve: bool = _DEFAULT_SOLVER.linear.complex_coarse_solve,
+        estimator_tolerance: float | None = None,
+        estimator_max_iterations: int | None = None,
+        estimator_mg: bool | None = None,
     ) -> None:
         """Set common solver controls, preserving problem-specific settings.
 
         Defaults match the simulation constructor: order 2, complex MUMPS
         multigrid, 400 iterations, and CPU. Linear tolerance is 1e-9 for
-        eigenmode simulations and 1e-6 otherwise. Set individual
+        eigenmode simulations and 1e-6 otherwise. Error estimator controls left
+        as None are chosen by AMR state. Set individual
         controls directly through ``sim.solver`` to retain other common values.
 
         Example:
@@ -113,6 +117,9 @@ class SolverSettingsMixin:
                     mg_max_levels=mg_max_levels,
                     pc_mat_real=pc_mat_real,
                     complex_coarse_solve=complex_coarse_solve,
+                    estimator_tolerance=estimator_tolerance,
+                    estimator_max_iterations=estimator_max_iterations,
+                    estimator_mg=estimator_mg,
                 ),
             )
         )

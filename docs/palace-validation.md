@@ -30,7 +30,14 @@ report.warnings  # Suspicious but unproven, for example a jump of the port mode.
 Only set `estimator_disabled=True` when the actual input disables the estimator. The parser recognizes the paired
 zero-iteration PCG and unit-residual warning inside estimator sections or adaptive offline training. It keeps field
 correction, eigen, and driven failures separate. An enabled estimator failure remains a failure of that check. A skipped
-estimator supplies no evidence of mesh accuracy.
+estimator supplies no evidence of mesh accuracy. gsim never writes `EstimatorMaxIts` by default, so on a config gsim
+wrote, the lookup above is true only when you asked for 0. For a config that gsim did not write, read the resolved
+`EstimatorMaxIts` from Palace's own `config_resolved.json` in the output directory.
+
+A converged estimator prints nothing, so a normal run reports `estimator` as `unknown`; that is expected and is not a
+problem. A non-zero `EstimatorMaxIts` that stops the estimator early is reported as a failure: of the `estimator` check
+where Palace prints an estimator header (electrostatic, driven uniform sweeps, eigenmode, boundary mode), and of the
+`core` check during adaptive offline training, which has no header.
 
 Adaptive checks retain excitation IDs and complete training-frequency lists in GHz. Missing or truncated outcomes are
 `unknown`; reaching the sample limit is `failed`. Successful adaptive sampling cannot clear an earlier core failure.
@@ -145,9 +152,10 @@ reproducible settings points at a change in the geometry, the mesh settings or t
 Statuses describe supplied evidence, not a complete physical validation. In particular, a passed core check means at
 least one recognized convergence message and no recognized core failure. It cannot establish complete log coverage, mesh
 convergence, or convergence of unreported eigenpairs. Unrecognized log formats and absent metrics are not proof of
-success. Archived `cfa430a` and `cfa430a-dirty` coverage is limited to driven and eigenmode logs; electrostatic and
-magnetostatic log coverage is not established. Their standard `It N/M: Index = ...` header resets the estimator section,
-but abridged or reformatted logs may omit that boundary. Later Palace formats may require additional parsing rules.
+success. The log fixtures cover driven logs from archived `cfa430a` and `cfa430a-dirty` builds, and electrostatic,
+eigenmode and boundary-mode logs from Palace `v0.18.1`. Magnetostatic and transient log coverage is not established. The
+standard driven `It N/M: Index = ...` header resets the estimator section, but abridged or reformatted logs may omit that
+boundary. Later Palace formats may require additional parsing rules.
 
 `report.failures` contains explicit failures; an empty tuple can still leave unknown or omitted checks. Mode checks are
 omitted unless requested; the automatic port-mode continuity checks are separate (`report.port_mode_checks`, listed in

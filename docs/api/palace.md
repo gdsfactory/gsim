@@ -30,7 +30,7 @@ An omitted linear tolerance uses the simulation-specific default through grouped
 dictionaries, settings models, and legacy `numerical` constructors or assignments.
 An explicitly supplied tolerance, including `1e-6`, is preserved.
 
-The configurable multigrid controls live under `sim.solver.linear`:
+The configurable multigrid and error estimator controls live under `sim.solver.linear`:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -38,6 +38,23 @@ The configurable multigrid controls live under `sim.solver.linear`:
 | `mg_max_levels` | `100` | Maximum multigrid levels; Palace uses the available hierarchy. Set 1 for a full-system solve. |
 | `pc_mat_real` | `False` | Set True to use a real approximation of the preconditioner matrix. |
 | `complex_coarse_solve` | `True` | Use a complex coarse solve for complex-valued problems. |
+| `estimator_tolerance` | automatic: `1e-2` with AMR off, Palace's `1e-6` with AMR on | PCG tolerance of the error estimator (the AMR indicator). |
+| `estimator_max_iterations` | automatic: Palace's `10000` | `0` skips the projection solve; the indicator is then meaningless, and with AMR on gsim warns; pass `estimator_disabled=True` to [`validate_solution`](../palace-validation.md). |
+| `estimator_mg` | automatic: Palace's `False` | Multigrid preconditioner for the estimator; costs memory; worth it at field order 1. |
+
+The three estimator settings default to `None`, which means automatic: gsim
+chooses their values by AMR state when it writes `config.json`. AMR is on when
+the refinement `max_its`, set with `sim.set_refinement(max_its=...)`, is above
+zero; the default 0 leaves it off. With AMR off, nothing reads the indicator
+closely, so gsim writes `EstimatorTol` `1e-2`. With AMR on, the indicator decides
+where to refine and when to stop, so gsim writes no estimator key and Palace's
+defaults apply. Explicit values win key by key; assign `None` to return to
+automatic. To restore Palace's own estimator with AMR off, set
+`estimator_tolerance=1e-6`. With AMR off, the error estimator never affects the
+S-parameters or other results. With AMR on, the indicator decides the refined
+mesh, and so the results computed on it.
+AMR-off runs compute the indicator to this loose tolerance, so the
+`error_indicators` of a result can read slightly higher than with Palace's default.
 
 Real-only problems such as electrostatics still solve real equations. The complex
 controls do not turn materials or fields into complex quantities in those problems.
@@ -87,16 +104,17 @@ boundary.solver.boundary_mode.freq = 5e9
 boundary.solver.boundary_mode.num_modes = 2
 ```
 
-All four share nine controls: `order`, `device`, and
+All four share twelve controls: `order`, `device`, and
 `linear.{solver_type, preconditioner, tolerance, max_iterations, mg_max_levels,
-pc_mat_real, complex_coarse_solve}`.
+pc_mat_real, complex_coarse_solve, estimator_tolerance, estimator_max_iterations,
+estimator_mg}`.
 
 | Simulation | Problem group | Problem settings | Total settings |
 | --- | --- | --- | --- |
-| DrivenSim | `solver.driven` | 13 | 22 |
-| EigenmodeSim | `solver.eigenmode` | 8 | 17 |
-| ElectrostaticSim | `solver.electrostatic` | 1 | 10 |
-| BoundaryModeSim | `solver.boundary_mode` | 7 | 16 |
+| DrivenSim | `solver.driven` | 13 | 25 |
+| EigenmodeSim | `solver.eigenmode` | 8 | 20 |
+| ElectrostaticSim | `solver.electrostatic` | 1 | 13 |
+| BoundaryModeSim | `solver.boundary_mode` | 7 | 19 |
 
 `sim.set_solver(...)` replaces the common controls using the same defaults as
 the simulation constructor, including its linear tolerance, while preserving the problem-specific settings. Assign individual
@@ -132,9 +150,12 @@ and solve behavior can change. Explicit saved tolerances are retained.
 For a full-system solve, set `mg_max_levels=1`; set `max_iterations=1` to also
 request the former iteration limit. This does not reproduce the entire old block:
 gsim no longer writes the forced `EstimatorMaxIts=0`, `EstimatorTol=1e-6`,
-`DivFreeMaxIts=0`, or `DivFreeTol=1e-6`. Those auxiliary controls are not currently
-exposed by the settings API, so Palace applies its defaults. Exposing them is
-deferred; there is no automatic legacy-mode fallback.
+`DivFreeMaxIts=0`, or `DivFreeTol=1e-6`. The error estimator controls are in the
+`sim.solver.linear` table above; `estimator_max_iterations=0` reproduces the old
+estimator behavior, at a cost: the indicator is meaningless, Palace prints solver
+warnings, and gsim warns when AMR is on. The divergence-free projection controls
+are not exposed by the settings API, so Palace applies its defaults. There is no
+automatic legacy-mode fallback.
 
 Calling `set_numerical()` without an explicit order now uses **2**, matching the
 constructor and `set_solver()`. Pass `order=1` to retain the previous setter behavior.
