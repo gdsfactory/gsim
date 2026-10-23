@@ -32,10 +32,13 @@ either orientation.
 The sign convention is ``exp(+i omega t)``, matching the rest of gsim.
 
 :class:`BoundaryModeField` and :func:`load_boundary_mode_field` are
-re-exported from :mod:`gsim.palace`; the three integrals are not, because
+re-exported from :mod:`gsim.palace`; the integrals are not, because
 they share a unit contract — um coordinates against SI fields, which
 cancels only in the ratio :func:`z0_power_current` takes — and are meant
-to be read together with it.
+to be read together with it. The terminal-port helpers
+:func:`voltage_line_integral` and :func:`reaction_matrix` follow the same
+contract: a voltage comes back in V/m times um and a reaction in
+(V/m)(A/m) times um^2, so that ``V I`` and ``2 P`` are in one scale.
 
 :func:`check_field_is_the_mode` sits here rather than beside whoever
 reads a Mode back, because asking a saved field whether it is the Mode
@@ -52,24 +55,30 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from scipy.constants import epsilon_0 as EPS0  # noqa: N812
 from scipy.constants import mu_0 as MU0  # noqa: N812
 
 from gsim.common.modes import z0_power_current as common_z0
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 __all__ = [
     "DEFAULT_PERIMETER_TOL_UM",
     "FIELD_INDEX_RTOL",
+    "VOLTAGE_NSAMPLES",
     "BoundaryModeField",
     "check_field_is_the_mode",
     "contour_current",
     "field_index_ratio",
     "load_boundary_mode_field",
+    "load_port_mode_fields",
+    "port_mode_fields_from_grid",
     "power_flux",
+    "reaction_matrix",
+    "voltage_line_integral",
     "z0_power_current",
 ]
 
@@ -79,6 +88,17 @@ __all__ = [
 #: about a nanometre; this is loose enough to absorb that and far tighter
 #: than any drawn feature.
 DEFAULT_PERIMETER_TOL_UM: float = 1e-4
+
+#: Default sample points per path segment of :func:`voltage_line_integral`.
+#: On a path that runs a few thousandths of a gap from a metal corner, as the
+#: detour paths of a multi-terminal port do, the integral is not converged at
+#: 200 (0.9 % in a voltage of a three-terminal port, 3.5e-3 in a terminal S at
+#: 50 GHz) and is converged to well under 1e-3 at 800.
+VOLTAGE_NSAMPLES: int = 800
+
+#: How far the points of a saved 3D port face may differ in the coordinate
+#: normal to it (um); Palace writes single-precision coordinates.
+_FACE_FLAT_TOL_UM: float = 1e-3
 
 #: Barycentric points and weights of a triangle rule exact to degree 4,
 #: which is what the product of two second-order fields asks for.
@@ -232,6 +252,146 @@ def load_boundary_mode_field(
     )
 
 
+def port_mode_fields_from_grid(
+    grid: Any, *, indices: Sequence[int], attributes: Sequence[int]
+) -> list[BoundaryModeField]:
+    """Take the saved port-mode fields of one wave-port face off a boundary dataset.
+
+    The boundary ParaView output of a driven run carries, for every
+    ``WavePort`` entry, the unit-power field of the port mode that entry's
+    eigenproblem found: ``E0_<index>_real`` and ``E0_<index>_imag``, 3-vectors
+    in V/m at the nodes of the boundary mesh (which is in um), where
+    ``<index>`` is the entry's Palace ``Index``. The face is a plane of the 3D
+    mesh; its cells are the boundary cells of the given attributes.
+
+    The result is a :class:`BoundaryModeField` in the face's own ``(h, v)``
+    coordinates, the ones of the matching 2D cross-section (``y, z`` for a face
+    normal to x, ``x, z`` for y, ``x, y`` for z): ``e_t`` is the in-plane part
+    of ``E0``, ``e_n`` the part along the normal. The magnetic field is not
+    saved, so ``h_t`` is zero and ``h_n`` is ``None``: the field is good for
+    :func:`voltage_line_integral`, not for the power or current integrals.
+
+    Args:
+        grid: The boundary dataset (what ``load_fields(..., boundary=True)``
+            returns).
+        indices: Palace ``Index`` of each entry wanted, one field per index,
+            in this order.
+        attributes: Boundary attributes of the port face.
+
+    Returns:
+        One field per index.
+
+    Raises:
+        ValueError: When no cell carries the attributes, the face is not made
+            of second-order triangles or does not lie in a coordinate plane, or
+            an entry has no ``E0`` field in the dataset (the run did not save
+            fields at that frequency, or the index is not an entry of the face).
+    """
+    from vtkmodules.util.numpy_support import vtk_to_numpy
+
+    wanted = sorted({int(a) for a in attributes})
+    if not wanted:
+        raise ValueError("No boundary attribute was given for the port face.")
+    if "attribute" not in grid.cell_data:
+        raise ValueError("The saved boundary dataset carries no 'attribute' cell data.")
+    labels = np.asarray(grid.cell_data["attribute"])
+    on_face = np.flatnonzero(np.isin(labels, wanted))
+    if on_face.size == 0:
+        present = sorted({int(a) for a in np.unique(labels)})
+        raise ValueError(
+            f"The saved boundary has no cell on the attributes {wanted}; it has "
+            f"{present}."
+        )
+    face = grid.extract_cells(on_face)
+    cell_types = {int(t) for t in np.unique(np.asarray(face.celltypes))}
+    offsets = vtk_to_numpy(face.GetCells().GetOffsetsArray())
+    counts = np.diff(np.asarray(offsets, dtype=np.int64))
+    if not cell_types <= {22, 69} or counts.size == 0 or not np.all(counts == 6):
+        raise ValueError(
+            f"The port face has cell types {sorted(cell_types)} with "
+            f"{sorted(set(counts.tolist()))} nodes each, not the second-order "
+            "triangles a driven run writes."
+        )
+    cells = np.asarray(face.cell_connectivity, dtype=np.int64).reshape(-1, 6)
+    points = np.asarray(face.points, dtype=np.float64)
+    flat = np.flatnonzero(np.ptp(points, axis=0) < _FACE_FLAT_TOL_UM)
+    if flat.size != 1:
+        raise ValueError(
+            "The port face does not lie in one coordinate plane (extent per axis "
+            f"{np.ptp(points, axis=0).tolist()} um)."
+        )
+    normal = int(flat[0])
+    plane = [axis for axis in range(3) if axis != normal]
+    labels_face = np.asarray(face.cell_data["attribute"], dtype=np.int64)
+
+    fields: list[BoundaryModeField] = []
+    for index in indices:
+        name = f"E0_{int(index)}"
+        missing = [
+            k for k in (f"{name}_real", f"{name}_imag") if k not in face.point_data
+        ]
+        if missing:
+            raise ValueError(
+                f"The saved boundary carries no {', '.join(missing)}; its point "
+                f"data is {sorted(face.point_data)}. The port-mode fields are "
+                "written for the frequencies of set_driven(save_fields_at=...)."
+            )
+        e = _complex_array(face, name)
+        if e.ndim != 2 or e.shape[1] != 3:
+            raise ValueError(f"{name} has shape {e.shape}, not (N, 3).")
+        fields.append(
+            BoundaryModeField(
+                points_um=points[:, plane],
+                cells=cells,
+                attribute=labels_face,
+                e_t=np.asarray(e[:, plane], dtype=np.complex128),
+                e_n=np.asarray(e[:, normal], dtype=np.complex128),
+                h_t=np.zeros((points.shape[0], 2), dtype=np.complex128),
+                h_n=None,
+            )
+        )
+    return fields
+
+
+def load_port_mode_fields(
+    source: str | Path | dict[str, Any],
+    *,
+    indices: Sequence[int],
+    attributes: Sequence[int],
+    cycle: int,
+    excitation: int = 1,
+) -> list[BoundaryModeField]:
+    """Read the saved port-mode fields of one wave-port face of a driven run.
+
+    Palace writes one ParaView cycle per saved frequency
+    (``set_driven(save_fields_at=...)``), in ascending order: cycle ``1`` is the
+    lowest saved frequency. Every excitation's boundary output carries the
+    port-mode fields ``E0_<index>`` of the entries; the fields do not depend on
+    which entry is excited, so one excitation is enough. See
+    :func:`port_mode_fields_from_grid` for what is returned.
+
+    Args:
+        source: What ``run_local`` or the cloud returned, or the simulation
+            directory.
+        indices: Palace ``Index`` of each entry wanted.
+        attributes: Boundary attributes of the port face (the sidecar
+            ``port_modes.json`` lists them per entry).
+        cycle: ParaView cycle number, 1-based.
+        excitation: Excitation whose output is read (1-based).
+
+    Returns:
+        One field per index, in the order of ``indices``.
+
+    Raises:
+        FileNotFoundError: When the run saved no boundary fields at that cycle.
+        ValueError: As :func:`port_mode_fields_from_grid`.
+    """
+    from gsim.palace.results import load_fields
+
+    grid = load_fields(source, excitation=excitation, cycle=int(cycle), boundary=True)
+    return port_mode_fields_from_grid(grid, indices=indices, attributes=attributes)
+
+
 def _triangle_areas(field: BoundaryModeField) -> NDArray[np.float64]:
     """Signed-free area of each triangle from its corner nodes (um^2)."""
     corners = field.points_um[field.cells[:, :3]]
@@ -280,6 +440,237 @@ def power_flux(field: BoundaryModeField) -> complex:
         h_q = np.einsum("n,cnk->ck", shape, h_t)
         total += weight * (e_q[:, 0] * h_q[:, 1] - e_q[:, 1] * h_q[:, 0])
     return complex(0.5 * np.sum(total * areas))
+
+
+def _shape_values_at(bary: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The six second-order shape functions at many barycentric points.
+
+    Args:
+        bary: ``(P, 3)`` barycentric coordinates.
+
+    Returns:
+        ``(P, 6)`` shape-function values, in the node order of a
+        second-order triangle (the layout :func:`_shape_values` uses).
+    """
+    l0, l1, l2 = bary[:, 0], bary[:, 1], bary[:, 2]
+    return np.asarray(
+        np.stack(
+            [
+                l0 * (2.0 * l0 - 1.0),
+                l1 * (2.0 * l1 - 1.0),
+                l2 * (2.0 * l2 - 1.0),
+                4.0 * l0 * l1,
+                4.0 * l1 * l2,
+                4.0 * l2 * l0,
+            ],
+            axis=1,
+        ),
+        dtype=np.float64,
+    )
+
+
+def _locate_points(
+    field: BoundaryModeField, points: NDArray[np.float64], tol_um: float
+) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+    """Find the triangle each point sits in, and its barycentric coordinates.
+
+    A point counts as inside a triangle when it is no further than
+    ``tol_um`` outside its worst edge, and where several triangles
+    qualify (a point on a shared edge) the one it is deepest inside wins.
+    The triangles are taken as straight-sided on their corner nodes,
+    which is how :func:`power_flux` reads them.
+
+    Args:
+        field: The Mode's saved fields.
+        points: ``(P, 2)`` points (um).
+        tol_um: How far outside the mesh a point may sit and still be
+            located (um).
+
+    Returns:
+        ``(cell, bary)``: the triangle index of each point and its
+        ``(P, 3)`` barycentric coordinates in that triangle.
+
+    Raises:
+        ValueError: When a point is further than ``tol_um`` outside every
+            triangle, or the mesh has no triangle with an area.
+    """
+    corners = field.points_um[field.cells[:, :3]]
+    origin = corners[:, 0]
+    edge_a = corners[:, 1] - origin
+    edge_b = corners[:, 2] - origin
+    det = edge_a[:, 0] * edge_b[:, 1] - edge_a[:, 1] * edge_b[:, 0]
+    usable = np.flatnonzero(det != 0.0)
+    if usable.size == 0:
+        raise ValueError("The saved mode's mesh has no triangle with an area.")
+    corners, origin = corners[usable], origin[usable]
+    edge_a, edge_b, det = edge_a[usable], edge_b[usable], det[usable]
+    # Length of the edge opposite each corner; twice the area over it is
+    # the altitude, which turns a barycentric coordinate into a distance.
+    opposite = np.stack(
+        [
+            np.linalg.norm(corners[:, 2] - corners[:, 1], axis=1),
+            np.linalg.norm(corners[:, 0] - corners[:, 2], axis=1),
+            np.linalg.norm(corners[:, 1] - corners[:, 0], axis=1),
+        ],
+        axis=1,
+    )
+    altitude = np.abs(det)[:, None] / opposite
+
+    count = points.shape[0]
+    found = np.empty(count, dtype=np.int64)
+    bary = np.empty((count, 3), dtype=np.float64)
+    chunk = max(1, 1_000_000 // usable.size)
+    for start in range(0, count, chunk):
+        offset = points[start : start + chunk, None, :] - origin[None]
+        lam1 = (
+            offset[..., 0] * edge_b[None, :, 1] - offset[..., 1] * edge_b[None, :, 0]
+        ) / det
+        lam2 = (
+            edge_a[None, :, 0] * offset[..., 1] - edge_a[None, :, 1] * offset[..., 0]
+        ) / det
+        lam = np.stack([1.0 - lam1 - lam2, lam1, lam2], axis=-1)
+        depth = np.min(lam * altitude[None], axis=-1)
+        best = np.argmax(depth, axis=1)
+        rows = np.arange(best.size)
+        outside = depth[rows, best] < -tol_um
+        if np.any(outside):
+            bad = points[start + int(np.argmax(outside))]
+            raise ValueError(
+                f"The point ({bad[0]:g}, {bad[1]:g}) um lies outside the meshed "
+                f"cross-section (by more than {tol_um:g} um): it is off the "
+                "domain or inside a conductor that was left out of the mesh as "
+                "a perfect conductor."
+            )
+        found[start : start + chunk] = usable[best]
+        bary[start : start + chunk] = lam[rows, best]
+    return found, bary
+
+
+def voltage_line_integral(
+    field: BoundaryModeField,
+    path_um: ArrayLike,
+    *,
+    nsamples: int = VOLTAGE_NSAMPLES,
+    tol_um: float = DEFAULT_PERIMETER_TOL_UM,
+) -> complex:
+    """Line integral of the transverse electric field along a polyline.
+
+    ``V = integral of E_t . dl`` from the first point of the path to the
+    last. The path is sampled with composite four-point Gauss-Legendre
+    panels, and ``E_t`` is evaluated at each sample from the second-order
+    shape functions of the triangle that contains it, so a field that
+    the mesh represents exactly (any quadratic) is integrated exactly
+    along a straight segment inside one polynomial piece; across element
+    boundaries the quadrature converges as ``nsamples`` grows.
+
+    The result is in the um-length scale of :func:`contour_current` (V/m
+    times um): divide by ``1e6`` for volts. Taking the voltage and the
+    reaction from the same saved field keeps ``V I`` and ``2 P`` in one
+    scale.
+
+    Args:
+        field: The Mode's saved fields.
+        path_um: ``(M, 2)`` polyline points in the cross-section's own
+            ``(h, v)`` coordinates (um), ``M >= 2``, consecutive points
+            distinct.
+        nsamples: Sample points per segment, rounded up to a multiple of
+            four. The default is :data:`VOLTAGE_NSAMPLES` (800).
+        tol_um: How far outside the mesh a sample may sit and still be
+            evaluated (um). Palace writes its coordinates in single
+            precision, so a path a hair inside a gap may land a hair off
+            the written mesh.
+
+    Returns:
+        The complex line integral.
+
+    Raises:
+        ValueError: When the path is malformed, a segment has zero length,
+            ``nsamples`` is below one, or a sample falls outside the
+            mesh (off the domain, or inside a ``"pec"`` conductor's hole).
+    """
+    path = np.asarray(path_um, dtype=np.float64)
+    if path.ndim != 2 or path.shape[1] != 2 or path.shape[0] < 2:
+        raise ValueError(
+            "A voltage path is an (M, 2) polyline of (h, v) points with M >= 2; "
+            f"got an array of shape {path.shape}."
+        )
+    if not np.all(np.isfinite(path)):
+        raise ValueError("The voltage path has non-finite coordinates.")
+    if nsamples < 1:
+        raise ValueError(f"nsamples must be at least 1, got {nsamples}.")
+    steps = np.diff(path, axis=0)
+    if np.any(np.linalg.norm(steps, axis=1) == 0.0):
+        raise ValueError("The voltage path repeats a point: a segment has no length.")
+
+    panels = -(-int(nsamples) // 4)
+    nodes, gauss = np.polynomial.legendre.leggauss(4)
+    edges = np.linspace(0.0, 1.0, panels + 1)
+    width = edges[1:] - edges[:-1]
+    centre = 0.5 * (edges[1:] + edges[:-1])
+    params = (centre[:, None] + 0.5 * width[:, None] * nodes[None, :]).ravel()
+    weights = (0.5 * width[:, None] * gauss[None, :]).ravel()
+
+    total = 0.0 + 0.0j
+    for k in range(len(steps)):
+        start, step = path[k], steps[k]
+        samples = start[None, :] + params[:, None] * step[None, :]
+        cell, bary = _locate_points(field, samples, tol_um)
+        e_at = np.einsum(
+            "pn,pnk->pk", _shape_values_at(bary), field.e_t[field.cells[cell]]
+        )
+        total += np.sum(weights * (e_at @ step))
+    return complex(total)
+
+
+def reaction_matrix(fields: Sequence[BoundaryModeField]) -> NDArray[np.complex128]:
+    """Unconjugated reaction of every pair of Modes on one cross-section.
+
+    ``R_jk = integral of (E_t,j x H_t,k) . z dA`` over the whole meshed
+    cross-section, with the quadrature :func:`power_flux` uses. For
+    distinct Modes of a reciprocal line ``R`` is diagonal, and it is the
+    ``T_V^T T_I`` that :func:`gsim.palace.terminal.currents_from_reaction`
+    takes. For one real Mode ``R[0, 0] = 2 * power_flux``. For a complex
+    Mode the two differ: ``power_flux`` conjugates ``H``, the reaction
+    does not.
+
+    Args:
+        fields: The Modes' saved fields, all on the same mesh.
+
+    Returns:
+        ``(n, n)`` complex matrix in the um-area scale of
+        :func:`power_flux`.
+
+    Raises:
+        ValueError: When no field is given, or the fields do not share one
+            mesh.
+    """
+    modes = list(fields)
+    if not modes:
+        raise ValueError("reaction_matrix needs at least one Mode.")
+    first = modes[0]
+    for index, other in enumerate(modes[1:], start=1):
+        if not (
+            np.array_equal(other.cells, first.cells)
+            and np.array_equal(other.points_um, first.points_um)
+        ):
+            raise ValueError(
+                f"Mode {index} is not on the mesh of Mode 0: a reaction pairs "
+                "Modes of one meshed cross-section."
+            )
+    areas = _triangle_areas(first)
+    e_all = np.stack([m.e_t[first.cells] for m in modes])
+    h_all = np.stack([m.h_t[first.cells] for m in modes])
+    reaction = np.zeros((len(modes), len(modes)), dtype=np.complex128)
+    for l0, l1, l2, weight in _QUADRATURE:
+        shape = _shape_values(l0, l1, l2)
+        e_q = np.einsum("n,jcnk->jck", shape, e_all)
+        h_q = np.einsum("n,jcnk->jck", shape, h_all)
+        cross = (
+            e_q[:, None, :, 0] * h_q[None, :, :, 1]
+            - e_q[:, None, :, 1] * h_q[None, :, :, 0]
+        )
+        reaction += weight * np.einsum("jkc,c->jk", cross, areas)
+    return reaction
 
 
 def _rectangle_side_normals(

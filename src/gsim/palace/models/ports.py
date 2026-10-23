@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gsim.palace.ports.modes import check_wave_port_modes
+
 if TYPE_CHECKING:
     from shapely import Polygon
 
@@ -321,6 +323,17 @@ class WavePortConfig(BaseModel):
             its own default (max(2 x Mode, Mode + 15)).
         eigensolver_verbose: Palace Verbose level for this port's mode
             solve. None uses Palace's own default.
+        modes: Palace mode numbers followed on this port's face, for a
+            multimode wave port. Empty (the default) is an ordinary wave
+            port that follows ``mode`` only.
+        active_mode: With ``modes``, the mode whose entry terminates the
+            face; it must be in ``modes`` and equal to ``mode``. The other
+            modes are observation-only entries (``"Active": false``).
+        excite_modes: ``"active"`` excites only the active entry, ``"all"``
+            every entry of the port.
+        pilot_paths: Optional ``{mode: points}``: an open polyline of
+            ``(x, y, z)`` points in um from the signal to the reference
+            conductor, written as that entry's ``VoltagePath``.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -363,6 +376,51 @@ class WavePortConfig(BaseModel):
         ge=0,
         description="Palace Verbose level for this port's mode solve",
     )
+    modes: tuple[int, ...] = Field(
+        default=(),
+        description=(
+            "Palace mode numbers followed on this port's face (multimode port)"
+        ),
+    )
+    active_mode: int | None = Field(
+        default=None,
+        ge=1,
+        description="Mode whose entry terminates the face (multimode port)",
+    )
+    excite_modes: Literal["active", "all"] = Field(
+        default="active",
+        description="Excite only the active entry or every entry of the port",
+    )
+    pilot_paths: dict[int, list[list[float]]] | None = Field(
+        default=None,
+        description=(
+            "Per-mode VoltagePath: (x, y, z) points in um from the signal to "
+            "the reference conductor"
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _active_mode_sets_mode(cls, data: Any) -> Any:
+        """Let ``active_mode`` stand in for ``mode`` when only it is given."""
+        if (
+            isinstance(data, dict)
+            and data.get("active_mode") is not None
+            and "mode" not in data
+        ):
+            return {**data, "mode": data["active_mode"]}
+        return data
+
+    @model_validator(mode="after")
+    def _validate_modes(self) -> Self:
+        """Check the mode list, the active mode and the pilot paths."""
+        check_wave_port_modes(
+            mode=self.mode,
+            modes=self.modes,
+            active_mode=self.active_mode,
+            pilot_paths=self.pilot_paths,
+        )
+        return self
 
 
 class TwoTerminalPortConfig(BaseModel):

@@ -126,6 +126,7 @@ from gsim.palace.mesh.validation import check_lumped_port_contact
 from gsim.palace.mode_fields import (
     BoundaryModeField,
     load_boundary_mode_field,
+    load_port_mode_fields,
 )
 
 # Models (new submodule)
@@ -304,6 +305,7 @@ __all__ = [
     "load_circuit_synthesis",
     "load_field_context",
     "load_fields",
+    "load_port_mode_fields",
     "load_refinement_history",
     "load_sparams",
     "load_stack_yaml",

@@ -30,6 +30,7 @@ from gsim.palace._validation_models import (
 )
 from gsim.palace._validation_port_modes import (
     CONTINUITY_RTOL,
+    FACE_MODE_RTOL,
     MAX_EVIDENCE,
     MIN_DISTINCT_FREQUENCIES,
     NEIGHBOUR_COUNT,
@@ -39,6 +40,7 @@ from gsim.palace._validation_port_modes import (
 
 __all__ = [
     "CONTINUITY_RTOL",
+    "FACE_MODE_RTOL",
     "MAX_EVIDENCE",
     "MIN_DISTINCT_FREQUENCIES",
     "NEIGHBOUR_COUNT",
@@ -185,6 +187,7 @@ def validate_solution(
     input_files: Mapping[str, str | Path] | None = None,
     expected_input_sha256: Mapping[str, str] | None = None,
     ports_share_cross_section: bool = False,
+    port_faces: Mapping[int, str] | None = None,
 ) -> SolutionReport:
     """Build a report from a Palace log and optional independent evidence.
 
@@ -213,6 +216,10 @@ def validate_solution(
             (``port_mode_ports`` check). The log does not record the port
             geometry, so gsim cannot infer this; the default skips the
             port-to-port comparison.
+        port_faces: For multimode wave ports, the face (gsim port name)
+            of each Palace port index, from the ``port_modes.json`` sidecar.
+            Adds the ``port_mode_faces`` check: the modes of one face must
+            be distinct in ``n_eff`` and ranked by decreasing ``n_eff``.
 
     Returns:
         Independent checks and raw mode samples. Even an empty ``failures``
@@ -250,6 +257,6 @@ def validate_solution(
         mode_samples=samples,
         provenance=_provenance(metadata, input_files, expected_input_sha256),
         port_mode_checks=check_port_mode_continuity(
-            samples, compare_ports=ports_share_cross_section
+            samples, compare_ports=ports_share_cross_section, faces=port_faces
         ),
     )
