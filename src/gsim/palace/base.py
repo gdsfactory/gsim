@@ -327,6 +327,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         mesh_config: MeshConfig
         simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
         absorbing_boundary: bool
+        absorbing_order: Literal[1, 2]
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
@@ -1654,6 +1655,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self.absorbing_boundary,
+            absorbing_order=self.absorbing_order,
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
             merge_via_distance=mesh_config.merge_via_distance,
@@ -1917,6 +1919,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self.absorbing_boundary,
+                absorbing_order=self.absorbing_order,
                 symmetry_plane=(
                     self._symmetry_planes[0] if self._symmetry_planes else None
                 ),
@@ -2251,6 +2254,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             refinement_config=self.refinement,
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=self.absorbing_boundary,
+            absorbing_order=self.absorbing_order,
             hints=hints,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
@@ -2766,6 +2770,17 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     # Defaults set by each problem class
     simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
     absorbing_boundary: bool
+    absorbing_order: Literal[1, 2] = Field(
+        default=2,
+        description=(
+            "Order of the absorbing boundary condition on the outer walls "
+            "(Palace ``Boundaries.Absorbing.Order``). Palace releases without "
+            "awslabs/palace#1070 apply the second-order term with the wrong "
+            "sign, which makes it reflect more than first order for oblique "
+            "outgoing waves. Prefer 1 for radiating structures until the "
+            "Palace in use includes that fix."
+        ),
+    )
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
 
     # Stack configuration (stored as kwargs until resolved)

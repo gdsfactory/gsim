@@ -161,6 +161,24 @@ class TestDrivenSimWorkflow:
         assert len(boundaries["LumpedPort"]) == 2
         assert "Absorbing" in boundaries
 
+    def test_absorbing_order_written_to_config(self, driven_sim):
+        config_path = Path(driven_sim._output_dir) / "config.json"
+        driven_sim.write_config()
+        absorbing = json.loads(config_path.read_text())["Boundaries"]["Absorbing"]
+        assert absorbing["Order"] == 2
+
+        driven_sim.absorbing_order = 1
+        try:
+            driven_sim.write_config()
+            absorbing = json.loads(config_path.read_text())["Boundaries"]["Absorbing"]
+            assert absorbing["Order"] == 1
+        finally:
+            driven_sim.absorbing_order = 2
+
+    def test_absorbing_order_rejects_unsupported_order(self):
+        with pytest.raises(ValueError, match="absorbing_order"):
+            DrivenSim(absorbing_order=3)
+
     def test_validate_mesh_passes(self, driven_sim):
         result = driven_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
