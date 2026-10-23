@@ -17,6 +17,7 @@ from gsim.common.materials import (
     evaluate_material_card,
     tabulated_wavelengths_um,
 )
+from gsim.fdtd.mode_selection import ModeSelection
 from gsim.fdtd.models import FDTDConfigError, MeshManifest
 
 
@@ -242,6 +243,7 @@ class ExcitationConfig(_StrictModel):
     num_wavelengths: int = Field(ge=1)
     amplitude: float = 1.0
     default_port: str | None = Field(default=None, min_length=1)
+    mode: ModeSelection | None = None
     dipole: DipoleConfig | None = None
     line_current: LineCurrentConfig | None = None
     gaussian_beam: GaussianBeamConfig | None = None
@@ -268,6 +270,8 @@ class ExcitationConfig(_StrictModel):
             return self
         if self.default_port is not None:
             raise ValueError(f"{self.type} excitation cannot use default_port")
+        if self.mode is not None:
+            raise ValueError(f"{self.type} excitation cannot select a guided mode")
         for source_type, block in source_blocks.items():
             if (source_type == self.type) != (block is not None):
                 raise ValueError(

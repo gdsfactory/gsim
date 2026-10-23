@@ -83,6 +83,18 @@ def test_invalid_excitation_combinations(options):
         )
 
 
+def test_non_eigenmode_excitation_rejects_mode_selection():
+    with pytest.raises(ValidationError, match="cannot select a guided mode"):
+        ExcitationConfig(
+            type="dipole",
+            center_wavelength=1550,
+            wavelength_halfspan=50,
+            num_wavelengths=3,
+            dipole={"position": [0, 0, 0], "current_axis": "x"},
+            mode={"kind": "mode_order", "mode_order": 2},
+        )
+
+
 @pytest.mark.parametrize(
     ("options", "message"),
     [
