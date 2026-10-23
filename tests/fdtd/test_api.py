@@ -45,7 +45,9 @@ def test_guided_mode_selection_serializes(
     artifacts = simulation.write(tmp_path)
     document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
 
-    assert isinstance(simulation.source.mode, fdtd.ModeSelection)
+    source = simulation.source
+    assert isinstance(source, fdtd.PortSource)
+    assert isinstance(source.mode, fdtd.ModeSelection)
     assert document["excitation"]["mode"] == expected
 
 
