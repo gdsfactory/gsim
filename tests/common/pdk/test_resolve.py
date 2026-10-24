@@ -138,6 +138,21 @@ def test_preserves_derived_geometry_and_authoritative_layer_fields() -> None:
     assert (10, 0) in result.derived_component.layers
 
 
+def test_info_mesh_order_overrides_layer_level_field() -> None:
+    """PDKs that keep the order in ``info['mesh_order']`` are honoured.
+
+    IHP stores the real order in ``LayerLevel.info`` and leaves the
+    ``mesh_order`` field at its class default, so the canonical resolver must
+    prefer ``info`` (gsim#230).
+    """
+    pdk = make_test_pdk()
+    pdk.get_layer_stack().layers["core_key"].info = {"mesh_order": 42}
+
+    result = resolve_passive_pcell("demo", pdk=pdk)
+
+    assert result.layers["core_key"].mesh_order == 42
+
+
 def test_preexisting_derived_target_does_not_replace_source_geometry() -> None:
     component = demo_component()
     component.add_polygon(

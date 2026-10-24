@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -1332,3 +1334,49 @@ class TestXZAutoCrop:
         assert sim.geometry.stack is not None
         box = next(d for d in sim.geometry.stack.dielectrics if d["name"] == "box")
         assert box["zmin"] == -2.0
+
+
+def test_run_local_resolves_relative_output_dir(tmp_path, monkeypatch):
+    """The runner executes with cwd=output_dir; the script path must be absolute."""
+    import subprocess
+
+    from gsim.meep.models.results import SParameterResult
+
+    sim = Simulation()
+    calls: dict[str, object] = {}
+
+    def fake_write_config(output_dir):
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "run_meep.py").write_text("", encoding="utf8")
+        return path
+
+    class _Completed:
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, *, cwd, **_kwargs):
+        calls["cmd"] = cmd
+        calls["cwd"] = Path(cwd)
+        return _Completed()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        Simulation,
+        "write_config",
+        lambda _self, output_dir: fake_write_config(output_dir),
+    )
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        SParameterResult, "from_directory", classmethod(lambda cls, path: cls())
+    )
+
+    sim.run_local("relative_output", verbose=False)
+
+    cwd = calls["cwd"]
+    command = calls["cmd"]
+    assert isinstance(cwd, Path)
+    assert isinstance(command, list)
+    script = Path(command[-1])
+    assert script.is_absolute()
+    assert script.parent == cwd

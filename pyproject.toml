@@ -92,6 +92,8 @@ rf-analysis = [
   "scikit-rf>=2.1",
 ]
 test = [
+  "h5netcdf>=1.3.0",
+  "h5py>=3.10",
   "ihp-gdsfactory>=2.0.1",
   "pytest>=8.3.0",
   "pytest-cov>=6.0.0",
@@ -200,13 +202,14 @@ reportMissingImports = "none"
 reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
-addopts = "--tb=short -m 'not cloud and not meep_local and not tcad_local and not palace_local'"
+addopts = "--tb=short -m 'not cloud and not meep_local and not tcad_local and not palace_local and not pdk_data'"
 markers = [
   "palace_local: tests running the Palace binary locally (deselected by default; run with `pytest -m palace_local`)",
   "cloud: tests that submit jobs to GDSFactory+ cloud servers (deselected by default; run with `pytest -m cloud`)",
   "sim_smoke_test: smallest cloud sims (one per solver) run automatically per-PR; run with `pytest -m sim_smoke_test`",
   "meep_local: tests requiring a local MEEP installation (deselected by default; run with `pytest -m meep_local`)",
   "tcad_local: tests requiring a local DEVSIM installation (deselected by default; run with `pytest -m tcad_local`)",
+  "pdk_data: tests that download pinned open-PDK reference data (deselected by default; run with `pytest -m pdk_data`)",
 ]
 norecursedirs = ["scripts"]
 testpaths = ["tests"]

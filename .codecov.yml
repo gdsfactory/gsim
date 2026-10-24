@@ -5,3 +5,7 @@ coverage:
         target: 0% # Ensure it always passes
         threshold: 0% # No threshold drop is allowed
         informational: true # Do not fail the build based on coverage
+    patch:
+      default:
+        target: 80%
+        threshold: 0%
