@@ -1,0 +1,11 @@
+{
+  "source": "IHP-Open-PDK",
+  "url": "https://github.com/IHP-GmbH/IHP-Open-PDK/tree/943983786b04351feb20e33e8d3d76c0e0d87cce/ihp-sg13g2/libs.tech/openems/testcase/SG13_Octagon_L2n0",
+  "commit": "943983786b04351feb20e33e8d3d76c0e0d87cce",
+  "license": "Apache-2.0",
+  "files": {
+    "L_2n0_simplified.gds": "4a8adee639a25b27023f093a1941e244ef93217a068219947b923cb32db72016",
+    "die_x2y7.s2p": "4a1febb9a4f2d0054c63ee800e57b2114bce8e44db642cf5b6ccb5f6c0739721",
+    "die_x5y8.s2p": "34ba71b0986d30a0941b3b50f38a7e8b2dec363ff1ba9f4e777dfc02e232f944"
+  }
+}

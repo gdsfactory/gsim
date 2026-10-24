@@ -1,0 +1,9 @@
+{
+  "case": "ihp_sg13g2_l2n0",
+  "frequency_ghz": 30.0,
+  "inductance_nh": 0.7997983436783163,
+  "q": -0.8611544120217177,
+  "z_series": [-175.06550967700662, 150.75843605118496],
+  "ports": ["P1", "P2"],
+  "output": "/tmp/gsim-ihp/nbs/data/ihp_validation/runs/l2n0_30ghz"
+}

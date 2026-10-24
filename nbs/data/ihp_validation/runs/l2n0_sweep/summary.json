@@ -1,0 +1,9 @@
+{
+  "case": "ihp_sg13g2_l2n0",
+  "frequency_ghz": 1.0,
+  "inductance_nh": 1.3461875445658726,
+  "q": 0.23485503799898594,
+  "z_series": [36.015177161160054, 8.458345800724455],
+  "ports": ["P1", "P2"],
+  "output": "nbs/data/ihp_validation/runs/l2n0_sweep"
+}

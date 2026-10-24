@@ -1,0 +1,161 @@
+{
+  "baseline": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.5993027304696077,
+    "Q": 0.2819781096356465,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {},
+    "L_diff_nH": 0.7493181647811784,
+    "Q_diff": 0.13225066855234044,
+    "pass": true
+  },
+  "ground0": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.8815723693610784,
+    "Q": 0.2049415318049237,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "ground_pad_um": 0.0
+    },
+    "L_diff_nH": 0.7536303988486982,
+    "Q_diff": 0.08212724990779526,
+    "pass": true
+  },
+  "pec": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.6388315216063094,
+    "Q": 0.28831504979668093,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "pec_boundary": true
+    },
+    "L_diff_nH": 0.7955572776734777,
+    "Q_diff": 0.14002222438568446,
+    "pass": true
+  },
+  "ground0_pec": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.920713307781098,
+    "Q": 0.20892371659537262,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "ground_pad_um": 0.0,
+      "pec_boundary": true
+    },
+    "L_diff_nH": 0.8019574493000682,
+    "Q_diff": 0.0872341720346098,
+    "pass": true
+  },
+  "mesh1.5": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.6229730101720667,
+    "Q": 0.26323311113952885,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "refined_mesh_size": 1.5
+    },
+    "L_diff_nH": 0.7538536326587584,
+    "Q_diff": 0.12231861599508839,
+    "pass": true
+  },
+  "planar_pec": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": -148188.29236943732,
+    "Q": 10.33621123275552,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "planar_conductors": true
+    },
+    "L_diff_nH": -2294.9819342337305,
+    "Q_diff": -5.709805173077623,
+    "pass": false
+  },
+  "substrate180": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.5991804957845186,
+    "Q": 0.2819570916949491,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "substrate_thickness_um": 180.0
+    },
+    "L_diff_nH": 0.7494921818734142,
+    "Q_diff": 0.13228370828234345,
+    "pass": true
+  },
+  "gap": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 0.7795860426945153,
+    "Q": 3.061061437270309,
+    "ports": [
+      "Pdiff"
+    ],
+    "kwargs": {
+      "port_variant": "gap"
+    },
+    "L_diff_nH": 0.7795860426945153,
+    "Q_diff": 3.061061437270309,
+    "pass": true
+  },
+  "openems_ground": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.6543361670026526,
+    "Q": 0.24134775277672998,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "openems_ground": true
+    },
+    "L_diff_nH": 0.7321414464927576,
+    "Q_diff": 0.10725449624756205,
+    "pass": true
+  },
+  "shell_conformal": {
+    "ok": true,
+    "frequency_ghz": 1.0,
+    "L_nH": 1.6276542317036578,
+    "Q": 0.2639988847274653,
+    "L_diff_nH": 0.7540145916614779,
+    "Q_diff": 0.12234581317327423,
+    "pass": true,
+    "ports": [
+      "P1",
+      "P2"
+    ],
+    "kwargs": {
+      "shell_variant": true,
+      "refined_mesh_size": 1.5
+    }
+  }
+}
