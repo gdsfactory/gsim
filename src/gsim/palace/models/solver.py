@@ -64,6 +64,13 @@ class LinearSolverConfig(BaseModel):
     max_iterations: int = Field(
         default=400, ge=1, description="Maximum Krylov solver iterations."
     )
+    initial_guess: bool | None = Field(
+        default=None,
+        description=(
+            "Reuse a prior solution as the initial guess. None leaves Palace's "
+            "default. Set False for residuals normalized to a zero initial guess."
+        ),
+    )
     solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = Field(
         default="MUMPS", description="Linear solver backend; Default auto-selects."
     )
@@ -123,6 +130,8 @@ class LinearSolverConfig(BaseModel):
         }
         if self.solver_type == "Default" and self.preconditioner != "Default":
             config["Type"] = self.preconditioner
+        if self.initial_guess is not None:
+            config["InitialGuess"] = self.initial_guess
         # Unset keys are resolved when the config is written.
         estimator = (
             self.estimator_tolerance,

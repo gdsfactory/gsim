@@ -88,6 +88,7 @@ class SolverSettingsMixin:
         estimator_tolerance: float | None = None,
         estimator_max_iterations: int | None = None,
         estimator_mg: bool | None = None,
+        initial_guess: bool | None = None,
     ) -> None:
         """Set common solver controls, preserving problem-specific settings.
 
@@ -120,6 +121,7 @@ class SolverSettingsMixin:
                     estimator_tolerance=estimator_tolerance,
                     estimator_max_iterations=estimator_max_iterations,
                     estimator_mg=estimator_mg,
+                    initial_guess=initial_guess,
                 ),
             )
         )

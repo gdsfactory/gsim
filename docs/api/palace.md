@@ -41,6 +41,7 @@ The configurable multigrid and error estimator controls live under `sim.solver.l
 | `estimator_tolerance` | automatic: `1e-2` with AMR off, Palace's `1e-6` with AMR on | PCG tolerance of the error estimator (the AMR indicator). |
 | `estimator_max_iterations` | automatic: Palace's `10000` | `0` skips the projection solve; the indicator is then meaningless, and with AMR on gsim warns; pass `estimator_disabled=True` to [`validate_solution`](../palace-validation.md). |
 | `estimator_mg` | automatic: Palace's `False` | Multigrid preconditioner for the estimator; costs memory; worth it at field order 1. |
+| `initial_guess` | Palace default | `False` starts each solve from zero. `None` retains Palace's default. |
 
 The three estimator settings default to `None`, which means automatic: gsim
 chooses their values by AMR state when it writes `config.json`. AMR is on when
@@ -104,17 +105,17 @@ boundary.solver.boundary_mode.freq = 5e9
 boundary.solver.boundary_mode.num_modes = 2
 ```
 
-All four share twelve controls: `order`, `device`, and
+All four share thirteen controls: `order`, `device`, and
 `linear.{solver_type, preconditioner, tolerance, max_iterations, mg_max_levels,
 pc_mat_real, complex_coarse_solve, estimator_tolerance, estimator_max_iterations,
-estimator_mg}`.
+estimator_mg, initial_guess}`.
 
 | Simulation | Problem group | Problem settings | Total settings |
 | --- | --- | --- | --- |
-| DrivenSim | `solver.driven` | 13 | 25 |
-| EigenmodeSim | `solver.eigenmode` | 8 | 20 |
-| ElectrostaticSim | `solver.electrostatic` | 1 | 13 |
-| BoundaryModeSim | `solver.boundary_mode` | 7 | 19 |
+| DrivenSim | `solver.driven` | 13 | 26 |
+| EigenmodeSim | `solver.eigenmode` | 8 | 21 |
+| ElectrostaticSim | `solver.electrostatic` | 1 | 14 |
+| BoundaryModeSim | `solver.boundary_mode` | 7 | 20 |
 
 `sim.set_solver(...)` replaces the common controls using the same defaults as
 the simulation constructor, including its linear tolerance, while preserving the problem-specific settings. Assign individual
@@ -262,6 +263,31 @@ config generation also support `z` for supplied mesh metadata.
 argument and frequency-based length estimate are removed. Old mesh results without translation metadata must be regenerated.
 
 ## Electrostatic terminals
+
+Static dataset runs can retain the solver log and read convergence for each
+terminal separately from the auxiliary error-estimator solve:
+
+```python
+from pathlib import Path
+
+from gsim.palace.results import load_static_solver_metrics
+
+sim.solver.linear.initial_guess = False
+sim.write_config()  # run_local() reuses the exported config.json
+sim.run_local(log_path="run/solver.log", verbose=False)
+metrics = load_static_solver_metrics(Path("run/solver.log").read_text())
+```
+
+`log_path` is resolved against the current working directory, not the simulation
+directory, and the file is written as UTF-8. The parser reads electrostatic
+logs; magnetostatic excitations are rejected
+because their estimator solves have no separating marker. The log needs Palace's
+per-iteration residual output, which `Problem.Verbose = 3` in the generated
+config provides. Each metric contains
+the terminal index, initial and final residual norms, their ratio, and the
+iteration count. Repeated indices retain the mesh-pass order. The ratio is a
+linear convergence measure, not a capacitance error bound. Without a zero
+initial guess it need not be relative to the right-hand side.
 
 An `ElectrostaticSim` terminal selects conductors by connected net, by region or by
 layer. A net is the metal that touches on one layer plus the metal that vias join on
