@@ -42,7 +42,10 @@ def test_missing_runtime_does_not_restore_permissions_or_download(
     assert not list(tmp_path.iterdir())
 
 
-def test_installed_runtime_restores_all_launcher_permissions(tmp_path, monkeypatch):
+@pytest.mark.parametrize("incomplete_cache", [False, True])
+def test_installed_runtime_restores_all_launcher_permissions(
+    tmp_path, monkeypatch, incomplete_cache
+):
     archive = io.BytesIO()
     with ZipFile(archive, "w") as wheel:
         for name in _BIN_NAMES:
@@ -51,6 +54,7 @@ def test_installed_runtime_restores_all_launcher_permissions(tmp_path, monkeypat
             entry.external_attr = (stat.S_IFREG | 0o755) << 16
             wheel.writestr(entry, b"launcher")
         wheel.writestr("palacetoolkit_palace_cpu/lib/library.so", b"library")
+        wheel.writestr("palacetoolkit_palace_cpu/share/openmpi/help.txt", b"MPI help")
     monkeypatch.setenv("PALACETOOLKIT_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setattr(runtime, "_is_linux_x86_64", lambda: True)
     monkeypatch.setattr(
@@ -60,7 +64,14 @@ def test_installed_runtime_restores_all_launcher_permissions(tmp_path, monkeypat
         runtime, "urlopen", lambda *_a, **_k: io.BytesIO(archive.getvalue())
     )
 
+    if incomplete_cache:
+        prefix = runtime._cached_runtime_prefix()
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "lib").mkdir()
+        (prefix / "bin" / "palace").write_text("old incomplete runtime")
+        assert runtime._cached_binary() is None
     binary = runtime.install_palace_runtime()
+    assert (binary.parent.parent / "share/openmpi/help.txt").read_bytes() == b"MPI help"
 
     for name in _BIN_NAMES:
         launcher = binary.parent / name
@@ -81,6 +92,7 @@ def test_cached_runtime_repairs_launchers_without_download(
 ):
     monkeypatch.setenv("PALACETOOLKIT_RUNTIME_DIR", str(tmp_path))
     prefix = runtime._cached_runtime_prefix()
+    (prefix / "share").mkdir(parents=True)
     for name in _BIN_NAMES:
         path = prefix / "bin" / name
         path.parent.mkdir(parents=True, exist_ok=True)
