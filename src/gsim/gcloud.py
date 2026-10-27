@@ -611,8 +611,8 @@ def wait_for_results(
         parent_dir: Where to create sim-data directories (default: cwd).
         poll_interval: Seconds between status polls (default 5.0).
         estimated_runtime_seconds: Expected solver runtime, excluding queue
-            time. When provided, status output includes an estimated percent
-            complete and remaining time.
+            time. When provided, the status bar uses the estimated elapsed
+            fraction and the description includes estimated remaining time.
 
     Returns:
         Parsed result (single job) or list of parsed results (multiple jobs).
@@ -768,8 +768,8 @@ def _print_status_table(
     * **TTY (terminal)** — uses carriage-return / ANSI cursor-up to overwrite.
     * **Pipe / plain CI** — only prints the final status.
 
-    ``shown_progress`` maps job IDs to the highest percentage already
-    displayed. Pass the same dict on every poll so a job's bar never moves
+    ``shown_progress`` maps job IDs to the highest bar-fill percentage already
+    used. Pass the same dict on every poll so a job's bar never moves
     backwards; it is updated in place.
 
     Returns the number of lines printed (for the TTY path to erase).
@@ -807,18 +807,18 @@ def _print_status_table(
         """
         status = _status_value(job.status).casefold()
         if status == "completed":
-            return 100, "complete"
+            return 100, "Job completed"
         if status == "failed":
-            return 100, "failed"
+            return 100, "Job failed"
         if status == "running":
             if estimated_runtime_seconds is not None:
                 elapsed = time.monotonic() - start_times[jid]
                 percent = min(99, round(100 * elapsed / estimated_runtime_seconds))
                 remaining = max(0, estimated_runtime_seconds - elapsed)
                 mins, secs = divmod(round(remaining), 60)
-                return percent, f"running, ETA {mins}m {secs:02d}s"
-            return 50, "running"
-        return _PRE_RUN_PROGRESS.get(status, 5), status or "starting"
+                return percent, f"Job in progress… ETA {mins}m {secs:02d}s"
+            return 50, "Job in progress…"
+        return _PRE_RUN_PROGRESS.get(status, 5), f"Job {status or 'starting'}…"
 
     def _progress(jid: str, job: Any) -> tuple[int, str]:
         percent, phase = _lifecycle_progress(jid, job)
@@ -831,7 +831,7 @@ def _print_status_table(
 
     def _bar(percent: int, width: int = 20) -> str:
         filled = round(width * percent / 100)
-        return f"[{'#' * filled}{'.' * (width - filled)}] {percent:3d}%"
+        return f"[{'#' * filled}{'.' * (width - filled)}]"
 
     lines_printed = 0
     n = len(jobs)

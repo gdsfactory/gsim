@@ -90,8 +90,10 @@ def test_multi_job_progress_keeps_finished_elapsed_time(monkeypatch, capsys, mod
     )
     output = capsys.readouterr().out
     assert all(
-        value in output for value in ["Waiting for 2 jobs", "50%", "100%", "1m 05s"]
+        value in output
+        for value in ["Waiting for 2 jobs", "Job in progress…", "Job failed", "1m 05s"]
     )
+    assert "%" not in output
     assert ("\033[3A" in output) == (mode == "tty")
     assert cleared.call_count == (mode == "jupyter")
 
