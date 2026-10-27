@@ -13,7 +13,9 @@ from pydantic import ValidationError
 
 from gsim.common.stack import Layer, LayerStack
 from gsim.palace import ElectrostaticSim
+from gsim.palace.mesh.generator import generate_mesh
 from gsim.palace.models import CrossSectionPlaneConfig
+from gsim.palace.models.symmetry import SymmetryPlaneConfig
 from tests._electrode_layouts import make_sim
 
 
@@ -237,6 +239,30 @@ def test_section_rejects_periodic_meshing(tmp_path: Path) -> None:
     sim.set_cross_section("x=2")
     with pytest.raises(ValueError, match="periodic"):
         sim.mesh(periodic_axis="x", verbose=False)
+
+
+def test_section_rejects_pec_blocks(tmp_path: Path) -> None:
+    sim = sheet_sim(tmp_path)
+    sim.set_cross_section("x=2")
+    sim.add_pec(gds_layer=(2, 0), from_layer="metal", to_layer="metal")
+    with pytest.raises(ValueError, match="PEC blocks"):
+        sim.mesh(verbose=False)
+
+
+def test_low_level_section_rejects_a_symmetry_plane(tmp_path: Path) -> None:
+    sim = sheet_sim(tmp_path)
+    assert sim.component is not None
+    assert sim.stack is not None
+    with pytest.raises(ValueError, match="electrostatic cross sections"):
+        generate_mesh(
+            sim.component,
+            sim.stack,
+            [],
+            tmp_path,
+            simulation_type="electrostatic",
+            cross_section=CrossSectionPlaneConfig(axis="x", value=2),
+            symmetry_plane=SymmetryPlaneConfig(axis="y", position=0),
+        )
 
 
 def test_section_rejects_an_xy_plane_config_when_meshing(tmp_path: Path) -> None:
