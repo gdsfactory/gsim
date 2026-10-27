@@ -765,7 +765,7 @@ def _print_status_table(
     * **Jupyter / nbconvert** — uses ``clear_output(wait=True)`` so every
       poll replaces the previous output.  nbconvert only captures the
       *last* state, giving one clean line in rendered docs.
-    * **TTY (terminal)** — uses carriage-return / ANSI cursor-up to overwrite.
+    * **TTY (terminal)** — uses carriage-return / ANSI cursor-up and line erasure.
     * **Pipe / plain CI** — only prints the final status.
 
     ``shown_progress`` maps job IDs to the highest bar-fill percentage already
@@ -790,7 +790,7 @@ def _print_status_table(
         clear_output(wait=True)
 
     # TTY: move cursor up to overwrite previous output
-    if mode == "tty" and prev_lines > 0:
+    if mode == "tty" and prev_lines > 0 and len(jobs) > 1:
         sys.stdout.write(f"\033[{prev_lines}A")
 
     def _elapsed(jid: str) -> str:
@@ -816,9 +816,10 @@ def _print_status_table(
                 percent = min(99, round(100 * elapsed / estimated_runtime_seconds))
                 remaining = max(0, estimated_runtime_seconds - elapsed)
                 mins, secs = divmod(round(remaining), 60)
-                return percent, f"Job in progress… ETA {mins}m {secs:02d}s"
-            return 50, "Job in progress…"
-        return _PRE_RUN_PROGRESS.get(status, 5), f"Job {status or 'starting'}…"
+                return percent, f"Job in progress... ETA {mins}m {secs:02d}s"
+            return 50, "Job in progress..."
+        description = (status or "starting").replace("_", " ").replace("-", " ")
+        return _PRE_RUN_PROGRESS.get(status, 5), f"Job {description}..."
 
     def _progress(jid: str, job: Any) -> tuple[int, str]:
         percent, phase = _lifecycle_progress(jid, job)
@@ -844,7 +845,7 @@ def _print_status_table(
             f"  elapsed {_elapsed(jid)}"
         )
         if mode == "tty":
-            sys.stdout.write(f"\r{msg:<80s}")
+            sys.stdout.write(f"\r\033[2K{msg}")
             if final:
                 sys.stdout.write("\n")
         else:
@@ -853,14 +854,23 @@ def _print_status_table(
         return 1
 
     # Multi-job: header + one line per job
+    rows = [(jid, job, *_progress(jid, job)) for jid, job in jobs.items()]
+    name_width = max(
+        30, max((len(job.job_name or jid) for jid, job in jobs.items()), default=30)
+    )
+    phase_width = max((len(phase) for _, _, _, phase in rows), default=0)
+    if mode == "tty":
+        sys.stdout.write("\r\033[2K")
     print(f"Waiting for {n} jobs...")  # noqa: T201
     lines_printed += 1
-    for jid, job in jobs.items():
-        percent, phase = _progress(jid, job)
+    for jid, job, percent, phase in rows:
         line = (
-            f"  {job.job_name or jid:<30s} {_bar(percent)} {phase:<12s}"
+            f"  {job.job_name or jid:<{name_width}s} {_bar(percent)}"
+            f" {phase:<{phase_width}s}"
             f" elapsed {_elapsed(jid)}"
         )
+        if mode == "tty":
+            sys.stdout.write("\r\033[2K")
         print(line)  # noqa: T201
         lines_printed += 1
 

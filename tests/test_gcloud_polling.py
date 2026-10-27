@@ -1,5 +1,6 @@
 """Exercise cloud retries and log pagination at the SDK boundary."""
 
+import re
 from datetime import timedelta
 from unittest.mock import Mock
 
@@ -91,11 +92,72 @@ def test_multi_job_progress_keeps_finished_elapsed_time(monkeypatch, capsys, mod
     output = capsys.readouterr().out
     assert all(
         value in output
-        for value in ["Waiting for 2 jobs", "Job in progress…", "Job failed", "1m 05s"]
+        for value in [
+            "Waiting for 2 jobs",
+            "Job in progress...",
+            "Job failed",
+            "1m 05s",
+        ]
     )
     assert "%" not in output
     assert ("\033[3A" in output) == (mode == "tty")
     assert cleared.call_count == (mode == "jupyter")
+
+
+@pytest.mark.parametrize("mode", ["pipe", "tty", "jupyter"])
+@pytest.mark.parametrize("estimate", [None, 240.0])
+def test_mixed_job_descriptions_align_elapsed_columns(
+    monkeypatch, capsys, mode, estimate
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    monkeypatch.setattr("IPython.display.clear_output", Mock())
+    jobs = {
+        status: FakeJob(job_name=f"meep-{status}", status=status)
+        for status in ("created", "queued", "running", "completed", "failed")
+    }
+    jobs["queued"].job_name = "meep-job-with-a-name-longer-than-thirty-characters"
+    gcloud._print_status_table(
+        jobs, dict.fromkeys(jobs, 0.0), final=True, estimated_runtime_seconds=estimate
+    )
+
+    output = re.sub(r"\033\[[0-9]*[AK]", "", capsys.readouterr().out)
+    rows = [line for line in output.splitlines() if "elapsed" in line]
+    assert len(rows) == len(jobs)
+    assert len({row.index("elapsed") for row in rows}) == 1
+
+
+@pytest.mark.parametrize("job_count", [1, 2])
+@pytest.mark.parametrize("terminal", ["completed", "failed"])
+def test_tty_redraw_erases_shorter_terminal_rows(
+    monkeypatch, capsys, job_count, terminal
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    jobs = {
+        f"job-{i}": FakeJob(job_name="meep-" + "long-name-" * 5, status="running")
+        for i in range(job_count)
+    }
+    starts = dict.fromkeys(jobs, 0.0)
+    lines = gcloud._print_status_table(jobs, starts, estimated_runtime_seconds=240)
+    previous = capsys.readouterr().out
+    for job in jobs.values():
+        job.status = terminal
+    gcloud._print_status_table(jobs, starts, prev_lines=lines, final=True)
+    redraw = capsys.readouterr().out
+
+    # Every row is erased before writing, including rows longer than 80 columns.
+    assert len(previous.splitlines()[-1]) > 80
+    if job_count == 1:
+        assert "\033[1A" not in redraw
+    else:
+        assert redraw.startswith(f"\033[{lines}A")
+        redraw = redraw.removeprefix(f"\033[{lines}A")
+    rows = redraw.split("\n")[:-1]
+    assert len(rows) == lines
+    assert all(row.startswith("\r\033[2K") for row in rows)
+    assert redraw.count(f"Job {terminal}") == job_count
+    assert "ETA" not in redraw
 
 
 @pytest.mark.parametrize("finished", [False, True])

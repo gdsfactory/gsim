@@ -290,15 +290,21 @@ class TestStatusDescriptions:
     @pytest.mark.parametrize(
         ("status", "bar", "description"),
         [
-            ("created", "[#...................]", "Job created…"),
-            ("pending", "[##..................]", "Job pending…"),
-            ("queued", "[###.................]", "Job queued…"),
-            ("starting", "[######..............]", "Job starting…"),
-            (SimStatus.RUNNING, "[##########..........]", "Job in progress…"),
+            ("created", "[#...................]", "Job created..."),
+            ("pending", "[##..................]", "Job pending..."),
+            ("queued", "[###.................]", "Job queued..."),
+            ("starting", "[######..............]", "Job starting..."),
+            (SimStatus.RUNNING, "[##########..........]", "Job in progress..."),
             (SimStatus.COMPLETED, "[####################]", "Job completed"),
             (SimStatus.FAILED, "[####################]", "Job failed"),
-            ("", "[#...................]", "Job starting…"),
-            ("unknown", "[#...................]", "Job unknown…"),
+            ("", "[#...................]", "Job starting..."),
+            ("unknown", "[#...................]", "Job unknown..."),
+            ("timed_out", "[#...................]", "Job timed out..."),
+            (
+                "waiting-for-capacity",
+                "[#...................]",
+                "Job waiting for capacity...",
+            ),
         ],
     )
     def test_descriptions_replace_percentages(
@@ -328,6 +334,42 @@ class TestStatusDescriptions:
         else:
             clear_output.assert_not_called()
 
+    @pytest.mark.parametrize("encoding", ["ascii", "cp437", "cp850"])
+    @pytest.mark.parametrize("job_count", [1, 2])
+    def test_polling_with_strict_legacy_stdout(
+        self, encoding, job_count, monkeypatch, tmp_path
+    ):
+        import io
+
+        from gsim import gcloud
+
+        buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(buffer, encoding=encoding, errors="strict")
+        monkeypatch.setattr("sys.stdout", stdout)
+        monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+        monkeypatch.setattr(gcloud.time, "sleep", lambda _: None)
+        running = FakeJob(job_name="meep-running", status="running")
+        completed = FakeJob(
+            job_name="meep-running", status="completed", job_def_name="custom"
+        )
+        monkeypatch.setattr(
+            gcloud.sim,
+            "get_job",
+            MagicMock(side_effect=[running] * job_count + [completed] * job_count),
+        )
+        monkeypatch.setattr(gcloud.sim, "download_results", lambda *_a, **_kw: {})
+
+        gcloud.wait_for_results(
+            *(f"job-{i}" for i in range(job_count)),
+            parent_dir=tmp_path,
+            estimated_runtime_seconds=240,
+        )
+
+        stdout.flush()
+        output = buffer.getvalue().decode(encoding)
+        assert "Job in progress... ETA" in output
+        assert "Job completed" in output
+
 
 class TestWaitForResultsSingle:
     """Tests for wait_for_results with a single job."""
@@ -344,7 +386,7 @@ class TestWaitForResultsSingle:
         _print_status_table({"job-1": job}, {"job-1": 0.0}, final=True)
 
         output = capsys.readouterr().out
-        assert "[##########..........]  Job in progress…" in output
+        assert "[##########..........]  Job in progress..." in output
         assert "%" not in output
         assert "elapsed" in output
 
@@ -363,7 +405,7 @@ class TestWaitForResultsSingle:
         )
 
         output = capsys.readouterr().out
-        assert "[##########..........]  Job in progress…" in output
+        assert "[##########..........]  Job in progress..." in output
         assert "%" not in output
         assert "ETA 2m 00s" in output
         assert mock_monotonic.called
@@ -406,7 +448,7 @@ class TestWaitForResultsSingle:
         assert shown["job-1"] == 30
         assert mock_monotonic.called
         output = capsys.readouterr().out
-        assert "[######..............]  Job in progress…" in output
+        assert "[######..............]  Job in progress..." in output
         assert "%" not in output
 
     @patch("gsim.gcloud.sim")
