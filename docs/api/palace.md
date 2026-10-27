@@ -263,6 +263,30 @@ argument and frequency-based length estimate are removed. Old mesh results witho
 
 ## Electrostatic terminals
 
+The existing Gmsh pipeline supports zero-thickness conductor sheets. Use
+`sim.mesh(planar_conductors=True)` to flatten finite-thickness conductors too.
+Disconnected electrodes on one layer remain separate nets, and unassigned
+conductors, including a surrounding ground frame with holes, can stay grounded.
+
+Background substrate boxes follow the component footprint. An airbox margin
+expands air only. If the substrate should extend beyond the metal, include its
+outline on a dielectric layer declared in the stack.
+
+For a uniform line, select an x or y plane before meshing to solve a 2D
+electrostatic cross-section with the same stack and net terminals:
+
+```python
+sim.set_cross_section("x=2")
+sim.mesh(planar_conductors=True, refined_mesh_size=0.4, max_mesh_size=20.0)
+```
+
+The returned capacitances represent 1 um of uniform line. Divide by `1e-6`
+to obtain F/m, or multiply by a line length in um to obtain its capacitance.
+This approximation
+omits longitudinal end effects. It supports sheet conductors, including sheets
+at different heights, but does not support vias. Optional `window` and `window_z`
+arguments clip the transverse domain, and every selected terminal must intersect it.
+
 An `ElectrostaticSim` terminal selects conductors by connected net, by region or by
 layer. A net is the metal that touches on one layer plus the metal that vias join on
 other layers, so two electrodes on one layer are two nets (see `sim.nets()`).

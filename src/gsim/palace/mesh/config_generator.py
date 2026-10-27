@@ -474,7 +474,9 @@ def generate_palace_config(
     # computed with the true frequency-resolved permittivity (e.g. Sellmeier
     # silicon at 1550 nm) rather than the RF constant values.
     stack_materials = stack.materials
-    section_axis: str | None = None
+    section_axis: str | None = (hints or {}).get("_cross_section_axis")
+    if simulation_type in {"electrostatic", "electrostatics"} and section_axis:
+        cast(dict[str, Any], config["Model"])["Lc"] = 1.0
     if driven_config is not None:
         from gsim.palace.materials import resolve_palace_materials_at_frequency
 

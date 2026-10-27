@@ -32,8 +32,8 @@ from .geometry import (
 )
 from .groups import assign_physical_groups
 from .metadata import write_metadata
-from .net_groups import check_via_merging, split_groups_by_net
-from .nets import extract_nets
+from .net_groups import check_via_merging, net_labels, split_groups_by_net
+from .nets import Nets, extract_nets
 from .symmetry import clamp_xy_bounds
 
 if TYPE_CHECKING:
@@ -174,73 +174,49 @@ class MeshResult:
     symmetry_plane: dict | None = None
 
 
-def _extract_native_boundarymode_rectangles(
+def _extract_native_2d_rectangles(
     component,
     stack: LayerStack,
     cross_section: CrossSectionPlaneConfig,
+    *,
+    electrostatic: bool = False,
+    planar_conductors: bool = False,
 ) -> list[dict[str, float | str]]:
-    """Return axis-mapped 2D rectangles from the solver-agnostic section API."""
+    """Map stack slices to the mesh plane, retaining electrostatic sheets."""
     from gsim.common import cross_section as section_utils
 
-    section = section_utils.extract_plane_section(
-        component,
-        stack,
-        axis=cross_section.axis,
-        value=cross_section.value,
+    if cross_section.axis not in {"x", "y"}:
+        raise ValueError("Native 2D meshing supports only x/y cross sections.")
+    section = (
+        section_utils.extract_yz_rectangles(component, stack, cross_section.value)
+        if cross_section.axis == "x"
+        else section_utils.extract_xz_rectangles(component, stack, cross_section.value)
     )
-
-    rects: list[dict[str, float | str]] = []
-    if cross_section.axis == "x":
-        for rect in section:
-            y0 = getattr(rect, "y0", None)
-            y1 = getattr(rect, "y1", None)
-            z0 = getattr(rect, "zmin", None)
-            z1 = getattr(rect, "zmax", None)
-            if y0 is None or y1 is None or z0 is None or z1 is None:
-                continue
-            y0 = float(y0)
-            y1 = float(y1)
-            z0 = float(z0)
-            z1 = float(z1)
-            if y1 <= y0 or z1 <= z0:
-                continue
-            rects.append(
-                {
-                    "layer_name": str(getattr(rect, "layer_name", "layer")),
-                    "h0": y0,
-                    "h1": y1,
-                    "v0": z0,
-                    "v1": z1,
-                }
-            )
-    elif cross_section.axis == "y":
-        for rect in section:
-            x0 = getattr(rect, "x0", None)
-            x1 = getattr(rect, "x1", None)
-            z0 = getattr(rect, "zmin", None)
-            z1 = getattr(rect, "zmax", None)
-            if x0 is None or x1 is None or z0 is None or z1 is None:
-                continue
-            x0 = float(x0)
-            x1 = float(x1)
-            z0 = float(z0)
-            z1 = float(z1)
-            if x1 <= x0 or z1 <= z0:
-                continue
-            rects.append(
-                {
-                    "layer_name": str(getattr(rect, "layer_name", "layer")),
-                    "h0": x0,
-                    "h1": x1,
-                    "v0": z0,
-                    "v1": z1,
-                }
-            )
-    else:
-        raise ValueError(
-            "Boundary mode native 2D currently supports only x/y cross sections."
+    horizontal = "y" if cross_section.axis == "x" else "x"
+    rects = []
+    for rect in section:
+        layer = stack.layers[rect.layer_name]
+        h0, h1 = (
+            float(getattr(rect, f"{horizontal}0")),
+            float(getattr(rect, f"{horizontal}1")),
         )
-
+        v0, v1 = float(rect.zmin), float(rect.zmax)
+        if electrostatic and layer.layer_type in {"conductor", "via"}:
+            if layer.layer_type == "via" or (v1 != v0 and not planar_conductors):
+                raise ValueError(
+                    "Electrostatic cross sections require zero-thickness conductors "
+                    "or planar_conductors=True, and do not support vias."
+                )
+            v1 = v0
+        if (
+            h1 <= h0
+            or v1 < v0
+            or (v1 == v0 and not (electrostatic and layer.layer_type == "conductor"))
+        ):
+            continue
+        rects.append(
+            {"layer_name": rect.layer_name, "h0": h0, "h1": h1, "v0": v0, "v1": v1}
+        )
     return rects
 
 
@@ -284,7 +260,7 @@ def _ensure_background_material(stack, material: str) -> None:
         stack.materials[material] = {"permittivity": 1.0, "loss_tangent": 0.0}
 
 
-def _generate_native_boundarymode_groups(
+def _generate_native_2d_groups(
     *,
     kernel,
     component,
@@ -301,17 +277,17 @@ def _generate_native_boundarymode_groups(
     airbox_material: str = "air",
     contact_specs: list[_LayerPairSpec] | None = None,
     interface_specs: list[_LayerPairSpec] | None = None,
+    electrostatic: bool = False,
+    planar_conductors: bool = False,
+    nets: Nets | None = None,
 ) -> dict:
-    """Build a native 2D gmsh model and groups for BoundaryMode."""
-    if cross_section.axis not in {"x", "y"}:
-        raise ValueError(
-            "Boundary mode native 2D currently supports only x/y cross sections."
-        )
-
-    section_rects = _extract_native_boundarymode_rectangles(
+    """Build native 2D groups for boundary modes or electrostatic sheets."""
+    section_rects = _extract_native_2d_rectangles(
         component=component,
         stack=stack,
         cross_section=cross_section,
+        electrostatic=electrostatic,
+        planar_conductors=planar_conductors,
     )
     if not section_rects:
         raise ValueError(
@@ -350,12 +326,21 @@ def _generate_native_boundarymode_groups(
 
     outer_surface = kernel.addRectangle(hmin, vmin, 0.0, hmax - hmin, vmax - vmin)
     layer_inputs: list[tuple[str, int]] = []
+    sheet_inputs: list[tuple[str, int]] = []
 
     for rect in section_rects:
         h0 = max(float(rect["h0"]), hmin)
         h1 = min(float(rect["h1"]), hmax)
         v0 = max(float(rect["v0"]), vmin)
         v1 = min(float(rect["v1"]), vmax)
+        if electrostatic and rect["v0"] == rect["v1"]:
+            if h1 > h0 and vmin <= float(rect["v0"]) <= vmax:
+                start = kernel.addPoint(h0, v0, 0)
+                end = kernel.addPoint(h1, v0, 0)
+                sheet_inputs.append(
+                    (str(rect["layer_name"]), kernel.addLine(start, end))
+                )
+            continue
         if h1 <= h0 or v1 <= v0:
             continue
         stag = kernel.addRectangle(h0, v0, 0.0, h1 - h0, v1 - v0)
@@ -394,18 +379,18 @@ def _generate_native_boundarymode_groups(
         stag = kernel.addRectangle(h0, z0, 0.0, h1 - h0, z1 - z0)
         layer_inputs.append((region.material, stag))
 
-    if not layer_inputs:
+    if not layer_inputs and not sheet_inputs:
         raise ValueError(
             f"Cross section '{cross_section.spec}' produced no meshing rectangles."
         )
 
     _, out_map = kernel.fragment(
         [(2, outer_surface)],
-        [(2, tag) for _, tag in layer_inputs],
+        [(2, tag) for _, tag in layer_inputs] + [(1, tag) for _, tag in sheet_inputs],
     )
     kernel.synchronize()
 
-    groups: dict[str, dict] = {
+    groups: dict = {
         "volumes": {},
         "conductor_surfaces": {},
         "pec_surfaces": {},
@@ -666,6 +651,53 @@ def _generate_native_boundarymode_groups(
     # The 2D background medium (unclaimed domain) is merged into the dielectric
     # groups above, so nothing to add here.
 
+    if sheet_inputs:
+        labels = net_labels(nets) if nets is not None else ()
+        curves_by_sheet: dict[tuple[str, int | None], set[int]] = {}
+        for i, (layer_name, _) in enumerate(sheet_inputs, start=1 + len(layer_inputs)):
+            for dim, tag in out_map[i]:
+                if dim != 1:
+                    continue
+                net_index = None
+                if nets is not None:
+                    h, _, _ = kernel.getCenterOfMass(1, tag)
+                    x, y = (
+                        (cross_section.value, h)
+                        if cross_section.axis == "x"
+                        else (h, cross_section.value)
+                    )
+                    net = nets.net_at(x, y, layer_name)
+                    if net is None:
+                        raise ValueError(
+                            f"Section conductor on {layer_name!r} has no layout net"
+                        )
+                    net_index = next(
+                        k for k, candidate in enumerate(nets) if candidate is net
+                    )
+                curves_by_sheet.setdefault((layer_name, net_index), set()).add(tag)
+        net_groups: list[list[int]] = [[] for _ in nets] if nets is not None else []
+        for (layer_name, net_index), curves in curves_by_sheet.items():
+            name = (
+                layer_name if net_index is None else f"{layer_name}@{labels[net_index]}"
+            )
+            tags = sorted(curves)
+            pg = gmsh.model.addPhysicalGroup(1, tags)
+            gmsh.model.setPhysicalName(1, pg, name)
+            groups["pec_surfaces"][name] = {"phys_group": pg, "tags": tags}
+            if net_index is not None:
+                net_groups[net_index].append(pg)
+        if nets is not None:
+            groups["nets"] = [
+                {
+                    "name": net.name,
+                    "label": labels[k],
+                    "ports": list(net.ports),
+                    "layers": list(net.layers),
+                    "phys_groups": net_groups[k],
+                }
+                for k, net in enumerate(nets)
+            ]
+
     refinement_curves: set[int] = set()
     for info in groups["conductor_surfaces"].values():
         refinement_curves.update(int(t) for t in info.get("tags", []))
@@ -719,9 +751,15 @@ def _generate_native_boundarymode_groups(
             vol_boundary_curves[layer_name] = curves
 
     vol_names = list(vol_boundary_curves.keys())
+    sheet_curves = (
+        {tag for info in groups["pec_surfaces"].values() for tag in info["tags"]}
+        if electrostatic
+        else set()
+    )
     for i, l1 in enumerate(vol_names):
         for l2 in vol_names[i + 1 :]:
-            shared = vol_boundary_curves[l1] & vol_boundary_curves[l2]
+            # Palace must not receive a conductor again as a material interface.
+            shared = (vol_boundary_curves[l1] & vol_boundary_curves[l2]) - sheet_curves
             if shared:
                 name = f"interface_{l1}_{l2}"
                 pg = gmsh.model.addPhysicalGroup(1, sorted(shared))
@@ -1327,12 +1365,20 @@ def generate_mesh(
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
+    electrostatic_section = (
+        simulation_type in {"electrostatic", "electrostatics"}
+        and cross_section is not None
+    )
+    native_2d = simulation_type == "boundarymode" or electrostatic_section
     msh_path = output_dir / f"{model_name}.msh"
 
     if symmetry_plane is not None:
         if simulation_type == "boundarymode":
             raise ValueError("Symmetry planes are not supported for boundarymode.")
+        if electrostatic_section:
+            raise ValueError(
+                "Symmetry planes are not supported for electrostatic cross sections."
+            )
         if periodic_axis == symmetry_plane.axis:
             raise ValueError(
                 f"periodic_axis={periodic_axis!r} conflicts with a symmetry plane "
@@ -1357,7 +1403,7 @@ def generate_mesh(
     logger.info("  Polygons: %s", len(geometry.polygons))
     logger.info("  Bbox: %s", geometry.bbox)
 
-    if refinement_boxes and simulation_type != "boundarymode":
+    if refinement_boxes and not native_2d:
         raise ValueError(
             "refinement_boxes apply to native-2D cross-section meshes only."
         )
@@ -1384,6 +1430,10 @@ def generate_mesh(
             merge_via_distance,
             clip_merged_vias=clip_merged_vias,
         )
+    if electrostatic_section and (periodic_axis is not None or pec_blocks):
+        raise ValueError(
+            "Electrostatic cross sections do not support periodic axes or PEC blocks"
+        )
 
     # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
     gmsh.initialize(readConfigFiles=False)
@@ -1402,7 +1452,7 @@ def generate_mesh(
     port_info: list = []
 
     try:
-        if simulation_type == "boundarymode":
+        if native_2d:
             if ports:
                 raise ValueError(
                     "Boundary mode uses cross_section-only native 2D meshing and "
@@ -1415,8 +1465,8 @@ def generate_mesh(
                     "set_cross_section('y=<value>')."
                 )
 
-            logger.info("Building native 2D BoundaryMode geometry...")
-            groups = _generate_native_boundarymode_groups(
+            logger.info("Building native 2D cross-section geometry...")
+            groups = _generate_native_2d_groups(
                 kernel=kernel,
                 component=component,
                 geometry=geometry,
@@ -1432,7 +1482,17 @@ def generate_mesh(
                 airbox_material=airbox_material,
                 contact_specs=contact_specs,
                 interface_specs=interface_specs,
+                electrostatic=electrostatic_section,
+                planar_conductors=planar_conductors,
+                nets=nets,
             )
+            if electrostatic_section:
+                for info in groups["pec_surfaces"].values():
+                    for tag in info["tags"]:
+                        length = kernel.getMass(1, tag)
+                        gmsh.model.mesh.setTransfiniteCurve(
+                            tag, max(5, math.ceil(length / refined_mesh_size) + 1)
+                        )
 
             refinement_lines = sorted(
                 {
