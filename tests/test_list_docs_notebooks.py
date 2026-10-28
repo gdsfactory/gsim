@@ -39,6 +39,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_terminal_waveport.ipynb",
     "nbs/palace_terminal_waveport_gssg.ipynb",
     "nbs/tcad_pn_junction.ipynb",
+    "nbs/tcad_twmzm.ipynb",
 ]
 
 

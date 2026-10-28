@@ -22,7 +22,7 @@ transmission line rather than a waveguide Mode should tighten it, since
 a discretization's spurious Modes cluster just inside it.
 
 The selection itself is on the effective index alone, so it serves any
-guided Mode and not only a line's — an optical Stage selects its
+guided Mode and not only a line's — an optical mode solve selects its
 waveguide Mode through :func:`select_line_mode` with nothing but the
 guided-index floor. What is a transmission line's own rule is the loss
 bound above and the candidate rule that carries it; the name follows
