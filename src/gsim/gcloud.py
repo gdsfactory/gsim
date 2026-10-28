@@ -766,6 +766,7 @@ def _print_status_table(
       poll replaces the previous output.  nbconvert only captures the
       *last* state, giving one clean line in rendered docs.
     * **TTY (terminal)** — uses carriage-return / ANSI cursor-up and line erasure.
+      Rows are shortened to fit the terminal width without wrapping.
     * **Pipe / plain CI** — only prints the final status.
 
     ``shown_progress`` maps job IDs to the highest bar-fill percentage already
@@ -778,6 +779,17 @@ def _print_status_table(
 
     _end_times = end_times or {}
     mode = _output_mode()
+    tty_width = (
+        max(0, shutil.get_terminal_size().columns - 1) if mode == "tty" else None
+    )
+
+    def _fit_tty(line: str) -> str:
+        # Leave the last column unused to avoid automatic terminal wrapping.
+        if tty_width is None or len(line) <= tty_width:
+            return line
+        if tty_width < 3:
+            return "." * tty_width
+        return line[: tty_width - 3] + "..."
 
     # Pipe: only print at the end
     if mode == "pipe" and not final:
@@ -845,7 +857,7 @@ def _print_status_table(
             f"  elapsed {_elapsed(jid)}"
         )
         if mode == "tty":
-            sys.stdout.write(f"\r\033[2K{msg}")
+            sys.stdout.write(f"\r\033[2K{_fit_tty(msg)}")
             if final:
                 sys.stdout.write("\n")
         else:
@@ -861,7 +873,7 @@ def _print_status_table(
     phase_width = max((len(phase) for _, _, _, phase in rows), default=0)
     if mode == "tty":
         sys.stdout.write("\r\033[2K")
-    print(f"Waiting for {n} jobs...")  # noqa: T201
+    print(_fit_tty(f"Waiting for {n} jobs..."))  # noqa: T201
     lines_printed += 1
     for jid, job, percent, phase in rows:
         line = (
@@ -871,7 +883,7 @@ def _print_status_table(
         )
         if mode == "tty":
             sys.stdout.write("\r\033[2K")
-        print(line)  # noqa: T201
+        print(_fit_tty(line))  # noqa: T201
         lines_printed += 1
 
     sys.stdout.flush()

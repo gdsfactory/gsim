@@ -319,6 +319,10 @@ class TestStatusDescriptions:
         with (
             patch("gsim.gcloud._output_mode", return_value=mode),
             patch("gsim.gcloud.time.monotonic", return_value=222.0),
+            patch(
+                "gsim.gcloud.shutil.get_terminal_size",
+                return_value=MagicMock(columns=200),
+            ),
             patch("IPython.display.clear_output") as clear_output,
         ):
             lines = _print_status_table(jobs, dict.fromkeys(jobs, 0.0), final=True)
@@ -347,6 +351,9 @@ class TestStatusDescriptions:
         stdout = io.TextIOWrapper(buffer, encoding=encoding, errors="strict")
         monkeypatch.setattr("sys.stdout", stdout)
         monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+        monkeypatch.setattr(
+            gcloud.shutil, "get_terminal_size", lambda: MagicMock(columns=200)
+        )
         monkeypatch.setattr(gcloud.time, "sleep", lambda _: None)
         running = FakeJob(job_name="meep-running", status="running")
         completed = FakeJob(

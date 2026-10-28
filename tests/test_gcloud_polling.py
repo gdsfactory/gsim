@@ -75,6 +75,7 @@ def test_polling_retries_transient_errors_and_preserves_other_failures(
 @pytest.mark.parametrize("mode", ["pipe", "tty", "jupyter"])
 def test_multi_job_progress_keeps_finished_elapsed_time(monkeypatch, capsys, mode):
     monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
     monkeypatch.setattr(gcloud.time, "monotonic", lambda: 200)
     cleared = Mock()
     monkeypatch.setattr("IPython.display.clear_output", cleared)
@@ -110,6 +111,7 @@ def test_mixed_job_descriptions_align_elapsed_columns(
     monkeypatch, capsys, mode, estimate
 ):
     monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
     monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
     monkeypatch.setattr("IPython.display.clear_output", Mock())
     jobs = {
@@ -133,6 +135,7 @@ def test_tty_redraw_erases_shorter_terminal_rows(
     monkeypatch, capsys, job_count, terminal
 ):
     monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
     monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
     jobs = {
         f"job-{i}": FakeJob(job_name="meep-" + "long-name-" * 5, status="running")
@@ -158,6 +161,59 @@ def test_tty_redraw_erases_shorter_terminal_rows(
     assert all(row.startswith("\r\033[2K") for row in rows)
     assert redraw.count(f"Job {terminal}") == job_count
     assert "ETA" not in redraw
+
+
+@pytest.mark.parametrize("job_count", [1, 2])
+@pytest.mark.parametrize("columns", [1, 3, 20, 80, 98, 100, 101, 200])
+def test_tty_rows_fit_terminal_width_across_redraw_and_resize(
+    monkeypatch, capsys, job_count, columns
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+    terminal_size = Mock(columns=columns)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: terminal_size)
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    jobs = {
+        f"job-{i}": FakeJob(job_name=f"meep-{i}", status="running")
+        for i in range(job_count)
+    }
+    starts = dict.fromkeys(jobs, 0.0)
+    lines = gcloud._print_status_table(jobs, starts, estimated_runtime_seconds=240)
+    initial = capsys.readouterr().out
+    expected_lines = 1 if job_count == 1 else job_count + 1
+    assert lines == expected_lines
+
+    def visible_rows(output):
+        return re.sub(r"\033\[[0-9]*[AK]", "", output).replace("\r", "").split("\n")
+
+    assert all(len(row) < columns for row in visible_rows(initial))
+    if columns == 98 and job_count == 2:
+        assert initial.count("...") >= job_count
+
+    terminal_size.columns = max(1, columns - 7)
+    for job in jobs.values():
+        job.status = "completed"
+    assert (
+        gcloud._print_status_table(jobs, starts, prev_lines=lines, final=True) == lines
+    )
+    redraw = capsys.readouterr().out
+    assert all(len(row) < terminal_size.columns for row in visible_rows(redraw))
+    if job_count > 1:
+        assert redraw.startswith(f"\033[{expected_lines}A")
+
+
+@pytest.mark.parametrize("mode", ["pipe", "jupyter"])
+def test_non_tty_output_is_not_shortened(monkeypatch, capsys, mode):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=1))
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    monkeypatch.setattr("IPython.display.clear_output", Mock())
+    job = FakeJob(job_name="meep-" + "long-name-" * 5, status="running")
+    gcloud._print_status_table(
+        {"job-1": job}, {"job-1": 0.0}, final=True, estimated_runtime_seconds=240
+    )
+    output = capsys.readouterr().out
+    assert job.job_name in output
+    assert "Job in progress... ETA 2m 00s  elapsed 2m 00s" in output
 
 
 @pytest.mark.parametrize("finished", [False, True])
