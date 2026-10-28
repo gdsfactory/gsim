@@ -27,10 +27,18 @@ HeatmapQuantity = Literal[
 ]
 
 
+class _FiniteModel(_MutableModel):
+    """Concern model that rejects non-finite numbers, as the solver schema does."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
 class Geometry(BaseModel):
     """Component and meshing settings, expressed in micrometers and nanometers."""
 
-    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+    model_config = ConfigDict(
+        validate_assignment=True, extra="forbid", allow_inf_nan=False
+    )
 
     component: Any | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
@@ -72,13 +80,13 @@ class Geometry(BaseModel):
         return self._resolver() if self._resolver is not None else self
 
 
-class Material(_MutableModel):
+class Material(_FiniteModel):
     """Lossless scalar material override at the source wavelength."""
 
     refractive_index: float = Field(gt=0)
 
 
-class Materials(_MutableModel):
+class Materials(_FiniteModel):
     """Background material, refractive-index overrides, and dispersion handling.
 
     By default each material reaches the solver as its index at the source
@@ -121,7 +129,7 @@ class Materials(_MutableModel):
         self(overrides=updated)
 
 
-class Heatmap(_MutableModel):
+class Heatmap(_FiniteModel):
     """Steady-state scalar field images requested from a plane monitor."""
 
     quantity: HeatmapQuantity = "intensity"
@@ -136,7 +144,7 @@ class Heatmap(_MutableModel):
         return values
 
 
-class Source(_MutableModel):
+class Source(_FiniteModel):
     """Settings shared by every FDTD source."""
 
     waveform: Waveform = "pulse"
@@ -220,7 +228,7 @@ class GaussianBeamSource(Source):
 SourceType = PortSource | DipoleSource | LineCurrentSource | GaussianBeamSource
 
 
-class FiberMode(_MutableModel):
+class FiberMode(_FiniteModel):
     """Analytic Gaussian fiber profile for overlap projection."""
 
     propagation_direction: Vector3
@@ -230,7 +238,7 @@ class FiberMode(_MutableModel):
     refractive_index: float | None = Field(default=None, gt=0)
 
 
-class PlaneMonitor(_MutableModel):
+class PlaneMonitor(_FiniteModel):
     """Flux, field, and optional fiber-overlap measurement on a plane."""
 
     name: str = Field(min_length=1)
@@ -307,7 +315,7 @@ class Monitors:
         return [monitor.model_dump() for monitor in self]
 
 
-class Domain(_MutableModel):
+class Domain(_FiniteModel):
     """Physical domain padding in um, axis bounds, and PML settings.
 
     A scalar pads both sides equally; a pair specifies (negative, positive).
@@ -390,7 +398,7 @@ class Domain(_MutableModel):
         super().__setattr__(name, value)
 
 
-class Solver(_MutableModel):
+class Solver(_FiniteModel):
     """Yee-grid resolution and termination controls."""
 
     cell_size_nm: float = Field(default=60.0, gt=0)

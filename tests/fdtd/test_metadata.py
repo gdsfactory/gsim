@@ -264,9 +264,7 @@ def test_write_emits_metadata_from_finalized_inputs(
     tmp_path, fdtd_pdk_module, historical
 ):
     if historical:
-        from gsim.fdtd.simulation import ArtifactSimulation
-
-        simulation = ArtifactSimulation(
+        simulation = fdtd.Simulation(
             pdk=fdtd_pdk_module,
             default_port="o1",
             nanometers_per_cell=100,

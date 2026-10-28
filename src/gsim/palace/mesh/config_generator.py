@@ -23,11 +23,17 @@ from gsim.palace.mesh.metadata import (
 from gsim.palace.mesh.quality import tetrahedron_distortion
 from gsim.palace.models.solver import _ESTIMATOR_KEYS
 from gsim.palace.ports.config import PortType
+from gsim.palace.ports.modes import (
+    PORT_MODES_FILENAME,
+    PortModeEntry,
+    same_face_pairs,
+    write_port_modes,
+)
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from gsim.common.stack import LayerStack
     from gsim.palace.models import (
@@ -267,6 +273,104 @@ def _to_section_frame(props: dict[str, Any], axis: str) -> dict[str, Any]:
         if isinstance(value, list | tuple) and len(value) == 3:
             out[key] = [value[i] for i in order]
     return out
+
+
+def _voltage_path(points: Sequence[Sequence[float]]) -> list[list[float]]:
+    """A wave-port ``VoltagePath`` in mesh units (um, as the 2D mode paths are)."""
+    return [[float(c) for c in point] for point in points]
+
+
+def _multimode_entries(
+    multimode: list[tuple[int, PalacePort, int]],
+    first_free_index: int,
+    wave_ports: list[dict[str, object]],
+    ports: list[PalacePort],
+) -> list[PortModeEntry]:
+    """Add the observation entries of the multimode wave ports to ``wave_ports``.
+
+    The active entry of every multimode port is already in ``wave_ports`` with
+    the port's own index. Each further mode of the port becomes an entry on
+    the same boundary attribute with ``"Active": false`` and an index after
+    all the ports, so the active entry has the lowest index of its face
+    (Palace refuses an active port on an attribute an earlier entry took).
+
+    Args:
+        multimode: ``(port index, port, boundary attribute)`` of each multimode
+            port, in port order.
+        first_free_index: The first index after all ports.
+        wave_ports: The ``WavePort`` entries so far; extended in place.
+        ports: Every port of the simulation.
+
+    Returns:
+        The map from Palace index to (port, mode, active), in index order.
+
+    Raises:
+        ValueError: If two wave ports are on one face.
+    """
+    if not multimode:
+        return []
+    faces = [
+        (p.name, (float(p.center[0]), float(p.center[1])), float(p.orientation))
+        for p in ports
+        if p.port_type == PortType.WAVEPORT
+    ]
+    if pairs := same_face_pairs(faces):
+        first, second = pairs[0]
+        raise ValueError(
+            f"Wave ports {first!r} and {second!r} are on the same face. A "
+            "multimode wave port holds all the modes of its face; declare one "
+            "port per face and list the modes with modes=..."
+        )
+    rows: list[PortModeEntry] = []
+    attrs_by_port = {number: attr for number, _, attr in multimode}
+    next_index = first_free_index
+    extras: list[PortModeEntry] = []
+    for number, port, attribute in multimode:
+        rows.append(
+            PortModeEntry(
+                index=number,
+                port=port.name,
+                portnumber=number,
+                mode=port.mode,
+                active=True,
+                excited=port.excited,
+                attributes=(attribute,),
+            )
+        )
+        template = next(
+            e for e in wave_ports if e["Index"] == number and e.get("Mode") == port.mode
+        )
+        for mode in port.modes:
+            if mode == port.mode:
+                continue
+            excited = bool(port.excited and port.excite_modes == "all")
+            entry: dict[str, object] = {
+                "Index": next_index,
+                "Mode": mode,
+                "Offset": port.offset,
+                "Excitation": next_index if excited else False,
+                "Attributes": [attrs_by_port[number]],
+                "Active": False,
+            }
+            for key in ("SolverType", "EigenTol", "KSPTol", "MaxSize", "Verbose"):
+                if key in template:
+                    entry[key] = template[key]
+            if pilot := port.pilot_paths.get(mode):
+                entry["VoltagePath"] = _voltage_path(pilot)
+            wave_ports.append(entry)
+            extras.append(
+                PortModeEntry(
+                    index=next_index,
+                    port=port.name,
+                    portnumber=number,
+                    mode=mode,
+                    active=False,
+                    excited=excited,
+                    attributes=(attrs_by_port[number],),
+                )
+            )
+            next_index += 1
+    return sorted([*rows, *extras], key=lambda row: row.index)
 
 
 # Without AMR nothing reads the indicator precisely, so a loose tolerance is
@@ -611,6 +715,7 @@ def generate_palace_config(
         info["phys_group"] for info in groups.get("pec_surfaces", {}).values()
     ]
     boundaries: dict[str, Any]
+    mode_rows: list[PortModeEntry] = []
 
     is_electrostatic = simulation_type in ("electrostatic", "electrostatics")
 
@@ -723,6 +828,7 @@ def generate_palace_config(
     else:
         lumped_ports: list[dict[str, object]] = []
         wave_ports: list[dict[str, object]] = []
+        multimode: list[tuple[int, PalacePort, int]] = []
         port_idx = 1
 
         for port in ports:
@@ -820,8 +926,16 @@ def generate_palace_config(
                             wave_port_entry["MaxSize"] = port.eigensolver_max_size
                         if port.eigensolver_verbose is not None:
                             wave_port_entry["Verbose"] = port.eigensolver_verbose
+                        if pilot := port.pilot_paths.get(port.mode):
+                            wave_port_entry["VoltagePath"] = _voltage_path(pilot)
                         wave_ports.append(wave_port_entry)
+                        if port.modes:
+                            multimode.append((port_idx, port, port_group["phys_group"]))
             port_idx += 1
+
+        # The other modes of a multimode port: entries on the same face, after
+        # every port, so the active entry keeps the lowest index of its face.
+        mode_rows = _multimode_entries(multimode, port_idx, wave_ports, ports)
 
         boundaries: dict[str, Any] = {
             "Conductivity": conductors,
@@ -956,6 +1070,14 @@ def generate_palace_config(
         }
     with port_info_path.open("w") as f:
         json.dump(port_info_struct, f, indent=4)
+
+    # Which Palace index is which (face, mode, active) of a multimode port.
+    # A sidecar left by an earlier run in this folder must not outlive a
+    # config without multimode ports.
+    if mode_rows:
+        write_port_modes(output_path, mode_rows)
+    else:
+        (output_path / PORT_MODES_FILENAME).unlink(missing_ok=True)
 
     return config_path
 

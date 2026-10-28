@@ -55,28 +55,12 @@ from gsim.common.stack.overlays import (
     merge_overlay,
 )
 from gsim.common.stack.pn_junction import (
-    M_CE_STAR,
-    M_CH_STAR,
-    MU_N_CM2_VS,
-    MU_P_CM2_VS,
     NI_SI_300K_CM3,
-    SIGMA_NEGLIGIBLE_SM,
     PNJunctionConfig,
     built_in_voltage,
-    carrier_profile_1d,
-    default_eps_bg_rel,
     depletion_extents,
     depletion_width,
-    drude_relaxation_times,
-    epsilon_eff_relative,
     junction_capacitance_per_area,
-    junction_epsilon_profile,
-    make_doping_profile,
-    make_pn_junction_profile,
-    make_segmented_junction_profile,
-    optical_params,
-    refractive_index,
-    select_junction_mode,
 )
 from gsim.common.stack.visualization import (
     StackLayer,
@@ -100,11 +84,19 @@ def get_stack(
     Args:
         yaml_path: Path to custom YAML stack file. If None, uses active PDK.
         **kwargs: Additional args passed to the stack builder:
-            - substrate_thickness: Thickness below z=0 in um (default: 2.0)
+            - substrate_thickness: Depth below z=0 in um (default: 2.0). The
+              depth of the oxide fill when the substrate is omitted, the
+              silicon thickness when ``include_substrate=True``. Ignored (with
+              a warning if given) when ``include_substrate=False`` and
+              ``add_oxide_dielectric=False``: the stack bottom then comes from
+              the PDK's dielectric layers.
             - include_substrate: Include lossy silicon substrate (default: False).
-              When False, omits substrate for RF simulation.
+              When False, omits substrate for RF simulation: the PDK's
+              substrate layer, and its thickness, do not enter the stack
+              (see ``LayerStack.omitted_substrate_layers``).
             - add_oxide_dielectric: Add synthetic oxide dielectric background
-              region (default: True).
+              region (default: True). It is the region that carries
+              ``substrate_thickness`` when the substrate is omitted.
 
     Returns:
         LayerStack object
@@ -195,12 +187,7 @@ def load_stack_yaml(yaml_path: str | Path) -> LayerStack:
 
 __all__ = [
     "MATERIALS_DB",
-    "MU_N_CM2_VS",
-    "MU_P_CM2_VS",
-    "M_CE_STAR",
-    "M_CH_STAR",
     "NI_SI_300K_CM3",
-    "SIGMA_NEGLIGIBLE_SM",
     "DispersionModel",
     "EmxImportWarning",
     "Layer",
@@ -214,36 +201,25 @@ __all__ = [
     "ValidationResult",
     "ValidityRange",
     "built_in_voltage",
-    "carrier_profile_1d",
-    "default_eps_bg_rel",
     "depletion_extents",
     "depletion_width",
-    "drude_relaxation_times",
-    "epsilon_eff_relative",
     "extract_from_pdk",
     "extract_layer_stack",
     "get_material_properties",
     "get_stack",
     "junction_capacitance_per_area",
-    "junction_epsilon_profile",
     "load_emx_proc",
     "load_overlay",
     "load_portable_stackup_json",
     "load_stack_yaml",
     "make_doped_material",
     "make_doped_materials",
-    "make_doping_profile",
-    "make_pn_junction_profile",
-    "make_segmented_junction_profile",
     "merge_overlay",
-    "optical_params",
     "parse_emx_proc",
     "parse_layer_stack",
     "plot_stack",
     "print_stack",
     "print_stack_table",
-    "refractive_index",
     "resolve_material_at_wavelength",
-    "select_junction_mode",
     "should_enable_dispersion",
 ]

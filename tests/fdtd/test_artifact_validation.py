@@ -1,18 +1,19 @@
-"""Exercise artifact validation and vertical source/monitor conventions."""
+"""Exercise flat-argument validation and vertical source/monitor conventions."""
 
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from gsim import fdtd
 from gsim.fdtd.models import FDTDConfigError, FDTDGeometryError
-from gsim.fdtd.simulation import ArtifactSimulation
 
 
 @pytest.mark.parametrize(
     "options",
     [
         {"wavelength_um": 0},
+        {"wavelength_um": np.inf},
         {"mesh_size_nm": np.nan},
         {"geometry_tolerance_nm": 31},
         {"background_material": ""},
@@ -27,9 +28,9 @@ from gsim.fdtd.simulation import ArtifactSimulation
         {"vertical_port_waist_radius_um": np.inf},
     ],
 )
-def test_invalid_artifact_settings(options):
+def test_invalid_flat_settings(options):
     with pytest.raises(ValueError):
-        ArtifactSimulation(**options)
+        fdtd.Simulation(**options)
 
 
 @pytest.mark.parametrize("axis", ["+z", "-z"])
@@ -41,7 +42,7 @@ def test_vertical_source_and_monitor_are_oppositely_directed(
     fdtd_pdk_module.PDK.activate()
     component = fdtd_pdk_module.PDK.cells["vertical_coupler"]()
     component.ports["o2"].port_type = polarization
-    simulation = ArtifactSimulation(
+    simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
         vertical_port_axis=axis,
         vertical_port_aperture_width_um=0.8 if explicit_aperture else None,
@@ -61,24 +62,24 @@ def test_vertical_source_and_monitor_are_oppositely_directed(
         (0, 1, 0) if polarization == "vertical_te" else (1, 0, 0)
     )
     assert source.waist_radius == pytest.approx(300 if explicit_aperture else 500)
-    simulation.vertical_port_aperture_width_um = 100
+    simulation.source(vertical_aperture_width_um=100)
     with pytest.raises(FDTDConfigError, match="aperture exceeds"):
         simulation._vertical_port_configs(simulation._material_snapshots())
 
 
-def test_unconfigured_or_unknown_artifact_inputs(fdtd_pdk_module):
-    simulation = ArtifactSimulation(pdk=fdtd_pdk_module)
+def test_unconfigured_or_unknown_flat_inputs(fdtd_pdk_module):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     with pytest.raises(FDTDGeometryError, match="No geometry"):
         _ = simulation.resolved
-    with pytest.raises(FDTDConfigError, match="default_port is required"):
+    with pytest.raises(FDTDConfigError, match="requires an explicit port"):
         simulation._selected_port_name()
     simulation.geometry("straight")
-    simulation.default_port = "absent"
+    simulation.source(port="absent")
     with pytest.raises(FDTDConfigError, match="not present"):
         simulation._selected_port_name()
-    simulation.background_material = "Si"
+    simulation.materials.background = "Si"
     assert set(simulation._material_snapshots()) == {"Si"}
-    simulation.background_material = "unknown-material"
+    simulation.materials.background = "unknown-material"
     with pytest.raises(FDTDConfigError, match="Could not resolve background"):
         simulation._material_snapshots()
     with pytest.raises(FDTDConfigError, match="Unsupported vertical"):

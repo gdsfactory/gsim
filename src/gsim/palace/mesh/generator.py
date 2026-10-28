@@ -417,8 +417,12 @@ def _generate_native_boundarymode_groups(
 
     outer_parts = {tag for dim, tag in out_map[0] if dim == 2}
     layer_surfaces: dict[str, set[int]] = {}
+    # Pieces of each input rectangle, kept per entry (same order as
+    # ``layer_inputs``): ``layer_surfaces`` merges entries of one material.
+    entry_pieces: list[set[int]] = []
     for idx, (layer_name, _tag) in enumerate(layer_inputs, start=1):
         pieces = {tag for dim, tag in out_map[idx] if dim == 2}
+        entry_pieces.append(pieces)
         if pieces:
             layer_surfaces.setdefault(layer_name, set()).update(pieces)
 
@@ -509,6 +513,37 @@ def _generate_native_boundarymode_groups(
             claimed_pieces.update(unique)
         else:
             layer_surfaces.pop(layer_name, None)
+
+    # Step 3: background regions that overlap in z (e.g. a slab laid over part
+    # of the oxide) must not share pieces: a piece in two domain groups writes
+    # its triangles twice, and its edges end up in several interface groups and
+    # in ``absorbing``. Mirror the 3D rule (``build_entities`` order and the
+    # first-claim loop in ``run_boolean_pipeline``): the region listed first in
+    # the stack wins the overlap, the "air" background comes last.
+    #
+    # The claim runs per stack region, not per material: ``layer_inputs`` holds
+    # material names, and two regions of one material (an SiO2 box and an SiO2
+    # cladding) with another material listed between them must not be merged
+    # first, or the merged group would take an overlap that belongs to the
+    # region in between. Regions are merged into material groups afterwards.
+    bg_entries = [
+        (bg_name, entry_pieces[idx])
+        for idx, (bg_name, _tag) in enumerate(layer_inputs)
+        if _is_background_dielectric(bg_name)
+    ]
+    bg_entries.sort(key=lambda entry: entry[0] == "air")  # stable: stack order
+    claimed_bg: set[int] = set()
+    bg_owned: dict[str, set[int]] = {}
+    for bg_name, region_pieces in bg_entries:
+        # ``layer_surfaces`` already lost the patterned-dielectric pieces
+        unique = (region_pieces & layer_surfaces.get(bg_name, set())) - claimed_bg
+        claimed_bg |= unique
+        bg_owned.setdefault(bg_name, set()).update(unique)
+    for bg_name, owned in bg_owned.items():
+        if owned:
+            layer_surfaces[bg_name] = owned
+        else:
+            layer_surfaces.pop(bg_name, None)
 
     if metal_piece_tags:
         for layer_name, pieces in list(layer_surfaces.items()):
@@ -801,8 +836,12 @@ def _generate_native_boundarymode_groups(
             list(interface_specs or []), kind="Interface", key="interface_lines"
         )
 
+    # Only the meshed regions can carry the outer boundary. A conductor is a
+    # hole in the 2D mesh: the piece of the domain wall it covers is not an
+    # edge of any triangle, and a boundary element that is no edge of a
+    # triangle makes Palace crash (MFEM's GetBdrElementFace reads face -1).
     outer_curves: set[int] = set()
-    for stag in outer_parts:
+    for stag in sorted(outer_parts & vol_pg_surfaces):
         try:
             boundaries = gmsh.model.getBoundary(
                 [(2, stag)],
@@ -1537,6 +1576,18 @@ def generate_mesh(
                 problem_type=simulation_type,
             )
 
+            # No element may be written twice: a line or triangle in two physical
+            # groups gives Palace a face with several boundary elements. Contact
+            # and interface lines are named after declared layer pairs and may
+            # reuse the interface curves on purpose.
+            gmsh_utils.check_unique_group_membership(
+                dims=(1, 2),
+                ignore_names=(
+                    *groups.get("contact_lines", {}),
+                    *groups.get("interface_lines", {}),
+                ),
+            )
+
             gmsh.option.setNumber("Mesh.Binary", 0)
             gmsh.option.setNumber("Mesh.SaveAll", 0)
             gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
@@ -1616,6 +1667,9 @@ def generate_mesh(
             airbox_z_above=airbox_z_above,
             airbox_z_below=airbox_z_below,
             symmetry_plane=symmetry_plane,
+        )
+        logger.info(
+            "  Domain z-range: %.3f to %.3f um", domain_bounds[2], domain_bounds[5]
         )
         domain_bbox = (
             geometry.bbox[0] - margin_x,
@@ -1832,6 +1886,10 @@ def generate_mesh(
             field_order=numerical_config.order if numerical_config else 2,
             problem_type=simulation_type,
         )
+
+        # No element may be written twice: a face in two physical groups gives
+        # Palace a face with several boundary elements.
+        gmsh_utils.check_unique_group_membership(dims=(2, 3))
 
         # Save mesh
         gmsh.option.setNumber("Mesh.Binary", 0)

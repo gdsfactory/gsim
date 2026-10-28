@@ -45,6 +45,8 @@ from gsim.palace.models.results import (
 from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from gdsfactory.component import Component
 
     from gsim.palace.results import PalaceTextResults, SParams
@@ -471,7 +473,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         yaml_path: str | Path | None = None,
         air_above: float | None = None,
         air_below: float | None = None,
-        substrate_thickness: float = 2.0,
+        substrate_thickness: float | None = None,
         include_substrate: bool = False,
         add_oxide_dielectric: bool = True,
         **kwargs,
@@ -497,10 +499,43 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             yaml_path: Path to custom YAML stack file.
             air_above: Deprecated and ignored. Use set_airbox().
             air_below: Deprecated and ignored. Use set_airbox().
-            substrate_thickness: Thickness below z=0 in um.
-            include_substrate: Include lossy silicon substrate.
-            add_oxide_dielectric: Add synthetic oxide background dielectric.
+            substrate_thickness: Depth below ``z=0`` in um (2.0 when omitted).
+                It only matters where something is built from it: the
+                synthetic oxide fill (``include_substrate=False`` with
+                ``add_oxide_dielectric=True``) or the silicon substrate
+                (``include_substrate=True``; a stack with shaped (photonic)
+                dielectrics keeps the PDK's own substrate depth if that is
+                deeper). With ``include_substrate=False`` and
+                ``add_oxide_dielectric=False`` nothing is built from it, it is
+                ignored, and a warning is logged if it was given.
+            include_substrate: Include lossy silicon substrate (default
+                ``False``). With ``False`` the PDK's substrate layer is left
+                out of the simulation, so changing its thickness in the PDK
+                stack changes neither the mesh nor the config. A warning is
+                logged when the PDK substrate and these settings disagree.
+            add_oxide_dielectric: Add the synthetic oxide background
+                dielectric (default ``True``). When the substrate is omitted
+                this is the region whose bottom is ``-substrate_thickness``.
+                With ``False`` the stack bottom comes from the PDK's own
+                dielectric regions, or from the lowest layer when there are
+                none, not from ``substrate_thickness``.
             **kwargs: Additional args passed to extract_layer_stack.
+
+        The bottom of the Palace domain is the lowest non-air dielectric
+        region of the resolved stack (the lowest layer when there is no such
+        region) minus ``set_airbox(z_below=...)``. What sets that region:
+
+        * ``include_substrate=True``: the silicon, whose bottom is
+          ``-substrate_thickness`` (or the PDK substrate bottom, if deeper, for
+          stacks with shaped dielectrics).
+        * ``include_substrate=False`` and ``add_oxide_dielectric=True`` (the
+          default): the oxide fill, whose bottom is ``-substrate_thickness``.
+        * ``include_substrate=False`` and ``add_oxide_dielectric=False``: not
+          ``substrate_thickness``; the PDK's dielectric layers and layer
+          extents. Move the bottom with ``z_below`` or the PDK layers.
+
+        With a custom ``LayerStack`` the bottom is whatever its dielectrics
+        say.
 
         Example:
             >>> sim.set_stack(substrate_thickness=2.0)
@@ -520,11 +555,14 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         self._stack_kwargs = {
             "yaml_path": yaml_path,
-            "substrate_thickness": substrate_thickness,
             "include_substrate": include_substrate,
             "add_oxide_dielectric": add_oxide_dielectric,
             **kwargs,
         }
+        # Left out when unset so the stack builder can tell the 2.0 um default
+        # from a value the user chose, and warn only about the former.
+        if substrate_thickness is not None:
+            self._stack_kwargs["substrate_thickness"] = substrate_thickness
         # Stack will be resolved lazily during mesh() or simulate()
         self.stack = None
 
@@ -563,7 +601,14 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             z_above: Airbox extension above the stack top (um).
                 Defaults to ``0.0`` when omitted.
             z_below: Airbox extension below the stack bottom (um).
-                Defaults to ``0.0`` when omitted.
+                Defaults to ``0.0`` when omitted. The stack bottom is the
+                lowest dielectric region: the silicon substrate with
+                ``set_stack(include_substrate=True)``, otherwise the oxide
+                bottom at ``-substrate_thickness``. With
+                ``add_oxide_dielectric=False`` there is no such oxide, and the
+                bottom comes from the PDK's remaining dielectric regions or
+                layer extents (``substrate_thickness`` is ignored). A
+                substrate layer left out of the stack does not move it.
             material: Background material name for the padded region
                 (default ``"air"``).
         """
@@ -594,6 +639,47 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             "z_below": zb,
             "material": material,
         }
+
+    def _warn_if_substrate_omitted(self, stack: LayerStack) -> None:
+        """Warn when a substrate layer of the stack cannot move the domain bottom.
+
+        With ``include_substrate=False`` (the default) the PDK's substrate layer
+        is left out of the stack, so a different silicon thickness there gives
+        the same mesh and config. This matters once ``set_airbox(z_below=...)``
+        is used to place the bottom boundary: it is measured from the stack
+        bottom, not from the silicon. That is the oxide bottom
+        (``-substrate_thickness``), or, with ``add_oxide_dielectric=False``,
+        the lowest PDK dielectric region or layer extent.
+        """
+        omitted = getattr(stack, "omitted_substrate_layers", None)
+        z_below = (self._airbox_config or {}).get("z_below") or 0.0
+        if not omitted or z_below <= 0:
+            return
+        from gsim.palace.mesh.geometry import _resolve_stack_z_extent
+
+        z_bottom, _ = _resolve_stack_z_extent(stack, True)
+        if (stack.simulation or {}).get("add_oxide_dielectric", True):
+            move_hint = "substrate_thickness / z_below"
+        else:
+            move_hint = (
+                "z_below or the PDK dielectric layers (substrate_thickness "
+                "has no effect with add_oxide_dielectric=False)"
+            )
+        layers = ", ".join(
+            f"'{d['name']}' ({d['thickness']:g} um, z={d['zmin']:g} to {d['zmax']:g})"
+            for d in omitted
+        )
+        logger.warning(
+            "The stack's substrate layer %s is not part of the domain because "
+            "include_substrate=False, so its thickness does not move the domain "
+            "bottom. The bottom is z=%g um (stack bottom) minus "
+            "set_airbox(z_below=%g). Use set_stack(include_substrate=True) to "
+            "mesh the substrate, or set %s to move the bottom.",
+            layers,
+            z_bottom,
+            z_below,
+            move_hint,
+        )
 
     def _resolve_domain_margins(self, mesh_config) -> tuple[float, float]:
         """Lateral margins for the mesh domain, excluding the airbox expansion.
@@ -1363,6 +1449,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 for wp in wave_ports
                 if not wp.layer
             )
+            errors.extend(self._multimode_wave_port_errors(wave_ports))
+            errors.extend(self._wave_port_face_errors(wave_ports))
 
         eigenmode = self._get_problem_settings("eigenmode")
         if eigenmode is not None and eigenmode.target is None:
@@ -1439,6 +1527,115 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
+
+    def _multimode_wave_port_errors(self, wave_ports: list[Any]) -> list[str]:
+        """Errors that only multimode wave ports can have.
+
+        Two ports on one face would be two surfaces in one place, and Palace
+        refuses two active ports on one attribute; a multimode port puts all
+        its modes on one surface instead, so the second port is refused here.
+        """
+        from gsim.palace.ports.modes import same_face_pairs
+
+        if not any(wp.modes for wp in wave_ports):
+            return []
+        errors: list[str] = []
+        if self.simulation_type != "driven":
+            errors.append(
+                "Multimode wave ports are only supported for driven simulations, "
+                f"not {self.simulation_type!r}."
+            )
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            return errors
+        by_name = {port.name: port for port in component.ports}
+        faces = [
+            (
+                wp.name,
+                (float(by_name[wp.name].center[0]), float(by_name[wp.name].center[1])),
+                float(by_name[wp.name].orientation or 0.0),
+            )
+            for wp in wave_ports
+            if wp.name in by_name
+        ]
+        errors.extend(
+            f"Wave ports {first!r} and {second!r} are on the same face; give a "
+            "face one wave port and list its modes with modes=..."
+            for first, second in same_face_pairs(faces)
+        )
+        return errors
+
+    def _wave_port_face_errors(self, wave_ports: list[Any]) -> list[str]:
+        """Errors for wave ports whose generated faces overlap.
+
+        The mesher builds one rectangle per wave port: a ``max_size`` port
+        spans the whole side of the domain whatever its centre, margins widen
+        a face. Where two rectangles overlap the boolean pass merges them, one
+        port keeps no surface and ``write_config()`` emits no ``WavePort``
+        entry for it. The rectangles are built here with the mesher's own
+        function. The domain margins are only known at ``mesh()``, so the
+        domain is left unbounded, which does not change which faces overlap.
+        The mesher repeats the check with the real domain.
+        """
+        component = self.geometry.component if self.geometry else None
+        if component is None or len(wave_ports) < 2:
+            return []
+        from gsim.palace.mesh.geometry import (
+            UNBOUNDED_DOMAIN,
+            overlapping_wave_ports,
+            wave_port_overlap_message,
+        )
+        from gsim.palace.ports.config import PalacePort, PortType
+        from gsim.palace.ports.modes import same_face_pairs
+
+        by_name = {port.name: port for port in component.ports}
+        ports = [
+            PalacePort(
+                name=wp.name,
+                port_type=PortType.WAVEPORT,
+                center=(
+                    float(by_name[wp.name].center[0]),
+                    float(by_name[wp.name].center[1]),
+                ),
+                width=float(by_name[wp.name].width),
+                orientation=float(by_name[wp.name].orientation or 0.0),
+                layer=wp.layer,
+                z_margin=wp.z_margin,
+                lateral_margin=wp.lateral_margin,
+                max_size=wp.max_size,
+            )
+            for wp in wave_ports
+            if wp.layer and wp.name in by_name
+        ]
+        if len(ports) < 2:
+            return []
+        # Resolving the stack must not leave a stack behind: set_stack() may
+        # still follow, and mesh() resolves it again.
+        previous = self.stack
+        try:
+            stack = self._resolve_stack()
+        except Exception:
+            return []  # the mesher reports a stack that does not resolve
+        finally:
+            self.stack = previous
+        # A pair on the same face is already reported by the multimode check
+        reported = (
+            {
+                frozenset(pair)
+                for pair in same_face_pairs(
+                    (p.name, p.center, p.orientation) for p in ports
+                )
+            }
+            if any(wp.modes for wp in wave_ports)
+            else set()
+        )
+        return [
+            wave_port_overlap_message(first, second)
+            for first, second in overlapping_wave_ports(
+                ports, stack, domain_bounds=UNBOUNDED_DOMAIN
+            )
+            if frozenset((first, second)) not in reported
+        ]
 
     def _find_gf_port(self, port_name: str):
         """Find a gdsfactory port by name."""
@@ -1578,6 +1775,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     eigensolver_ksp_tol=port_config.eigensolver_ksp_tol,
                     eigensolver_max_size=port_config.eigensolver_max_size,
                     eigensolver_verbose=port_config.eigensolver_verbose,
+                    modes=port_config.modes,
+                    excite_modes=port_config.excite_modes,
+                    pilot_paths=port_config.pilot_paths,
                 )
 
         # Configure two-terminal ports
@@ -1620,6 +1820,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # Resolve stack
         stack = self._resolve_stack()
+        self._warn_if_substrate_omitted(stack)
         airbox_cfg = self._airbox_config or {}
         domain_margin_x, domain_margin_y = self._resolve_domain_margins(mesh_config)
 
@@ -1887,6 +2088,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # Resolve stack
         stack = self._resolve_stack()
+        self._warn_if_substrate_omitted(stack)
 
         # Get ports
         ports = self._get_ports_for_preview(stack)
@@ -2762,6 +2964,120 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 eigensolver_verbose=eigensolver_verbose,
             )
         )
+
+    def add_multimode_wave_port(
+        self,
+        name: str,
+        *,
+        modes: Sequence[int],
+        layer: str | None = None,
+        active_mode: int = 1,
+        excite: Literal["active", "all"] = "active",
+        pilot_paths: Mapping[int, Sequence[Sequence[float]]] | None = None,
+        z_margin: float = 0.0,
+        lateral_margin: float = 0.0,
+        max_size: bool = False,
+        excited: bool = True,
+        offset: float = 0.0,
+        eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None,
+        eigensolver_tol: float | None = None,
+        eigensolver_ksp_tol: float | None = None,
+        eigensolver_max_size: int | None = None,
+        eigensolver_verbose: int | None = None,
+    ) -> None:
+        """Add a wave port that follows several modes on one port face.
+
+        The port keeps one boundary surface. Palace gets one ``WavePort``
+        entry per mode on that surface: the entry of ``active_mode`` keeps the
+        port's own index and terminates the face, and every other mode is an
+        observation-only entry (``"Active": false``) with an index after all
+        the ports, so the active entry always has the lowest index of its
+        face, which Palace requires. Every entry solves its own 2D port
+        mode, and every entry is measured, so ``port-S.csv`` gets a column per
+        entry and excitation. The map from Palace index to (port, mode,
+        active) is written next to ``config.json`` as ``port_modes.json``.
+
+        Only the active entry loads the face. A wave that arrives in another
+        mode is not matched there, so the S-parameters of the observed modes
+        carry a reflection error of the order of the relative difference of
+        the wave numbers. The error is zero for the active mode. To get every
+        mode with the active-mode accuracy, run once per mode with that mode
+        as ``active_mode`` and use only the columns of the active entries.
+
+        Args:
+            name: Port name (must match a component port at the signal center).
+            modes: The Palace mode numbers (1-based) to follow on this face,
+                for example ``(1, 2, 3)``. Must contain ``active_mode``.
+            layer: Target conductor layer.
+            active_mode: The mode that terminates the face.
+            excite: ``"active"`` excites only the active entry (one excitation
+                per port); ``"all"`` excites every entry, which gives a column
+                per mode but excites the unmatched modes with an amplitude
+                that is off by the same mismatch.
+            pilot_paths: Optional ``{mode: points}``. Each path is an open
+                polyline of ``(x, y, z)`` points in um across the face, from
+                the signal (high-potential) conductor to the reference, and
+                becomes that entry's ``VoltagePath``: Palace flips the mode so
+                the line integral of ``E`` along it is positive, which pins the
+                sign of the mode, and writes the voltage to ``port-V.csv``.
+            z_margin: Margin in z direction.
+            lateral_margin: Margin in x/y directions.
+            max_size: Fill the full simulation domain boundary on that side.
+            excited: Whether the port is excited at all.
+            offset: Offset distance used for scattering parameter de-embedding.
+            eigensolver_type: Palace SolverType of the 2D mode eigenproblem.
+            eigensolver_tol: Palace EigenTol of the mode solve.
+            eigensolver_ksp_tol: Palace KSPTol of the mode solve.
+            eigensolver_max_size: Palace MaxSize of the mode solve.
+            eigensolver_verbose: Palace Verbose level of the mode solve.
+
+        Raises:
+            ValueError: If this is not a driven simulation, or the modes,
+                active mode or pilot paths are inconsistent.
+
+        Example:
+            >>> sim.add_multimode_wave_port(
+            ...     "o1",
+            ...     layer="metal3",
+            ...     modes=(1, 2, 3),
+            ...     active_mode=1,
+            ...     max_size=True,
+            ... )
+        """
+        if self.simulation_type != "driven":
+            raise ValueError(
+                "A multimode wave port is a driven-simulation feature, not "
+                f"{self.simulation_type!r}."
+            )
+        paths = (
+            {
+                int(mode): [[float(c) for c in point] for point in path]
+                for mode, path in pilot_paths.items()
+            }
+            if pilot_paths
+            else None
+        )
+        config = WavePortConfig(
+            name=name,
+            layer=layer,
+            z_margin=z_margin,
+            lateral_margin=lateral_margin,
+            max_size=max_size,
+            mode=active_mode,
+            modes=tuple(int(m) for m in modes),
+            active_mode=active_mode,
+            excite_modes=excite,
+            pilot_paths=paths,
+            excited=excited,
+            offset=offset,
+            eigensolver_type=eigensolver_type,
+            eigensolver_tol=eigensolver_tol,
+            eigensolver_ksp_tol=eigensolver_ksp_tol,
+            eigensolver_max_size=eigensolver_max_size,
+            eigensolver_verbose=eigensolver_verbose,
+        )
+        self.wave_ports = [p for p in self.wave_ports if p.name != name]
+        self.wave_ports.append(config)
 
 
 class _PalaceSimBase(PalaceSimMixin, BaseModel):

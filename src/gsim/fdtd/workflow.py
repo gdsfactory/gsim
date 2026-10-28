@@ -46,6 +46,32 @@ from gsim.fdtd.models import (
 from gsim.fdtd.runtime import RuntimeConfigMixin
 from gsim.fdtd.viz import Axis, ViewerMode
 
+# Flat constructor arguments of the original API, as (concern, field).
+# wavelength_halfspan_um is translated separately: it doubles into a span.
+_LEGACY_FIELDS: dict[str, tuple[str, str]] = {
+    "mesh_size_nm": ("geometry", "mesh_size_nm"),
+    "geometry_tolerance_nm": ("geometry", "geometry_tolerance_nm"),
+    "background_material": ("materials", "background"),
+    "wavelength_um": ("source", "wavelength_um"),
+    "num_wavelengths": ("source", "num_wavelengths"),
+    "default_port": ("source", "port"),
+    "vertical_port_axis": ("source", "vertical_axis"),
+    "vertical_port_aperture_width_um": ("source", "vertical_aperture_width_um"),
+    "vertical_port_waist_radius_um": ("source", "vertical_waist_radius_um"),
+    "padding": ("domain", "padding"),
+    "padding_x": ("domain", "padding_x"),
+    "padding_y": ("domain", "padding_y"),
+    "padding_z": ("domain", "padding_z"),
+    "pml_cells": ("domain", "pml_cells"),
+    "x_bounds": ("domain", "x_bounds"),
+    "y_bounds": ("domain", "y_bounds"),
+    "z_bounds": ("domain", "z_bounds"),
+    "nanometers_per_cell": ("solver", "cell_size_nm"),
+    "max_timesteps": ("solver", "max_timesteps"),
+    "energy_decay_fraction": ("solver", "energy_decay_fraction"),
+    "max_wall_seconds": ("solver", "max_wall_seconds"),
+}
+
 
 def _source_from_value(value: SourceType | Mapping[str, Any] | None) -> SourceType:
     """Validate a source mapping using its explicit public type."""
@@ -144,6 +170,12 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Validate source replacements while keeping concern mutation concise."""
+        if name in _LEGACY_FIELDS:
+            concern, field = _LEGACY_FIELDS[name]
+            raise AttributeError(
+                f"Simulation.{name} is a constructor argument only; "
+                f"set simulation.{concern}.{field} instead."
+            )
         if name == "source" and hasattr(self, "source"):
             value = _source_from_value(value)
         object.__setattr__(self, name, value)
@@ -167,31 +199,16 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
         solver: dict[str, Any],
     ) -> None:
         """Map the original flat constructor fields into concern objects."""
-        mappings = {
-            "mesh_size_nm": (geometry, "mesh_size_nm"),
-            "geometry_tolerance_nm": (geometry, "geometry_tolerance_nm"),
-            "background_material": (materials, "background"),
-            "wavelength_um": (source, "wavelength_um"),
-            "num_wavelengths": (source, "num_wavelengths"),
-            "default_port": (source, "port"),
-            "vertical_port_axis": (source, "vertical_axis"),
-            "vertical_port_aperture_width_um": (
-                source,
-                "vertical_aperture_width_um",
-            ),
-            "vertical_port_waist_radius_um": (source, "vertical_waist_radius_um"),
-            "pml_cells": (domain, "pml_cells"),
-            "x_bounds": (domain, "x_bounds"),
-            "y_bounds": (domain, "y_bounds"),
-            "z_bounds": (domain, "z_bounds"),
-            "nanometers_per_cell": (solver, "cell_size_nm"),
-            "max_timesteps": (solver, "max_timesteps"),
-            "energy_decay_fraction": (solver, "energy_decay_fraction"),
-            "max_wall_seconds": (solver, "max_wall_seconds"),
+        targets = {
+            "geometry": geometry,
+            "materials": materials,
+            "source": source,
+            "domain": domain,
+            "solver": solver,
         }
-        for old_name, (target, new_name) in mappings.items():
+        for old_name, (concern, new_name) in _LEGACY_FIELDS.items():
             if old_name in legacy:
-                target.setdefault(new_name, legacy.pop(old_name))
+                targets[concern].setdefault(new_name, legacy.pop(old_name))
         if "wavelength_halfspan_um" in legacy:
             source.setdefault(
                 "wavelength_span_um", 2 * legacy.pop("wavelength_halfspan_um")

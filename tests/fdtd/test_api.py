@@ -66,6 +66,41 @@ def test_concerns_batch_validate_without_partial_updates() -> None:
     assert simulation.domain.z_bounds == (-0.5, 0.75)
 
 
+_PLANE = {"name": "out", "size_um": (0, 1, 1), "normal": "+x"}
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+@pytest.mark.parametrize(
+    ("model", "kwargs"),
+    [
+        (fdtd.Solver, lambda value: {"max_wall_seconds": value}),
+        (fdtd.PortSource, lambda value: {"amplitude": value}),
+        (fdtd.Material, lambda value: {"refractive_index": value}),
+        (
+            fdtd.PlaneMonitor,
+            lambda value: {**_PLANE, "center_um": (value, 0, 0)},
+        ),
+        (fdtd.Domain, lambda value: {"padding": value}),
+    ],
+    ids=["solver", "source", "material", "plane_monitor", "domain"],
+)
+def test_concern_models_reject_non_finite_numbers(model, kwargs, value) -> None:
+    with pytest.raises(ValidationError, match="finite number"):
+        model(**kwargs(value))
+
+
+def test_concern_models_reject_non_finite_assignment() -> None:
+    simulation = fdtd.Simulation()
+
+    with pytest.raises(ValidationError, match="finite number"):
+        simulation.solver.max_wall_seconds = float("inf")
+    with pytest.raises(ValidationError, match="finite number"):
+        simulation.source(amplitude=float("nan"))
+
+    assert simulation.solver.max_wall_seconds == 3600.0
+    assert simulation.source.amplitude == 1.0
+
+
 def test_dipole_material_override_and_plane_monitor_serialize(
     tmp_path: Path,
     fdtd_pdk_module,

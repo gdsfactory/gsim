@@ -923,6 +923,7 @@ class TestInstallPalaceRuntime:
             prefix = tmp_path / f"palace-cpu-v{tag}"
             (prefix / "bin").mkdir(parents=True)
             (prefix / "lib").mkdir(parents=True)
+            (prefix / "share").mkdir(parents=True)
             bin_palace = prefix / "bin" / "palace"
             bin_palace.write_text("#!/bin/sh\nexit 0\n")
             bin_palace.chmod(0o755)
@@ -955,6 +956,7 @@ class TestInstallPalaceRuntime:
         with zipfile.ZipFile(wheel_buf, "w") as zf:
             zf.writestr("palacetoolkit_palace_cpu/bin/palace", "#!/bin/sh\nexit 0\n")
             zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
+            zf.writestr("palacetoolkit_palace_cpu/share/openmpi/help.txt", "MPI help")
         wheel_buf.seek(0)
         downloads: list[str] = []
 
@@ -1039,6 +1041,7 @@ class TestInstallPalaceRuntime:
             zf.writestr("palacetoolkit_palace_cpu/bin/palace", "#!/bin/sh\nexit 0\n")
             zf.writestr("palacetoolkit_palace_cpu/bin/palace-x86_64.bin", "x")
             zf.writestr("palacetoolkit_palace_cpu/lib/libfoo.so", "libdata")
+            zf.writestr("palacetoolkit_palace_cpu/share/openmpi/help.txt", "MPI help")
         wheel_buf.seek(0)
 
         class _FakeResponse:

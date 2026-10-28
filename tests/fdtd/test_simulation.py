@@ -13,7 +13,6 @@ import pytest
 
 from gsim import fdtd
 from gsim.fdtd.models import FDTDConfigError, FDTDGeometryError
-from gsim.fdtd.simulation import ArtifactSimulation
 
 
 def _physical_group_points(mesh: meshio.Mesh, name: str, cell_type: str) -> np.ndarray:
@@ -209,10 +208,7 @@ def test_write_keeps_background_level_without_polygons(
     assert "buried_oxide" in artifacts.manifest.layers
 
 
-@pytest.mark.parametrize("simulation_class", [fdtd.Simulation, ArtifactSimulation])
-def test_write_uses_lf_line_endings(
-    tmp_path, fdtd_pdk_module, monkeypatch, simulation_class
-) -> None:
+def test_write_uses_lf_line_endings(tmp_path, fdtd_pdk_module, monkeypatch) -> None:
     """The cloud solver crashes on CRLF meshes, so Windows output must be LF."""
     gmsh_write = gmsh.write
 
@@ -224,7 +220,7 @@ def test_write_uses_lf_line_endings(
         mesh_path.write_bytes(content.replace(b"\n", b"\r\n"))
 
     monkeypatch.setattr(gmsh, "write", write_like_windows)
-    simulation = simulation_class(
+    simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
         mesh_size_nm=750,
         default_port="o1",

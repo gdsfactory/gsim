@@ -35,6 +35,22 @@ def _flat_at(tag: int, axis: int, value: float) -> bool:
     return abs(bb[axis] - value) < TOL and abs(bb[axis + 3] - value) < TOL
 
 
+def test_same_material_internal_face_is_not_labelled_none(kernel):
+    lower = kernel.addBox(0, 0, 0, 1, 1, 1)
+    upper = kernel.addBox(0, 0, 1, 1, 1, 1)
+    pg_map = gmsh_utils.run_boolean_pipeline(
+        [gmsh_utils.Entity("sio2", 3, 0, [lower, upper])]
+    )
+    shared = next(
+        int(tag)
+        for _, tag in gmsh.model.getEntities(2)
+        if len(gmsh.model.getAdjacencies(2, tag)[0]) == 2
+    )
+
+    assert "sio2__None" in pg_map
+    assert gmsh.model.getPhysicalGroupsForEntity(2, shared).size == 0
+
+
 def _stacked_cubes(kernel) -> dict[str, list[int]]:
     """A big box with two unit cubes stacked inside it, fragmented.
 
@@ -237,5 +253,4 @@ def test_absorbing_only_on_the_outer_boundary(tmp_path, caplog, via_kind):
     ]
     assert inside == []
 
-    warned = [r for r in caplog.records if "are internal" in r.getMessage()]
-    assert bool(warned) == (via_kind == "conductor")
+    assert not [r for r in caplog.records if "are internal" in r.getMessage()]

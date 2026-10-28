@@ -384,6 +384,10 @@ class BoundaryModeSim(_PalaceSimBase):
         """A wave port is a 3D excitation; refused here."""
         raise self._no_ports("wave ports")
 
+    def add_multimode_wave_port(self, *_args: Any, **_kwargs: Any) -> None:
+        """A multimode wave port is a 3D excitation; refused here."""
+        raise self._no_ports("wave ports")
+
     def add_terminal(self, *_args: Any, **_kwargs: Any) -> None:
         """A terminal belongs to an electrostatic solve; refused here."""
         raise self._no_ports("terminals")

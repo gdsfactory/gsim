@@ -262,4 +262,48 @@ def test_upload_explains_denied_access_and_preserves_server_errors(
 def test_log_outages_keep_the_resume_cursor(monkeypatch, available):
     provider = Mock(side_effect=RuntimeError("logs unavailable")) if available else None
     monkeypatch.setattr(gcloud, "_get_job_logs_callable", lambda: provider)
-    assert gcloud._fetch_logs("job-1", "resume-here") == ([], "resume-here")
+    position = gcloud._LogPosition("resume-here", seen=3)
+    assert gcloud._fetch_logs("job-1", position) == ([], position, False)
+
+
+def test_full_logs_print_each_line_once_and_return_after_completion(
+    monkeypatch, tmp_path, capsys
+):
+    # The server pages by cursor and omits next_cursor on the last page, which
+    # keeps growing while the job runs (gdsfactory/gsim#425).
+    store: list[str] = []
+
+    def get_logs(_job_id, cursor=None, limit=50):
+        start = int(cursor or 0)
+        end = start + limit
+        return {
+            "items": [{"message": msg} for msg in store[start:end]],
+            "page_info": {"next_cursor": str(end)} if end < len(store) else {},
+        }
+
+    def get_job(_job_id):
+        status = "running" if len(store) < 7 else "completed"
+        store.extend(f"line {len(store)}" for _ in range(2))
+        return FakeJob(status=status)
+
+    output = tmp_path / "solver.log"
+    output.write_text("result")
+    monkeypatch.setattr(gcloud.sim, "get_job", get_job)
+    monkeypatch.setattr(
+        gcloud.sim, "download_results", Mock(return_value={"log": output})
+    )
+    monkeypatch.setattr(
+        gcloud, "_get_job_logs_callable", lambda: Mock(side_effect=get_logs)
+    )
+    monkeypatch.setattr(gcloud.time, "sleep", lambda _seconds: None)
+    real_fetch = gcloud._fetch_logs
+    monkeypatch.setattr(
+        gcloud,
+        "_fetch_logs",
+        lambda job_id, position: real_fetch(job_id, position, limit=3),
+    )
+
+    gcloud.wait_for_results("job-1", verbose="full", parent_dir=tmp_path)
+
+    printed = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    assert [line for line in printed if line.startswith("line ")] == store

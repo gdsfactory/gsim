@@ -35,7 +35,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from gdsfactoryplus import sim
 
@@ -522,45 +522,64 @@ def get_status(job_id: str) -> str:
     return _status_value(job.status)
 
 
-def _fetch_logs(job_id: str, cursor: str | None) -> tuple[list[str], str | None]:
-    """Fetch a page of log messages. Returns (messages, next_cursor)."""
+class _LogPosition(NamedTuple):
+    """Where log streaming resumes: a page cursor and the items printed from it.
+
+    The logs API omits ``next_cursor`` on the last page, and that page keeps
+    growing while the job runs, so the cursor alone cannot mark the end of
+    what was already printed.
+    """
+
+    cursor: str | None = None
+    seen: int = 0
+
+
+def _fetch_logs(
+    job_id: str, position: _LogPosition, *, limit: int = 50
+) -> tuple[list[str], _LogPosition, bool]:
+    """Fetch unseen log messages from one page.
+
+    Returns ``(messages, next_position, has_more)``, where *has_more* says
+    whether a further page exists.
+    """
     _get_logs = _get_job_logs_callable()
     if _get_logs is None:
-        return [], cursor
-    _logs_unavailable = getattr(sim, "LogsNotAvailableError", Exception)
+        return [], position, False
     try:
-        page = _get_logs(job_id, cursor=cursor, limit=50)
-    except _logs_unavailable:
-        return [], cursor
-    except Exception:
-        return [], cursor
+        page = _get_logs(job_id, cursor=position.cursor, limit=limit)
+    except Exception:  # includes sim.LogsNotAvailableError; retry next poll
+        return [], position, False
     else:
         # Strip leading timestamps like "[2026-03-18T15:05:33.217Z] "
         msgs = [
             re.sub(r"^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\]\s*", "", entry.get("message", ""))
             for entry in page["items"]
         ]
-        next_cursor = page["page_info"].get("next_cursor") or cursor
-        return msgs, next_cursor
+        new_msgs = msgs[position.seen :]
+        next_cursor = page["page_info"].get("next_cursor")
+        if next_cursor:
+            return new_msgs, _LogPosition(next_cursor), True
+        return new_msgs, _LogPosition(position.cursor, len(msgs)), False
 
 
 def _fetch_and_print_logs(
     job_id: str,
-    cursor: str | None,
+    position: _LogPosition,
     *,
     drain: bool = False,
-) -> str | None:
-    """Fetch a page of logs and print them. Returns the next cursor.
+) -> _LogPosition:
+    """Print log messages not yet shown. Returns where to resume.
 
     When *drain* is True, fetch all remaining pages (for final flush).
     """
     while True:
-        msgs, cursor = _fetch_logs(job_id, cursor)
+        msgs, next_position, has_more = _fetch_logs(job_id, position)
         for msg in msgs:
             print(f"  {msg}")  # noqa: T201
-        if not drain or not msgs:
-            break
-    return cursor
+        # Stop on the last page, or if the API hands back the same cursor
+        if not drain or not has_more or next_position == position:
+            return next_position
+        position = next_position
 
 
 def estimate_runtime_seconds(input_dir: str | Path) -> float:
@@ -654,8 +673,8 @@ def wait_for_results(
     # Highest percentage shown per job, so the bar never moves backwards
     shown_progress: dict[str, int] = {}
 
-    # Log cursors for streaming (one per job)
-    log_cursors: dict[str, str | None] = dict.fromkeys(job_ids, None)
+    # Log positions for streaming (one per job)
+    log_positions = {jid: _LogPosition() for jid in job_ids}
 
     # Poll until all jobs reach a terminal state
     while not all(_status_value(j.status) in terminal for j in jobs.values()):
@@ -684,7 +703,7 @@ def wait_for_results(
                 if verbose == "full" and _status_value(
                     jobs[jid].status
                 ) == _status_value(sim.SimStatus.RUNNING):
-                    log_cursors[jid] = _fetch_and_print_logs(jid, log_cursors[jid])
+                    log_positions[jid] = _fetch_and_print_logs(jid, log_positions[jid])
                 # Freeze timer when job reaches terminal state
                 if _status_value(jobs[jid].status) in terminal:
                     end_times[jid] = time.monotonic()
@@ -692,7 +711,7 @@ def wait_for_results(
     # Final log fetch — drain all remaining pages
     if verbose == "full":
         for jid in job_ids:
-            _fetch_and_print_logs(jid, log_cursors[jid], drain=True)
+            _fetch_and_print_logs(jid, log_positions[jid], drain=True)
 
     # Final status display — skip clear_output when logs were streamed
     if verbose == "status":
