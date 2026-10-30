@@ -9,10 +9,22 @@ from __future__ import annotations
 
 import pytest
 
-from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
+from gsim.palace import (
+    BoundaryModeSim,
+    DrivenSim,
+    EigenmodeSim,
+    ElectrostaticSim,
+    MagnetostaticSim,
+)
 from gsim.palace.models import MeshConfig
 
-SIM_CLASSES = [DrivenSim, EigenmodeSim, ElectrostaticSim, BoundaryModeSim]
+SIM_CLASSES = [
+    DrivenSim,
+    EigenmodeSim,
+    ElectrostaticSim,
+    MagnetostaticSim,
+    BoundaryModeSim,
+]
 
 
 @pytest.fixture(params=SIM_CLASSES, ids=lambda cls: cls.__name__)

@@ -265,13 +265,16 @@ def check_lumped_port_geometry(
     *,
     rel_tol: float = 1.0e-6,
 ) -> list[str]:
-    """Check every lumped-port surface for Palace's geometry constraint."""
+    """Check every lumped-port and surface-current sheet for Palace's geometry rule.
+
+    Palace applies the same rectangle and Direction rule to both kinds.
+    """
     from gsim.palace.ports.config import PortGeometry, PortType
 
     errors: list[str] = []
 
     for port_idx, port in enumerate(palace_ports, start=1):
-        if port.port_type != PortType.LUMPED:
+        if port.port_type not in (PortType.LUMPED, PortType.SURFACE_CURRENT):
             continue
 
         port_key = f"P{port_idx}"
@@ -433,18 +436,36 @@ def check_port_surfaces_in_domain(
     return errors
 
 
-def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
-    """Count mesh nodes shared by each lumped port and a conductor surface.
+# Config sheets that must touch a conductor, and their names in messages.
+_CONTACT_SHEETS = {"LumpedPort": "lumped port", "SurfaceCurrent": "surface current"}
 
-    A valid rectangular port can survive meshing after its metal lead was
-    consumed by a boolean cut. This check catches that disconnected case.
-    It does not prove that the port touches the intended conductor island.
+
+def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
+    """Count mesh nodes shared by each port or source sheet and a conductor surface.
+
+    Covers ``LumpedPort`` and ``SurfaceCurrent`` entries of ``config.json``.
+    A valid rectangular sheet can survive meshing after its metal lead was
+    consumed by a boolean cut; a source sheet that touches no PEC closes no
+    current loop. This check catches that disconnected case. It does not
+    prove that the sheet touches the intended conductor island.
     """
     sim_dir = Path(sim_dir)
     boundaries = json.loads((sim_dir / "config.json").read_text())["Boundaries"]
-    ports = boundaries.get("LumpedPort", [])
-    if not ports:
-        raise ValueError("config.json has no lumped ports")
+    return _sheet_contacts(boundaries, sim_dir / "palace.msh")
+
+
+def _sheet_contacts(boundaries: dict, mesh_path: Path) -> dict[int, int]:
+    """Count the conductor nodes on each sheet of ``boundaries`` in a mesh.
+
+    Raises:
+        ValueError: If there is no sheet or conductor, a sheet has no mesh
+            group, or a sheet shares no node with a conductor surface.
+    """
+    sheets = [
+        (kind, port) for kind in _CONTACT_SHEETS for port in boundaries.get(kind, [])
+    ]
+    if not sheets:
+        raise ValueError("config.json has no lumped ports or surface currents")
 
     conductor_attributes = set(boundaries.get("PEC", {}).get("Attributes", []))
     for boundary in boundaries.get("Conductivity", []):
@@ -454,7 +475,7 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
 
     import gmsh
 
-    with _temporary_mesh_model(sim_dir / "palace.msh"):
+    with _temporary_mesh_model(mesh_path):
         surface_groups = gmsh.model.getPhysicalGroups(2)
         groups = {
             gmsh.model.getPhysicalName(dim, tag): tag for dim, tag in surface_groups
@@ -475,7 +496,9 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
                 conductor_nodes.update(nodes(tag))
 
         contacts: dict[int, int] = {}
-        for port in ports:
+        orphaned: dict[str, list[int]] = {}
+        for kind, port in sheets:
+            label = _CONTACT_SHEETS[kind]
             index = int(port["Index"])
             tags = {int(tag) for tag in port.get("Attributes", [])}
             tags.update(
@@ -484,19 +507,22 @@ def check_lumped_port_contact(sim_dir: str | Path) -> dict[int, int]:
                 for tag in element.get("Attributes", [])
             )
             if not tags:
-                raise ValueError(f"lumped port {index} has no surface attributes")
+                raise ValueError(f"{label} {index} has no surface attributes")
             if missing := tags - surface_tags:
                 raise ValueError(
-                    f"mesh has no surface group for lumped port {index}: "
-                    f"{sorted(missing)}"
+                    f"mesh has no surface group for {label} {index}: {sorted(missing)}"
                 )
             port_nodes = set().union(*(nodes(tag) for tag in tags))
             contacts[index] = len(port_nodes & conductor_nodes)
+            if not contacts[index]:
+                orphaned.setdefault(label, []).append(index)
 
-    orphaned = [index for index, count in contacts.items() if count == 0]
     if orphaned:
         raise ValueError(
-            f"lumped ports {orphaned} share no nodes with conductor surfaces"
+            "; ".join(
+                f"{label}s {indices} share no nodes with conductor surfaces"
+                for label, indices in orphaned.items()
+            )
         )
     return contacts
 
@@ -518,6 +544,31 @@ def _check_symmetry_config(symmetry: dict, boundaries: dict) -> list[str]:
             "are listed under Boundaries.Absorbing."
         )
     return errors
+
+
+def _check_source_contact(
+    boundaries: dict, mesh_path: Path
+) -> tuple[list[str], list[str]]:
+    """Check that the config has current sources and each one touches PEC.
+
+    Returns:
+        The errors, and the warnings: without the mesh file the contact of
+        the sheets is not checked, and a warning says so.
+    """
+    if not boundaries.get("SurfaceCurrent"):
+        return ["config.json has no SurfaceCurrent entries."], []
+    if not mesh_path.exists():
+        return [], [
+            f"Current-source contact with PEC not checked: {mesh_path} does not exist."
+        ]
+    try:
+        _sheet_contacts(boundaries, mesh_path)
+    except ValueError as e:
+        return [
+            f"{e}. A current-source sheet must end on PEC at both edges to "
+            "close its loop; check that the source's leads survive meshing."
+        ], []
+    return [], []
 
 
 def validate_mesh(sim) -> ValidationResult:
@@ -556,7 +607,7 @@ def validate_mesh(sim) -> ValidationResult:
             warnings_list.append(f"PEC surfaces: {list(groups['pec_surfaces'].keys())}")
 
     port_surfaces = groups.get("port_surfaces", {})
-    if not port_surfaces and sim.simulation_type == "driven":
+    if not port_surfaces and sim.simulation_type in ("driven", "magnetostatic"):
         errors.append("No port surfaces in mesh.")
     else:
         for port_name, port_info in port_surfaces.items():
@@ -630,6 +681,12 @@ def validate_mesh(sim) -> ValidationResult:
                     )
                 ):
                     errors.append("config.json has no LumpedPort nor Waveport entries.")
+                if sim.simulation_type == "magnetostatic":
+                    contact_errors, contact_warnings = _check_source_contact(
+                        boundaries, mesh_result.mesh_path
+                    )
+                    errors.extend(contact_errors)
+                    warnings_list.extend(contact_warnings)
                 if symmetry:
                     errors.extend(_check_symmetry_config(symmetry, boundaries))
             except json.JSONDecodeError as e:

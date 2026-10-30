@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import pydantic
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -15,6 +15,7 @@ from gsim.palace.models.problems import (
     DrivenConfig,
     EigenmodeConfig,
     ElectrostaticConfig,
+    MagnetostaticConfig,
 )
 
 _WARNING_SKIP_PREFIXES = (
@@ -168,6 +169,9 @@ class SolverConfig(BaseModel):
     device: Literal["CPU", "GPU"] = Field(
         default="CPU", description="Compute device; GPU requires a GPU-enabled Palace."
     )
+    # Linear settings this solver class uses unless the caller sets them.
+    _linear_defaults: ClassVar[dict[str, Any]] = {}
+
     linear: LinearSolverConfig = Field(default_factory=LinearSolverConfig)
 
     @model_validator(mode="before")
@@ -194,6 +198,39 @@ class SolverConfig(BaseModel):
             if overlap := flat.keys() & linear.keys():
                 raise ValueError(f"Linear settings supplied twice: {sorted(overlap)}")
             values["linear"] = {**linear, **flat}
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_class_linear_defaults(cls, values: Any) -> Any:
+        """Use the class linear defaults for settings the caller leaves unset."""
+        if not cls._linear_defaults:
+            return values
+        if isinstance(values, SolverConfig) and not isinstance(values, cls):
+            # Preserve nested assignments and which linear fields were explicit.
+            values = {**values.model_dump(), "linear": values.linear}
+        elif isinstance(values, BaseModel) and not isinstance(values, cls):
+            values = values.model_dump(exclude_unset=True)
+        if not isinstance(values, dict):
+            return values
+        # Legacy flat keys are explicit; they are grouped by the next validator.
+        defaults = {
+            name: value
+            for name, value in cls._linear_defaults.items()
+            if name not in values
+        }
+        linear = values.get("linear", {})
+        if isinstance(linear, LinearSolverConfig):
+            unset = {
+                name: value
+                for name, value in defaults.items()
+                if name not in linear.model_fields_set
+            }
+            if unset:
+                return {**values, "linear": linear.model_copy(update=unset)}
+            return values
+        if isinstance(linear, dict):
+            return {**values, "linear": {**defaults, **linear}}
         return values
 
     @property
@@ -274,6 +311,7 @@ class SolverConfig(BaseModel):
             ("eigenmode", "Eigenmode"),
             ("electrostatic", "Electrostatic"),
             ("boundary_mode", "BoundaryMode"),
+            ("magnetostatic", "Magnetostatic"),
         ):
             if problem := getattr(self, name, None):
                 config[palace_name] = problem.to_palace_config()
@@ -286,35 +324,25 @@ class DrivenSolverConfig(SolverConfig):
     driven: DrivenConfig = Field(default_factory=DrivenConfig)
 
 
+_EIGENMODE_LINEAR_DEFAULTS: dict[str, Any] = {"tolerance": 1e-9}
+# Palace resolves magnetostatic Default to AMS + CG on the singular curl-curl
+# operator; direct backends are not documented for it.
+_MAGNETOSTATIC_LINEAR_DEFAULTS: dict[str, Any] = {
+    "solver_type": "Default",
+    "preconditioner": "AMS",
+    "tolerance": 1e-8,
+}
+
+
 class EigenmodeSolverConfig(SolverConfig):
     """Common and eigenvalue settings for EigenmodeSim."""
 
+    _linear_defaults: ClassVar[dict[str, Any]] = _EIGENMODE_LINEAR_DEFAULTS
+
     linear: LinearSolverConfig = Field(
-        default_factory=lambda: LinearSolverConfig(tolerance=1e-9)
+        default_factory=lambda: LinearSolverConfig(**_EIGENMODE_LINEAR_DEFAULTS)
     )
     eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_eigenmode_linear_tolerance(cls, values: Any) -> Any:
-        """Use the eigenmode tolerance unless the caller supplies an override."""
-        if isinstance(values, SolverConfig) and not isinstance(values, cls):
-            # Preserve nested assignments and whether tolerance was explicit.
-            values = {**values.model_dump(), "linear": values.linear}
-        elif isinstance(values, BaseModel) and not isinstance(values, cls):
-            values = values.model_dump(exclude_unset=True)
-        if isinstance(values, dict) and "tolerance" not in values:
-            linear = values.get("linear", {})
-            if isinstance(linear, LinearSolverConfig):
-                if "tolerance" not in linear.model_fields_set:
-                    return {
-                        **values,
-                        "linear": linear.model_copy(update={"tolerance": 1e-9}),
-                    }
-                return values
-            if isinstance(linear, dict):
-                return {**values, "linear": {"tolerance": 1e-9, **linear}}
-        return values
 
 
 class ElectrostaticSolverConfig(SolverConfig):
@@ -327,3 +355,22 @@ class BoundaryModeSolverConfig(SolverConfig):
     """Common and cross-section mode settings for BoundaryModeSim."""
 
     boundary_mode: BoundaryModeConfig = Field(default_factory=BoundaryModeConfig)
+
+
+class MagnetostaticSolverConfig(SolverConfig):
+    """Common and magnetostatic settings for MagnetostaticSim.
+
+    The linear solve defaults to Palace's magnetostatic choice: the AMS
+    preconditioner with conjugate gradients at a 1e-8 relative tolerance.
+    """
+
+    _linear_defaults: ClassVar[dict[str, Any]] = _MAGNETOSTATIC_LINEAR_DEFAULTS
+
+    linear: LinearSolverConfig = Field(
+        default_factory=lambda: LinearSolverConfig(**_MAGNETOSTATIC_LINEAR_DEFAULTS)
+    )
+    magnetostatic: MagnetostaticConfig = Field(default_factory=MagnetostaticConfig)
+
+    def to_linear_solver_config(self) -> dict[str, object]:
+        """Convert to Palace's ``Solver.Linear`` block with a CG Krylov solve."""
+        return {**super().to_linear_solver_config(), "KSPType": "CG"}

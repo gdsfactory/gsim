@@ -16,6 +16,7 @@ nbs/*.py
 *.egg
 *.egg-info
 *.log
+!tests/palace/fixtures/**/palace.log
 *.manifest
 *.mo
 *.pot

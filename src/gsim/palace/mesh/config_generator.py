@@ -41,6 +41,7 @@ if TYPE_CHECKING:
         DrivenConfig,
         EigenmodeConfig,
         ElectrostaticConfig,
+        MagnetostaticConfig,
         NumericalConfig,
         RefinementConfig,
         SolverConfig,
@@ -402,6 +403,64 @@ def _resolve_estimator_settings(
         )
 
 
+def _surface_current_direction(port: PalacePort) -> str:
+    """The signed cardinal Palace ``Direction`` of a source sheet (``+X``...)."""
+    direction = port.direction.upper()
+    return direction if direction.startswith("-") else f"+{direction}"
+
+
+def _magnetostatic_boundaries(
+    groups: dict,
+    ports: list[PalacePort],
+    conductor_attrs: list[int],
+    pec_attrs: list[int],
+) -> dict[str, Any]:
+    """``PEC`` and ``SurfaceCurrent`` boundaries of a magnetostatic solve.
+
+    Palace models conductors only as perfect conductors here, so every
+    conductor surface, PEC surface and via side wall is PEC: without the via
+    walls a loop that drops through a via would be open. Each current source
+    is one ``SurfaceCurrent`` sheet, with ``Index`` in the order the sources
+    were added. The outer wall is left to the ``_metallic_boundaries`` hint.
+
+    Raises:
+        ValueError: If a port is not a current source, a source has no sheet
+            in the mesh, or a sheet is also a PEC attribute.
+    """
+    pec = set(conductor_attrs) | set(pec_attrs)
+    for via_groups in groups.get("via_boundary_surfaces", {}).values():
+        pec.update(via_groups)
+
+    surface_currents: list[dict[str, object]] = []
+    for index, port in enumerate(ports, start=1):
+        if port.port_type != PortType.SURFACE_CURRENT:
+            raise ValueError(
+                f"Port {port.name!r} is not a current source; a magnetostatic "
+                "solve takes only current sources (add_current_source)."
+            )
+        sheet = groups["port_surfaces"].get(f"P{index}")
+        if sheet is None:
+            raise ValueError(
+                f"Current source {port.name!r} has no sheet in the mesh; run "
+                "mesh() again."
+            )
+        attribute = sheet["phys_group"]
+        if attribute in pec:
+            raise ValueError(
+                f"The sheet of current source {port.name!r} (attribute "
+                f"{attribute}) is also a PEC surface; a source sheet must not "
+                "be PEC."
+            )
+        surface_currents.append(
+            {
+                "Index": index,
+                "Attributes": [attribute],
+                "Direction": _surface_current_direction(port),
+            }
+        )
+    return {"PEC": {"Attributes": sorted(pec)}, "SurfaceCurrent": surface_currents}
+
+
 def generate_palace_config(
     groups: dict,
     ports: list[PalacePort],
@@ -424,6 +483,7 @@ def generate_palace_config(
     periodic_translation: tuple[float, float, float] | None = None,
     resolved_terminals: list[ResolvedTerminal] | None = None,
     absorbing_order: int = 2,
+    magnetostatic_config: MagnetostaticConfig | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -449,6 +509,8 @@ def generate_palace_config(
         resolved_terminals: Electrostatic terminals resolved to nets; needed
             when the mesh has one group per net (``"nets"`` in ``groups``),
             where they replace ``terminals``.
+        magnetostatic_config: Optional MagnetostaticConfig for the
+            magnetostatic problem settings; ``Save: 0`` without it.
 
     Returns:
         Path to the generated config.json
@@ -465,6 +527,7 @@ def generate_palace_config(
         "boundarymode",
         "electrostatic",
         "electrostatics",
+        "magnetostatic",
     ):
         raise ValueError(f"Unsupported simulation type: {simulation_type}")
 
@@ -521,11 +584,17 @@ def generate_palace_config(
     if numerical_config is not None:
         solver_conf = dict(numerical_config.to_solver_config())
     else:
-        from gsim.palace.models.solver import EigenmodeSolverConfig, SolverConfig
+        from gsim.palace.models.solver import (
+            EigenmodeSolverConfig,
+            MagnetostaticSolverConfig,
+            SolverConfig,
+        )
 
         defaults = (
             EigenmodeSolverConfig()
             if simulation_type == "eigenmode"
+            else MagnetostaticSolverConfig()
+            if simulation_type == "magnetostatic"
             else SolverConfig()
         )
         solver_conf = defaults.to_solver_config()
@@ -544,6 +613,12 @@ def generate_palace_config(
             solver_conf["Electrostatic"] = {"Save": 0}
     elif simulation_type == "boundarymode":
         solver_conf["BoundaryMode"] = solver_boundarymode
+    elif simulation_type == "magnetostatic":
+        solver_conf["Magnetostatic"] = (
+            magnetostatic_config.to_palace_config()
+            if magnetostatic_config is not None
+            else {"Save": 0}
+        )
     else:
         raise NotImplementedError
 
@@ -553,6 +628,7 @@ def generate_palace_config(
         "boundarymode": "BoundaryMode",
         "electrostatic": "Electrostatic",
         "electrostatics": "Electrostatic",
+        "magnetostatic": "Magnetostatic",
     }
 
     model_l0 = 1e-6
@@ -824,6 +900,17 @@ def generate_palace_config(
         mode_postprocessing = (hints or {}).get("_mode_postprocessing")
         if mode_postprocessing:
             boundaries["Postprocessing"] = mode_postprocessing
+
+    elif simulation_type == "magnetostatic":
+        if absorbing_boundary:
+            raise ValueError(
+                "Palace ignores an Absorbing boundary in a magnetostatic solve "
+                "and leaves the outer wall PMC; use metallic_boundaries to "
+                "choose a PEC (True) or PMC (False) outer wall instead."
+            )
+        boundaries = _magnetostatic_boundaries(
+            groups, ports, conductor_attrs, pec_attrs
+        )
 
     else:
         lumped_ports: list[dict[str, object]] = []
@@ -1294,6 +1381,7 @@ def write_config(
     refinement_config: RefinementConfig | None = None,
     resolved_terminals: list[ResolvedTerminal] | None = None,
     absorbing_order: int = 2,
+    magnetostatic_config: MagnetostaticConfig | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -1312,6 +1400,8 @@ def write_config(
         hints: Additional config hints merged into the JSON
         resolved_terminals: Electrostatic terminals resolved to nets, for a
             mesh with one physical group per net
+        magnetostatic_config: Optional MagnetostaticConfig for the
+            magnetostatic problem settings
 
     Returns:
         Path to the generated config.json
@@ -1350,6 +1440,7 @@ def write_config(
         refinement_config=refinement_config,
         resolved_terminals=resolved_terminals,
         absorbing_order=absorbing_order,
+        magnetostatic_config=magnetostatic_config,
     )
 
     # Update the mesh_result with the config path

@@ -1,0 +1,219 @@
+>> /usr/local/bin/mpirun -n 1 /opt/palace/bin/palace-x86_64.bin rings.json
+
+_____________     _______
+_____   __   \____ __   /____ ____________
+____   /_/  /  __ ` /  /  __ ` /  ___/  _ \
+___   _____/  /_/  /  /  /_/  /  /__/  ___/
+  /__/     \___,__/__/\___,__/\_____\_____/
+
+Git changeset ID: v0.18.1
+Running with 1 MPI process, 4 OpenMP threads
+Device configuration: omp,cpu
+Memory configuration: host-std
+libCEED backend: /cpu/self/xsmm/blocked
+
+Added 3339 elements in 2 iterations of local bisection for under-resolved interior boundaries
+Added 698 duplicate vertices for interior boundaries in the mesh
+Added 2094 duplicate boundary elements for interior boundaries in the mesh
+
+Characteristic length and time scales:
+ Lc = 2.732e-03 m, tc = 9.113e-03 ns
+Finished partitioning mesh into 1 subdomain
+
+Mesh curvature order: 2
+Mesh bounding box:
+ (Xmin, Ymin, Zmin) = (-1.366e-03, -1.366e-03, -1.000e-03) m
+ (Xmax, Ymax, Zmax) = (+1.366e-03, +1.366e-03, +1.000e-03) m
+
+Parallel Mesh Stats:
+
+                minimum     average     maximum       total
+ vertices         13499       13499       13499       13499
+ edges            91916       91916       91916       91916
+ faces           154010      154010      154010      154010
+ elements         75592       75592       75592       75592
+ neighbors            0           0           0
+
+            minimum     maximum
+ h      0.000309032    0.117634
+ kappa            1     17.9668
+
+Estimated current per-rank memory usage is: Min. 93.0M, Max. 93.0M, Avg. 93.0M, Total 93.0M
+Estimated current per-node memory usage is: Min. 93.0M, Max. 93.0M, Avg. 93.0M, Total 93.0M
+
+Configuring surface current excitation source term at attributes:
+ 4: Index = 1, n = (-0.0,-0.0,-1.0)
+ 5: Index = 2, n = (+0.0,+0.0,+1.0)
+
+Configuring Dirichlet BC at attributes:
+ 2-3
+
+Assembling system matrices, number of global unknowns:
+ H1 (p = 2): 105415, ND (p = 2): 491852, RT (p = 2): 688806
+ Operator assembly level: Partial
+ Mesh geometries:
+  Tetrahedron: P = 20, Q = 14 (quadrature order = 4)
+
+Assembling multigrid hierarchy:
+ Level 0 (p = 1): 91916 unknowns
+ Level 1 (p = 2): 491852 unknowns
+
+Computing magnetostatic fields for 2 source boundaries
+
+It 1/2: Current Index = 1 (elapsed time = 1.04e-03 s)
+  Residual norms for PCG solve
+  0 KSP residual norm ||r||_B = 8.953963e-03
+  1 KSP residual norm ||r||_B = 1.336083e-02
+  2 KSP residual norm ||r||_B = 2.768818e-02
+  3 KSP residual norm ||r||_B = 3.256574e-02
+  4 KSP residual norm ||r||_B = 2.551324e-02
+  5 KSP residual norm ||r||_B = 1.428734e-02
+  6 KSP residual norm ||r||_B = 7.986244e-03
+  7 KSP residual norm ||r||_B = 5.192614e-03
+  8 KSP residual norm ||r||_B = 3.779687e-03
+  9 KSP residual norm ||r||_B = 2.482501e-03
+ 10 KSP residual norm ||r||_B = 1.340983e-03
+ 11 KSP residual norm ||r||_B = 5.952111e-04
+ 12 KSP residual norm ||r||_B = 2.559442e-04
+ 13 KSP residual norm ||r||_B = 1.241772e-04
+ 14 KSP residual norm ||r||_B = 6.961729e-05
+ 15 KSP residual norm ||r||_B = 5.000812e-05
+ 16 KSP residual norm ||r||_B = 3.717120e-05
+ 17 KSP residual norm ||r||_B = 3.440310e-05
+ 18 KSP residual norm ||r||_B = 4.320241e-05
+ 19 KSP residual norm ||r||_B = 6.555292e-05
+ 20 KSP residual norm ||r||_B = 1.076727e-04
+ 21 KSP residual norm ||r||_B = 1.666988e-04
+ 22 KSP residual norm ||r||_B = 2.246292e-04
+ 23 KSP residual norm ||r||_B = 2.625506e-04
+ 24 KSP residual norm ||r||_B = 2.850184e-04
+ 25 KSP residual norm ||r||_B = 2.065479e-04
+ 26 KSP residual norm ||r||_B = 1.186542e-04
+ 27 KSP residual norm ||r||_B = 6.391792e-05
+ 28 KSP residual norm ||r||_B = 4.111999e-05
+ 29 KSP residual norm ||r||_B = 2.353053e-05
+ 30 KSP residual norm ||r||_B = 1.145397e-05
+ 31 KSP residual norm ||r||_B = 5.544158e-06
+ 32 KSP residual norm ||r||_B = 3.129758e-06
+ 33 KSP residual norm ||r||_B = 1.885966e-06
+ 34 KSP residual norm ||r||_B = 1.172074e-06
+ 35 KSP residual norm ||r||_B = 6.362598e-07
+ 36 KSP residual norm ||r||_B = 3.201613e-07
+ 37 KSP residual norm ||r||_B = 1.792517e-07
+ 38 KSP residual norm ||r||_B = 9.579265e-08
+ 39 KSP residual norm ||r||_B = 4.962347e-08
+ 40 KSP residual norm ||r||_B = 2.336202e-08
+ 41 KSP residual norm ||r||_B = 1.055411e-08
+ 42 KSP residual norm ||r||_B = 6.105755e-09
+ 43 KSP residual norm ||r||_B = 3.331981e-09
+ 44 KSP residual norm ||r||_B = 1.691179e-09
+ 45 KSP residual norm ||r||_B = 8.346566e-10
+ 46 KSP residual norm ||r||_B = 4.325192e-10
+ 47 KSP residual norm ||r||_B = 2.240292e-10
+ 48 KSP residual norm ||r||_B = 1.148938e-10
+ 49 KSP residual norm ||r||_B = 5.291264e-11
+PCG solver converged in 49 iterations (avg. reduction factor: 6.793e-01)
+
+It 2/2: Current Index = 2 (elapsed time = 1.14e+02 s)
+  Residual norms for PCG solve
+  0 KSP residual norm ||r||_B = 9.368133e-03
+  1 KSP residual norm ||r||_B = 1.259725e-02
+  2 KSP residual norm ||r||_B = 3.010440e-02
+  3 KSP residual norm ||r||_B = 5.398579e-02
+  4 KSP residual norm ||r||_B = 8.564379e-02
+  5 KSP residual norm ||r||_B = 1.076956e-01
+  6 KSP residual norm ||r||_B = 1.134414e-01
+  7 KSP residual norm ||r||_B = 9.517951e-02
+  8 KSP residual norm ||r||_B = 5.918216e-02
+  9 KSP residual norm ||r||_B = 3.665942e-02
+ 10 KSP residual norm ||r||_B = 2.231051e-02
+ 11 KSP residual norm ||r||_B = 1.372554e-02
+ 12 KSP residual norm ||r||_B = 8.887103e-03
+ 13 KSP residual norm ||r||_B = 5.056012e-03
+ 14 KSP residual norm ||r||_B = 2.547508e-03
+ 15 KSP residual norm ||r||_B = 1.505824e-03
+ 16 KSP residual norm ||r||_B = 7.984751e-04
+ 17 KSP residual norm ||r||_B = 4.794220e-04
+ 18 KSP residual norm ||r||_B = 3.078972e-04
+ 19 KSP residual norm ||r||_B = 2.764493e-04
+ 20 KSP residual norm ||r||_B = 3.290826e-04
+ 21 KSP residual norm ||r||_B = 4.330671e-04
+ 22 KSP residual norm ||r||_B = 5.210297e-04
+ 23 KSP residual norm ||r||_B = 5.594396e-04
+ 24 KSP residual norm ||r||_B = 4.652174e-04
+ 25 KSP residual norm ||r||_B = 3.111287e-04
+ 26 KSP residual norm ||r||_B = 1.998585e-04
+ 27 KSP residual norm ||r||_B = 1.157500e-04
+ 28 KSP residual norm ||r||_B = 6.219718e-05
+ 29 KSP residual norm ||r||_B = 3.783143e-05
+ 30 KSP residual norm ||r||_B = 2.119510e-05
+ 31 KSP residual norm ||r||_B = 1.170925e-05
+ 32 KSP residual norm ||r||_B = 6.994365e-06
+ 33 KSP residual norm ||r||_B = 4.508592e-06
+ 34 KSP residual norm ||r||_B = 2.607138e-06
+ 35 KSP residual norm ||r||_B = 1.484219e-06
+ 36 KSP residual norm ||r||_B = 8.105592e-07
+ 37 KSP residual norm ||r||_B = 4.384747e-07
+ 38 KSP residual norm ||r||_B = 2.139750e-07
+ 39 KSP residual norm ||r||_B = 1.084942e-07
+ 40 KSP residual norm ||r||_B = 5.542262e-08
+ 41 KSP residual norm ||r||_B = 2.685908e-08
+ 42 KSP residual norm ||r||_B = 1.417058e-08
+ 43 KSP residual norm ||r||_B = 7.120768e-09
+ 44 KSP residual norm ||r||_B = 3.478521e-09
+ 45 KSP residual norm ||r||_B = 1.667317e-09
+ 46 KSP residual norm ||r||_B = 8.620620e-10
+ 47 KSP residual norm ||r||_B = 4.470888e-10
+ 48 KSP residual norm ||r||_B = 2.283786e-10
+ 49 KSP residual norm ||r||_B = 1.244972e-10
+ 50 KSP residual norm ||r||_B = 6.226005e-11
+PCG solver converged in 50 iterations (avg. reduction factor: 6.862e-01)
+ Field energy H = 5.672e-14 J
+
+ Wrote fields to disk (Paraview) for source 1
+ Field energy H = 9.478e-13 J
+
+ Wrote fields to disk (Paraview) for source 2
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 2.605e-01, global unknowns = 491852
+ Max. iterations = 0, tol. = 1.000e-02
+
+Estimated peak per-rank memory usage is: Min. 1.9G, Max. 1.9G, Avg. 1.9G, Total 1.9G
+Estimated peak per-node memory usage is: Min. 1.9G, Max. 1.9G, Avg. 1.9G, Total 1.9G
+
+Elapsed Time Report (s)           Min.        Max.        Avg.
+==============================================================
+Initialization                   2.944       2.944       2.944
+  Mesh Preprocessing            14.751      14.751      14.751
+Operator Construction           60.087      60.087      60.087
+Linear Solve                    16.140      16.140      16.140
+  Setup                         25.107      25.107      25.107
+  Preconditioner               145.450     145.450     145.450
+  Coarse Solve                  18.769      18.769      18.769
+Estimation                       0.409       0.409       0.409
+  Construction                  16.879      16.879      16.879
+  Solve                         53.866      53.866      53.866
+Postprocessing                   1.793       1.793       1.793
+  Paraview                       7.160       7.160       7.160
+Disk IO                          6.470       6.470       6.470
+--------------------------------------------------------------
+Total                          370.116     370.116     370.116
+
+Peak Memory                   Per-Node       Total   Total HWM
+==============================================================
+Initialization                    2.1M        2.1M        2.1M
+  Mesh Preprocessing             33.6M       33.6M       35.8M
+Operator Construction           665.8M      665.8M      701.6M
+Linear Solve                      0.0K        0.0K      701.6M
+  Setup                         299.7M      299.7M     1001.3M
+  Preconditioner                  0.0K        0.0K     1001.3M
+  Coarse Solve                    0.0K        0.0K     1001.3M
+Estimation                      125.5M      125.5M        1.1G
+  Construction                  239.5M      239.5M        1.3G
+  Solve                         114.5M      114.5M        1.4G
+Postprocessing                   32.0K       32.0K        1.4G
+  Paraview                      321.6M      321.6M        1.8G
+Disk IO                          60.7M       60.7M        1.8G
+--------------------------------------------------------------
+Total                             1.8G        1.8G        1.8G

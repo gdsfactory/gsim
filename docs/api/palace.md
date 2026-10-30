@@ -1,6 +1,7 @@
 # Palace guide
 
-Use [`gsim.palace`][gsim.palace] for driven RF and microwave simulations, eigenmodes, electrostatics, and boundary modes.
+Use [`gsim.palace`][gsim.palace] for driven RF and microwave simulations, eigenmodes, electrostatics, magnetostatics, and
+boundary modes.
 This guide covers solver configuration, meshing, and result processing. Class and function links open the API reference.
 
 ## Solver settings
@@ -26,6 +27,10 @@ eigenvalue convergence. They are independent. All Palace simulation types defaul
 to **GMRES with complex MUMPS multigrid**, field order **2**, **400** maximum linear
 iterations, and `"CPU"`. Linear tolerance defaults to **1e-6**, except for
 `EigenmodeSim`, whose linear and eigenvalue tolerances both default to **1e-9**.
+`MagnetostaticSim` is the exception to the solver: its curl-curl operator is singular, so
+it defaults to Palace's iterative choice, the **AMS** preconditioner with **conjugate
+gradients** at a linear tolerance of **1e-8**, and refuses a direct `solver_type` or the
+BoomerAMG preconditioner.
 An omitted linear tolerance uses the simulation-specific default through grouped
 dictionaries, settings models, and legacy `numerical` constructors or assignments.
 An explicitly supplied tolerance, including `1e-6`, is preserved.
@@ -102,9 +107,12 @@ electrostatic.solver.electrostatic.save_fields = 2
 boundary = pa.BoundaryModeSim()
 boundary.solver.boundary_mode.freq = 5e9
 boundary.solver.boundary_mode.num_modes = 2
+
+magnetostatic = pa.MagnetostaticSim()
+magnetostatic.solver.magnetostatic.save_fields = 1
 ```
 
-All four share twelve controls: `order`, `device`, and
+All five share twelve controls: `order`, `device`, and
 `linear.{solver_type, preconditioner, tolerance, max_iterations, mg_max_levels,
 pc_mat_real, complex_coarse_solve, estimator_tolerance, estimator_max_iterations,
 estimator_mg}`.
@@ -115,6 +123,7 @@ estimator_mg}`.
 | EigenmodeSim | `solver.eigenmode` | 8 | 20 |
 | ElectrostaticSim | `solver.electrostatic` | 1 | 13 |
 | BoundaryModeSim | `solver.boundary_mode` | 7 | 19 |
+| MagnetostaticSim | `solver.magnetostatic` | 1 | 13 |
 
 `sim.set_solver(...)` replaces the common controls using the same defaults as
 the simulation constructor, including its linear tolerance, while preserving the problem-specific settings. Assign individual
@@ -185,6 +194,8 @@ For new code, use `sim.solver.model_copy(deep=True)` to copy all solver settings
 - [`EigenmodeConfig`][gsim.palace.EigenmodeConfig]
 - [`ElectrostaticConfig`][gsim.palace.ElectrostaticConfig]
 - [`BoundaryModeConfig`][gsim.palace.BoundaryModeConfig]
+- [`MagnetostaticConfig`][gsim.palace.MagnetostaticConfig]
+- [`MagnetostaticSolverConfig`][gsim.palace.MagnetostaticSolverConfig]
 
 See [result validation](../palace-validation.md) for independent solver,
 adaptive sampling, mode identity, wave-port mode continuity, and
@@ -229,6 +240,7 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 - [`EigenmodeSim`][gsim.palace.EigenmodeSim]
 - [`ElectrostaticSim`][gsim.palace.ElectrostaticSim]
 - [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
+- [`MagnetostaticSim`][gsim.palace.MagnetostaticSim]
 
 ## Floquet eigenmodes
 
@@ -326,6 +338,85 @@ cap.pairs()  # every pair and every terminal-to-ground value, as a table
 
 - [`CapacitanceMatrices`][gsim.palace.CapacitanceMatrices]
 - [`load_capacitance`][gsim.palace.load_capacitance]
+
+## Magnetostatic current sources
+
+A [`MagnetostaticSim`][gsim.palace.MagnetostaticSim] drives a unit current around each
+conductor loop in turn and returns the inductance matrix between the loops. Declare one
+current source per loop between two ports on the same conductor:
+
+```python
+from gsim.palace import MagnetostaticSim
+
+sim = MagnetostaticSim()  # PEC outer wall; metallic_boundaries=False for PMC
+sim.set_geometry(transformer)  # ports P1/P2 and S1/S2
+sim.set_stack()
+sim.set_airbox(margin_x=100, margin_y=100, z_above=150, z_below=150)
+sim.add_current_source("primary", plus_port="P1", minus_port="P2")
+sim.add_current_source("secondary", plus_port="S1", minus_port="S2")
+print(sim.resolve_current_sources())  # sheet, Direction and net, before meshing
+sim.set_output_dir("./palace-sim")
+sim.mesh(refined_mesh_size=1.0, max_mesh_size=30)
+inductance = sim.load_inductance(sim.run())
+inductance.mutual_inductance("primary", "secondary")  # in H, signed
+inductance.coupling("primary", "secondary")
+inductance.pairs()  # every self and mutual inductance, as a table
+assert not inductance.problems()
+```
+
+- **Where the current enters.** gsim bridges the gap between the two port faces with a
+  vertical sheet through the thickness of the conductor layer, which carries the source
+  current. The ports either face each other across a gap (a cut in a trace), or are
+  side-by-side leads that point the same way (the two leads of a coil); the sheet then
+  spans the gap between the inner edges of the leads. Both ports sit on one conductor
+  layer, inferred from their GDS layer unless `layer=` is given.
+- **Sign convention.** A unit current enters the conductor at `plus_port` and leaves it
+  at `minus_port`. A mutual inductance is positive when the two loops' fluxes add.
+  Swapping `plus_port` and `minus_port` of one source flips the sign of its row and
+  column; the self inductances do not change. The rows follow the order the sources
+  were added in.
+- **Return path.** The drawn metal that joins the two ports closes the loop; it must be
+  one connected net, or `resolve_current_sources()` reports an open loop. Every other
+  conductor is a perfect conductor with no source, so a closed one (a ground ring, a
+  patterned shield, an unconnected underpass) screens the field; `validate_config()`
+  warns about each and the component should leave it out. The generic
+  `gf.components.inductor` has an unconnected metal1 underpass that triggers this
+  warning.
+- **Net names.** `ResolvedCurrentSource.net` names the net from all component ports,
+  whatever their type (for example `'o1+o2+P1+P2'`), while `sim.nets()` uses the
+  electrical ports only (`'net1'` for the same metal).
+- **External inductance.** Conductors are perfect conductors, as Palace's magnetostatic
+  solver requires: the current flows on their surfaces, so the matrix is the
+  high-frequency external inductance, without internal or kinetic inductance.
+  Conductivities are not used. A perfect conductor crowds the current towards the
+  inside of each loop, so filament formulas along the trace centrelines overestimate
+  the |M| of nearby loops by about 10 %.
+- **Outer wall.** The outer wall of the domain is a perfect electric conductor by
+  default (`metallic_boundaries=True`). `metallic_boundaries=False` makes it a perfect
+  magnetic conductor. The two runs bracket the open-space value: an energy bound for
+  the self inductances, a first-order bracket for the mutual inductances. Their mean
+  cancels the first-order wall error. An absorbing wall is refused, since Palace
+  ignores it in a magnetostatic solve.
+- **Airbox and mesh.** Keep every airbox extent (`margin_x`, `margin_y`, `z_above`,
+  `z_below`) at least as large as the larger lateral side of the meshed conductors;
+  marker layers that are not meshed do not count. `validate_config()` warns
+  otherwise. Set `refined_mesh_size` to at most half the trace width, or pass
+  `auto_size=True`, and keep `max_mesh_size` coarse in the large airbox. `fmax` has no
+  effect on a static solve.
+- **Convergence.** A magnetostatic solve that did not converge still exits normally
+  and writes a plausible matrix. `load_inductance` reads the run's `palace.log` and
+  raises if a solve did not converge; `problems()` checks physics only (reciprocity,
+  energy, |k| ≤ 1). Local runs keep `palace.log` next to the result tables.
+- **Solver.** The linear solve is AMS-preconditioned conjugate gradients at a
+  tolerance of 1e-8 (see [Solver settings](#solver-settings)).
+
+See the [coupled-coil example](../nbs/palace_magnetostatic.md) for an IHP coil pair and
+an analytic check.
+
+## Inductance
+
+- [`InductanceMatrix`][gsim.palace.InductanceMatrix]
+- [`load_inductance`][gsim.palace.load_inductance]
 
 ## Saved fields and S-parameters
 

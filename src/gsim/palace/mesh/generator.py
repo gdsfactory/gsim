@@ -1305,7 +1305,8 @@ def generate_mesh(
             ``"sio2"`` for a uniform-dielectric cladding with no air.
         fmax: Max frequency for config (Hz)
         show_gui: Show gmsh GUI during meshing
-        simulation_type: Type of simulation (driven, eigenmode or electrostatics)
+        simulation_type: Type of simulation (driven, eigenmode, electrostatic,
+            magnetostatic or boundarymode)
         driven_config: Optional DrivenConfig for frequency sweep settings
         eigenmode_config: Optional EigenmodeConfig for eigenmode problems
         numerical_config: Optional SolverConfig (or legacy NumericalConfig)
@@ -1319,7 +1320,9 @@ def generate_mesh(
             contacts (native BoundaryMode only)
         write_config: Whether to write config.json (default True)
         pec_blocks: PEC configuration
-        planar_conductors: If True, treat conductors as 2D PEC surfaces
+        planar_conductors: If True, treat conductors as 2D PEC surfaces.
+            Refused for magnetostatic: a current-source sheet must end on
+            conductor volumes.
         absorbing_boundary: If True, use absorbing boundary conditions on outer surfaces
         periodic_axis: ("x" or "y") for meshing constraints on opposite domain sides
         symmetry_plane: Optional PEC/PMC symmetry plane; only the kept half of
@@ -1399,6 +1402,15 @@ def generate_mesh(
     if refinement_boxes and simulation_type != "boundarymode":
         raise ValueError(
             "refinement_boxes apply to native-2D cross-section meshes only."
+        )
+    if planar_conductors and simulation_type == "magnetostatic":
+        # A vertical current-source sheet would touch zero-thickness metal only
+        # along a line, so the source could not close its loop on PEC.
+        raise ValueError(
+            "planar_conductors=True is not supported for magnetostatic "
+            "simulations: each current-source sheet must end on conductor "
+            "volumes. Mesh the conductors with their thickness "
+            "(planar_conductors=False)."
         )
 
     # Terminals by net: find the nets and make sure that via merging keeps them

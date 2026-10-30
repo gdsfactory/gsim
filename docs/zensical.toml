@@ -24,6 +24,7 @@ nav = [
     { "Qubit Chip (QPDK)" = "nbs/palace_qpdk_filled_qubit_test_chip.md" },
     { "Inductor" = "nbs/palace_inductor.md" },
     { "Inductor Port Comparison" = "nbs/palace_inductor_port_comparison.md" },
+    { "Inductance Matrix (Magnetostatic)" = "nbs/palace_magnetostatic.md" },
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
     { "Field Visualization" = "nbs/palace_cpw_fields.md" }
   ] },
@@ -71,7 +72,7 @@ show_submodules = false
 inherited_members = false
 
 # Include shared simulation methods without preloading external Pydantic members.
-[project.plugins.api-autonav.module_options.'^gsim\.palace\.(driven|eigenmode|electrostatic|boundarymode)$']
+[project.plugins.api-autonav.module_options.'^gsim\.palace\.(driven|eigenmode|electrostatic|magnetostatic|boundarymode)$']
 inherited_members = true
 
 [project.plugins.llmstxt]

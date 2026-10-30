@@ -153,9 +153,12 @@ Statuses describe supplied evidence, not a complete physical validation. In part
 least one recognized convergence message and no recognized core failure. It cannot establish complete log coverage, mesh
 convergence, or convergence of unreported eigenpairs. Unrecognized log formats and absent metrics are not proof of
 success. The log fixtures cover driven logs from archived `cfa430a` and `cfa430a-dirty` builds, and electrostatic,
-eigenmode and boundary-mode logs from Palace `v0.18.1`. Magnetostatic and transient log coverage is not established. The
-standard driven `It N/M: Index = ...` header resets the estimator section, but abridged or reformatted logs may omit that
-boundary. Later Palace formats may require additional parsing rules.
+eigenmode, boundary-mode and magnetostatic logs from Palace `v0.18.1`. Transient log coverage is not established. A
+magnetostatic solve that did not converge still exits 0 and writes a plausible inductance matrix, so `load_inductance`
+checks `palace.log` the same way and refuses a run whose core check failed; the cloud build's `Current source solve did
+not converge for port N!` counts as a core failure. The standard driven `It N/M: Index = ...` header resets the
+estimator section, but abridged or reformatted logs may omit that boundary. Later Palace formats may require additional
+parsing rules.
 
 `report.failures` contains explicit failures; an empty tuple can still leave unknown or omitted checks. Mode checks are
 omitted unless requested; the automatic port-mode continuity checks are separate (`report.port_mode_checks`, listed in

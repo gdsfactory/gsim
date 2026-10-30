@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -122,5 +123,37 @@ def test_run_palace_builds_the_command_and_raises_on_failure(
             "config.json",
         ]
         assert popen.call_args.kwargs["env"] == {"A": "1"}
+        assert popen.call_args.kwargs["encoding"] == "utf-8"
+        assert popen.call_args.kwargs["errors"] == "replace"
         assert "solving" in emitted
         assert error.value.stderr == "solving"
+
+
+def test_missing_launcher_leaves_no_empty_log(tmp_path):
+    launch = PalaceLaunch((str(tmp_path / "missing-palace"),), {})
+    target = tmp_path / "logs" / "solver.log"
+
+    with pytest.raises(RuntimeError, match="Palace executable not found"):
+        run_palace(
+            launch, cwd=tmp_path, num_processes=1, verbose=False, log_path=target
+        )
+
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("failure", ["launcher", "cwd"])
+def test_existing_log_survives_a_launch_that_never_starts(tmp_path, failure):
+    target = tmp_path / "solver.log"
+    target.write_text("previous run\n", encoding="utf-8")
+    if failure == "launcher":
+        launch = PalaceLaunch((str(tmp_path / "missing-palace"),), {})
+        cwd = tmp_path
+    else:
+        launch = PalaceLaunch((sys.executable,), {})
+        cwd = tmp_path / "missing"
+
+    # A missing cwd raises NotADirectoryError on Windows, not FileNotFoundError.
+    with pytest.raises((RuntimeError, NotADirectoryError)):
+        run_palace(launch, cwd=cwd, num_processes=1, verbose=True, log_path=target)
+
+    assert target.read_text(encoding="utf-8") == "previous run\n"

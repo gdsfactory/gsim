@@ -17,6 +17,7 @@ import pytest
 
 from gsim.palace import CapacitanceMatrices, ElectrostaticSim, load_capacitance
 from gsim.palace.models import TerminalConfig
+from gsim.palace.results import load_text_results
 
 SPHERES = {
     "terminal-C.csv": """\
@@ -157,6 +158,21 @@ def test_reads_the_results_dict_that_run_returns(tmp_path) -> None:
     assert load_capacitance(results).maxwell == pytest.approx(
         _spheres(tmp_path).maxwell
     )
+
+
+def test_reads_the_results_that_run_local_returns(tmp_path) -> None:
+    """``run_local()`` returns a ``PalaceTextResults`` for an electrostatic run."""
+    run = _write(tmp_path / "run", SPHERES)
+    from_local = load_capacitance(load_text_results(run))
+    from_directory = load_capacitance(run)
+    assert from_local.terminals == from_directory.terminals
+    assert np.array_equal(from_local.maxwell, from_directory.maxwell)
+    assert np.array_equal(from_local.mutual, from_directory.mutual)
+    assert np.array_equal(from_local.inverse, from_directory.inverse)
+    assert np.array_equal(
+        from_local.excitation_voltage, from_directory.excitation_voltage
+    )
+    assert np.array_equal(from_local.stored_energy, from_directory.stored_energy)
 
 
 def test_finds_the_files_in_the_palace_output_subdirectory(tmp_path) -> None:

@@ -33,6 +33,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_qpdk_filled_qubit_test_chip.ipynb",
     "nbs/palace_inductor.ipynb",
     "nbs/palace_inductor_port_comparison.ipynb",
+    "nbs/palace_magnetostatic.ipynb",
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
     "nbs/palace_cpw_deembedding.ipynb",

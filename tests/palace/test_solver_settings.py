@@ -16,9 +16,14 @@ SIMULATIONS = [
     (pa.ElectrostaticSim, "electrostatic", "save_fields", 2),
     (pa.BoundaryModeSim, "boundary_mode", "freq", 6e9),
 ]
+# Grouped settings only: magnetostatic has no legacy constructor arguments.
+GROUPED_SIMULATIONS = [
+    *SIMULATIONS,
+    (pa.MagnetostaticSim, "magnetostatic", "save_fields", 2),
+]
 
 
-@pytest.mark.parametrize(("sim_class", "group", "field", "value"), SIMULATIONS)
+@pytest.mark.parametrize(("sim_class", "group", "field", "value"), GROUPED_SIMULATIONS)
 def test_grouped_constructor_and_serialization(sim_class, group, field, value):
     sim = sim_class(
         solver={
@@ -37,7 +42,7 @@ def test_grouped_constructor_and_serialization(sim_class, group, field, value):
     assert sim_class.model_validate(dumped).solver == sim.solver
 
 
-@pytest.mark.parametrize(("sim_class", "group", "field", "value"), SIMULATIONS)
+@pytest.mark.parametrize(("sim_class", "group", "field", "value"), GROUPED_SIMULATIONS)
 @pytest.mark.parametrize("setter", ["set_solver", "set_numerical"])
 def test_setter_defaults_match_constructor_and_preserve_problem(
     sim_class, group, field, value, setter

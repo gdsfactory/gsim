@@ -114,6 +114,29 @@ def test_disabled_estimator_sections_by_problem_type(fixture):
     assert (report.core.status, report.estimator.status) == ("passed", "failed")
 
 
+def test_magnetostatic_converged_log_passes():
+    log = (FIXTURES / "magnetostatic-converged.txt").read_text(encoding="utf-8")
+    report = validate_solution(log)
+    assert report.core.status == "passed"
+    assert [item.split(": ", 1)[0] for item in report.core.evidence] == [
+        "line 8",
+        "line 15",
+    ]
+
+
+@pytest.mark.parametrize(
+    "log",
+    [
+        (FIXTURES / "magnetostatic-not-converged.txt").read_text(encoding="utf-8"),
+        # Printed by the GDSFactory+ cloud Palace build, which then continues.
+        "Current source solve did not converge for port 1!",
+    ],
+    ids=["local-v0.18.1", "cloud-build"],
+)
+def test_magnetostatic_unconverged_log_fails(log):
+    assert validate_solution(log).core.status == "failed"
+
+
 def test_amr_marker_ends_postprocessing_estimator_section():
     # AMR marker printed by Palace basesolver.cpp; synthetic regression.
     report = validate_solution(

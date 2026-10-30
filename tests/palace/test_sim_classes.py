@@ -6,15 +6,23 @@ the ``gsim.palace.runtime`` binary resolver (``resolve_palace_binary`` etc.).
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
+import gdsfactory as gf
 import pytest
 
-from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
+from gsim.palace import (
+    BoundaryModeSim,
+    DrivenSim,
+    EigenmodeSim,
+    ElectrostaticSim,
+    MagnetostaticSim,
+)
 from gsim.palace.models import MeshConfig
 
 
@@ -242,6 +250,216 @@ class TestBoundaryModeSimValidation:
         assert cfg.tolerance == pytest.approx(1e-8)
         assert cfg.max_size == 60
         assert cfg.solver_type == "SLEPc"
+
+
+def _loop_sim(*, island: bool = False) -> MagnetostaticSim:
+    """A magnetostatic sim of a closed M3 U loop with leads P and M.
+
+    With ``island`` a loose M3 bar sits beside the loop, a conductor that
+    carries no source. The airbox is large enough not to be warned about.
+    """
+    gf.gpdk.PDK.activate()
+    boxes = [(-3, 0, -1, 10), (1, 0, 3, 10), (-3, 10, 3, 12)]
+    if island:
+        boxes.append((10, 0, 12, 10))
+    component = gf.Component()
+    for x0, y0, x1, y1 in boxes:
+        component.add_polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], layer=(49, 0))
+    for name, x in (("P", -2), ("M", 2)):
+        component.add_port(
+            name=name,
+            center=(x, 0),
+            width=2,
+            orientation=270,
+            layer=(49, 0),
+            port_type="electrical",
+        )
+    sim = MagnetostaticSim()
+    sim.set_geometry(component)
+    sim.set_stack()
+    sim.set_airbox(margin_x=500, margin_y=500, z_above=500, z_below=500)
+    return sim
+
+
+class TestMagnetostaticSim:
+    """MagnetostaticSim declarations and validation."""
+
+    def test_defaults(self):
+        sim = MagnetostaticSim()
+        assert sim.simulation_type == "magnetostatic"
+        assert sim.current_sources == []
+        assert sim.metallic_boundaries is True
+        assert sim.absorbing_boundary is False
+        assert sim.solver.magnetostatic.save_fields == 0
+
+    def test_add_current_source_keeps_add_order(self):
+        sim = MagnetostaticSim()
+        sim.add_current_source("A", plus_port="P1", minus_port="P2", layer="m1")
+        sim.add_current_source("B", plus_port="S1", minus_port="S2")
+        assert [s.name for s in sim.current_sources] == ["A", "B"]
+        assert sim.current_sources[0].layer == "m1"
+        assert sim.current_sources[1].layer is None
+
+    def test_re_adding_a_name_replaces_the_source_and_moves_it_last(self):
+        sim = MagnetostaticSim()
+        sim.add_current_source("A", plus_port="P1", minus_port="P2")
+        sim.add_current_source("B", plus_port="S1", minus_port="S2")
+        sim.add_current_source("A", plus_port="P2", minus_port="P1")
+        assert [s.name for s in sim.current_sources] == ["B", "A"]
+        assert (
+            sim.current_sources[1].plus_port,
+            sim.current_sources[1].minus_port,
+        ) == (
+            "P2",
+            "P1",
+        )
+
+    def test_set_magnetostatic(self):
+        sim = MagnetostaticSim()
+        sim.set_magnetostatic(save_fields=2)
+        assert sim.solver.to_palace_config()["Magnetostatic"] == {"Save": 2}
+
+    @pytest.mark.parametrize(
+        ("method", "kind"),
+        [
+            ("add_port", "lumped ports"),
+            ("add_cpw_port", "CPW ports"),
+            ("add_wave_port", "wave ports"),
+            ("add_two_terminal_port", "two-terminal ports"),
+            ("add_terminal", "terminals"),
+        ],
+    )
+    def test_port_like_declarations_point_to_current_sources(self, method, kind):
+        with pytest.raises(ValueError, match=rf"no {kind}.*add_current_source"):
+            getattr(MagnetostaticSim(), method)("P1", layer="metal3")
+
+    def test_no_current_source_is_an_error(self):
+        result = _loop_sim().validate_config()
+        assert not result.valid
+        assert any(
+            "No current source" in e and "add_current_source" in e
+            for e in result.errors
+        )
+
+    def test_a_resolvable_source_is_valid_without_warnings(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        result = sim.validate_config()
+        assert result.valid, result.errors
+        assert result.warnings == []
+
+    def test_a_source_that_does_not_resolve_is_an_error(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="P9")
+        result = sim.validate_config()
+        assert not result.valid
+        assert any("'L' (missing port)" in e for e in result.errors)
+
+    def test_an_absorbing_wall_is_an_error(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        sim.absorbing_boundary = True
+        result = sim.validate_config()
+        assert any(
+            "absorbing_boundary" in e and "metallic_boundaries" in e
+            for e in result.errors
+        )
+
+    def test_impedance_boundaries_are_refused(self):
+        with pytest.raises(
+            ValueError, match=r"do not apply to a magnetostatic.*Palace ignores"
+        ):
+            MagnetostaticSim().add_impedance_boundary("P1", inductance=1e-12)
+
+    @pytest.mark.parametrize("solver_type", ["MUMPS", "SuperLU", "STRUMPACK"])
+    def test_a_direct_solver_is_an_error(self, solver_type):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        sim.solver.linear.solver_type = solver_type
+        result = sim.validate_config()
+        assert any(f"solver_type={solver_type!r}" in e for e in result.errors)
+
+    def test_boomeramg_is_an_error(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        sim.solver.linear.preconditioner = "BoomerAMG"
+        result = sim.validate_config()
+        assert any("BoomerAMG" in e for e in result.errors)
+
+    def test_no_airbox_is_warned(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        sim._airbox_config = {}
+        result = sim.validate_config()
+        assert result.valid
+        assert any("No airbox" in w for w in result.warnings)
+
+    def test_an_airbox_smaller_than_the_meshed_conductors_is_warned(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        # the loop is 6 um x 12 um
+        sim.set_airbox(margin_x=500, margin_y=500, z_above=500, z_below=6.0)
+        result = sim.validate_config()
+        assert result.valid
+        (warning,) = result.warnings
+        assert "Airbox extents {'z_below': 6.0} um" in warning
+        assert "meshed conductors (12 um across)" in warning
+
+    def test_an_unmeshed_marker_does_not_size_the_airbox_warning(self):
+        sim = _loop_sim()
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        component = sim.component
+        assert component is not None
+        # A 200 um marker on a layer outside the stack is never meshed.
+        component.add_polygon(
+            [(-100, -100), (100, -100), (100, 100), (-100, 100)], layer=(99, 0)
+        )
+        assert component.xsize == pytest.approx(200)
+        sim.set_airbox(margin_x=50, margin_y=50, z_above=50, z_below=50)
+        result = sim.validate_config()
+        assert result.valid, result.errors
+        assert result.warnings == []
+
+    def test_the_recommended_airbox_is_quiet_for_the_ihp_validation_pair(
+        self, tmp_path: Path
+    ):
+        from tests._cloud_fixtures import make_magnetostatic_pair_sim
+
+        # 128.7 um with its marker layers, 68.7 um of meshed TopMetal2
+        sim = make_magnetostatic_pair_sim(tmp_path)
+        assert sim.component.xsize > 100
+        result = sim.validate_config()
+        assert result.valid, result.errors
+        assert result.warnings == []
+
+    def test_a_conductor_without_a_source_is_warned_as_a_screen(self):
+        sim = _loop_sim(island=True)
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        result = sim.validate_config()
+        assert result.valid, result.errors
+        (warning,) = result.warnings
+        assert "carry no current source" in warning
+        names = [net.name for net in sim.nets()]
+        assert names == ["P+M", "net2"]  # the loop and the island
+        coil, island = names
+        assert repr(island) in warning
+        assert repr(coil) not in warning
+
+    def test_the_screen_warning_survives_nets_that_do_not_pair_up(self, monkeypatch):
+        """A net nets() does not list keeps its name from all the ports."""
+        sim = _loop_sim(island=True)
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        electrical_nets = MagnetostaticSim._electrical_nets
+
+        def without_the_island(self, geometry, stack):
+            nets = electrical_nets(self, geometry, stack)
+            return dataclasses.replace(nets, nets=nets.nets[:1])
+
+        monkeypatch.setattr(MagnetostaticSim, "_electrical_nets", without_the_island)
+        result = sim.validate_config()
+        assert result.valid, result.errors
+        (warning,) = result.warnings
+        assert "Conductors ['net2'] carry no current source" in warning
 
 
 class TestModePaths:
