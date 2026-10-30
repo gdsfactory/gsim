@@ -1,0 +1,459 @@
+{
+  "is_3d": false,
+  "plane": "xy",
+  "y_cut": null,
+  "fiber_source": null,
+  "gds_filename": "layout.gds",
+  "component_bbox": [
+    -14.75,
+    -0.75,
+    10.75,
+    10.6
+  ],
+  "layer_stack": [
+    {
+      "layer_name": "substrate",
+      "gds_layer": [
+        65535,
+        0
+      ],
+      "zmin": -13.0,
+      "zmax": -3.0,
+      "material": "si",
+      "sidewall_angle": 0.0,
+      "mesh_order": 99
+    },
+    {
+      "layer_name": "box",
+      "gds_layer": [
+        65534,
+        0
+      ],
+      "zmin": -3.0,
+      "zmax": 0.0,
+      "material": "sio2",
+      "sidewall_angle": 0.0,
+      "mesh_order": 99
+    },
+    {
+      "layer_name": "clad",
+      "gds_layer": [
+        65533,
+        0
+      ],
+      "zmin": 0.0,
+      "zmax": 1.8000000000000003,
+      "material": "sio2",
+      "sidewall_angle": 0.0,
+      "mesh_order": 100
+    },
+    {
+      "layer_name": "core",
+      "gds_layer": [
+        65532,
+        0
+      ],
+      "zmin": 0.0,
+      "zmax": 0.22,
+      "material": "si__core_2d",
+      "sidewall_angle": 10.0,
+      "mesh_order": 1
+    },
+    {
+      "layer_name": "core2",
+      "gds_layer": [
+        65531,
+        0
+      ],
+      "zmin": 0.0,
+      "zmax": 0.22,
+      "material": "si",
+      "sidewall_angle": 10.0,
+      "mesh_order": 1
+    },
+    {
+      "layer_name": "heater",
+      "gds_layer": [
+        65530,
+        0
+      ],
+      "zmin": 1.1,
+      "zmax": 1.85,
+      "material": "TiN",
+      "sidewall_angle": 0.0,
+      "mesh_order": 1
+    },
+    {
+      "layer_name": "metal2",
+      "gds_layer": [
+        65529,
+        0
+      ],
+      "zmin": 1.8000000000000003,
+      "zmax": 2.5000000000000004,
+      "material": "Aluminum",
+      "sidewall_angle": 0.0,
+      "mesh_order": 2
+    }
+  ],
+  "dielectrics": [
+    {
+      "name": "substrate",
+      "zmin": -13.0,
+      "zmax": -3.0,
+      "material": "si"
+    },
+    {
+      "name": "box",
+      "zmin": -3.0,
+      "zmax": 0.0,
+      "material": "sio2"
+    },
+    {
+      "name": "clad",
+      "zmin": 0.0,
+      "zmax": 1.8000000000000003,
+      "material": "sio2"
+    }
+  ],
+  "ports": [
+    {
+      "name": "o1",
+      "center": [
+        -14.0,
+        0.0,
+        0.0
+      ],
+      "orientation": 180.0,
+      "width": 0.5,
+      "normal_axis": 0,
+      "direction": "+",
+      "is_source": true
+    },
+    {
+      "name": "o2",
+      "center": [
+        -14.0,
+        10.6,
+        0.0
+      ],
+      "orientation": 90.0,
+      "width": 0.5,
+      "normal_axis": 1,
+      "direction": "-",
+      "is_source": false
+    },
+    {
+      "name": "o3",
+      "center": [
+        10.0,
+        10.6,
+        0.0
+      ],
+      "orientation": 90.0,
+      "width": 0.5,
+      "normal_axis": 1,
+      "direction": "-",
+      "is_source": false
+    },
+    {
+      "name": "o4",
+      "center": [
+        10.0,
+        0.0,
+        0.0
+      ],
+      "orientation": 0.0,
+      "width": 0.5,
+      "normal_axis": 0,
+      "direction": "-",
+      "is_source": false
+    }
+  ],
+  "monitor_z_span": 11.0,
+  "materials": {
+    "si": {
+      "epsilon_diag": [
+        12.080400443726248,
+        12.080400443726248,
+        12.080400443726248
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    },
+    "si__core_2d": {
+      "epsilon_diag": [
+        8.10811388871268,
+        8.10811388871268,
+        8.10811388871268
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    },
+    "sio2": {
+      "epsilon_diag": [
+        2.0852042200370025,
+        2.0852042200370025,
+        2.0852042200370025
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    }
+  },
+  "background_material": "sio2",
+  "fdtd": {
+    "wavelength": 1.55,
+    "bandwidth": 0.1,
+    "num_freqs": 101,
+    "fcen": 0.6451612903225806,
+    "df": 0.04166666666666663
+  },
+  "source": {
+    "bandwidth": null,
+    "port": "o1",
+    "fwidth": 0.12903225806451613
+  },
+  "stopping": {
+    "mode": "energy_decay",
+    "run_after_sources": 1000.0,
+    "decay_dt": 50.0,
+    "decay_component": "Ey",
+    "decay_by": 0.0001,
+    "decay_monitor_port": null,
+    "dft_min_run_time": 100.0,
+    "wall_time_max": 300.0
+  },
+  "resolution": {
+    "pixels_per_um": 40
+  },
+  "domain": {
+    "z_bounds": null,
+    "dpml": 1.0,
+    "extend_into_pml": true,
+    "margin_x_low": 0.5,
+    "margin_x_high": 0.5,
+    "margin_y_low": 0.5,
+    "margin_y_high": 0.5,
+    "margin_z_low": 0.5,
+    "margin_z_high": 0.5,
+    "port_margin": 0.5,
+    "extend_ports": 0.0,
+    "source_port_offset": 0.1,
+    "distance_source_to_monitors": 0.2
+  },
+  "accuracy": {
+    "eps_averaging": true,
+    "subpixel_maxeval": 0,
+    "subpixel_tol": 0.0001,
+    "simplify_tol": 0.0
+  },
+  "verbose_interval": 0.0,
+  "meep_verbosity": 0,
+  "diagnostics": {
+    "save_geometry": true,
+    "save_fields": true,
+    "save_epsilon_raw": false,
+    "save_animation": false,
+    "animation_interval": 0.5,
+    "preview_only": false,
+    "verbose_interval": 0.0
+  },
+  "symmetries": [],
+  "split_chunks_evenly": false,
+  "pdk_authoritative": true,
+  "pdk_name": "ubcpdk",
+  "pdk_overlay": "UBC",
+  "pdk_stack_hash": "68a00fee983ff44463dc1516cc11be6037de78c9bbe26b6c32e9602de03f0879",
+  "pdk_provenance": {
+    "pdk_name": "ubcpdk",
+    "overlay": "UBC",
+    "wavelength_um": 1.55,
+    "drawn_z_range": [
+      0.0,
+      0.22
+    ],
+    "undrawn_z_range": [
+      -13.0,
+      2.5000000000000004
+    ],
+    "layers": {
+      "substrate": {
+        "gds_layer": [
+          999,
+          0
+        ],
+        "material": "si",
+        "zmin": -13.0,
+        "zmax": -3.0,
+        "thickness": 10.0,
+        "sidewall_angle": 0.0,
+        "mesh_order": 99,
+        "layer_type": "substrate",
+        "drawn": false
+      },
+      "box": {
+        "gds_layer": [
+          999,
+          0
+        ],
+        "material": "sio2",
+        "zmin": -3.0,
+        "zmax": 0.0,
+        "thickness": 3.0,
+        "sidewall_angle": 0.0,
+        "mesh_order": 99,
+        "layer_type": "dielectric",
+        "drawn": false
+      },
+      "clad": {
+        "gds_layer": [
+          999,
+          0
+        ],
+        "material": "sio2",
+        "zmin": 0.0,
+        "zmax": 1.8000000000000003,
+        "thickness": 1.8000000000000003,
+        "sidewall_angle": 0.0,
+        "mesh_order": 100,
+        "layer_type": "dielectric",
+        "drawn": false
+      },
+      "core": {
+        "gds_layer": [
+          1,
+          0
+        ],
+        "material": "si",
+        "zmin": 0.0,
+        "zmax": 0.22,
+        "thickness": 0.22,
+        "sidewall_angle": 10.0,
+        "mesh_order": 1,
+        "layer_type": "dielectric",
+        "drawn": true
+      },
+      "core2": {
+        "gds_layer": [
+          31,
+          0
+        ],
+        "material": "si",
+        "zmin": 0.0,
+        "zmax": 0.22,
+        "thickness": 0.22,
+        "sidewall_angle": 10.0,
+        "mesh_order": 1,
+        "layer_type": "dielectric",
+        "drawn": false
+      },
+      "heater": {
+        "gds_layer": [
+          11,
+          0
+        ],
+        "material": "TiN",
+        "zmin": 1.1,
+        "zmax": 1.85,
+        "thickness": 0.75,
+        "sidewall_angle": 0.0,
+        "mesh_order": 1,
+        "layer_type": "conductor",
+        "drawn": false
+      },
+      "metal2": {
+        "gds_layer": [
+          12,
+          0
+        ],
+        "material": "Aluminum",
+        "zmin": 1.8000000000000003,
+        "zmax": 2.5000000000000004,
+        "thickness": 0.7000000000000001,
+        "sidewall_angle": 0.0,
+        "mesh_order": 2,
+        "layer_type": "conductor",
+        "drawn": false
+      }
+    },
+    "dielectrics": [
+      {
+        "name": "substrate",
+        "material": "si",
+        "zmin": -13.0,
+        "zmax": -3.0,
+        "source": "explicit"
+      },
+      {
+        "name": "box",
+        "material": "sio2",
+        "zmin": -3.0,
+        "zmax": 0.0,
+        "source": "explicit"
+      },
+      {
+        "name": "clad",
+        "material": "sio2",
+        "zmin": 0.0,
+        "zmax": 1.8000000000000003,
+        "source": "explicit"
+      }
+    ],
+    "notes": [
+      "Applied PDK stack overlay 'UBC': UBC declares substrate/BOX/cladding on the WAFER layer but does not tag the substrate role or expose bulk dielectric regions; gsim supplies this reviewed overlay (gsim#230)."
+    ]
+  },
+  "material_provenance": {
+    "si": {
+      "epsilon_diag": [
+        12.080400443726248,
+        12.080400443726248,
+        12.080400443726248
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    },
+    "si__core_2d": {
+      "epsilon_diag": [
+        8.10811388871268,
+        8.10811388871268,
+        8.10811388871268
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    },
+    "sio2": {
+      "epsilon_diag": [
+        2.0852042200370025,
+        2.0852042200370025,
+        2.0852042200370025
+      ],
+      "epsilon_offdiag": null,
+      "mu_diag": null,
+      "D_conductivity": null,
+      "D_conductivity_diag": null,
+      "epsilon_susceptibilities": null,
+      "valid_freq_range": null
+    }
+  }
+}

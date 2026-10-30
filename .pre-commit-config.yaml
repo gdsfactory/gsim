@@ -1,5 +1,5 @@
 # Preserve the generated GitHub release-note snapshot verbatim between refreshes.
-exclude: '^docs/CHANGELOG\.md$'
+exclude: '^docs/CHANGELOG\.md$|^nbs/data/pdk_validation/runs/|^nbs/data/pdk_validation/gds/'
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: "v6.0.0"
@@ -17,7 +17,7 @@ repos:
   - id: mixed-line-ending
   - id: name-tests-test
     args: ["--pytest-test-first"]
-    exclude: "tests/custom|tests/_[^/]+\\.py"
+    exclude: "tests/custom|(^|/)_[^/]+\\.py$"
   - id: requirements-txt-fixer
   - id: trailing-whitespace
     args: [--markdown-linebreak-ext=md]
