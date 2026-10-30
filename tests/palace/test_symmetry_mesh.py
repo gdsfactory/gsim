@@ -537,7 +537,9 @@ def test_write_config_and_validate_mesh(fixture, key, request):
     pg = sim._last_mesh_result.groups["boundary_surfaces"]["symmetry"]["phys_group"]
     boundaries = config["Boundaries"]
     assert set(pg) <= set(boundaries[key]["Attributes"])
-    assert not set(pg) & set(boundaries["Absorbing"]["Attributes"])
+    # Wave-port runs default to a PEC outer wall, so there may be no Absorbing block.
+    absorbing = boundaries.get("Absorbing", {}).get("Attributes", [])
+    assert not set(pg) & set(absorbing)
     result = validate_mesh(sim)
     assert result.valid, result.errors
     assert any("Symmetry plane" in w for w in result.warnings)

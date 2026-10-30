@@ -217,6 +217,13 @@ exist; without these Robin terms, both omit `WavePortPEC`. A later `set_driven()
 call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
 updating other sweep options if you want to retain it.
 
+With wave ports, `DrivenSim` makes the outer wall of the 3D domain PEC
+(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself.
+Palace solves the port mode with PEC outer edges, so an absorbing wall makes the
+domain and the port mode disagree, which shows up as fake loss, reflection and
+mode conversion. To keep the absorbing wall, pass `absorbing_boundary=True`.
+Lumped-port-only runs stay absorbing by default.
+
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
 ## Result validation

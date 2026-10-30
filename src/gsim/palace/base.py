@@ -328,8 +328,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement: RefinementConfig
         mesh_config: MeshConfig
         simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
-        absorbing_boundary: bool
+        absorbing_boundary: bool | None
         absorbing_order: Literal[1, 2]
+        _pec_default_noted: bool
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
@@ -2004,7 +2005,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             write_config=write_config,
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
-            absorbing_boundary=self.absorbing_boundary,
+            absorbing_boundary=self._outer_wall()[0],
             absorbing_order=self.absorbing_order,
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
@@ -2270,7 +2271,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 boundary_mode_config=self._get_problem_settings("boundary_mode"),
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
-                absorbing_boundary=self.absorbing_boundary,
+                absorbing_boundary=self._outer_wall()[0],
                 absorbing_order=self.absorbing_order,
                 symmetry_plane=(
                     self._symmetry_planes[0] if self._symmetry_planes else None
@@ -2502,9 +2503,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         groups = getattr(self._last_mesh_result, "groups", None) or {}
         volumes = groups.get("volumes", {})
-        if groups.get("boundary_surfaces", {}).get("absorbing") and not any(
-            is_air_like_material(stack, name) for name in volumes
-        ):
+        if (
+            self._outer_wall()[0]
+            and groups.get("boundary_surfaces", {}).get("absorbing")
+        ) and not any(is_air_like_material(stack, name) for name in volumes):
             logger.warning(
                 "Absorbing boundary is applied to solid dielectric surfaces "
                 "(%s) because the model has no air region, which produces "
@@ -2534,6 +2536,22 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             )
 
         return result
+
+    def _outer_wall(self) -> tuple[bool, bool, bool]:
+        """Resolve the outer wall as (absorbing, metallic, pec_by_default).
+
+        An unset ``absorbing_boundary`` (``None``) is absorbing, except with
+        wave ports, where the wall is PEC like the port eigenproblem's.
+        """
+        absorbing = self.absorbing_boundary
+        metallic = bool(getattr(self, "metallic_boundaries", False))
+        if absorbing is not None:
+            return absorbing, metallic, False
+        if metallic:
+            return False, True, False
+        if getattr(self, "wave_ports", None):
+            return False, True, True
+        return True, False, False
 
     def write_config(
         self,
@@ -2589,8 +2607,16 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         hints = dict(self._hints)
         if self._impedance_boundaries:
             hints["_impedance_boundaries"] = self._impedance_boundaries
-        if getattr(self, "metallic_boundaries", False):
+        absorbing, metallic, pec_default = self._outer_wall()
+        if metallic:
             hints["_metallic_boundaries"] = True
+        if pec_default and not self._pec_default_noted:
+            self._pec_default_noted = True
+            logger.info(
+                "Wave ports: the outer wall is PEC, matching the port "
+                "eigenproblem. Set absorbing_boundary=True to keep an "
+                "absorbing wall."
+            )
         if getattr(self, "conductor_boundary", "conductivity") == "pec":
             hints["_conductor_boundary"] = "pec"
 
@@ -2618,7 +2644,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             numerical_config=self.solver,
             refinement_config=self.refinement,
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
-            absorbing_boundary=self.absorbing_boundary,
+            absorbing_boundary=absorbing,
             absorbing_order=self.absorbing_order,
             hints=hints,
             electrostatic_config=electrostatic_config,
@@ -3248,7 +3274,7 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     # Defaults set by each problem class
     simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
-    absorbing_boundary: bool
+    absorbing_boundary: bool | None
     absorbing_order: Literal[1, 2] = Field(
         default=2,
         description=(
@@ -3275,5 +3301,6 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+    _pec_default_noted: bool = PrivateAttr(default=False)
     _last_mesh_result: Any = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)
