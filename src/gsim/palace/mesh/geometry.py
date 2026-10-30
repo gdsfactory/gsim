@@ -19,6 +19,7 @@ from shapely import STRtree, buffer, make_valid
 from shapely.ops import unary_union
 
 from gsim.palace.ports.config import PortType
+from gsim.palace.ports.modes import same_face_pairs
 
 from . import gmsh_utils
 from .symmetry import DEFAULT_TOL as SYMMETRY_TOL
@@ -2484,6 +2485,63 @@ def wave_port_overlap_message(first: str, second: str) -> str:
     )
 
 
+def same_surface_pairs(
+    ports: Iterable[PalacePort],
+    stack: LayerStack,
+) -> list[tuple[str, str]]:
+    """Return the pairs of wave ports that would share one surface.
+
+    :func:`same_face_pairs` looks at the centre and the orientation only. Two
+    ports there on layers that do not overlap in z still get two rectangles
+    (see :func:`wave_port_face`, which sizes the z extent from the layer, the
+    margins and ``max_size``), so they are two surfaces and not a conflict.
+
+    The candidates from the face rule lie in one plane around one centre, so
+    their rectangles differ in their z extent; a candidate is dropped when the
+    two z extents overlap by no more than ``WAVE_PORT_FACE_TOL_UM``, which is
+    the z test of :func:`wave_port_faces_overlap`. The faces are built with an
+    unbounded domain, as :func:`overlapping_wave_ports` is used before the
+    margins of the domain are known. A candidate the mesher cannot size (a
+    multi-element port, or a layer that is not in the stack) is kept, so the
+    face rule alone decides for it.
+
+    Args:
+        ports: The ports of the simulation; only wave ports are looked at.
+        stack: Layer stack.
+
+    Returns:
+        ``(name, name)`` pairs in port order.
+    """
+    wave = [port for port in ports if port.port_type == PortType.WAVEPORT]
+    candidates = same_face_pairs(
+        (
+            port.name,
+            (float(port.center[0]), float(port.center[1])),
+            float(port.orientation or 0.0),
+        )
+        for port in wave
+    )
+    if not candidates:
+        return []
+    z_extent: dict[str, tuple[float, float]] = {}
+    for port in wave:
+        target_layer = stack.layers.get(port.layer) if port.layer else None
+        if port.multi_element or target_layer is None:
+            continue
+        face, _, _ = wave_port_face(
+            port, stack, target_layer, domain_bounds=UNBOUNDED_DOMAIN
+        )
+        z_extent[port.name] = (face[2], face[5])
+
+    def separate(first: str, second: str) -> bool:
+        if first not in z_extent or second not in z_extent:
+            return False
+        (low_a, high_a), (low_b, high_b) = z_extent[first], z_extent[second]
+        return min(high_a, high_b) - max(low_a, low_b) <= WAVE_PORT_FACE_TOL_UM
+
+    return [pair for pair in candidates if not separate(*pair)]
+
+
 def add_ports(
     kernel,
     ports: list[PalacePort],
@@ -2829,6 +2887,7 @@ __all__ = [
     "get_layer_info",
     "get_layer_infos",
     "overlapping_wave_ports",
+    "same_surface_pairs",
     "wave_port_face",
     "wave_port_faces_overlap",
     "wave_port_overlap_message",

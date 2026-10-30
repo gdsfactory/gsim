@@ -1706,12 +1706,76 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             for wp in wave_ports
             if wp.name in by_name
         ]
+        pairs = same_face_pairs(faces)
+        if pairs:
+            pairs = self._pairs_on_one_surface(pairs, wave_ports)
         errors.extend(
             f"Wave ports {first!r} and {second!r} are on the same face; give a "
             "face one wave port and list its modes with modes=..."
-            for first, second in same_face_pairs(faces)
+            for first, second in pairs
         )
         return errors
+
+    def _pairs_on_one_surface(
+        self, pairs: list[tuple[str, str]], wave_ports: list[Any]
+    ) -> list[tuple[str, str]]:
+        """Keep the pairs at one centre and orientation that share a surface.
+
+        Ports there on layers that do not overlap in z get separate faces. When
+        the stack does not resolve, the centre and orientation decide and the
+        mesher reports the stack.
+        """
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        stack = self._resolve_stack_quietly()
+        if stack is None:
+            return pairs
+        shared = {
+            frozenset(pair)
+            for pair in same_surface_pairs(self._wave_palace_ports(wave_ports), stack)
+        }
+        return [pair for pair in pairs if frozenset(pair) in shared]
+
+    def _wave_palace_ports(self, wave_ports: list[Any]) -> list[Any]:
+        """The wave ports as the mesher sees them, for those on the component."""
+        from gsim.palace.ports.config import PalacePort, PortType
+
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            return []
+        by_name = {port.name: port for port in component.ports}
+        return [
+            PalacePort(
+                name=wp.name,
+                port_type=PortType.WAVEPORT,
+                center=(
+                    float(by_name[wp.name].center[0]),
+                    float(by_name[wp.name].center[1]),
+                ),
+                width=float(by_name[wp.name].width),
+                orientation=float(by_name[wp.name].orientation or 0.0),
+                layer=wp.layer or None,
+                z_margin=wp.z_margin,
+                lateral_margin=wp.lateral_margin,
+                max_size=wp.max_size,
+            )
+            for wp in wave_ports
+            if wp.name in by_name
+        ]
+
+    def _resolve_stack_quietly(self) -> Any:
+        """The resolved stack, or None when it does not resolve.
+
+        Resolving the stack must not leave a stack behind: set_stack() may
+        still follow, and mesh() resolves it again.
+        """
+        previous = self.stack
+        try:
+            return self._resolve_stack()
+        except Exception:
+            return None
+        finally:
+            self.stack = previous
 
     def _wave_port_face_errors(self, wave_ports: list[Any]) -> list[str]:
         """Errors for wave ports whose generated faces overlap.
@@ -1731,49 +1795,19 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         from gsim.palace.mesh.geometry import (
             UNBOUNDED_DOMAIN,
             overlapping_wave_ports,
+            same_surface_pairs,
             wave_port_overlap_message,
         )
-        from gsim.palace.ports.config import PalacePort, PortType
-        from gsim.palace.ports.modes import same_face_pairs
 
-        by_name = {port.name: port for port in component.ports}
-        ports = [
-            PalacePort(
-                name=wp.name,
-                port_type=PortType.WAVEPORT,
-                center=(
-                    float(by_name[wp.name].center[0]),
-                    float(by_name[wp.name].center[1]),
-                ),
-                width=float(by_name[wp.name].width),
-                orientation=float(by_name[wp.name].orientation or 0.0),
-                layer=wp.layer,
-                z_margin=wp.z_margin,
-                lateral_margin=wp.lateral_margin,
-                max_size=wp.max_size,
-            )
-            for wp in wave_ports
-            if wp.layer and wp.name in by_name
-        ]
+        ports = [p for p in self._wave_palace_ports(wave_ports) if p.layer]
         if len(ports) < 2:
             return []
-        # Resolving the stack must not leave a stack behind: set_stack() may
-        # still follow, and mesh() resolves it again.
-        previous = self.stack
-        try:
-            stack = self._resolve_stack()
-        except Exception:
+        stack = self._resolve_stack_quietly()
+        if stack is None:
             return []  # the mesher reports a stack that does not resolve
-        finally:
-            self.stack = previous
         # A pair on the same face is already reported by the multimode check
         reported = (
-            {
-                frozenset(pair)
-                for pair in same_face_pairs(
-                    (p.name, p.center, p.orientation) for p in ports
-                )
-            }
+            {frozenset(pair) for pair in same_surface_pairs(ports, stack)}
             if any(wp.modes for wp in wave_ports)
             else set()
         )
