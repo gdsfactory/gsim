@@ -170,6 +170,18 @@ artifacts can be written or a job can run. A guided PDK port maps to an
 eigenmode source. Selecting a `vertical_te` or `vertical_tm` PDK port instead
 derives a Gaussian beam and fiber monitor from the port metadata.
 
+To excite a specific guided mode, set its one-based `mode_order`:
+
+```python
+sim.source(port="o1", mode={"kind": "mode_order", "mode_order": 2})
+```
+
+The selector is also available as `fdtd.ModeSelection`. `te_like` and `tm_like`
+select the first candidate with the requested polarization; those selectors
+require a transverse `te_axis` and can set `num_candidate_modes` and
+`min_polarization_fraction`. With no selector, the fundamental mode is used.
+The implicit port monitors use the same selection as the source.
+
 Replace `sim.source` to use another physical source:
 
 ```python
