@@ -42,7 +42,9 @@ nav = [
     { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },
     { "Palace: Checking a Run (solver evidence)" = "palace-validation.md" },
     { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" },
-    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" }
+    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" },
+    { "TCAD: Baehr-Jones 2012 modulator" = "nbs/tcad_bj2012_modulator.md" },
+    { "Palace: Baehr-Jones 2012 electrode" = "nbs/palace_bj2012_electrode.md" }
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Guides" = [

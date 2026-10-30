@@ -90,13 +90,16 @@ jobs:
           nbs/palace_qpdk_*.ipynb)
             uv pip install qpdk==0.4.0
             ;;
+          nbs/palace_bj2012_electrode.ipynb)
+            uv sync --no-default-groups --group docs --extra femwell
+            ;;
           nbs/palace_inductor.ipynb)
             uv sync --no-default-groups --group docs --group palace-inductor
             ;;
           nbs/palace_*.ipynb)
             uv pip install ihp-gdsfactory==2.0.1
             ;;
-          nbs/tcad_twmzm.ipynb)
+          nbs/tcad_twmzm.ipynb|nbs/tcad_bj2012_modulator.ipynb)
             uv sync --no-default-groups --group docs --extra tcad --extra femwell
             ;;
           nbs/tcad_*.ipynb)
