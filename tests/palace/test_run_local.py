@@ -97,6 +97,29 @@ def _write_mode_table(output_dir) -> None:
     )
 
 
+def test_run_local_forwards_log_path(monkeypatch, tmp_path):
+    """run_local() hands the log path to run_palace unchanged."""
+    output_dir = tmp_path / "sim"
+    sim = DrivenSim()
+    sim._last_mesh_result = _mesh_result(1_000)
+    _setup_sim(sim, output_dir)
+    executable = tmp_path / "palace"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+
+    captured: dict[str, object] = {}
+
+    def fake_run_palace(_launch, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("gsim.palace.runtime.run_palace", fake_run_palace)
+    target = tmp_path / "logs" / "solver.log"
+
+    sim.run_local(palace_executable=executable, verbose=False, log_path=target)
+
+    assert captured["log_path"] == target
+
+
 def test_run_local_boundarymode_defaults_to_single_rank(monkeypatch, tmp_path):
     """BoundaryModeSim.run_local() without args uses -np 1 and -nt <cpus>."""
     _setup_local_palace(monkeypatch, tmp_path)

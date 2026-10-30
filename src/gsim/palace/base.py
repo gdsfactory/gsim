@@ -2676,6 +2676,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         num_threads: int | None = None,
         verbose: bool = True,
         remedy: str | None = None,
+        log_path: str | Path | None = None,
     ) -> SParams | PalaceTextResults | dict[str, Path]:
         """Run simulation locally using Palace.
 
@@ -2708,6 +2709,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 omitted, defaults to the number of physical CPU cores so
                 shared-memory parallelism is used.
             verbose: Print progress messages and stream Palace output in real time
+            log_path: Optional file for combined solver output, retained on
+                success and failure even when verbose is False. A relative
+                path is resolved against the current working directory, not
+                the run directory.
             remedy: A second way out of a dead Palace runtime, named at the
                 end of the abort report beyond pointing ``PALACE_BIN``
                 somewhere else. A caller with no other way out gives none.
@@ -2836,6 +2841,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 num_threads=num_threads,
                 verbose=verbose,
                 emit=_emit_info,
+                log_path=log_path,
             )
         except subprocess.CalledProcessError as failure:
             raise RuntimeError(
