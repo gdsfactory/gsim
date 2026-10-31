@@ -31,6 +31,7 @@ nav = [
     { "EMX Process Files" = "emx_proc_import.md" },
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
+    { "Differential Interconnect, Crosstalk and TDR" = "nbs/palace_signal_integrity.md" },
     { "Terminal (multi-pin) Wave Ports" = "terminal_wave_ports.md" },
     { "Terminal Wave Ports in Palace" = "nbs/palace_terminal_waveport.md" },
     { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },

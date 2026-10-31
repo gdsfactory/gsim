@@ -173,6 +173,65 @@ def test_explicit_dielectric_material_reaches_palace_materials() -> None:
     assert stack.materials["silicon"]["conductivity"] == pytest.approx(2.0)
 
 
+def test_synthetic_pdk_layer_names_flow_through_ports(tmp_path) -> None:
+    """The tutorial setup never needs IHP-specific layer names."""
+    from gsim.palace.stack import build_palace_layer_stack
+
+    synthetic = gf.Pdk(
+        name="signal_integrity_synthetic",
+        layer_stack=GfLayerStack(
+            layers={
+                "return_sheet": LayerLevel(
+                    layer=(91, 0), zmin=2, thickness=0.5, material="aluminum"
+                ),
+                "trace_sheet": LayerLevel(
+                    layer=(92, 0), zmin=9, thickness=1, material="aluminum"
+                ),
+            }
+        ),
+    )
+    try:
+        previous = gf.get_active_pdk()
+    except ValueError:
+        previous = None
+    try:
+        synthetic.activate()
+        component = gf.Component()
+        component.add_polygon([(0, 0), (200, 0), (200, 10), (0, 10)], layer=(92, 0))
+        stack = resolve_layer_stack(
+            component,
+            pdk=synthetic,
+            use_pdk_overlay=False,
+            dielectrics=[{"name": "bulk", "material": "sio2", "zmin": 0, "zmax": 11}],
+        )
+
+        sim = DrivenSim()
+        sim.set_output_dir(str(tmp_path / "synthetic-setup"))
+        sim.set_geometry(component)
+        sim.set_stack(build_palace_layer_stack(stack))
+        sim.set_airbox(margin_x=10, margin_y=10, z_above=10, z_below=10)
+        for name in ("p1", "p2", "p3", "p4"):
+            sim.add_port(
+                name,
+                from_layer="return_sheet",
+                to_layer="trace_sheet",
+                geometry="interlayer",
+                impedance=50,
+                excited=True,
+            )
+
+        assert sim.stack is not None
+        assert sim.stack.layers["trace_sheet"].zmin == 9
+        assert all(
+            port.from_layer == "return_sheet" and port.to_layer == "trace_sheet"
+            for port in sim.ports
+        )
+        assert all(port.excited for port in sim.ports)
+    finally:
+        if previous is not None:
+            previous.activate()
+
+
 @pytest.mark.usefixtures("_ihp_active")
 def test_legacy_kwargs_are_rejected_with_the_flag() -> None:
     sim = DrivenSim()
