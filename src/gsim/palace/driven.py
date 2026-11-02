@@ -86,6 +86,10 @@ class DrivenSim(_PalaceSimBase):
         warn_legacy_solver_setting("sim.driven", "sim.solver.driven")
         self._set_problem_settings("driven", value)
 
+    def _can_reuse_mesh(self) -> bool:
+        """Driven and eigenmode sims can share one mesh between them."""
+        return True
+
     # -------------------------------------------------------------------------
     # Cloud run (narrowed return type)
     # -------------------------------------------------------------------------

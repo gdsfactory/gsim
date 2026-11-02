@@ -10,6 +10,7 @@ import gmsh
 import numpy as np
 import pytest
 
+from gsim.common.stack import LayerStack
 from gsim.palace import DrivenSim
 from gsim.palace.base import PalaceSimMixin
 from gsim.palace.mesh import quality
@@ -166,7 +167,7 @@ def test_sim_mesh_logs_metrics_automatically(monkeypatch, tmp_path, caplog):
         "validate_config",
         lambda _self: SimpleNamespace(valid=True, errors=[]),
     )
-    monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: object())
+    monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: LayerStack())
     monkeypatch.setattr(
         DrivenSim, "_configure_ports_on_component", lambda _self, _stack: None
     )
