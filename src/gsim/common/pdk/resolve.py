@@ -29,6 +29,18 @@ _ANGLE_TOLERANCE_DEGREES = 1e-6
 _PORT_POSITION_TOLERANCE_UM = 1e-6
 
 
+def _layer_mesh_order(layer_level: Any) -> int:
+    """Return the authoritative mesh order for a LayerLevel.
+
+    PDKs may keep the real order in ``info['mesh_order']`` (e.g. IHP), with the
+    ``LayerLevel.mesh_order`` field left at its class default.
+    """
+    info = getattr(layer_level, "info", None) or {}
+    if "mesh_order" in info:
+        return int(info["mesh_order"])
+    return int(layer_level.mesh_order)
+
+
 def _resolve_pdk(pdk_or_module: Any | None) -> tuple[Any, Any | None]:
     """Return the explicit PDK object or the active PDK."""
     if pdk_or_module is None:
@@ -134,7 +146,7 @@ def _resolved_layers(
             width_to_z=float(layer_level.width_to_z),
             bias=layer_level.bias,
             z_to_bias=layer_level.z_to_bias,
-            mesh_order=int(layer_level.mesh_order),
+            mesh_order=_layer_mesh_order(layer_level),
         )
     if not resolved:
         raise LayerResolutionError(

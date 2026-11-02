@@ -22,12 +22,26 @@ dependencies = [
   "pdk-schema[sympy]~=0.3.0",
   "plotly",
   "pyvista>=0.43.0",
+  # Touchstone I/O and network conversions (gsim.common.circuit).
+  "scikit-rf>=1.0",
   "trame",
   "trame-vtk",
   "trame-vuetify",
+  # `cadquery-ocp` below 7.9 bundles its own VTK bindings, which shadow the
+  # `vtk` distribution pyvista reads: `import gsim` then dies on "VTK version
+  # must be 9.3.1 or greater", and the mixed VTK segfaults on macOS. 7.9 pins
+  # `vtk==9.6.2`, so resolving vtk any higher falls back to the bundled one.
+  # cadquery arrives through femwell -> meshwell -> cadquery, so this bites
+  # wherever the femwell extra is installed.
+  "vtk<9.7",
 ]
 
 [project.optional-dependencies]
+# femwell/skfem mode-solving adapter (gsim.femwell).
+femwell = [
+  "femwell>=0.1.11",
+  "scikit-fem>=8.0.0",
+]
 # DEVSIM charge-transport backend (gsim.tcad). scipy-openblas32 gives DEVSIM
 # a BLAS/LAPACK on Linux, Windows and macOS: without it a plain pip install has
 # none DEVSIM can load on macOS or Windows. DEVSIM reads its scipy_-prefixed
@@ -165,6 +179,22 @@ module = "tests.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
+module = "meshio"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "scipy.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "femwell.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "skfem.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
 module = "gmsh"
 
 [[tool.mypy.overrides]]
@@ -186,6 +216,10 @@ module = "palacetoolkit_palace_cpu"
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
 module = "palacetoolkit_palace_cpu.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "skrf.*"
 
 [tool.pylsp-mypy]
 enabled = true
@@ -277,6 +311,9 @@ select = ["ALL"]
   "S101",  # assert
   "SLF001",  # private-member-access
   "T201",  # print
+]
+"samples/*.py" = [
+  "T201",  # print (samples are runnable demonstrations)
 ]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations

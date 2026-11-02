@@ -197,6 +197,23 @@ def triangulate_polygon_with_holes(polygon):
     return triangles if triangles else [list(polygon.exterior.coords[:-1])]
 
 
+def order_physical_layers(layer_stack):
+    """Emit lower PDK mesh_order last, where Meep gives it precedence.
+
+    Equal priorities retain their input order. Legacy entries without a
+    priority keep their relative order and precede explicitly ranked layers.
+    """
+    return sorted(
+        layer_stack,
+        key=lambda entry: (
+            float("inf")
+            if entry.get("mesh_order") is None
+            else entry["mesh_order"]
+        ),
+        reverse=True,
+    )
+
+
 def extract_xz_rectangles_runner(component, layer_stack, y_cut, eps=1e-9):
     """Inlined XZ cross-section cutter (mirrors gsim.common.cross_section)."""
     from shapely.geometry import LineString
@@ -205,7 +222,7 @@ def extract_xz_rectangles_runner(component, layer_stack, y_cut, eps=1e-9):
     dbu = getattr(getattr(component, "kcl", None), "dbu", 0.001)
 
     rects = []
-    for layer_entry in layer_stack:
+    for layer_entry in order_physical_layers(layer_stack):
         gds_layer_tuple = tuple(layer_entry["gds_layer"])
         shapely_polys = _xz_runner_layer_polys(component, gds_layer_tuple, dbu)
         if not shapely_polys:
@@ -492,7 +509,7 @@ def build_geometry(config, materials):
     geometry = []
     total_vertices = 0
 
-    for layer_entry in config["layer_stack"]:
+    for layer_entry in order_physical_layers(config["layer_stack"]):
         material_name = layer_entry["material"]
         mat = materials.get(material_name, mp.Medium())
         zmin = layer_entry["zmin"] if is_3d else 0

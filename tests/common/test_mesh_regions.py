@@ -6,7 +6,14 @@ import meshio
 import numpy as np
 import pytest
 
-from gsim.common.mesh_regions import cell_blocks, group_tags
+from gsim.common.mesh_regions import (
+    cell_blocks,
+    element_regions,
+    group_names,
+    group_tags,
+    node_regions,
+    region_elements,
+)
 
 
 def _mixed_dim_mesh(tmp_path, name="mixed.msh"):
@@ -48,10 +55,14 @@ def _mixed_dim_mesh(tmp_path, name="mixed.msh"):
 
 
 class TestGroupMaps:
-    def test_the_groups_of_one_dimension_are_found_by_name(self, tmp_path):
+    def test_the_two_directions_are_inverses_of_one_another(self, tmp_path):
         mesh = _mixed_dim_mesh(tmp_path)
 
-        assert group_tags(mesh, dim=2) == {"core": 1, "clad": 2}
+        tags = group_tags(mesh, dim=2)
+        names = group_names(mesh, dim=2)
+
+        assert tags == {"core": 1, "clad": 2}
+        assert names == {1: "core", 2: "clad"}
 
     def test_a_group_of_another_dimension_is_not_returned(self, tmp_path):
         mesh = _mixed_dim_mesh(tmp_path)
@@ -63,6 +74,7 @@ class TestGroupMaps:
         mesh = _mixed_dim_mesh(tmp_path)
 
         assert group_tags(mesh, dim=3) == {}
+        assert group_names(mesh, dim=3) == {}
 
 
 class TestCellBlocks:
@@ -92,6 +104,8 @@ class TestCellBlocks:
 
         assert cells.tolist() == [[0, 1, 2]]
         assert tags.tolist() == [0]
+        # An untagged element names no region, and matches no group.
+        assert element_regions(mesh)[1] == [""]
 
     def test_a_mesh_without_cells_of_that_type_is_rejected(self):
         mesh = meshio.Mesh(
@@ -103,3 +117,45 @@ class TestCellBlocks:
 
         with pytest.raises(ValueError, match="triangle"):
             cell_blocks(mesh, "triangle")
+
+
+class TestTriangleConveniences:
+    def test_every_element_carries_its_group_name(self, tmp_path):
+        mesh = _mixed_dim_mesh(tmp_path)
+
+        tris, names = element_regions(mesh)
+
+        assert tris.tolist() == [[0, 1, 2], [0, 2, 3]]
+        assert names == ["core", "clad"]
+
+    def test_an_element_of_no_named_group_gets_an_empty_name(self, tmp_path):
+        mesh = _mixed_dim_mesh(tmp_path)
+        mesh.field_data.pop("clad")
+
+        _tris, names = element_regions(mesh)
+
+        assert names == ["core", ""]
+
+    def test_a_node_inherits_the_group_of_one_incident_element(self, tmp_path):
+        mesh = _mixed_dim_mesh(tmp_path)
+
+        # Nodes 0 and 2 sit on both triangles; the lower-numbered element
+        # wins, so they read 'core'. Node 1 is core-only, node 3 clad-only.
+        assert node_regions(mesh) == ["core", "core", "core", "clad"]
+
+    def test_the_elements_of_a_region_come_back_in_mesh_order(self, tmp_path):
+        mesh = _mixed_dim_mesh(tmp_path)
+
+        assert region_elements(mesh, "core").tolist() == [0]
+        assert region_elements(mesh, "clad").tolist() == [1]
+
+    def test_a_region_that_is_not_on_the_mesh_is_reported(self, tmp_path):
+        mesh = _mixed_dim_mesh(tmp_path)
+
+        with pytest.raises(ValueError, match="electrode_high"):
+            region_elements(mesh, "electrode_high")
+
+    def test_a_mesh_is_read_from_a_path_too(self, tmp_path):
+        _mixed_dim_mesh(tmp_path)
+
+        assert region_elements(tmp_path / "mixed.msh", "core").tolist() == [0]

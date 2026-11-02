@@ -630,8 +630,8 @@ def wait_for_results(
         parent_dir: Where to create sim-data directories (default: cwd).
         poll_interval: Seconds between status polls (default 5.0).
         estimated_runtime_seconds: Expected solver runtime, excluding queue
-            time. When provided, status output includes an estimated percent
-            complete and remaining time.
+            time. When provided, the status bar uses the estimated elapsed
+            fraction and the description includes estimated remaining time.
 
     Returns:
         Parsed result (single job) or list of parsed results (multiple jobs).
@@ -784,11 +784,12 @@ def _print_status_table(
     * **Jupyter / nbconvert** — uses ``clear_output(wait=True)`` so every
       poll replaces the previous output.  nbconvert only captures the
       *last* state, giving one clean line in rendered docs.
-    * **TTY (terminal)** — uses carriage-return / ANSI cursor-up to overwrite.
+    * **TTY (terminal)** — uses carriage-return / ANSI cursor-up and line erasure.
+      Rows are shortened to fit the terminal width without wrapping.
     * **Pipe / plain CI** — only prints the final status.
 
-    ``shown_progress`` maps job IDs to the highest percentage already
-    displayed. Pass the same dict on every poll so a job's bar never moves
+    ``shown_progress`` maps job IDs to the highest bar-fill percentage already
+    used. Pass the same dict on every poll so a job's bar never moves
     backwards; it is updated in place.
 
     Returns the number of lines printed (for the TTY path to erase).
@@ -797,6 +798,17 @@ def _print_status_table(
 
     _end_times = end_times or {}
     mode = _output_mode()
+    tty_width = (
+        max(0, shutil.get_terminal_size().columns - 1) if mode == "tty" else None
+    )
+
+    def _fit_tty(line: str) -> str:
+        # Leave the last column unused to avoid automatic terminal wrapping.
+        if tty_width is None or len(line) <= tty_width:
+            return line
+        if tty_width < 3:
+            return "." * tty_width
+        return line[: tty_width - 3] + "..."
 
     # Pipe: only print at the end
     if mode == "pipe" and not final:
@@ -809,7 +821,7 @@ def _print_status_table(
         clear_output(wait=True)
 
     # TTY: move cursor up to overwrite previous output
-    if mode == "tty" and prev_lines > 0:
+    if mode == "tty" and prev_lines > 0 and len(jobs) > 1:
         sys.stdout.write(f"\033[{prev_lines}A")
 
     def _elapsed(jid: str) -> str:
@@ -826,18 +838,19 @@ def _print_status_table(
         """
         status = _status_value(job.status).casefold()
         if status == "completed":
-            return 100, "complete"
+            return 100, "Job completed"
         if status == "failed":
-            return 100, "failed"
+            return 100, "Job failed"
         if status == "running":
             if estimated_runtime_seconds is not None:
                 elapsed = time.monotonic() - start_times[jid]
                 percent = min(99, round(100 * elapsed / estimated_runtime_seconds))
                 remaining = max(0, estimated_runtime_seconds - elapsed)
                 mins, secs = divmod(round(remaining), 60)
-                return percent, f"running, ETA {mins}m {secs:02d}s"
-            return 50, "running"
-        return _PRE_RUN_PROGRESS.get(status, 5), status or "starting"
+                return percent, f"Job in progress... ETA {mins}m {secs:02d}s"
+            return 50, "Job in progress..."
+        description = (status or "starting").replace("_", " ").replace("-", " ")
+        return _PRE_RUN_PROGRESS.get(status, 5), f"Job {description}..."
 
     def _progress(jid: str, job: Any) -> tuple[int, str]:
         percent, phase = _lifecycle_progress(jid, job)
@@ -850,7 +863,7 @@ def _print_status_table(
 
     def _bar(percent: int, width: int = 20) -> str:
         filled = round(width * percent / 100)
-        return f"[{'#' * filled}{'.' * (width - filled)}] {percent:3d}%"
+        return f"[{'#' * filled}{'.' * (width - filled)}]"
 
     lines_printed = 0
     n = len(jobs)
@@ -863,7 +876,7 @@ def _print_status_table(
             f"  elapsed {_elapsed(jid)}"
         )
         if mode == "tty":
-            sys.stdout.write(f"\r{msg:<80s}")
+            sys.stdout.write(f"\r\033[2K{_fit_tty(msg)}")
             if final:
                 sys.stdout.write("\n")
         else:
@@ -872,15 +885,24 @@ def _print_status_table(
         return 1
 
     # Multi-job: header + one line per job
-    print(f"Waiting for {n} jobs...")  # noqa: T201
+    rows = [(jid, job, *_progress(jid, job)) for jid, job in jobs.items()]
+    name_width = max(
+        30, max((len(job.job_name or jid) for jid, job in jobs.items()), default=30)
+    )
+    phase_width = max((len(phase) for _, _, _, phase in rows), default=0)
+    if mode == "tty":
+        sys.stdout.write("\r\033[2K")
+    print(_fit_tty(f"Waiting for {n} jobs..."))  # noqa: T201
     lines_printed += 1
-    for jid, job in jobs.items():
-        percent, phase = _progress(jid, job)
+    for jid, job, percent, phase in rows:
         line = (
-            f"  {job.job_name or jid:<30s} {_bar(percent)} {phase:<12s}"
+            f"  {job.job_name or jid:<{name_width}s} {_bar(percent)}"
+            f" {phase:<{phase_width}s}"
             f" elapsed {_elapsed(jid)}"
         )
-        print(line)  # noqa: T201
+        if mode == "tty":
+            sys.stdout.write("\r\033[2K")
+        print(_fit_tty(line))  # noqa: T201
         lines_printed += 1
 
     sys.stdout.flush()
