@@ -514,6 +514,12 @@ A stack from `set_stack(pdk_authoritative=True)` is rebuilt from the active PDK
 at each check. Activating another PDK is refused if it changes any of these
 inputs, or fails with the PDK's own error if the stack cannot be rebuilt. Its
 material values are free, like any other material value, and reach the config.
+
+A mesh made with `mesh(periodic_axis=...)` keeps its periodic faces out of the
+absorbing boundary, and only a Floquet eigenmode solve conditions them. A receiver
+with `absorbing_boundary=True` and no Floquet solve is refused at `write_config()`,
+because those faces would reflect. Use `absorbing_boundary=False`, a Floquet
+eigenmode, or `mesh()` on the receiver.
 On a receiver that already holds a reused mesh, `reuse_mesh` takes the port
 geometry and kind back from the source: each port the source declares keeps the
 receiver's excitation, impedance and R/L/C, and ports the source lacks are

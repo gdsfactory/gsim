@@ -2917,10 +2917,22 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         try:
             shutil.copy2(source_mesh, staging / mesh_path.name)
             metadata = write_metadata(mesh_stats, staging, None)
-            # The mesh goes last: a failure before it keeps the mesh the
-            # receiver's state describes, and metadata is outside the cache key
-            (staging / METADATA_FILENAME).replace(output_dir / METADATA_FILENAME)
-            (staging / mesh_path.name).replace(mesh_path)
+            # The mesh goes last, and a failure puts the metadata back, so the
+            # folder keeps the pair of files the receiver's state describes
+            metadata_path = output_dir / METADATA_FILENAME
+            previous_metadata = staging / f"previous-{METADATA_FILENAME}"
+            had_metadata = metadata_path.is_file()
+            if had_metadata:
+                shutil.copy2(metadata_path, previous_metadata)
+            (staging / METADATA_FILENAME).replace(metadata_path)
+            try:
+                (staging / mesh_path.name).replace(mesh_path)
+            except OSError:
+                if had_metadata:
+                    previous_metadata.replace(metadata_path)
+                else:
+                    metadata_path.unlink()
+                raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -2979,7 +2991,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         Runs first in every ``write_config`` of a sim whose mesh came from
         ``reuse_mesh``, in this order: the mesh inputs must equal the ones the
         mesh was made from; the current Port settings are written into the
-        extracted ports; the configuration must be valid, as ``mesh()``
+        extracted ports; a periodic mesh must not leave its periodic faces
+        unconditioned beside an absorbing wall; the configuration must be
+        valid, as ``mesh()``
         requires; and a driven sim must excite at least one port, each with
         its surface in the mesh.
 
@@ -2987,8 +3001,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             stack: The resolved layer stack.
 
         Raises:
-            ValueError: If a mesh input changed after ``reuse_mesh``, the
-                configuration is invalid, or a driven sim has no excited port
+            ValueError: If a mesh input changed after ``reuse_mesh``, a
+                periodic mesh is used with an absorbing wall and no Floquet
+                solve, the configuration is invalid, or a driven sim has no excited port
                 or excites a port without a surface in the mesh.
         """
         from gsim.palace._mesh_fingerprint import describe_changes
@@ -3010,6 +3025,20 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             )
 
         mesh_result = self._last_mesh_result
+        # set_periodic_mesh takes these faces out of the absorbing group, and
+        # only a Floquet eigenmode solve writes a Periodic block for them
+        eigenmode = self._get_problem_settings("eigenmode")
+        floquet = eigenmode is not None and eigenmode.floquet
+        if mesh_result.periodic_axis and self.absorbing_boundary and not floquet:
+            raise ValueError(
+                f"This {name} reuses a mesh made with "
+                f"periodic_axis={mesh_result.periodic_axis!r}. Its periodic faces "
+                "are not in the absorbing boundary, so with "
+                "absorbing_boundary=True and no Floquet solve they would reflect "
+                "(PMC) instead of absorbing. Use absorbing_boundary=False, a "
+                "Floquet eigenmode with set_eigenmode(floquet=True), or call "
+                "mesh() to mesh this simulation without a periodic axis."
+            )
         sync_port_settings(
             self._last_ports,
             mesh_result.port_info,
@@ -3071,9 +3100,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         Raises:
             ValueError: If mesh() hasn't been called yet. For a mesh taken
-                with reuse_mesh(), also if a mesh input changed since, the
-                configuration is invalid, or a driven simulation excites no
-                port of the mesh.
+                with reuse_mesh(), also if a mesh input changed since, a
+                periodic mesh is used with an absorbing wall and no Floquet
+                solve, the configuration is invalid, or a driven simulation
+                excites no port of the mesh.
 
         Example:
             >>> result = sim.mesh("./sim")
