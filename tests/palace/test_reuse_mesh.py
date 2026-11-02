@@ -84,6 +84,10 @@ class FakeGmsh:
                 "keep": plane.keep,
             }
             groups["boundary_surfaces"]["symmetry"] = dict(symmetry)
+        periodic_axis = kwargs.get("periodic_axis")
+        if periodic_axis is not None:
+            groups["boundary_surfaces"]["periodic_donor"] = {"phys_group": 20}
+            groups["boundary_surfaces"]["periodic_receiver"] = {"phys_group": 21}
         port_info = [
             {
                 "portnumber": i,
@@ -109,7 +113,8 @@ class FakeGmsh:
             output_dir=output_dir,
             model_name=model_name,
             fmax=kwargs["fmax"],
-            periodic_axis=kwargs.get("periodic_axis"),
+            periodic_axis=periodic_axis,
+            periodic_translation=None if periodic_axis is None else (10.0, 0.0, 0.0),
             symmetry_plane=symmetry,
         )
 
@@ -1637,6 +1642,9 @@ def test_failed_install_keeps_the_mesh_and_state_of_the_receiver(
     fake_gmsh.allowed = False
     own_mesh = receiver.mesh_path.read_bytes()
     assert own_mesh != source.mesh_path.read_bytes()
+    # the staged metadata would have the same content; this tells them apart
+    metadata_path = receiver.output_dir / "metadata.json"
+    metadata_path.write_text('{"own": true}')
     before = _state(receiver)
     listing = _listing(receiver.output_dir)
     real_replace = Path.replace
@@ -1653,5 +1661,114 @@ def test_failed_install_keeps_the_mesh_and_state_of_the_receiver(
 
     assert _state(receiver) == before
     assert receiver.mesh_path.read_bytes() == own_mesh
+    assert metadata_path.read_text() == '{"own": true}'
     assert _listing(receiver.output_dir) == listing
     assert receiver.write_config(validate_mesh=False).is_file()
+
+
+def test_failed_mesh_install_of_a_new_receiver_leaves_no_metadata(
+    make_sim, fake_gmsh, monkeypatch, tmp_path
+) -> None:
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.mesh(verbose=False)
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    fake_gmsh.allowed = False
+    real_replace = Path.replace
+
+    def _replace(path, target):
+        if Path(target).name == "palace.msh":
+            raise OSError("disk full")
+        return real_replace(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", _replace)
+        with pytest.raises(OSError, match="disk full"):
+            receiver.reuse_mesh(source)
+
+    assert not receiver.has_mesh
+    assert _listing(tmp_path / "driven") == []
+
+
+# ----- periodic meshes ---------------------------------------------------------------
+
+
+@pytest.fixture
+def periodic_eigen(make_sim, fake_gmsh, tmp_path) -> EigenmodeSim:
+    """A Floquet eigenmode source with a mesh periodic along x."""
+    sim = make_sim(EigenmodeSim, tmp_path / "eigen")
+    sim.set_eigenmode(target=5e9, floquet=True)
+    sim.mesh(verbose=False, periodic_axis="x")
+    fake_gmsh.allowed = False
+    return sim
+
+
+def _boundaries(sim) -> dict:
+    """The ``Boundaries`` block of the config the sim writes."""
+    path = sim.write_config(validate_mesh=False)
+    return json.loads(path.read_text())["Boundaries"]
+
+
+@pytest.mark.parametrize("receiver_cls", [DrivenSim, EigenmodeSim])
+def test_absorbing_receiver_of_a_periodic_mesh_is_refused_at_write_config(
+    receiver_cls, periodic_eigen, make_sim, tmp_path
+) -> None:
+    """The periodic faces left the absorbing group; only Floquet conditions them."""
+    receiver = make_sim(receiver_cls, tmp_path / "receiver")
+    receiver.absorbing_boundary = True
+    receiver.reuse_mesh(periodic_eigen)
+
+    with pytest.raises(ValueError, match=r"periodic_axis='x'.*absorbing_boundary"):
+        receiver.write_config(validate_mesh=False)
+    assert not (tmp_path / "receiver" / "config.json").exists()
+
+
+def test_receiver_turning_on_absorption_after_reuse_is_refused(
+    periodic_eigen, make_sim, tmp_path
+) -> None:
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(periodic_eigen)
+    assert receiver.write_config(validate_mesh=False).is_file()
+
+    receiver.absorbing_boundary = True
+
+    with pytest.raises(ValueError, match=r"periodic_axis='x'.*absorbing_boundary"):
+        receiver.write_config(validate_mesh=False)
+
+
+def test_reflecting_receiver_of_a_periodic_mesh_has_one_outer_wall(
+    periodic_eigen, make_sim, tmp_path
+) -> None:
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(periodic_eigen)
+
+    boundaries = _boundaries(receiver)
+
+    assert "Absorbing" not in boundaries
+    assert "Periodic" not in boundaries
+
+
+def test_floquet_receiver_of_a_periodic_mesh_conditions_the_periodic_faces(
+    periodic_eigen, make_sim, tmp_path
+) -> None:
+    receiver = make_sim(EigenmodeSim, tmp_path / "floquet")
+    receiver.absorbing_boundary = True
+    receiver.set_eigenmode(target=5e9, floquet=True)
+    receiver.reuse_mesh(periodic_eigen)
+
+    boundaries = _boundaries(receiver)
+
+    assert boundaries["Periodic"]["BoundaryPairs"][0]["DonorAttributes"] == [20]
+    assert boundaries["Periodic"]["BoundaryPairs"][0]["ReceiverAttributes"] == [21]
+    assert boundaries["Absorbing"]["Attributes"] == [4]
+
+
+def test_direct_periodic_mesh_of_a_driven_sim_is_not_refused(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """The refusal is for reused meshes; a sim's own ``mesh()`` keeps its behaviour."""
+    sim = make_sim(DrivenSim, tmp_path / "driven")
+    sim.absorbing_boundary = True
+    sim.mesh(verbose=False, periodic_axis="x")
+
+    assert fake_gmsh.calls == 1
+    assert "Absorbing" in _boundaries(sim)
