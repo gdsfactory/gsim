@@ -445,6 +445,39 @@ class TestMagnetostaticSim:
         assert repr(island) in warning
         assert repr(coil) not in warning
 
+    def test_a_source_names_its_net_as_nets_does(self):
+        """A non-electrical port on the loop changes neither name."""
+        sim = _loop_sim()
+        assert sim.component is not None
+        sim.component.add_port(
+            name="o1",
+            center=(0, 11),
+            width=1,
+            orientation=90,
+            layer=(49, 0),
+            port_type="optical",
+        )
+        sim.add_current_source("L", plus_port="P", minus_port="M")
+        (source,) = sim.resolve_current_sources()
+        assert [net.name for net in sim.nets()] == [source.net] == ["P+M"]
+        assert sim.nets().find(source.net)
+
+    def test_a_source_on_optical_ports_names_its_net_as_nets_does(self):
+        sim = _loop_sim()
+        assert sim.component is not None
+        for name, x in (("o1", -2), ("o2", 2)):
+            sim.component.add_port(
+                name=name,
+                center=(x, 0),
+                width=2,
+                orientation=270,
+                layer=(49, 0),
+                port_type="optical",
+            )
+        sim.add_current_source("L", plus_port="o1", minus_port="o2")
+        (source,) = sim.resolve_current_sources()
+        assert source.net == sim.nets()[0].name == "P+M"
+
     def test_the_screen_warning_survives_nets_that_do_not_pair_up(self, monkeypatch):
         """A net nets() does not list keeps its name from all the ports."""
         sim = _loop_sim(island=True)

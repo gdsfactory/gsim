@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from gsim.common.stack import LayerStack
     from gsim.palace.current_sources import ResolvedCurrentSource
     from gsim.palace.mesh.geometry import GeometryData
-    from gsim.palace.mesh.nets import Net, Nets
+    from gsim.palace.mesh.nets import Net
     from gsim.palace.ports.config import PalacePort
     from gsim.palace.results import PalaceTextResults, SParams
 
@@ -125,6 +126,9 @@ class MagnetostaticSim(_PalaceSimBase):
         two flips the sign of the source's row and column of the inductance
         matrix. The drawn metal that joins the two ports is the return path.
 
+        The gap is part of the loop: the sheet replaces the metal there, so
+        its width changes the inductance. Keep it small against the loop.
+
         Re-adding a name replaces that source and moves it to the end.
 
         Args:
@@ -148,11 +152,13 @@ class MagnetostaticSim(_PalaceSimBase):
 
     def _resolve_with_nets(
         self, stack: LayerStack, geometry: GeometryData | None = None
-    ) -> tuple[list[ResolvedCurrentSource], Nets]:
+    ) -> tuple[list[ResolvedCurrentSource], list[Net]]:
         """The resolved sources, and the nets they were resolved on.
 
         The nets are built from all component ports, whatever their type, so
-        that a source on optical ports finds its net too.
+        that a source on optical ports finds its net too. They are then named
+        as :meth:`nets` names them, so ``source.net`` is a name of ``nets()``;
+        a net ``nets()`` does not list keeps its name from all the ports.
 
         Args:
             stack: The resolved layer stack.
@@ -174,7 +180,14 @@ class MagnetostaticSim(_PalaceSimBase):
             geometry = extract_geometry(component, stack)
         nets = extract_nets(geometry, stack, list(component.ports))
         resolved = resolve_current_sources(self.current_sources, component, stack, nets)
-        return resolved, nets
+        named = {
+            net.members: net.name for net in self._electrical_nets(geometry, stack)
+        }
+        renamed = {net.name: named.get(net.members, net.name) for net in nets}
+        return (
+            [replace(source, net=renamed[source.net]) for source in resolved],
+            [replace(net, name=renamed[net.name]) for net in nets],
+        )
 
     def resolve_current_sources(self) -> list[ResolvedCurrentSource]:
         """Show the sheet, Direction and net of each source, without meshing.
@@ -314,9 +327,7 @@ class MagnetostaticSim(_PalaceSimBase):
                 errors.append(str(error))
             else:
                 driven = {source.net for source in resolved}
-                screening = self._screening_names(
-                    [net for net in nets if net.name not in driven], geometry, stack
-                )
+                screening = [net.name for net in nets if net.name not in driven]
                 if screening:
                     warnings.append(
                         f"Conductors {screening} carry no current source. They "
@@ -348,20 +359,6 @@ class MagnetostaticSim(_PalaceSimBase):
         geometry = extracted[1] if isinstance(extracted, tuple) else None
         warnings.extend(self._airbox_warnings(geometry))
         return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
-
-    def _screening_names(
-        self, screening: list[Net], geometry: GeometryData, stack: LayerStack
-    ) -> list[str]:
-        """Name the nets that carry no source as :meth:`nets` names them.
-
-        The nets the sources resolve on also take non-electrical ports, which
-        only changes their names; a net is matched by its shapes, and keeps
-        its all-port name when :meth:`nets` has no net with the same shapes.
-        """
-        named = {
-            net.members: net.name for net in self._electrical_nets(geometry, stack)
-        }
-        return [named.get(net.members, net.name) for net in screening]
 
     def _airbox_warnings(self, geometry: GeometryData | None) -> list[str]:
         """Warn when the outer wall is close enough to bias the inductance."""

@@ -222,7 +222,7 @@ def test_gsim_matches_a_hand_written_palace_config(forward, standalone) -> None:
 
 
 def test_the_stacked_pair_couples_positively(forward) -> None:
-    assert 0.2 < forward[0].coupling("A", "B") < 0.5  # k ~ 0.34 (05 sec. 4.3)
+    assert 0.2 < forward[0].coupling("A", "B") < 0.5  # k ~ 0.34
 
 
 # ---------------------------------------------------------------------------

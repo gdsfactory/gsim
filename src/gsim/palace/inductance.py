@@ -161,7 +161,10 @@ class InductanceMatrix:
             rtol: Tolerance. Reciprocity, energy sign and coupling are judged
                 on the coupling matrix ``k_ij = M_ij / sqrt(M_ii M_jj)``, so a
                 weak mutual next to a large self inductance is judged on its
-                own scale; the stored energy is compared per source.
+                own scale; the stored energy is compared per source. The scale
+                cuts both ways: at the default ``1e-3``, a mutual with ``k`` near
+                0.01 passes with up to about 10 % between ``M_ij`` and ``M_ji``.
+                Compare ``matrix`` directly to judge a weak mutual on its own.
         """
         values = {
             "the inductance matrix": self.matrix,

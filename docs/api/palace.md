@@ -370,6 +370,8 @@ assert not inductance.problems()
   side-by-side leads that point the same way (the two leads of a coil); the sheet then
   spans the gap between the inner edges of the leads. Both ports sit on one conductor
   layer, inferred from their GDS layer unless `layer=` is given.
+- **The gap is part of the loop.** The sheet takes the place of the metal across the
+  gap, so the gap width changes the inductance. Keep it small against the loop.
 - **Sign convention.** A unit current enters the conductor at `plus_port` and leaves it
   at `minus_port`. A mutual inductance is positive when the two loops' fluxes add.
   Swapping `plus_port` and `minus_port` of one source flips the sign of its row and
@@ -382,9 +384,8 @@ assert not inductance.problems()
   warns about each and the component should leave it out. The generic
   `gf.components.inductor` has an unconnected metal1 underpass that triggers this
   warning.
-- **Net names.** `ResolvedCurrentSource.net` names the net from all component ports,
-  whatever their type (for example `'o1+o2+P1+P2'`), while `sim.nets()` uses the
-  electrical ports only (`'net1'` for the same metal).
+- **Net names.** `ResolvedCurrentSource.net` is the name `sim.nets()` gives that metal,
+  so it is named by the electrical ports only, even when a source sits on optical ports.
 - **External inductance.** Conductors are perfect conductors, as Palace's magnetostatic
   solver requires: the current flows on their surfaces, so the matrix is the
   high-frequency external inductance, without internal or kinetic inductance.

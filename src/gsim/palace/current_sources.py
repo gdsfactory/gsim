@@ -44,6 +44,7 @@ class ResolvedCurrentSource:
         direction: Palace ``Direction`` of the current in the sheet, the
             cardinal direction from the minus port to the plus port.
         net: Name of the net that joins the two ports (the return path).
+            ``MagnetostaticSim`` reports the name ``sim.nets()`` gives it.
         plus_port: Port where the current enters the conductor.
         minus_port: Port where the current leaves the conductor.
     """
