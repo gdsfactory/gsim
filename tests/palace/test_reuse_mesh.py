@@ -19,6 +19,8 @@ from unittest.mock import Mock
 
 import gdsfactory as gf
 import pytest
+from gdsfactory.technology import LayerLevel
+from gdsfactory.technology import LayerStack as GfLayerStack
 
 from gsim import gcloud
 from gsim.common.stack import LayerStack
@@ -1355,25 +1357,32 @@ def _build_from_options(resolved: dict) -> LayerStack:
 
 
 @pytest.fixture
-def _fake_pdk(monkeypatch) -> None:
-    """Patch the PDK-authoritative chain to build the generic stack."""
+def fake_pdk(monkeypatch) -> list:
+    """Patch the PDK-authoritative chain to build the generic stack.
 
-    def _resolve(_component=None, **options):
+    Returns the list of components the resolver received.
+    """
+    components: list = []
+
+    def _resolve(component=None, **options):
+        components.append(component)
         return options
 
     monkeypatch.setattr("gsim.common.pdk.resolve_layer_stack", _resolve)
     monkeypatch.setattr(
         "gsim.palace.stack.build_palace_layer_stack", _build_from_options
     )
+    return components
 
 
 @pytest.fixture
-def authoritative_eigen(make_sim, _fake_pdk, fake_gmsh, tmp_path) -> EigenmodeSim:
+def authoritative_eigen(make_sim, fake_pdk, fake_gmsh, tmp_path) -> EigenmodeSim:
     """An eigenmode sim on a PDK-authoritative stack, meshed by the real ``mesh()``."""
     sim = make_sim(EigenmodeSim, tmp_path / "eigen")
     sim.set_stack(pdk_authoritative=True)
     sim.mesh(verbose=False)
     assert fake_gmsh.calls == 1
+    assert fake_pdk  # mesh() resolved through the authoritative path
     return sim
 
 
@@ -1450,6 +1459,84 @@ def test_activating_another_pdk_is_refused_at_write_config(
     monkeypatch.setattr(
         "gsim.palace.stack.build_palace_layer_stack", _build_from_another_pdk
     )
+
+    with pytest.raises(ValueError, match=re.escape("stack layer 'm2'")):
+        receiver.write_config(validate_mesh=False)
+
+
+def test_reuse_resolves_against_the_receivers_own_component(
+    authoritative_eigen, fake_pdk, make_sim, tmp_path
+) -> None:
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    receiver.reuse_mesh(authoritative_eigen)
+
+    assert fake_pdk[-1] is receiver.geometry.component
+    assert fake_pdk[-1] is not authoritative_eigen.geometry.component
+
+
+@pytest.mark.usefixtures("fake_pdk")
+def test_airbox_only_authoritative_source_is_reused(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """No dielectric regions: the resolver accepts the copied airbox settings."""
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.set_stack(pdk_authoritative=True, dielectrics=[])
+    _set_an_airbox(source)
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    receiver.reuse_mesh(source)
+
+    assert receiver.write_config(validate_mesh=False).is_file()
+
+
+def _minimal_pdk(name: str, m2_zmin: float) -> gf.Pdk:
+    """A real PDK with the layers of the layout, and no reviewed overlay."""
+    return gf.Pdk(
+        name=name,
+        layer_stack=GfLayerStack(
+            layers={
+                "m1": LayerLevel(
+                    layer=(1, 0), thickness=1.0, zmin=0.0, material="aluminum"
+                ),
+                "m2": LayerLevel(
+                    layer=(2, 0), thickness=1.0, zmin=m2_zmin, material="aluminum"
+                ),
+            }
+        ),
+    )
+
+
+@pytest.fixture
+def _restores_active_pdk(component):  # noqa: ARG001 - activates the layout's PDK first
+    """Activate the previous PDK again after the test."""
+    previous = gf.get_active_pdk()
+    yield
+    previous.activate()
+
+
+@pytest.mark.usefixtures("_restores_active_pdk")
+def test_real_pdk_stack_is_reused_and_another_pdk_is_refused(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """The real resolver rebuilds the same stack, until another PDK is active."""
+    _minimal_pdk("reuse_mesh_a", m2_zmin=2.0).activate()
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.set_stack(
+        pdk_authoritative=True,
+        dielectrics=[{"name": "ox", "material": "sio2", "zmin": -2.0, "zmax": 5.0}],
+    )
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    receiver.reuse_mesh(source)
+
+    assert receiver.write_config(validate_mesh=False).is_file()
+
+    _minimal_pdk("reuse_mesh_b", m2_zmin=2.5).activate()
 
     with pytest.raises(ValueError, match=re.escape("stack layer 'm2'")):
         receiver.write_config(validate_mesh=False)

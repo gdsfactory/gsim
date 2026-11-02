@@ -2871,13 +2871,14 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 f"The source {source_name} has no record of the inputs its mesh "
                 "was made from. Call mesh() on it first."
             )
+        component_copy = None if geometry is None else geometry.component
         current = mesh_inputs_fingerprint(
-            component=None if geometry is None else geometry.component,
+            component=component_copy,
             stack=_resolve_layer_stack(
                 stack,
                 stack_kwargs,
                 materials,
-                component=None if geometry is None else geometry.component,
+                component=component_copy,
                 airbox_config=airbox_config,
             ),
             airbox_config=airbox_config or {},
