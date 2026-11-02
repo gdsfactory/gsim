@@ -1339,3 +1339,117 @@ def test_default_driven_receiver_writes_an_absorbing_boundary(
     outer = meshed_eigen.mesh_groups["boundary_surfaces"]["absorbing"]["phys_group"]
     assert config["Boundaries"]["Absorbing"]["Attributes"] == [outer]
     assert _excitations(config) == [1, False]
+
+
+# ----- PDK-authoritative stacks ------------------------------------------------------
+
+
+def _build_from_options(resolved: dict) -> LayerStack:
+    """The generic stack, with the options a PDK resolver would apply."""
+    built = generic_stack()
+    if resolved["dielectrics"] is not None:
+        built.dielectrics = [dict(region) for region in resolved["dielectrics"]]
+    for layer, role in (resolved["role_overrides"] or {}).items():
+        built.layers[layer].layer_type = role
+    return built
+
+
+@pytest.fixture
+def _fake_pdk(monkeypatch) -> None:
+    """Patch the PDK-authoritative chain to build the generic stack."""
+
+    def _resolve(_component=None, **options):
+        return options
+
+    monkeypatch.setattr("gsim.common.pdk.resolve_layer_stack", _resolve)
+    monkeypatch.setattr(
+        "gsim.palace.stack.build_palace_layer_stack", _build_from_options
+    )
+
+
+@pytest.fixture
+def authoritative_eigen(make_sim, _fake_pdk, fake_gmsh, tmp_path) -> EigenmodeSim:
+    """An eigenmode sim on a PDK-authoritative stack, meshed by the real ``mesh()``."""
+    sim = make_sim(EigenmodeSim, tmp_path / "eigen")
+    sim.set_stack(pdk_authoritative=True)
+    sim.mesh(verbose=False)
+    assert fake_gmsh.calls == 1
+    return sim
+
+
+CHANGED_PDK_OPTIONS = [
+    (
+        {
+            "dielectrics": [
+                {"name": "ox", "zmin": -3.0, "zmax": 5.0, "material": "sio2"}
+            ]
+        },
+        "stack dielectric regions",
+    ),
+    ({"role_overrides": {"v1": "conductor"}}, "stack layer 'v1'"),
+]
+
+
+def test_authoritative_source_is_reused_without_gmsh(
+    authoritative_eigen, make_sim, fake_gmsh, tmp_path
+) -> None:
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    receiver.reuse_mesh(authoritative_eigen)
+
+    assert receiver._stack_kwargs == authoritative_eigen._stack_kwargs
+    assert receiver._stack_kwargs is not authoritative_eigen._stack_kwargs
+    assert receiver._stack_kwargs["pdk_authoritative"] is True
+    assert receiver.write_config(validate_mesh=False).is_file()
+    assert fake_gmsh.calls == 1
+
+
+@pytest.mark.parametrize(("options", "label"), CHANGED_PDK_OPTIONS)
+def test_changed_pdk_option_on_the_receiver_is_refused_at_write_config(
+    options, label, authoritative_eigen, make_sim, fake_gmsh, tmp_path
+) -> None:
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(authoritative_eigen)
+
+    receiver.set_stack(pdk_authoritative=True, **options)
+
+    with pytest.raises(ValueError, match=re.escape(label)):
+        receiver.write_config(validate_mesh=False)
+    assert not (tmp_path / "driven" / "config.json").exists()
+
+
+@pytest.mark.parametrize(("options", "label"), CHANGED_PDK_OPTIONS)
+def test_changed_pdk_option_on_the_source_refuses_reuse(
+    options, label, authoritative_eigen, make_sim, fake_gmsh, tmp_path
+) -> None:
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    authoritative_eigen.set_stack(pdk_authoritative=True, **options)
+
+    with pytest.raises(ValueError, match="changed after its mesh was made") as error:
+        receiver.reuse_mesh(authoritative_eigen)
+    assert label in str(error.value)
+    assert receiver._last_mesh_result is None
+
+
+def test_activating_another_pdk_is_refused_at_write_config(
+    authoritative_eigen, make_sim, fake_gmsh, tmp_path, monkeypatch
+) -> None:
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(authoritative_eigen)
+
+    def _build_from_another_pdk(resolved: dict) -> LayerStack:
+        built = _build_from_options(resolved)
+        built.layers["m2"].zmax = 3.5
+        return built
+
+    monkeypatch.setattr(
+        "gsim.palace.stack.build_palace_layer_stack", _build_from_another_pdk
+    )
+
+    with pytest.raises(ValueError, match=re.escape("stack layer 'm2'")):
+        receiver.write_config(validate_mesh=False)

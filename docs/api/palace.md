@@ -509,6 +509,8 @@ airbox, PEC blocks, the symmetry plane and the port geometry (kind, layers,
 length, offset). Each `write_config()` of a receiver checks these and raises
 `ValueError` naming what changed. Undo the change, call `mesh()` on the
 receiver to mesh its current state, or call `reuse_mesh(source)` again.
+A stack from `set_stack(pdk_authoritative=True)` is rebuilt from the active PDK
+at each check, so activating another PDK counts as a change of the stack.
 On a receiver that already holds a reused mesh, `reuse_mesh` takes the port
 geometry and kind back from the source: each port the source declares keeps the
 receiver's excitation, impedance and R/L/C, and ports the source lacks are
