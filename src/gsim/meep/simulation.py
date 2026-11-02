@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 _AUTO_Z_PADDING = 0.5
 _FIBER_FLUX_OFFSET = 0.3
 _AIR_ONLY_STACK_WARNING = (
-    "PDK-authoritative stack has no bulk dielectric region; the Meep background "
+    "PDK-authoritative stack has no bulk dielectric region; the FDTD background "
     "outside drawn polygons is air, and PDK levels without polygons (such as "
-    "wafer-level box or cladding) add no material. Pass dielectrics=[...] to "
+    "wafer-level box or cladding) add no FDTD material. Pass dielectrics=[...] to "
     "set_stack() to model them, or an explicit air region if air is intended."
 )
 
@@ -341,6 +341,7 @@ class Simulation(CloudJobMixin, BaseModel):
     _z_crop_source_stack: Any | None = PrivateAttr(default=None)
     _last_cropped_stack: Any | None = PrivateAttr(default=None)
     _resolved_z_bounds: tuple[float, float] | None = PrivateAttr(default=None)
+    _air_only_warned: bool = PrivateAttr(default=False)
 
     # Extra hints forwarded into the config JSON (not part of the schema).
     _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -388,13 +389,13 @@ class Simulation(CloudJobMixin, BaseModel):
         every declared layer keeps its PDK z-extent/material/mesh_order, no
         synthetic oxide or substrate is inserted, and unknown materials raise.
 
-        The Meep background outside drawn polygons is air, or
-        ``mode_solver.background_material`` on mode-solve paths.  PDK levels
+        In FDTD the background outside drawn polygons is air, and PDK levels
         without polygons, such as a wafer-level box or cladding, add no material,
         so a PDK with no reviewed overlay leaves drawn features in air unless
-        ``dielectrics`` declares the bulk regions.  Resolving such a stack logs a
-        warning; an explicit air region declares that air is intended and
-        silences it.
+        ``dielectrics`` declares the bulk regions.  :meth:`build_config` logs a
+        warning for such a stack; an explicit air region declares that air is
+        intended and silences it.  Mode solves fill levels without polygons
+        across the cell, so this does not apply to them.
 
         Args:
             stack: Pre-built :class:`gsim.common.stack.LayerStack`.  When given,
@@ -424,6 +425,7 @@ class Simulation(CloudJobMixin, BaseModel):
             self.geometry.stack = stack
             self._stack_kwargs = {}
             self._authoritative_resolved = None
+            self._air_only_warned = False
             return stack
 
         if pdk_authoritative:
@@ -454,6 +456,7 @@ class Simulation(CloudJobMixin, BaseModel):
 
         self.geometry.stack = None
         self._authoritative_resolved = None
+        self._air_only_warned = False
         return self
 
     @field_validator("materials", mode="before")
@@ -604,9 +607,7 @@ class Simulation(CloudJobMixin, BaseModel):
             warnings_list.append(
                 "No stack configured. Will use active PDK with defaults."
             )
-        if self.mode_solver.background_material == "air" and (
-            self._has_air_only_stack()
-        ):
+        if self._has_air_only_stack():
             warnings_list.append(_AIR_ONLY_STACK_WARNING)
 
         # The active stopping mode is information, not a problem
@@ -649,13 +650,8 @@ class Simulation(CloudJobMixin, BaseModel):
             return False
         return bool(stack.simulation.get("pdk_authoritative")) and not stack.dielectrics
 
-    def _ensure_stack(self, *, background_material: str = "air") -> None:
-        """Lazily resolve the layer stack if not yet built.
-
-        Args:
-            background_material: Default medium of the caller's solver.  The
-                air-only warning is logged only when this is air.
-        """
+    def _ensure_stack(self) -> None:
+        """Lazily resolve the layer stack if not yet built."""
         if self.geometry.stack is not None:
             return
 
@@ -673,8 +669,6 @@ class Simulation(CloudJobMixin, BaseModel):
             )
             self._authoritative_resolved = resolved
             self.geometry.stack = build_layer_stack(resolved, backend="meep")
-            if background_material == "air" and self._has_air_only_stack():
-                logger.warning(_AIR_ONLY_STACK_WARNING)
             return
 
         from gsim.common.stack import get_stack
@@ -1163,8 +1157,7 @@ class Simulation(CloudJobMixin, BaseModel):
         """
         from gsim.meep.materials import resolve_materials
 
-        # The mode solver uses this as its default medium, unlike build_config().
-        self._ensure_stack(background_material=self.mode_solver.background_material)
+        self._ensure_stack()
         stack = self.geometry.stack
         if stack is None:
             raise ValueError("Stack resolution failed.")
@@ -1529,6 +1522,12 @@ class Simulation(CloudJobMixin, BaseModel):
                     "Explicit domain.z_bounds requires an active Z axis (3D or "
                     "XZ 2D). Use solver.z_cut to choose an XY slice."
                 )
+
+        # Here, not in _ensure_stack: mode solves share that path but fill levels
+        # without polygons, and a crop can remove the last region.
+        if self._has_air_only_stack() and not self._air_only_warned:
+            logger.warning(_AIR_ONLY_STACK_WARNING)
+            self._air_only_warned = True
 
         import gdsfactory as gf
 

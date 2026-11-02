@@ -290,7 +290,7 @@ def test_air_only_stack_warns_once_and_keeps_config_empty(
     assert result.config.dielectrics == []
     messages = _air_only_warnings(caplog)
     assert len(messages) == 1
-    assert "background outside drawn polygons is air" in messages[0]
+    assert "FDTD background outside drawn polygons is air" in messages[0]
     assert "levels without polygons" in messages[0]
     assert "dielectrics=[...]" in messages[0]
     assert "explicit air region" in messages[0]
@@ -311,18 +311,6 @@ def test_air_only_warning_is_not_repeated_until_set_stack_rearms_it(
         sim.set_stack(pdk_authoritative=True, pdk=pdk)
         sim.build_config()
         assert len(_air_only_warnings(caplog)) == 2
-
-
-@pytest.mark.usefixtures("_auth_pdk_active")
-def test_air_only_warning_reaches_the_mode_solver_path(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    sim = _simulation(gf.get_active_pdk())
-
-    with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
-        sim._resolve_stack_and_materials(wavelength=1.55)
-
-    assert len(_air_only_warnings(caplog)) == 1
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
@@ -394,7 +382,9 @@ def test_legacy_stack_does_not_warn_about_air_only_background(
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
-def test_validate_config_reports_prebuilt_authoritative_stack_without_regions() -> None:
+def test_prebuilt_authoritative_stack_without_regions_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from gsim.common.pdk import build_layer_stack, resolve_layer_stack
 
     pdk = gf.get_active_pdk()
@@ -406,9 +396,11 @@ def test_validate_config_reports_prebuilt_authoritative_stack_without_regions() 
     sim = _authoritative_sim(pdk)
     sim.set_stack(stack=prebuilt)
 
-    warnings = sim.validate_config().warnings
-    assert len(warnings) == 1
-    assert "no bulk dielectric region" in warnings[0]
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
+        sim.build_config()
+
+    assert len(_air_only_warnings(caplog)) == 1
+    assert sim.validate_config().warnings == _air_only_warnings(caplog)
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
@@ -523,12 +515,16 @@ def test_validate_config_clears_air_only_warning_when_region_is_added_in_place()
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
-def test_non_air_mode_background_silences_air_only_warning_on_mode_path(
+@pytest.mark.parametrize("background", ["air", "SiO2"])
+def test_mode_solver_config_does_not_log_the_fdtd_air_only_warning(
     caplog: pytest.LogCaptureFixture,
     tmp_path,
+    background: str,
 ) -> None:
+    # The mode solver fills levels without polygons across the cell, so the
+    # warning's claim that they add no material would be false here.
     sim = _simulation(gf.get_active_pdk())
-    sim.mode_solver.background_material = "SiO2"
+    sim.mode_solver.background_material = background
     sim.mode_solver.wavelengths = [1.55]
 
     with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
@@ -537,24 +533,46 @@ def test_non_air_mode_background_silences_air_only_warning_on_mode_path(
     payload = json.loads(
         (output_dir / "mode_solver_config.json").read_text(encoding="utf8")
     )
-    assert payload["background_material"] == "SiO2"
+    assert payload["background_material"] == background
     assert _air_only_warnings(caplog) == []
-    assert sim.validate_config().warnings == []
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
-def test_air_mode_background_keeps_air_only_warning_on_mode_path(
+@pytest.mark.parametrize("background", ["air", "SiO2"])
+def test_build_config_warns_after_a_mode_config_resolved_the_stack(
     caplog: pytest.LogCaptureFixture,
     tmp_path,
+    background: str,
 ) -> None:
     sim = _simulation(gf.get_active_pdk())
+    sim.mode_solver.background_material = background
     sim.mode_solver.wavelengths = [1.55]
+    sim.write_mode_solver_config(tmp_path / "modes")
 
     with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
-        sim.write_mode_solver_config(tmp_path / "modes")
+        result = sim.build_config()
 
+    assert result.config.background_material == "air"
+    assert result.config.dielectrics == []
     assert len(_air_only_warnings(caplog)) == 1
     assert sim.validate_config().warnings == _air_only_warnings(caplog)
+
+
+@pytest.mark.usefixtures("_auth_pdk_active")
+def test_build_config_warns_when_a_crop_removes_every_region(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sim = _simulation(
+        gf.get_active_pdk(),
+        dielectrics=[{"name": "top", "material": "SiO2", "zmin": 3.0, "zmax": 4.0}],
+    )
+    sim.domain.z_bounds = (-1.0, 1.0)
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
+        result = sim.build_config()
+
+    assert result.config.dielectrics == []
+    assert len(_air_only_warnings(caplog)) == 1
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
