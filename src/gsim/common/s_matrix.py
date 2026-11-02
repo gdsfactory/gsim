@@ -1,8 +1,9 @@
 """Solver-independent S-matrix: export to a SAX model and to Touchstone.
 
-Each solver builder (``gsim.fdtd.s_matrix``) turns its results into one
-:class:`SMatrixRun` per run and hands them to :func:`assemble_s_matrix`, which
-applies the shared refusals and assumptions and returns an :class:`SMatrix`.
+Each solver builder (``gsim.fdtd.s_matrix``, ``gsim.meep.s_matrix``) turns its
+results into one :class:`SMatrixRun` per run and hands them to
+:func:`assemble_s_matrix`, which applies the shared refusals and assumptions and
+returns an :class:`SMatrix`.
 
 Inside gsim an S-matrix is stored as ``s[f, receive, source]`` with time
 convention exp(+jwt). Each boundary converts on its own side:

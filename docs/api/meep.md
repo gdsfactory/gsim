@@ -67,3 +67,23 @@ port layer; automatic Z cropping currently follows one optical reference layer.
 ## Results
 
 - [`SParameterResult`][gsim.meep.SParameterResult]
+- [`s_matrix`][gsim.meep.s_matrix]
+
+### Export to SAX and Touchstone
+
+[`s_matrix`][gsim.meep.s_matrix] builds an [`SMatrix`][gsim.common.s_matrix.SMatrix] from one result per excited port, in
+the same way as the [GDSFactory FDTD export](fdtd.md#export-to-sax-and-touchstone), which describes the assumptions,
+conventions and limits.
+
+```python
+from gsim.meep import s_matrix
+
+matrix = s_matrix([result_o1, result_o2], port_names=["o1", "o2"])
+model = matrix.sax_model()
+matrix.write_touchstone("device")
+```
+
+Meep's result file numbers its ports, so pass `port_names` in port order, or the entries are named `port_1`, `port_2`.
+Meep uses exp(-iωt), and the values are conjugated so that `matrix.s` and Touchstone files hold exp(+jωt). The phase
+reference of the source port's monitor is offset from the port center, and gsim does not de-embed it. Fiber-source
+results (`S10`) are normalized to launched flux, not to a port mode, so they are refused.

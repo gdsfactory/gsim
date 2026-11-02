@@ -290,6 +290,70 @@ Simulation setup views remain separate from these result plots: `sim.plot_*()`
 inspects the submitted geometry and mesh, while `result.plot*()` displays solver
 output.
 
+### Export to SAX and Touchstone
+
+One run excites one port, so it measures one column of the S-matrix. Run a source at each port and combine the results
+with [`s_matrix`][gsim.fdtd.s_matrix]:
+
+```python
+import sax
+
+result_o1 = sim.run(check_cache=True)
+sim.source(port="o2", wavelength_um=1.55, wavelength_span_um=0.1, num_wavelengths=101)
+result_o2 = sim.run(check_cache=True)
+
+matrix = fdtd.s_matrix([result_o1, result_o2])
+
+model = matrix.sax_model()
+circuit, _ = sax.circuit(
+    netlist={
+        "instances": {"arm": "dut", "delay": "straight"},
+        "connections": {"arm,o2": "delay,in0"},
+        "ports": {"in": "arm,o1", "out": "delay,out0"},
+    },
+    models={"dut": model, "straight": sax.models.straight},
+)
+transmission = circuit(wl=1.55)["in", "out"]
+
+matrix.write_touchstone("device")  # device.s2p
+```
+
+With fewer runs than ports, [`s_matrix`][gsim.fdtd.s_matrix] raises and lists the entries no run measured. SAX reads an
+absent entry as zero, so you state each assumption explicitly:
+
+```python
+matrix = fdtd.s_matrix(
+    result_o1,
+    assume_reciprocal=True,  # S(o1,o2) copied from the measured S(o2,o1)
+    assume_unmeasured_zero=True,  # what is left, here S(o2,o2), set to zero
+)
+matrix.measured  # False for every assumed entry
+```
+
+Runs must share their ports and wavelengths. Samples below the source noise floor are dropped, with a warning.
+
+The model takes `wl` in micrometers and covers the simulated band only: a wavelength outside it raises. It interpolates
+magnitude and unwrapped phase, so sample finely enough that phase changes by less than pi between wavelengths. It
+computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
+
+The two exports use different conventions:
+
+| Where | Entry for transmission from `o1` to `o2` | Time convention |
+| --- | --- | --- |
+| `result.s_parameters`, `matrix.s`, Touchstone | `S(o2,o1)` (receive, source) | exp(+jωt), phase falls with length |
+| `sax_model()` | `("o1", "o2")` (in, out) | exp(-iωt), phase rises with length, as `sax.models.straight` |
+
+`sax.parsers.parse_touchstone` keeps the phase sign of the file and reads `s[i, j]` as (in, out), so a file written here
+does not compose correctly with SAX's photonic models that way. Use `sax_model()` to reach SAX.
+
+**Time convention of the solver.** gsim takes the solver's values as exp(+jωt). This is inferred from the solver's
+source spectrum and not stated by the solver. [`s_matrix`][gsim.fdtd.s_matrix] warns if the strongest transmission has a
+non-positive group delay. On a grid too coarse to unwrap phase, this check can stay silent even when the sign is wrong,
+so silence is not proof.
+
+Phases are referenced where the solver's port monitors sit, and gsim does not de-embed them. The `z0` argument of
+`write_touchstone` only fills the file header, because the S-parameters are normalized per mode.
+
 ## API reference
 
 - [`Simulation`][gsim.fdtd.Simulation]
@@ -299,3 +363,4 @@ output.
 - [`GaussianBeamSource`][gsim.fdtd.GaussianBeamSource]
 - [`PlaneMonitor`][gsim.fdtd.PlaneMonitor]
 - [`FDTDResult`][gsim.fdtd.FDTDResult]
+- [`s_matrix`][gsim.fdtd.s_matrix]
