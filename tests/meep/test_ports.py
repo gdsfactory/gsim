@@ -220,8 +220,17 @@ class TestPerPortVerticalGeometry:
         component = _component([("o1", (174, 0))], drawn_layers=[(174, 0)])
         stack = LayerStack(layers={"core": _layer("core", (171, 0), 0.0, 0.49, "si")})
 
-        with pytest.raises(ValueError, match=r"Expand domain\.z_bounds"):
-            extract_port_info(component, stack, port_margin=0.5)
+        with pytest.raises(ValueError) as excinfo:
+            extract_port_info(component, stack, port_margin=0.5, stack_is_cropped=True)
+
+        assert str(excinfo.value) == (
+            "Port 'o1' uses drawn layer (174, 0), which has no entry in the active "
+            "simulation stack. Stack layers: core (171, 0). Expand domain.z_bounds "
+            "only if a crop removed the layer. If the layer is physical material, "
+            "add a LayerLevel to the PDK LayerStack or pass a stack that includes "
+            "it with set_stack(stack=...). If it is only a marker, move the port "
+            "to a stack layer."
+        )
 
     def test_drawn_port_layer_missing_from_stack_says_how_to_fix_it(self):
         from gsim.common.stack import LayerStack
@@ -232,12 +241,13 @@ class TestPerPortVerticalGeometry:
         with pytest.raises(ValueError) as excinfo:
             extract_port_info(component, stack, port_margin=0.5)
 
+        assert "z_bounds" not in str(excinfo.value)
         assert str(excinfo.value) == (
             "Port 'o1' uses drawn layer (174, 0), which has no entry in the active "
-            "simulation stack. Stack layers: core (171, 0). Expand domain.z_bounds "
-            "only if a crop removed the layer. Otherwise add a LayerLevel to the PDK "
-            "LayerStack, pass a stack that includes it with set_stack(stack=...), or "
-            "move the port to a stack layer."
+            "simulation stack. Stack layers: core (171, 0). If the layer is physical "
+            "material, add a LayerLevel to the PDK LayerStack or pass a stack that "
+            "includes it with set_stack(stack=...). If it is only a marker, move the "
+            "port to a stack layer."
         )
 
     def test_missing_port_layer_error_reports_an_empty_stack(self):
@@ -245,7 +255,7 @@ class TestPerPortVerticalGeometry:
 
         component = _component([("o1", (174, 0))], drawn_layers=[(174, 0)])
 
-        with pytest.raises(ValueError, match=r"Stack layers: none\. Expand"):
+        with pytest.raises(ValueError, match=r"Stack layers: none\. If the layer"):
             extract_port_info(component, LayerStack(layers={}), port_margin=0.5)
 
     def test_unambiguous_drawn_layer_fallback(self, caplog):
@@ -337,8 +347,52 @@ def test_build_config_reports_port_on_undeclared_drawn_layer(undeclared_layer_pd
 
     assert str(excinfo.value) == (
         "Port 'o1' uses drawn layer (77, 0), which has no entry in the active "
-        "simulation stack. Stack layers: core (1, 0), metal (2, 0). Expand "
-        "domain.z_bounds only if a crop removed the layer. Otherwise add a "
-        "LayerLevel to the PDK LayerStack, pass a stack that includes it with "
-        "set_stack(stack=...), or move the port to a stack layer."
+        "simulation stack. Stack layers: core (1, 0), metal (2, 0). If the layer is "
+        "physical material, add a LayerLevel to the PDK LayerStack or pass a stack "
+        "that includes it with set_stack(stack=...). If it is only a marker, move "
+        "the port to a stack layer."
+    )
+
+
+def _simulation_with_port_on_metal(pdk):
+    """Build a 3D simulation whose only port is on the ``metal`` level."""
+    import gdsfactory as gf
+
+    from gsim.meep import Simulation
+
+    component = gf.Component()
+    component.add_polygon([(0, -1), (5, -1), (5, 1), (0, 1)], layer=(1, 0))
+    component.add_polygon([(0, -0.25), (5, -0.25), (5, 0.25), (0, 0.25)], layer=(2, 0))
+    component.add_port(
+        name="o1", center=(0.0, 0.0), orientation=180, width=0.5, layer=(2, 0)
+    )
+
+    sim = Simulation()
+    sim.geometry.component = component
+    sim.set_stack(
+        pdk_authoritative=True,
+        pdk=pdk,
+        dielectrics=[{"name": "box", "material": "SiO2", "zmin": -2.0, "zmax": 0.0}],
+    )
+    sim.source.port = "o1"
+    sim.source.wavelength = 1.55
+    return sim
+
+
+def test_build_config_explicit_xy_bounds_report_port_layer_removed_by_z_crop(
+    undeclared_layer_pdk,
+):
+    sim = _simulation_with_port_on_metal(undeclared_layer_pdk)
+    sim.domain(x_bounds=(-1.0, 6.0), y_bounds=(-2.0, 2.0), z_bounds=(-1.0, 0.25))
+
+    with pytest.raises(ValueError) as excinfo:
+        sim.build_config()
+
+    assert str(excinfo.value) == (
+        "Port 'o1' uses drawn layer (2, 0), which has no entry in the active "
+        "simulation stack. Stack layers: core (1, 0). Expand domain.z_bounds only "
+        "if a crop removed the layer. If the layer is physical material, add a "
+        "LayerLevel to the PDK LayerStack or pass a stack that includes it with "
+        "set_stack(stack=...). If it is only a marker, move the port to a stack "
+        "layer."
     )
