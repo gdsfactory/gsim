@@ -107,9 +107,6 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert "function tetrahedronVolume" in viewer.html
     assert "function largestMaterialGroup" in viewer.html
     assert "function orderedGroupEntries" in viewer.html
-    assert "constopacity=isLargestMaterial?(isSlice?0.55:0.35):1;" in compact_html
-    assert "transparent:isLargestMaterial" in compact_html
-    assert "depthWrite:!isLargestMaterial" in compact_html
     assert 'height="420"' in viewer._repr_html_()
     assert viewer.save(tmp_path / "viewer.html").is_file()
 

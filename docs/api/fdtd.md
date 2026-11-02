@@ -181,6 +181,13 @@ viewer.save("mesh.html")
 
 The interactive 2D viewer includes a slider that moves the plane through the
 mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
+The 3D viewer uses each PDK stack entry's `info["opacity"]` and layer-view
+visibility by default, including hidden parent groups. Stack `info["visible"]`
+overrides layer-view visibility. The derived layer view is preferred, with the
+source layer view as a fallback. A zero opacity starts a layer hidden, with
+normal opacity when enabled in the viewer's layer list. Explicit `show_groups`
+and `hide_groups` override these initial visibility defaults; `hide_groups`
+takes precedence. Entries without display metadata retain the viewer defaults.
 Zooming moves toward the pointer by default; set `zoom_to_cursor=False` to zoom
 toward the view center instead. The same choice is available in the viewer's
 **Zoom toward** controls.

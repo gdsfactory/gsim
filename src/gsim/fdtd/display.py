@@ -1,0 +1,105 @@
+"""PDK display defaults for FDTD physical groups."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from math import isfinite
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from gsim.common.pdk import ResolvedPassivePcell
+
+
+class GroupStyle(TypedDict, total=False):
+    """Initial visibility and surface opacity of a physical group."""
+
+    opacity: float
+    visible: bool
+
+
+def _layer_tuple(layer: Any) -> tuple[int, int] | None:
+    """Return a concrete GDS layer, leaving boolean expressions unmatched."""
+    if isinstance(layer, tuple) and len(layer) == 2:
+        return int(layer[0]), int(layer[1])
+    nested_layer = getattr(layer, "layer", None)
+    datatype = getattr(layer, "datatype", None)
+    if isinstance(nested_layer, int) and isinstance(datatype, int):
+        return nested_layer, datatype
+    if nested_layer is not None:
+        return _layer_tuple(nested_layer)
+    return None
+
+
+def _visibility_by_layer(
+    views: Mapping[str, Any], parent_visible: bool = True
+) -> dict[tuple[int, int], bool]:
+    """Include the visibility of every enclosing layer-view group."""
+    visibility = {}
+    for view in views.values():
+        visible = parent_visible and getattr(view, "visible", True)
+        layer = _layer_tuple(getattr(view, "layer", None))
+        if layer is not None:
+            visibility[layer] = visible
+        visibility.update(
+            _visibility_by_layer(getattr(view, "group_members", {}), visible)
+        )
+    return visibility
+
+
+def normalize_group_styles(styles: Mapping[str, GroupStyle]) -> dict[str, GroupStyle]:
+    """Validate display metadata and make zero-opacity groups toggleable."""
+    normalized = {}
+    for name, style in styles.items():
+        result: GroupStyle = {}
+        if "visible" in style:
+            visible = style["visible"]
+            if not isinstance(visible, bool):
+                raise ValueError(f"Group {name!r} visibility must be a bool")
+            result["visible"] = visible
+        if "opacity" in style:
+            try:
+                opacity = float(style["opacity"])
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Group {name!r} opacity must be between 0 and 1"
+                ) from error
+            if not isfinite(opacity) or not 0 <= opacity <= 1:
+                raise ValueError(f"Group {name!r} opacity must be between 0 and 1")
+            if opacity == 0:
+                # A hidden group must become visible when switched on in the UI.
+                result.update(opacity=1.0, visible=False)
+            else:
+                result["opacity"] = opacity
+        if result:
+            normalized[name] = result
+    return normalized
+
+
+def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, GroupStyle]:
+    """Map native stack and layer-view metadata to mesh physical-group names.
+
+    Stack info.opacity supplies numeric opacity. Stack info.visible overrides
+    the layer view's effective visibility. Derived layers use their derived
+    GDS layer view where present. No display metadata changes simulation inputs.
+    """
+    stack = getattr(resolved, "layer_stack", None)
+    if stack is None:
+        return {}
+    pdk_views = getattr(getattr(resolved, "pdk", None), "layer_views", None)
+    visibility = _visibility_by_layer(getattr(pdk_views, "layer_views", {}))
+    styles: dict[str, GroupStyle] = {}
+    for name, level in stack.layers.items():
+        style: GroupStyle = {}
+        for declared_layer in (level.derived_layer, level.layer):
+            layer = _layer_tuple(declared_layer)
+            if layer is not None and layer in visibility:
+                style["visible"] = visibility[layer]
+                break
+        info = level.info
+        if info.get("visible") is not None:
+            style["visible"] = info["visible"]
+        if info.get("opacity") is not None:
+            style["opacity"] = info["opacity"]
+        if style:
+            styles[name] = style
+    return normalize_group_styles(styles)
