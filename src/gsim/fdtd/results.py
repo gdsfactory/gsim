@@ -536,17 +536,6 @@ def _optional_complex_trace(
     return None if samples is None else ComplexTrace.from_samples(samples, valid)
 
 
-__all__ = [
-    "ComplexTrace",
-    "FDTDResult",
-    "HeatmapResult",
-    "MonitorResults",
-    "PlaneMonitorResult",
-    "PortOutputResults",
-    "SParameterResults",
-]
-
-
 def s_matrix(
     results: FDTDResult | Sequence[FDTDResult],
     *,
@@ -604,3 +593,15 @@ def _s_matrix_run(result: FDTDResult) -> SMatrixRun:
         entries={key: trace.values for key, trace in traces.items()},  # noqa: PD011
         valid=valid,
     )
+
+
+__all__ = [
+    "ComplexTrace",
+    "FDTDResult",
+    "HeatmapResult",
+    "MonitorResults",
+    "PlaneMonitorResult",
+    "PortOutputResults",
+    "SParameterResults",
+    "s_matrix",
+]
