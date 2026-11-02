@@ -36,9 +36,7 @@ def test_impedance_boundary_normalization(target):
             }
         }
     }
-    entries = _resolve_impedance_boundaries(
-        {"_impedance_boundaries": [object(), boundary]}, groups
-    )
+    entries = _resolve_impedance_boundaries([object(), boundary], groups)
     if target == "missing":
         assert entries == []
     else:
