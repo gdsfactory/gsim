@@ -1540,3 +1540,118 @@ def test_real_pdk_stack_is_reused_and_another_pdk_is_refused(
 
     with pytest.raises(ValueError, match=re.escape("stack layer 'm2'")):
         receiver.write_config(validate_mesh=False)
+
+
+# ----- hierarchical layouts ----------------------------------------------------------
+
+
+def _hierarchical_layout() -> tuple[gf.Component, gf.Component]:
+    """The ``_layout`` ports over nested, arrayed, rotated and mirrored cells.
+
+    Returns the layout and the unlocked cell holding its m1 strip, two levels down.
+    """
+    gf.gpdk.PDK.activate()
+    strip = gf.Component()
+    strip.add_polygon([(0, 0), (10, 0), (10, 1), (0, 1)], layer=(1, 0))
+    nested = gf.Component()
+    nested.add_ref(strip)
+
+    pad = gf.Component()
+    pad.add_polygon([(0, 0), (1, 0), (1, 1), (0, 1)], layer=(2, 0))
+    m2 = pad.kcl.layer(2, 0)
+    pad.shapes(m2).insert(gf.kdb.DBox(0, 1.5, 1, 2))
+    pad.shapes(m2).insert(
+        gf.kdb.DPath([gf.kdb.DPoint(0, 2.5), gf.kdb.DPoint(1, 3.5)], 0.2)
+    )
+
+    c = gf.Component()
+    c.add_ref(nested)
+    c.add_ref(pad, columns=3, rows=2, column_pitch=2.0, row_pitch=4.0).move((0, 3))
+    c.add_ref(pad).rotate(30).move((8, 3))
+    c.add_ref(pad).rotate(90).move((14, 3))
+    c.add_ref(pad).mirror_y().move((16, 3))
+    for name, x, orientation in (("o1", 0, 180), ("o2", 10, 0)):
+        c.add_port(
+            name=name,
+            center=(x, 0.5),
+            width=1.0,
+            orientation=orientation,
+            layer=(1, 0),
+            port_type="electrical",
+        )
+    return c, strip
+
+
+def test_hierarchical_source_is_reused_as_a_flat_copy(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    layout, _strip = _hierarchical_layout()
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.set_geometry(layout)
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+
+    receiver.reuse_mesh(source)
+
+    assert receiver.write_config(validate_mesh=False).is_file()
+    assert receiver.component.kdb_cell.child_instances() == 0
+    assert source.component.kdb_cell.child_instances() == 5
+    # 10 um x 1 um, in square database units of 1 nm
+    assert receiver.component.get_region((1, 0)).area() == 10_000_000
+    assert sorted(receiver.component.ports.get_all_named()) == ["o1", "o2"]
+
+
+def test_editing_a_child_cell_of_the_source_does_not_reach_the_receiver(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    layout, strip = _hierarchical_layout()
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.set_geometry(layout)
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(source)
+
+    strip.add_polygon([(0, 6), (2, 6), (2, 7), (0, 7)], layer=(1, 0))
+
+    # the snapshot still matches its mesh; the source no longer does
+    assert receiver.component.get_region((1, 0)).area() == 10_000_000
+    assert receiver.write_config(validate_mesh=False).is_file()
+    late = make_sim(DrivenSim, tmp_path / "late")
+    with pytest.raises(ValueError, match=re.escape("geometry (layout polygons)")):
+        late.reuse_mesh(source)
+
+
+# ----- failures while installing the files -------------------------------------------
+
+
+@pytest.mark.parametrize("failing", ["metadata.json", "palace.msh"])
+def test_failed_install_keeps_the_mesh_and_state_of_the_receiver(
+    failing, make_sim, fake_gmsh, monkeypatch, tmp_path
+) -> None:
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.mesh(verbose=False)
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.mesh(verbose=False)
+    fake_gmsh.allowed = False
+    own_mesh = receiver.mesh_path.read_bytes()
+    assert own_mesh != source.mesh_path.read_bytes()
+    before = _state(receiver)
+    listing = _listing(receiver.output_dir)
+    real_replace = Path.replace
+
+    def _replace(path, target):
+        if Path(target).name == failing:
+            raise OSError("disk full")
+        return real_replace(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", _replace)
+        with pytest.raises(OSError, match="disk full"):
+            receiver.reuse_mesh(source)
+
+    assert _state(receiver) == before
+    assert receiver.mesh_path.read_bytes() == own_mesh
+    assert _listing(receiver.output_dir) == listing
+    assert receiver.write_config(validate_mesh=False).is_file()
