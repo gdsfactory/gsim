@@ -253,6 +253,18 @@ def _resolve_pdk_authoritative_stack(
     return canonical
 
 
+def _flat_copy(component: Component) -> Component:
+    """A copy of a component that shares no cells with it.
+
+    ``Component.copy()`` duplicates the top cell only, so its instances still
+    point at the original child cells. Flattening the copy moves their polygons
+    into it, without merging them. The originals stay as they are.
+    """
+    copied = component.copy()
+    copied.kdb_cell.flatten(False)
+    return copied
+
+
 def _resolve_layer_stack(
     stack: LayerStack | None,
     stack_kwargs: Mapping[str, Any],
@@ -2678,7 +2690,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         Copied from the source, as independent copies that replace what this
         simulation had: the geometry, the stack and its settings, the
         material overrides, the airbox, the PEC blocks, the symmetry plane,
-        ``mesh_config`` and the port declarations. Kept per simulation: the
+        ``mesh_config`` and the port declarations. The geometry copy is flat:
+        it has the source's polygons and ports but no instances, so it shares
+        no cells with the source. Kept per simulation: the
         simulation type, the solver and problem settings, the absorbing
         boundary, refinement, impedance boundaries and the output directory.
 
@@ -2840,7 +2854,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # 2. Independent copies of every mesh input, in locals
         component = source.component
-        geometry = None if component is None else Geometry(component=component.copy())
+        geometry = (
+            None if component is None else Geometry(component=_flat_copy(component))
+        )
         stack = None if source.stack is None else source.stack.model_copy(deep=True)
         stack_kwargs = copy.deepcopy(source._stack_kwargs)
         materials = {k: v.model_copy(deep=True) for k, v in source.materials.items()}
@@ -2901,8 +2917,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         try:
             shutil.copy2(source_mesh, staging / mesh_path.name)
             metadata = write_metadata(mesh_stats, staging, None)
-            (staging / mesh_path.name).replace(mesh_path)
+            # The mesh goes last: a failure before it keeps the mesh the
+            # receiver's state describes, and metadata is outside the cache key
             (staging / METADATA_FILENAME).replace(output_dir / METADATA_FILENAME)
+            (staging / mesh_path.name).replace(mesh_path)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 

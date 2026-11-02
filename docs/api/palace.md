@@ -501,7 +501,8 @@ solver settings and the outer wall stay per simulation: with
 the source's nor nested with it; `reuse_mesh` copies the `.msh` into it.
 
 The copy is a snapshot. Re-meshing or editing the source does not reach the
-receiver; call `reuse_mesh(source)` again to pick up the new mesh.
+receiver; call `reuse_mesh(source)` again to pick up the new mesh. The receiver's
+layout is a flat copy of the source's: same polygons and ports, no instances.
 
 The mesh fixes what it was built from: the layout polygons and component ports,
 the stack layers and dielectric regions, which materials are air-like, the
