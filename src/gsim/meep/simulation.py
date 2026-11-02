@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 _AUTO_Z_PADDING = 0.5
 _FIBER_FLUX_OFFSET = 0.3
+_AIR_ONLY_STACK_WARNING = (
+    "PDK-authoritative stack has no bulk dielectric region; the Meep background "
+    "will be air, and PDK levels without polygons (such as wafer-level box or "
+    "cladding) add no material. Pass dielectrics=[...] to set_stack() to model "
+    "them, or an explicit air region if air is intended."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +388,12 @@ class Simulation(CloudJobMixin, BaseModel):
         every declared layer keeps its PDK z-extent/material/mesh_order, no
         synthetic oxide or substrate is inserted, and unknown materials raise.
 
+        The Meep background is air.  PDK levels without polygons, such as a
+        wafer-level box or cladding, add no material, so a PDK with no reviewed
+        overlay leaves drawn features in air unless ``dielectrics`` declares the
+        bulk regions.  Resolving such a stack logs a warning; an explicit air
+        region declares that air is intended and silences it.
+
         Args:
             stack: Pre-built :class:`gsim.common.stack.LayerStack`.  When given,
                 it is used directly and the remaining keyword arguments are
@@ -584,10 +596,14 @@ class Simulation(CloudJobMixin, BaseModel):
                 "drives the sim — unset source.port, or drop the fiber source."
             )
 
-        if self.geometry.stack is None:
+        if self.geometry.stack is None and not self._stack_kwargs.get(
+            "pdk_authoritative"
+        ):
             warnings_list.append(
                 "No stack configured. Will use active PDK with defaults."
             )
+        if self._has_air_only_stack():
+            warnings_list.append(_AIR_ONLY_STACK_WARNING)
 
         # The active stopping mode is information, not a problem
         info: list[str] = []
@@ -622,6 +638,15 @@ class Simulation(CloudJobMixin, BaseModel):
     # Internal: stack resolution
     # -------------------------------------------------------------------------
 
+    def _has_air_only_stack(self) -> bool:
+        """Return whether the active stack is an air-background PDK resolution."""
+        resolved = self._authoritative_resolved
+        stack = self.geometry.stack
+        if resolved is None or stack is None or resolved.dielectrics:
+            return False
+        # A later ``geometry.stack`` assignment replaces the resolved stack.
+        return stack.simulation.get("stack_hash") == resolved.stack_hash
+
     def _ensure_stack(self) -> None:
         """Lazily resolve the layer stack if not yet built."""
         if self.geometry.stack is not None:
@@ -641,6 +666,8 @@ class Simulation(CloudJobMixin, BaseModel):
             )
             self._authoritative_resolved = resolved
             self.geometry.stack = build_layer_stack(resolved, backend="meep")
+            if self._has_air_only_stack():
+                logger.warning(_AIR_ONLY_STACK_WARNING)
             return
 
         from gsim.common.stack import get_stack
