@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _SPEED_OF_LIGHT_UM_HZ = 299792458.0e6
 _BAND_EDGE_TOLERANCE_UM = 1e-9
+_GRID_RTOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,36 @@ class SMatrix:
     ports: tuple[str, ...]
     s: np.ndarray
     measured: np.ndarray
+
+    def __post_init__(self) -> None:
+        """Hold the stated invariants: every method relies on them."""
+        wavelength_um = np.asarray(self.wavelength_um, dtype=float)
+        ports = _unique_ports(self.ports)
+        s = np.asarray(self.s, dtype=complex)
+        measured = np.asarray(self.measured, dtype=bool)
+        if (
+            wavelength_um.ndim != 1
+            or wavelength_um.size == 0
+            or not (wavelength_um[0] > 0 and np.all(np.diff(wavelength_um) > 0))
+        ):
+            raise ValueError(
+                "wavelength_um must be positive and strictly ascending, got "
+                f"{wavelength_um}."
+            )
+        n_ports = len(ports)
+        if s.shape != (wavelength_um.size, n_ports, n_ports):
+            raise ValueError(
+                f"s has shape {s.shape}, expected "
+                f"{(wavelength_um.size, n_ports, n_ports)}."
+            )
+        if measured.shape != (n_ports, n_ports):
+            raise ValueError(
+                f"measured has shape {measured.shape}, expected {(n_ports, n_ports)}."
+            )
+        object.__setattr__(self, "wavelength_um", wavelength_um)
+        object.__setattr__(self, "ports", ports)
+        object.__setattr__(self, "s", s)
+        object.__setattr__(self, "measured", measured)
 
     @property
     def frequency_hz(self) -> np.ndarray:
@@ -182,17 +213,175 @@ class SMatrix:
         return path
 
 
-def assemble_s_matrix(runs: Sequence[SMatrixRun]) -> SMatrix:
-    """Combine solver runs, each one S-matrix column, into an :class:`SMatrix`."""
-    ports = tuple(runs[0].ports)
-    index = {port: i for i, port in enumerate(ports)}
-    order = np.argsort(runs[0].wavelength_um)
-    wavelength_um = np.asarray(runs[0].wavelength_um, dtype=float)[order]
-    s = np.zeros((wavelength_um.size, len(ports), len(ports)), dtype=complex)
-    measured = np.zeros((len(ports), len(ports)), dtype=bool)
+def assemble_s_matrix(
+    runs: Sequence[SMatrixRun],
+    *,
+    assume_reciprocal: bool = False,
+    assume_unmeasured_zero: bool = False,
+) -> SMatrix:
+    """Combine solver runs, each one S-matrix column, into an :class:`SMatrix`.
+
+    A sample is dropped, with a WARNING giving the count, when any run flags it
+    invalid or any entry is non-finite there. Entries are filled from assumptions
+    only when asked, and each one is logged at INFO and marked False in
+    ``measured``. Filling is opt-in because SAX reads an absent key as zero, so a
+    one-run model would otherwise claim zero reflection and zero backward
+    transmission.
+
+    Args:
+        runs: The runs, on one port list and one wavelength grid.
+        assume_reciprocal: Copy a missing S(a,b) from a measured S(b,a).
+        assume_unmeasured_zero: Set entries that are still missing to zero.
+
+    Returns:
+        The matrix, on ascending wavelength.
+
+    Raises:
+        ValueError: If there are no runs; a run has no S-parameters; port lists or
+            wavelength grids differ (``rtol=1e-9`` after sorting); an entry appears
+            twice, names an unknown port or has the wrong length; every sample is
+            invalid; or an entry is missing and no flag fills it.
+    """
+    wavelength_um, ports, entries, keep = _merge_runs(list(runs))
+    keep = keep & np.all([np.isfinite(v) for v in entries.values()], axis=0)
+    if not keep.any():
+        raise ValueError(
+            f"Every one of the {keep.size} samples is invalid (below the noise floor "
+            "or non-finite), so there is no S-matrix to build."
+        )
+    if not keep.all():
+        logger.warning(
+            "Dropped %d of %d samples flagged invalid or non-finite.",
+            keep.size - np.count_nonzero(keep),
+            keep.size,
+        )
+
+    n_ports = len(ports)
+    s = np.zeros((np.count_nonzero(keep), n_ports, n_ports), dtype=complex)
+    measured = np.zeros((n_ports, n_ports), dtype=bool)
+    for (receive, source), values in entries.items():
+        i, j = ports.index(receive), ports.index(source)
+        s[:, i, j] = values[keep]
+        measured[i, j] = True
+
+    missing = []
+    for i, receive in enumerate(ports):
+        for j, source in enumerate(ports):
+            if measured[i, j]:
+                continue
+            name = _entry_name(receive, source)
+            if assume_reciprocal and measured[j, i]:
+                s[:, i, j] = s[:, j, i]
+                mirror = _entry_name(source, receive)
+                logger.info("Assumed %s = measured %s (reciprocity).", name, mirror)
+            elif assume_unmeasured_zero:
+                logger.info("Assumed %s = 0 (unmeasured).", name)
+            else:
+                missing.append(name)
+    if missing:
+        raise ValueError(
+            f"Missing S-parameters: {', '.join(missing)}. Run a source at the source "
+            "ports of those entries, or state the assumption with "
+            "assume_reciprocal=True (copies a measured mirror entry) and "
+            "assume_unmeasured_zero=True (sets what is left to zero)."
+        )
+    matrix = SMatrix(wavelength_um[keep], ports, s, measured)
+    _warn_if_not_causal(matrix)
+    return matrix
+
+
+def _warn_if_not_causal(matrix: SMatrix) -> None:
+    """Warn when the strongest measured transmission has a non-positive delay.
+
+    In exp(+jwt) a passive device delays its output, so
+    ``tau = -d(unwrapped phase)/d(omega)`` is positive. The check is the one guard
+    on a solver's assumed phase convention, so it only warns.
+    """
+    off_diagonal = matrix.measured & ~np.eye(len(matrix.ports), dtype=bool)
+    if matrix.wavelength_um.size < 3 or not off_diagonal.any():
+        return
+    strength = np.where(off_diagonal, np.abs(matrix.s).sum(axis=0), -1.0)
+    i, j = np.unravel_index(np.argmax(strength), strength.shape)
+    trace = matrix.s[::-1, i, j]
+    magnitude = np.abs(trace)
+    weights = (magnitude[1:] + magnitude[:-1]) / 2
+    if not weights.any():
+        return
+    omega = 2 * np.pi * matrix.frequency_hz[::-1]
+    delays = -np.diff(np.unwrap(np.angle(trace))) / np.diff(omega)
+    tau = float(np.average(delays, weights=weights))
+    if tau <= 0:
+        logger.warning(
+            "%s has a non-positive group delay (%.3g s): the solver's phase convention "
+            "differs from the assumed one, or the sampling is too coarse to unwrap "
+            "phase.",
+            _entry_name(matrix.ports[i], matrix.ports[j]),
+            tau,
+        )
+
+
+def _entry_name(receive: str, source: str) -> str:
+    """Format one entry as gsim names it, ``S(receive,source)``."""
+    return f"S({receive},{source})"
+
+
+def _unique_ports(ports: Sequence[str]) -> tuple[str, ...]:
+    """Return ports as a tuple, refusing a name that would alias two indices."""
+    names = tuple(ports)
+    if len(set(names)) != len(names):
+        raise ValueError(f"Port list {list(names)} has duplicate names.")
+    return names
+
+
+def _merge_runs(
+    runs: list[SMatrixRun],
+) -> tuple[
+    np.ndarray,
+    tuple[str, ...],
+    dict[tuple[str, str], np.ndarray],
+    np.ndarray,
+]:
+    """Refuse runs that do not form one matrix and align them on ascending grid."""
+    if not runs:
+        raise ValueError("Got no results to build an S-matrix from.")
+    ports = _unique_ports(runs[0].ports)
+    reference_um = np.sort(np.asarray(runs[0].wavelength_um, dtype=float))
+    keep = np.ones(reference_um.size, dtype=bool)
+    entries: dict[tuple[str, str], np.ndarray] = {}
     for run in runs:
-        run_order = np.argsort(run.wavelength_um)
-        for (receive, source), values in run.entries.items():
-            s[:, index[receive], index[source]] = np.asarray(values)[run_order]
-            measured[index[receive], index[source]] = True
-    return SMatrix(wavelength_um, ports, s, measured)
+        if not run.entries:
+            raise ValueError(f"{run.label} has no S-parameters.")
+        if tuple(run.ports) != ports:
+            raise ValueError(
+                f"{run.label} has port list {list(run.ports)}, expected {list(ports)}."
+            )
+        wavelength_um = np.asarray(run.wavelength_um, dtype=float)
+        order = np.argsort(wavelength_um)
+        if wavelength_um.shape != reference_um.shape or not np.allclose(
+            wavelength_um[order], reference_um, rtol=_GRID_RTOL, atol=0.0
+        ):
+            raise ValueError(
+                f"{run.label} has a different wavelength grid from {runs[0].label}."
+            )
+        valid = np.asarray(run.valid, dtype=bool)
+        if valid.shape != reference_um.shape:
+            raise ValueError(f"{run.label} has {valid.size} validity flags.")
+        keep &= valid[order]
+        for key, values in run.entries.items():
+            name = _entry_name(*key)
+            unknown = [port for port in key if port not in ports]
+            if unknown:
+                raise ValueError(
+                    f"{run.label}: {name} names {unknown}, not in port list "
+                    f"{list(ports)}."
+                )
+            if key in entries:
+                raise ValueError(f"{name} appears in more than one result.")
+            samples = np.asarray(values, dtype=complex)
+            if samples.shape != reference_um.shape:
+                raise ValueError(
+                    f"{run.label}: {name} has {samples.size} samples, expected "
+                    f"{reference_um.size}."
+                )
+            entries[key] = samples[order]
+    return reference_um, ports, entries, keep
