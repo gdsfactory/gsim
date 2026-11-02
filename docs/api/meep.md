@@ -84,6 +84,13 @@ matrix.write_touchstone("device")
 ```
 
 Meep's result file numbers its ports, so pass `port_names` in port order, or the entries are named `port_1`, `port_2`.
-Meep uses exp(-iωt), and the values are conjugated so that `matrix.s` and Touchstone files hold exp(+jωt). The phase
-reference of the source port's monitor is offset from the port center, and gsim does not de-embed it. Fiber-source
+Meep uses exp(-iωt), and the values are conjugated so that `matrix.s` and Touchstone files hold exp(+jωt). Fiber-source
 results (`S10`) are normalized to launched flux, not to a port mode, so they are refused.
+
+Meep's monitors sit inward from each port center, by `source_port_offset` at non-source ports and by
+`source_port_offset + distance_source_to_monitors` at the source port. So in a matrix merged from several runs, the
+diagonal and off-diagonal entries are referenced to different planes: a reflection's phase differs by
+2·beta·`distance_source_to_monitors`, with beta the mode's propagation constant, from what the transmission entries
+received at that port imply. gsim cannot correct this from the result file, which holds neither the offsets nor the mode
+index. Transmission phases are consistent between runs when the ports share one beta, but do not rely on reflection
+phases in circuits sensitive to them, such as resonators.

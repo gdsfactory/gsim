@@ -250,6 +250,30 @@ def test_touchstone_z0_defaults_to_50_ohm(tmp_path: Path) -> None:
     np.testing.assert_allclose(network.z0, 50.0)
 
 
+@pytest.mark.parametrize(
+    "z0", [0, 0.0, -50.0, 50 + 1j, float("inf"), float("-inf"), float("nan")]
+)
+def test_touchstone_refuses_z0_that_is_not_positive_finite_real(
+    tmp_path: Path, z0: complex
+) -> None:
+    matrix, _ = _non_reciprocal_matrix()
+
+    with pytest.raises(ValueError, match="reference impedance"):
+        matrix.write_touchstone(tmp_path / "device", z0=z0)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_touchstone_accepts_z0_with_zero_imaginary_part(tmp_path: Path) -> None:
+    skrf = pytest.importorskip("skrf")
+    matrix, _ = _non_reciprocal_matrix()
+
+    network = skrf.Network(
+        str(matrix.write_touchstone(tmp_path / "device", z0=75 + 0j))
+    )
+
+    np.testing.assert_allclose(network.z0, 75.0)
+
+
 def test_touchstone_three_ports_keep_matrix_order(tmp_path: Path) -> None:
     skrf = pytest.importorskip("skrf")
     ports = ("a", "b", "c")
@@ -410,6 +434,45 @@ def test_different_port_lists_refused() -> None:
 
     with pytest.raises(ValueError, match="port"):
         assemble_s_matrix([_single_run(), other])
+
+
+def test_reordered_ports_in_a_later_run_give_the_in_order_matrix() -> None:
+    backward = 0.5 * FORWARD
+    entries = {("o2", "o2"): REFLECTION, ("o1", "o2"): backward}
+    in_order = assemble_s_matrix(
+        [_single_run(), _single_run(entries, label="b", ports=("o1", "o2"))]
+    )
+
+    reordered = assemble_s_matrix(
+        [_single_run(), _single_run(entries, label="b", ports=("o2", "o1"))]
+    )
+
+    assert reordered.ports == PORTS
+    np.testing.assert_array_equal(reordered.s, in_order.s)
+    np.testing.assert_array_equal(reordered.measured, in_order.measured)
+    np.testing.assert_array_equal(reordered.s[:, 1, 0], FORWARD)
+    np.testing.assert_array_equal(reordered.s[:, 0, 1], backward)
+
+
+def test_matrix_keeps_the_port_order_of_the_first_run() -> None:
+    backward = 0.5 * FORWARD
+    runs = [
+        _single_run(ports=("o2", "o1")),
+        _single_run({("o2", "o2"): REFLECTION, ("o1", "o2"): backward}, label="b"),
+    ]
+
+    matrix = assemble_s_matrix(runs)
+
+    assert matrix.ports == ("o2", "o1")
+    np.testing.assert_array_equal(matrix.s[:, 0, 1], FORWARD)  # S(o2,o1)
+    np.testing.assert_array_equal(matrix.s[:, 1, 0], backward)  # S(o1,o2)
+
+
+def test_later_run_repeating_a_port_refused() -> None:
+    other = _single_run({("o2", "o2"): REFLECTION}, label="b", ports=("o1", "o2", "o2"))
+
+    with pytest.raises(ValueError, match="duplicate"):
+        assemble_s_matrix([_single_run(), other], assume_unmeasured_zero=True)
 
 
 def test_different_wavelength_grids_refused() -> None:

@@ -28,6 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
+__all__ = ["SMatrix", "SMatrixRun", "assemble_s_matrix"]
+
 logger = logging.getLogger(__name__)
 
 _SPEED_OF_LIGHT_UM_HZ = 299792458.0e6
@@ -182,8 +184,17 @@ class SMatrix:
             The path written.
 
         Raises:
-            ValueError: If the suffix of ``path`` names a different port count.
+            ValueError: If ``z0`` is not a positive finite real number, or the suffix
+                of ``path`` names a different port count.
         """
+        # complex() rather than trusting the annotation: a complex reference
+        # passed at runtime must be refused, not truncated.
+        z_ref = complex(z0)
+        if z_ref.imag != 0.0 or not 0.0 < z_ref.real < np.inf:
+            raise ValueError(
+                "A Touchstone reference impedance is a positive finite real number; "
+                f"got {z_ref}."
+            )
         n_ports = len(self.ports)
         path = Path(path)
         if not re.fullmatch(r"\.s\d+p", path.suffix.lower()):
@@ -198,7 +209,7 @@ class SMatrix:
         import skrf as rf
 
         network = rf.Network(
-            f=self.frequency_hz[::-1], s=self.s[::-1], z0=z0, f_unit="Hz"
+            f=self.frequency_hz[::-1], s=self.s[::-1], z0=z_ref.real, f_unit="Hz"
         )
         network.port_names = list(self.ports)
         fmt = "{:.16e}"
@@ -230,7 +241,9 @@ def assemble_s_matrix(
     transmission.
 
     Args:
-        runs: The runs, on one port list and one wavelength grid.
+        runs: The runs, on one port set and one wavelength grid. Each may list the
+            ports in any order: the matrix keeps the first run's order and places
+            entries by port name.
         assume_reciprocal: Copy a missing S(a,b) from a measured S(b,a).
         assume_unmeasured_zero: Set entries that are still missing to zero.
 
@@ -238,7 +251,7 @@ def assemble_s_matrix(
         The matrix, on ascending wavelength.
 
     Raises:
-        ValueError: If there are no runs; a run has no S-parameters; port lists or
+        ValueError: If there are no runs; a run has no S-parameters; port sets or
             wavelength grids differ (``rtol=1e-9`` after sorting); an entry appears
             twice, names an unknown port or has the wrong length; every sample is
             invalid; or an entry is missing and no flag fills it.
@@ -352,7 +365,7 @@ def _merge_runs(
     for run in runs:
         if not run.entries:
             raise ValueError(f"{run.label} has no S-parameters.")
-        if tuple(run.ports) != ports:
+        if set(_unique_ports(run.ports)) != set(ports):
             raise ValueError(
                 f"{run.label} has port list {list(run.ports)}, expected {list(ports)}."
             )

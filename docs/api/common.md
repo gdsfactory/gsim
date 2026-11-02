@@ -86,6 +86,8 @@ An n-port S-matrix built from photonic solver runs by [`gsim.fdtd.s_matrix`][gsi
 [`gsim.meep.s_matrix`][gsim.meep.s_matrix], with exports to a SAX model and a Touchstone file.
 
 - [`SMatrix`][gsim.common.s_matrix.SMatrix]
+- [`SMatrixRun`][gsim.common.s_matrix.SMatrixRun]
+- [`assemble_s_matrix`][gsim.common.s_matrix.assemble_s_matrix]
 
 ## Traveling-wave MZM figures of merit
 

@@ -565,7 +565,7 @@ def s_matrix(
 
     Raises:
         ValueError: If there are no results; a result has no S-parameters (a
-            non-eigenmode source); port lists or wavelength grids differ; an entry
+            non-eigenmode source); port sets or wavelength grids differ; an entry
             appears twice or names an unknown port; every sample is invalid; or an
             entry is missing and neither flag fills it.
     """

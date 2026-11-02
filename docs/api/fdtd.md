@@ -293,7 +293,8 @@ output.
 ### Export to SAX and Touchstone
 
 One run excites one port, so it measures one column of the S-matrix. Run a source at each port and combine the results
-with [`s_matrix`][gsim.fdtd.s_matrix]:
+with [`s_matrix`][gsim.fdtd.s_matrix]. SAX is not a gsim dependency and is installed separately with `pip install sax`;
+`s_matrix` and `write_touchstone` do not need it.
 
 ```python
 import sax
