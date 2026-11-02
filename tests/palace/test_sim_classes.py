@@ -340,7 +340,7 @@ class TestModePaths:
         monkeypatch.setattr(sim, "_resolve_stack", lambda: None)
         sim.write_config(photonic=True, validate_mesh=False)
 
-        block = captured["hints"]["_mode_postprocessing"]
+        block = captured["mode_postprocessing"]
         assert block["Impedance"][0]["VoltagePath"] == [[0.0, 0.0], [1.0, 0.0]]
 
 
