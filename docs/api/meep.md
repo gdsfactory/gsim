@@ -8,6 +8,13 @@ Use [`gsim.meep`][gsim.meep] to configure photonic FDTD simulations and inspect 
 
 ## Configuration
 
+For overlapping physical layers, lower `mesh_order` values take precedence
+in XY, XZ and 3D. The runner emits those objects last to follow Meep's overlap
+convention. Equal priorities retain input order, so the last object wins ties.
+Legacy entries without `mesh_order` retain their relative order and are emitted
+before explicitly ranked entries. Configurations containing only legacy entries
+therefore keep their previous ordering.
+
 - [`Geometry`][gsim.meep.Geometry]
 - [`Domain`][gsim.meep.Domain]
 

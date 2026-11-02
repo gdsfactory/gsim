@@ -36,7 +36,8 @@ nav = [
     { "Terminal Wave Ports in Palace" = "nbs/palace_terminal_waveport.md" },
     { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },
     { "Palace Result Validation" = "palace-validation.md" },
-    { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" }
+    { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" },
+    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" }
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Guides" = [
@@ -55,6 +56,11 @@ site_url = "https://gdsfactory.com/gsim"
 repo_url = "https://gdsfactory.com/"
 repo_name = "gdsfactory.com"
 copyright = "Copyright &copy; 2025 GDSFactory"
+# Render the \(...\) / \[...\] spans that pymdownx.arithmatex emits.
+extra_javascript = [
+  "javascripts/mathjax.js",
+  "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"
+]
 
 [project.plugins.search]
 

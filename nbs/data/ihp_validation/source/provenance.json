@@ -1,0 +1,31 @@
+{
+  "source": "IHP-Open-PDK",
+  "url": "https://github.com/IHP-GmbH/IHP-Open-PDK/tree/943983786b04351feb20e33e8d3d76c0e0d87cce/ihp-sg13g2/libs.tech/openems/testcase/SG13_Octagon_L2n0",
+  "commit": "943983786b04351feb20e33e8d3d76c0e0d87cce",
+  "license": "Apache-2.0",
+  "files": {
+    "L_2n0_simplified.gds": "4a8adee639a25b27023f093a1941e244ef93217a068219947b923cb32db72016",
+    "die_x2y7.s2p": "4a1febb9a4f2d0054c63ee800e57b2114bce8e44db642cf5b6ccb5f6c0739721",
+    "die_x5y8.s2p": "34ba71b0986d30a0941b3b50f38a7e8b2dec363ff1ba9f4e777dfc02e232f944",
+    "diff_die_x2y7.s1p": "9ad00b33b9f6ce7c6605e6f95fa11421f1a1a8d578ea96d60bbaf5a16409babe",
+    "diff_die_x5y8.s1p": "15882ab76944acf0c868724ba8d6a262270c0aedf08f76219006cbeb3de197dd",
+    "openems_twoport_1p5um.s2p": "18ecaa89a23fa34c2f063521c5430a4d32e10b63053695f0574eb2ea6674613a",
+    "openems_oneport_1p5um.s1p": "39b52ef10af2054ac1724522ed3fd34c6b10fa217dfc38ee16550c64483fb921",
+    "openems_oneport_1um.s1p": "4069a6d54b35835dcdd220a10d9cc00179a8ae2f1ff832498c95cb8a09057a49",
+    "openems_matlab_oneport_1p5um.s1p": "ed1ea3f1f749c3b658375455fe2aeed34bfabc059066b787c97d12c9c9894d32",
+    "openems_matlab_oneport_1um.s1p": "e0f41aff0e2a9acb8f03315d15b635d3391c8857a764e281f82544a044b89284",
+    "openems_matlab_oneport_0p5um.s1p": "7252bb26575aa8263ddeb85b13072a00ab2924ba37f236180a51b8d9f7c0cf70",
+    "openems_matlab_oneport_0p5um_finer_z.s1p": "c479b8d8082a35beb1888224571ff854839aa545b38193b1336c5a1cabb28906"
+  },
+  "additional_source_paths": {
+    "diff_die_x2y7.s1p": "measured/diffmeas_L3_2n0_THRU_deemb_GSGSG_PQD701W03Cx2y7.s1p",
+    "diff_die_x5y8.s1p": "measured/diffmeas_L3_2n0_THRU_deemb_GSGSG_PQD701W03Cx5y8.s1p",
+    "openems_twoport_1p5um.s2p": "OpenEMS_Python/data/SG13_L2n0_2port_groundpolygon_mesh1.5um/SG13_L2n0_2port_groundpolygon_mesh1.5um.s2p",
+    "openems_oneport_1p5um.s1p": "OpenEMS_Python/data/SG13_L2n0_mesh1.5um_v2/SG13_L2n0_mesh1.5um_v2.s1p",
+    "openems_oneport_1um.s1p": "OpenEMS_Python/data/SG13_L2n0_mesh1um_v2/SG13_L2n0_mesh1um_v2.s1p",
+    "openems_matlab_oneport_1p5um.s1p": "OpenEMS_Matlab/data/SG13_L2n0_30GHz_mesh1u5_50dB/SG13_L2n0_30GHz_mesh1u5_50dB.s1p",
+    "openems_matlab_oneport_1um.s1p": "OpenEMS_Matlab/data/SG13_L2n0_30GHz_mesh1um_50dB/SG13_L2n0_30GHz_mesh1um_50dB.s1p",
+    "openems_matlab_oneport_0p5um.s1p": "OpenEMS_Matlab/data/SG13_L2n0_30GHz_mesh0u5_50dB/SG13_L2n0_30GHz_mesh0u5_50dB.s1p",
+    "openems_matlab_oneport_0p5um_finer_z.s1p": "OpenEMS_Matlab/data/SG13_L2n0_30GHz_mesh0u5_50dB_finerZ/SG13_L2n0_30GHz_mesh0u5_50dB_finerZ2.s1p"
+  }
+}

@@ -481,6 +481,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         substrate_thickness: float | None = None,
         include_substrate: bool = False,
         add_oxide_dielectric: bool = True,
+        pdk_authoritative: bool = False,
+        dielectrics: list[dict[str, Any]] | None = None,
+        role_overrides: dict[str, str] | None = None,
+        use_pdk_overlay: bool = True,
         **kwargs,
     ) -> None:
         """Configure the layer stack.
@@ -524,6 +528,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 With ``False`` the stack bottom comes from the PDK's own
                 dielectric regions, or from the lowest layer when there are
                 none, not from ``substrate_thickness``.
+            pdk_authoritative: Build directly from the PDK LayerStack without
+                synthetic oxide or substrate; unknown materials raise. Defaults
+                to ``False`` to preserve legacy behavior.
+            dielectrics: Explicit bulk regions with
+                ``name``/``material``/``zmin``/``zmax`` in authoritative mode.
+            role_overrides: Explicit ``{layer_key: role}`` declarations in
+                authoritative mode.
+            use_pdk_overlay: Apply the reviewed per-PDK overlay in authoritative
+                mode. Defaults to ``True``.
             **kwargs: Additional args passed to extract_layer_stack.
 
         The bottom of the Palace domain is the lowest non-air dielectric
@@ -544,6 +557,13 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         Example:
             >>> sim.set_stack(substrate_thickness=2.0)
+            >>> sim.set_stack(
+            ...     pdk_authoritative=True,
+            ...     dielectrics=[
+            ...         {"name": "ild", "material": "sio2", "zmin": -2.0, "zmax": 14.03}
+            ...     ],
+            ...     role_overrides={"via1": "via"},
+            ... )  # PDK-authoritative stack with explicit background/roles
         """
         if stack is not None:
             # Directly use a pre-built LayerStack — skip lazy resolution
@@ -558,10 +578,25 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 "z_above=..., z_below=...)."
             )
 
+        if pdk_authoritative:
+            self._warn_on_ignored_legacy_stack_kwargs(
+                yaml_path=yaml_path,
+                substrate_thickness=substrate_thickness,
+                include_substrate=include_substrate,
+                add_oxide_dielectric=add_oxide_dielectric,
+                extra_kwargs=kwargs,
+            )
+        elif not use_pdk_overlay:
+            raise ValueError("use_pdk_overlay=False requires pdk_authoritative=True")
+
         self._stack_kwargs = {
             "yaml_path": yaml_path,
             "include_substrate": include_substrate,
             "add_oxide_dielectric": add_oxide_dielectric,
+            "pdk_authoritative": pdk_authoritative,
+            "dielectrics": dielectrics,
+            "role_overrides": role_overrides,
+            "use_pdk_overlay": use_pdk_overlay,
             **kwargs,
         }
         # Left out when unset so the stack builder can tell the 2.0 um default
@@ -570,6 +605,44 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._stack_kwargs["substrate_thickness"] = substrate_thickness
         # Stack will be resolved lazily during mesh() or simulate()
         self.stack = None
+
+    def _warn_on_ignored_legacy_stack_kwargs(
+        self,
+        *,
+        yaml_path: str | Path | None,
+        substrate_thickness: float | None,
+        include_substrate: bool,
+        add_oxide_dielectric: bool,
+        extra_kwargs: dict[str, Any],
+    ) -> None:
+        """Raise/warn when legacy (inferred-stack) kwargs cannot apply.
+
+        With ``pdk_authoritative=True`` the PDK LayerStack is used verbatim, so
+        the legacy extractor tuning is meaningless.  Passing it silently would
+        be a trap (gsim#230 review), so reject the mutually-exclusive options
+        and warn about the rest.
+        """
+        if yaml_path is not None:
+            raise ValueError(
+                "set_stack(pdk_authoritative=True) resolves the active PDK "
+                "LayerStack directly and cannot be combined with yaml_path."
+            )
+
+        ignored: list[str] = []
+        if substrate_thickness is not None:
+            ignored.append(f"substrate_thickness={substrate_thickness!r}")
+        if include_substrate:
+            ignored.append("include_substrate=True")
+        if not add_oxide_dielectric:
+            ignored.append("add_oxide_dielectric=False")
+        ignored.extend(f"{key}={value!r}" for key, value in extra_kwargs.items())
+        if ignored:
+            raise ValueError(
+                "set_stack(pdk_authoritative=True) ignores legacy stack "
+                f"options ({', '.join(sorted(ignored))}); they only apply to "
+                "the inferred legacy extractor. Remove them or use explicit "
+                "dielectrics=[...]/role_overrides={...} instead."
+            )
 
     def set_airbox(
         self,
@@ -1026,6 +1099,81 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             for name, props in self.materials.items():
                 self.stack.materials[name] = props.to_dict()
             return self.stack
+
+        # PDK-authoritative path (gsim#230): build directly from the PDK
+        # LayerStack, with no synthetic geometry or silent material fallbacks.
+        # Read (do not pop) these options: if resolution raises, a caller that
+        # follows the error's advice (e.g. calls set_airbox() and retries) must
+        # still resolve through the authoritative path.
+        dielectrics = self._stack_kwargs.get("dielectrics")
+        role_overrides = self._stack_kwargs.get("role_overrides")
+        pdk_authoritative = bool(self._stack_kwargs.get("pdk_authoritative", False))
+        if pdk_authoritative:
+            from gsim.common.pdk import resolve_layer_stack
+            from gsim.palace.stack import build_palace_layer_stack
+
+            resolved = resolve_layer_stack(
+                self.component,
+                dielectrics=dielectrics,
+                role_overrides=role_overrides,
+                use_pdk_overlay=bool(self._stack_kwargs.get("use_pdk_overlay", True)),
+            )
+            canonical = build_palace_layer_stack(resolved)
+
+            # Apply material overrides to both canonical names and PDK tokens
+            # that resolve to them. Layers retain their original material token.
+            from gsim.common.stack.materials import MATERIAL_ALIASES
+
+            for name, props in self.materials.items():
+                target = MATERIAL_ALIASES.get(name.lower(), name.lower())
+                for token in canonical.materials:
+                    if MATERIAL_ALIASES.get(token.lower(), token.lower()) == target:
+                        canonical.materials[token] = props.to_dict()
+                canonical.materials[name] = props.to_dict()
+
+            # Keep stack free of synthetic air regions; Palace airboxes are
+            # generated explicitly from set_airbox().
+            canonical.dielectrics = [
+                d
+                for d in canonical.dielectrics
+                if str(d.get("material", "")).lower() != "air"
+            ]
+
+            has_airbox = bool(getattr(self, "_airbox_config", None))
+            if not canonical.dielectrics and not has_airbox:
+                raise ValueError(
+                    "PDK-authoritative stack has no bulk dielectric region and "
+                    "no airbox is configured, so Palace would fail with "
+                    "'No dielectric volumes in mesh'. Pass "
+                    "dielectrics=[...] to set_stack() or call set_airbox()."
+                )
+            if not canonical.dielectrics:
+                logger.warning(
+                    "PDK-authoritative stack has no bulk dielectric region; the "
+                    "domain background will be air only. Pass dielectrics=[...] "
+                    "to set_stack() to model the BEOL/cladding."
+                )
+
+            self._stack_kwargs["pdk_authoritative"] = True
+            self._stack_kwargs["dielectrics"] = dielectrics
+            self._stack_kwargs["role_overrides"] = role_overrides
+            self._stack_kwargs["use_pdk_overlay"] = bool(
+                self._stack_kwargs.get("use_pdk_overlay", True)
+            )
+            self.stack = canonical
+            return canonical
+
+        # Legacy path: the authoritative-only options must not reach the
+        # inferred extractor.
+        dielectrics = self._stack_kwargs.pop("dielectrics", None)
+        role_overrides = self._stack_kwargs.pop("role_overrides", None)
+        self._stack_kwargs.pop("pdk_authoritative", None)
+        self._stack_kwargs.pop("use_pdk_overlay", None)
+        if dielectrics or role_overrides:
+            logger.warning(
+                "set_stack(dielectrics=/role_overrides=) only applies with "
+                "pdk_authoritative=True; ignoring them."
+            )
 
         from gsim.common.stack import get_stack
 

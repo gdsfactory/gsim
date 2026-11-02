@@ -7,7 +7,7 @@ import hashlib
 import logging
 import math
 from itertools import pairwise
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import gmsh
 import numpy as np
@@ -43,6 +43,284 @@ class Entity:
         )
 
 
+# Bounding box, centre of mass and area of one surface.
+_FaceGeometry = tuple[tuple[float, ...], tuple[float, ...], float]
+# Outline of a planar surface: a point on its plane, the unit normal and the
+# boundary curves as an (n, 2, 3) array of straight segments.
+_FaceOutline = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+class _FaceRecord(NamedTuple):
+    """What :func:`_snapshot_2d` keeps about a surface."""
+
+    geometry: _FaceGeometry
+    outline: _FaceOutline | None
+
+
+# Tolerance (model units, um) for matching a face before and after a fragment.
+_FACE_MATCH_ABS_TOL = 1e-4
+# Relative tolerance for the area of a face.
+_FACE_MATCH_AREA_RTOL = 1e-6
+# Straight segments used for a curved edge of a face outline.
+_OUTLINE_CURVE_SEGMENTS = 64
+# Sample points per parametric direction inside a surface.
+_INTERIOR_GRID = 7
+# Share of a piece's sample points that must lie on the old face.
+_ON_FACE_FRACTION = 0.5
+
+
+def _face_geometry(tag: int) -> _FaceGeometry:
+    """Return bounding box, centre of mass and area of OCC surface ``tag``."""
+    occ = gmsh.model.occ
+    return (
+        tuple(occ.getBoundingBox(2, tag)),
+        tuple(occ.getCenterOfMass(2, tag)),
+        occ.getMass(2, tag),
+    )
+
+
+def _close(a: tuple[float, ...], b: tuple[float, ...]) -> bool:
+    """Return True when two coordinate tuples agree within the match tolerance."""
+    return all(abs(x - y) <= _FACE_MATCH_ABS_TOL for x, y in zip(a, b, strict=True))
+
+
+def _same_area(a: float, b: float) -> bool:
+    """Return True when two areas agree within the relative tolerance."""
+    return abs(a - b) <= _FACE_MATCH_AREA_RTOL * max(a, b, 1.0)
+
+
+def _same_face(a: _FaceGeometry, b: _FaceGeometry) -> bool:
+    """Return True when two surfaces have the same box, centre and area."""
+    return _close(a[0], b[0]) and _close(a[1], b[1]) and _same_area(a[2], b[2])
+
+
+def _face_outline(tag: int) -> _FaceOutline | None:
+    """Return the outline of planar surface ``tag``; None if it is not planar.
+
+    Every boundary curve, holes included, is sampled into straight segments.
+    Together they give an even-odd inside test for points on the plane
+    (:func:`_lies_on_face`) that still works once the surface is gone.
+    Needs a synchronized model.
+    """
+    try:
+        if gmsh.model.getType(2, tag) != "Plane":
+            return None
+        lower, upper = gmsh.model.getParametrizationBounds(2, tag)
+        middle = [(a + b) / 2 for a, b in zip(lower, upper, strict=True)]
+        origin = np.asarray(gmsh.model.getValue(2, tag, middle), dtype=float)
+        normal = np.asarray(gmsh.model.getNormal(tag, middle), dtype=float)
+        normal = normal / np.linalg.norm(normal)
+        boundary = gmsh.model.getBoundary(
+            [(2, tag)], combined=False, oriented=False, recursive=False
+        )
+        segments = []
+        for _, curve in boundary:
+            first, last = gmsh.model.getParametrizationBounds(1, curve)
+            is_line = gmsh.model.getType(1, curve) == "Line"
+            count = 1 if is_line else _OUTLINE_CURVE_SEGMENTS
+            params = np.linspace(first[0], last[0], count + 1)
+            points = np.asarray(
+                gmsh.model.getValue(1, curve, params.tolist()), dtype=float
+            ).reshape(-1, 3)
+            segments.append(np.stack([points[:-1], points[1:]], axis=1))
+    except Exception:
+        logger.debug("No outline for surface %d", tag, exc_info=True)
+        return None
+    if not segments:
+        return None
+    return origin, normal, np.concatenate(segments)
+
+
+def _interior_points(tag: int) -> np.ndarray:
+    """Return sample points inside surface ``tag`` as an ``(n, 3)`` array.
+
+    The points come from a grid over the parametric domain; those outside
+    the trimmed surface are dropped. The array is empty for a piece too small
+    for the grid, or when the surface cannot be sampled.
+    """
+    try:
+        lower, upper = gmsh.model.getParametrizationBounds(2, tag)
+        fractions = (np.arange(_INTERIOR_GRID) + 0.5) / _INTERIOR_GRID
+        us = lower[0] + fractions * (upper[0] - lower[0])
+        vs = lower[1] + fractions * (upper[1] - lower[1])
+        params = [
+            (float(u), float(v))
+            for u in us
+            for v in vs
+            if gmsh.model.isInside(2, tag, [float(u), float(v)], parametric=True)
+        ]
+        if not params:
+            return np.empty((0, 3))
+        flat = [c for uv in params for c in uv]
+        return np.asarray(gmsh.model.getValue(2, tag, flat), dtype=float).reshape(-1, 3)
+    except Exception:
+        logger.debug("Cannot sample surface %d", tag, exc_info=True)
+        return np.empty((0, 3))
+
+
+def _lies_on_face(points: np.ndarray, outline: _FaceOutline | None) -> bool:
+    """Return True when most of ``points`` lie on the face ``outline`` bounds.
+
+    A point is on the face when it is in the plane of the outline and inside
+    its boundary by the even-odd rule, so points in a hole do not count.
+    Without an outline (curved face) or without points there is nothing to
+    object to and the answer is True.
+    """
+    if outline is None or len(points) == 0:
+        return True
+    origin, normal, segments = outline
+    in_plane = np.abs((points - origin) @ normal) <= _FACE_MATCH_ABS_TOL
+    # Project along the dominant normal axis and count crossings of a ray.
+    axes = [i for i in range(3) if i != int(np.argmax(np.abs(normal)))]
+    px, py = points[:, axes].T
+    ax, ay = segments[:, 0, axes].T
+    bx, by = segments[:, 1, axes].T
+    py_col = py[:, None]
+    straddles = (ay > py_col) != (by > py_col)
+    rise = np.where(by == ay, 1.0, by - ay)
+    cross_x = ax + (py_col - ay) * (bx - ax) / rise
+    crossings = (straddles & (px[:, None] < cross_x)).sum(axis=1)
+    on_face = in_plane & (crossings % 2 == 1)
+    return bool(on_face.mean() >= _ON_FACE_FRACTION)
+
+
+def _bbox_within(inner: tuple[float, ...], outer: tuple[float, ...]) -> bool:
+    """Return True when box ``inner`` lies inside box ``outer`` (tolerance)."""
+    return all(
+        inner[i] >= outer[i] - _FACE_MATCH_ABS_TOL
+        and inner[i + 3] <= outer[i + 3] + _FACE_MATCH_ABS_TOL
+        for i in range(3)
+    )
+
+
+def _snapshot_2d(entities: list[Entity]) -> dict[int, _FaceRecord]:
+    """Record the geometry of every surface held by a dim=2 entity.
+
+    Taken before the dim=3 fragment so that :func:`_refresh_2d` can find the
+    faces again if the fragment renumbers them. Needs a synchronized model.
+
+    Returns:
+        Mapping from surface tag to its geometry (bounding box, centre of
+        mass, area) and, for a planar surface, its outline.
+    """
+    snapshot: dict[int, _FaceRecord] = {}
+    for entity in entities:
+        if entity.dim != 2:
+            continue
+        for _, tag in entity.dimtags:
+            if tag not in snapshot:
+                snapshot[tag] = _FaceRecord(_face_geometry(tag), _face_outline(tag))
+    return snapshot
+
+
+def _volume_boundary_faces(volume_dimtags: list[tuple[int, int]]) -> set[int]:
+    """Return the tags of all surfaces bounding the given volumes."""
+    if not volume_dimtags:
+        return set()
+    boundary = gmsh.model.getBoundary(
+        volume_dimtags, combined=False, oriented=False, recursive=False
+    )
+    return {tag for dim, tag in boundary if dim == 2}
+
+
+def _refresh_2d(
+    entities: list[Entity],
+    snapshot: dict[int, _FaceRecord],
+    volume_dimtags: list[tuple[int, int]],
+) -> None:
+    """Re-point dim=2 entities at the faces the dim=3 fragment left behind.
+
+    The dim=3 fragment only sees the volumes. A 2D entity face that is shared
+    with a volume face (for example the footprint where a via touches a
+    conductor shell) is renumbered when that volume is split, and the entity
+    keeps a stale tag. OCC also reuses freed tags, so a tag that is still valid
+    can now be a different face. Each recorded face is therefore checked by
+    geometry:
+
+    1. same tag, same bounding box, centre of mass and area: keep;
+    2. otherwise a boundary face of the fragment output with the same geometry
+       replaces it;
+    3. otherwise the boundary faces that lie on the old face replace it if
+       their areas add up to the old area (the face was split). Lying on
+       the face means inside its recorded outline: a face in a hole of the
+       old face, or one in the same plane beside it, is not a piece of it;
+    4. otherwise the face is dropped with a warning.
+
+    Must be called after ``synchronize()``.
+
+    Args:
+        entities: All pipeline entities; dim=2 ones are updated in place.
+        snapshot: Result of :func:`_snapshot_2d` taken before the fragment.
+        volume_dimtags: The volumes the fragment produced. Their boundary
+            faces are the only faces that can be new.
+    """
+    if not snapshot:
+        return
+    live = {tag for _, tag in gmsh.model.getEntities(2)}
+
+    kept = {
+        tag
+        for tag, record in snapshot.items()
+        if tag in live and _same_face(_face_geometry(tag), record.geometry)
+    }
+    if len(kept) == len(snapshot):
+        return
+
+    candidates = {
+        tag: _face_geometry(tag)
+        for tag in _volume_boundary_faces(volume_dimtags) & live
+        if tag not in kept
+    }
+    replacements: dict[int, list[int]] = {}
+    samples: dict[int, np.ndarray] = {}
+    for tag, (geometry, outline) in snapshot.items():
+        if tag in kept:
+            continue
+        bbox, _, area = geometry
+        same = [t for t, g in candidates.items() if _same_face(g, geometry)]
+        if same:
+            replacements[tag] = same[:1]
+            continue
+        # The face may have been split: take the candidates lying on it. The
+        # bounding box alone is not enough, a face with a hole has other
+        # faces (the plane of the hole, say) inside its box.
+        inside = []
+        for t, g in candidates.items():
+            if not _bbox_within(g[0], bbox):
+                continue
+            if t not in samples:
+                samples[t] = _interior_points(t)
+            if _lies_on_face(samples[t], outline):
+                inside.append(t)
+        if inside and _same_area(sum(candidates[t][2] for t in inside), area):
+            replacements[tag] = inside
+        else:
+            logger.warning(
+                "2D face %d (area %.6g) was lost in the dim=3 fragment; "
+                "dropping it from its entity",
+                tag,
+                area,
+            )
+            replacements[tag] = []
+
+    for entity in entities:
+        if entity.dim != 2:
+            continue
+        fresh: list[tuple[int, int]] = []
+        for dim, tag in entity.dimtags:
+            if tag in replacements:
+                fresh.extend((2, t) for t in replacements[tag])
+            else:
+                fresh.append((dim, tag))
+        entity.dimtags = list(dict.fromkeys(fresh))
+
+    logger.debug(
+        "Refreshed %d of %d 2D faces after the dim=3 fragment",
+        len(snapshot) - len(kept),
+        len(snapshot),
+    )
+
+
 def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
     """Meshwell-style boolean pipeline (minimalistic).
 
@@ -52,6 +330,9 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
        sliver faces from priority cuts on small volumes like vias).
        For dim=2,1,0: priority cuts — each entity is cut by all previously
        processed entities in the same dimension.
+       After the dim=3 fragment the faces of the dim=2 entities are looked up
+       again by geometry (see :func:`_refresh_2d`): the fragment renumbers
+       surfaces that are shared with the volumes it splits.
     4. Fragment current dimension against all higher-dimension entities
        already processed, then update tags via the returned mapping.
     5. Accumulate processed entities for the next (lower) dimension.
@@ -88,6 +369,9 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
             # when small volumes (e.g. vias) are subtracted from large ones.
             all_3d_dimtags = [dt for e in current_group for dt in e.dimtags]
             if len(all_3d_dimtags) > 1:
+                # Shell faces that coincide with a volume face (via footprints)
+                # are renumbered when the fragment splits that volume.
+                snapshot_2d = _snapshot_2d(entities)
                 _, out_map = gmsh.model.occ.fragment(
                     all_3d_dimtags,
                     [],
@@ -112,6 +396,12 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
                         idx += 1
                     entity.dimtags = list(set(new_dimtags))
 
+                _refresh_2d(
+                    entities,
+                    snapshot_2d,
+                    [dt for e in current_group for dt in e.dimtags],
+                )
+
             processed_in_dim = [e for e in current_group if e.dimtags]
         else:
             # --- Pre-step: fragment current-dim entities against higher-dim
@@ -122,7 +412,9 @@ def run_boolean_pipeline(entities: list[Entity]) -> dict[str, int]:
             # If priority cuts run first (with the old tags), OCC raises
             # "Unknown entity of dimension N with tag T".  Fragmenting against
             # the higher-dim entities here refreshes all surface tags so the
-            # subsequent priority cuts operate on valid geometry.
+            # subsequent priority cuts operate on valid geometry.  Tags that the
+            # dim=3 fragment itself made stale were already re-found by
+            # ``_refresh_2d``; this step cannot recover them, it would raise.
             if processed_higher_dims:
                 object_dimtags = [dt for e in current_group for dt in e.dimtags]
                 tool_dimtags_hd = [

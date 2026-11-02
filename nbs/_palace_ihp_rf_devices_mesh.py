@@ -15,7 +15,7 @@
 # %% [markdown]
 # # Palace Mesh Generation: IHP RF Devices
 #
-# This notebook discovers RF components from `ihp.cells.rf_devices`, prints their ports, and generates Palace meshes for each component.
+# This notebook discovers registered IHP RF cells, prints their ports, and generates Palace meshes for each component.
 #
 # **Requirements:**
 # - IHP PDK from GitHub (`pip install git+https://github.com/gdsfactory/IHP.git`)
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import ihp.cells.rf_devices as rf_devices
 import pandas as pd
 from ihp import PDK
 
@@ -36,29 +35,18 @@ from gsim.palace import DrivenSim
 PDK.activate()
 
 # %%
-# Discover RF component factories defined in ihp.cells.rf_devices and registered in the active PDK.
-rf_module_factories = {
-    name
-    for name, obj in vars(rf_devices).items()
-    if callable(obj) and not name.startswith("_")
+# The installed IHP package registers RF device factories in PDK.cells.
+rf_cell_names = {
+    "inductor2",
+    "inductor3",
+    "cmim",
+    "rfcmim",
+    "cmom",
+    "svaricap",
+    "rfnmos",
+    "rfpmos",
 }
-
-rf_keywords = (
-    "wilkinson",
-    "filter",
-    "coupler",
-    "divider",
-    "directional",
-    "hybrid",
-    "branch",
-    "transformer",
-)
-
-component_names = sorted(
-    name
-    for name in PDK.cells
-    if name in rf_module_factories and any(k in name.lower() for k in rf_keywords)
-)
+component_names = sorted(rf_cell_names.intersection(PDK.cells))
 
 print("Discovered RF components:")
 for name in component_names:
@@ -66,7 +54,7 @@ for name in component_names:
 
 if not component_names:
     raise RuntimeError(
-        "No RF device components were discovered in ihp.cells.rf_devices"
+        "No supported RF device cells are registered in the active IHP PDK"
     )
 
 # %%
