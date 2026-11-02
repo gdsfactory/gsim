@@ -205,14 +205,24 @@ def _resolve_port_vertical_geometry(
     resolution_source = f"port layer {gds_layer}"
 
     if not candidates:
-        # If the component really draws the port mask but the active/cropped
-        # stack does not contain it, an override cannot restore that missing
-        # geometry. This commonly indicates that z_bounds excluded the layer.
+        # If the component really draws the port mask but the active stack does
+        # not contain it, an override cannot restore that missing geometry. A
+        # z_bounds crop and a layer that was never declared look the same here,
+        # so the message lists the stack for the reader to tell them apart.
         if gds_layer is not None and _component_draws_layer(component, gds_layer):
+            stack_layers = (
+                ", ".join(
+                    f"{layer.name} {tuple(layer.gds_layer)}"
+                    for layer in layer_stack.layers.values()
+                )
+                or "none"
+            )
             raise ValueError(
-                f"Port {gf_port.name!r} uses drawn layer {gds_layer}, but that "
-                "layer is absent from the active simulation stack. Expand "
-                "domain.z_bounds or include the layer in the stack."
+                f"Port {gf_port.name!r} uses drawn layer {gds_layer}, which has no "
+                f"entry in the active simulation stack. Stack layers: {stack_layers}. "
+                "Expand domain.z_bounds only if a crop removed the layer. Otherwise "
+                "add a LayerLevel to the PDK LayerStack, pass a stack that includes "
+                "it with set_stack(stack=...), or move the port to a stack layer."
             )
 
         candidates = [
