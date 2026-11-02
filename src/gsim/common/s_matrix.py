@@ -19,10 +19,15 @@ imported: the model is a plain function following the SAX calling convention.
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _SPEED_OF_LIGHT_UM_HZ = 299792458.0e6
 _BAND_EDGE_TOLERANCE_UM = 1e-9
@@ -125,6 +130,56 @@ class SMatrix:
             }
 
         return model
+
+    def write_touchstone(self, path: str | Path, *, z0: float = 50.0) -> Path:
+        """Write the matrix to a Touchstone file (``.sNp``), ascending in frequency.
+
+        The file keeps gsim's time convention exp(+jwt), the RF-tool reading, and
+        ``sax.parsers.parse_touchstone`` keeps the file's sign and reads ``s[i, j]``
+        as ``(in, out)``, so use :meth:`sax_model` to reach SAX. Port names are
+        embedded as ``! Port[i]`` comments and values are written as real and
+        imaginary parts with 16-digit precision.
+
+        Args:
+            path: Destination path. ``.sNp`` is appended when the name has no such
+                suffix, so ``run_1.5`` becomes ``run_1.5.s2p``.
+            z0: Nominal reference impedance [Ohm]. S is power-wave modal, normalised
+                per mode, so ``z0`` only fills the file header.
+
+        Returns:
+            The path written.
+
+        Raises:
+            ValueError: If the suffix of ``path`` names a different port count.
+        """
+        n_ports = len(self.ports)
+        path = Path(path)
+        if not re.fullmatch(r"\.s\d+p", path.suffix.lower()):
+            # Append rather than with_suffix: "run_1.5" must keep its ".5".
+            path = Path(f"{path}.s{n_ports}p")
+        elif path.suffix.lower() != f".s{n_ports}p":
+            raise ValueError(
+                f"Touchstone suffix {path.suffix!r} does not match the {n_ports} ports "
+                f"of this matrix; use '.s{n_ports}p'."
+            )
+
+        import skrf as rf
+
+        network = rf.Network(
+            f=self.frequency_hz[::-1], s=self.s[::-1], z0=z0, f_unit="Hz"
+        )
+        network.port_names = list(self.ports)
+        fmt = "{:.16e}"
+        network.write_touchstone(
+            path,
+            form="ri",
+            format_spec_A=fmt,
+            format_spec_B=fmt,
+            format_spec_freq=fmt,
+            write_z0=False,
+        )
+        logger.info("Touchstone written to %s", path)
+        return path
 
 
 def assemble_s_matrix(runs: Sequence[SMatrixRun]) -> SMatrix:

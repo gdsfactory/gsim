@@ -6,10 +6,12 @@ Numerical expectations come from closed forms or independent libraries
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from gsim.common.s_matrix import SMatrixRun, assemble_s_matrix
+from gsim.common.s_matrix import SMatrix, SMatrixRun, assemble_s_matrix
 
 PORTS = ("o1", "o2")
 WAVELENGTH_UM = np.linspace(1.5, 1.6, 51)
@@ -192,3 +194,111 @@ def test_model_does_not_follow_later_changes_to_the_matrix_arrays() -> None:
     matrix.wavelength_um[:] = 1.0
 
     np.testing.assert_allclose(model(wl=1.55)["o1", "o2"], before)
+
+
+def _non_reciprocal_matrix() -> tuple[SMatrix, dict[tuple[str, str], np.ndarray]]:
+    """Return a 2-port whose four entries are all different, stored as exp(+jwt)."""
+    wavelength_um = np.array([1.6, 1.5, 1.55])
+    table = {
+        ("o1", "o1"): np.array([0.1 + 0.2j, 0.3 - 0.1j, 0.2 + 0.0j]),
+        ("o2", "o1"): np.array([0.7 + 0.1j, 0.6 - 0.2j, 0.5 + 0.4j]),
+        ("o1", "o2"): np.array([0.05 - 0.01j, 0.04 + 0.02j, 0.03 + 0.03j]),
+        ("o2", "o2"): np.array([-0.2 + 0.1j, -0.1 + 0.3j, -0.3 - 0.2j]),
+    }
+    run = SMatrixRun("run", wavelength_um, PORTS, table, np.ones(3, dtype=bool))
+    return assemble_s_matrix([run]), table
+
+
+def test_touchstone_read_by_skrf_has_ascending_f_values_names_and_z0(
+    tmp_path: Path,
+) -> None:
+    skrf = pytest.importorskip("skrf")
+    matrix, table = _non_reciprocal_matrix()
+
+    written = matrix.write_touchstone(tmp_path / "device", z0=75.0)
+
+    assert written == tmp_path / "device.s2p"
+    network = skrf.Network(str(written))
+    # table holds the samples for wavelengths [1.6, 1.5, 1.55] um; ascending
+    # frequency is wavelengths 1.6, 1.55, 1.5, that is indices 0, 2, 1.
+    ascending_f = [0, 2, 1]
+    np.testing.assert_allclose(
+        network.f, 299792458.0 / (np.array([1.6, 1.55, 1.5]) * 1e-6), rtol=1e-12
+    )
+    assert np.all(np.diff(network.f) > 0)
+    for (receive, source), (i, j) in {
+        ("o1", "o1"): (0, 0),
+        ("o2", "o1"): (1, 0),
+        ("o1", "o2"): (0, 1),
+        ("o2", "o2"): (1, 1),
+    }.items():
+        np.testing.assert_allclose(
+            network.s[:, i, j], table[receive, source][ascending_f], atol=1e-12
+        )
+    assert list(network.port_names) == list(PORTS)
+    np.testing.assert_allclose(network.z0, 75.0)
+
+
+def test_touchstone_z0_defaults_to_50_ohm(tmp_path: Path) -> None:
+    skrf = pytest.importorskip("skrf")
+    matrix, _ = _non_reciprocal_matrix()
+
+    network = skrf.Network(str(matrix.write_touchstone(tmp_path / "device")))
+
+    np.testing.assert_allclose(network.z0, 50.0)
+
+
+def test_touchstone_three_ports_keep_matrix_order(tmp_path: Path) -> None:
+    skrf = pytest.importorskip("skrf")
+    ports = ("a", "b", "c")
+    wavelength_um = np.array([1.5, 1.6])
+    table = {
+        (receive, source): np.array([1.0, 2.0]) * (0.01 * (10 * i + j + 11) + 0.02j)
+        for i, receive in enumerate(ports)
+        for j, source in enumerate(ports)
+    }
+    run = SMatrixRun("run", wavelength_um, ports, table, np.ones(2, dtype=bool))
+
+    written = assemble_s_matrix([run]).write_touchstone(tmp_path / "device")
+
+    assert written.name == "device.s3p"
+    network = skrf.Network(str(written))
+    assert list(network.port_names) == list(ports)
+    for i, receive in enumerate(ports):
+        for j, source in enumerate(ports):
+            np.testing.assert_allclose(
+                network.s[:, i, j], table[receive, source][::-1], atol=1e-12
+            )
+
+
+def test_touchstone_appends_suffix_without_eating_a_dotted_name(
+    tmp_path: Path,
+) -> None:
+    matrix, _ = _non_reciprocal_matrix()
+
+    written = matrix.write_touchstone(tmp_path / "run_1.5")
+
+    assert written == tmp_path / "run_1.5.s2p"
+    assert written.is_file()
+
+
+@pytest.mark.parametrize("name", ["device.s2p", "device.S2P"])
+def test_touchstone_keeps_a_matching_suffix(tmp_path: Path, name: str) -> None:
+    matrix, _ = _non_reciprocal_matrix()
+
+    written = matrix.write_touchstone(str(tmp_path / name))
+
+    assert written == tmp_path / name
+    assert written.is_file()
+    assert [path.name for path in tmp_path.iterdir()] == [name]
+
+
+@pytest.mark.parametrize("name", ["device.s4p", "device.S1P"])
+def test_touchstone_refuses_a_suffix_with_the_wrong_port_count(
+    tmp_path: Path, name: str
+) -> None:
+    matrix, _ = _non_reciprocal_matrix()
+
+    with pytest.raises(ValueError, match=r"2 ports"):
+        matrix.write_touchstone(tmp_path / name)
+    assert not (tmp_path / name).exists()
