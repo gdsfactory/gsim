@@ -17,31 +17,43 @@ class GroupStyle(TypedDict, total=False):
     visible: bool
 
 
-def _layer_tuple(layer: Any) -> tuple[int, int] | None:
+def _layer_tuple(
+    layer: Any, pdk: Any = None, component: Any = None
+) -> tuple[int, int] | None:
     """Return a concrete GDS layer, leaving boolean expressions unmatched."""
     if isinstance(layer, tuple) and len(layer) == 2:
         return int(layer[0]), int(layer[1])
+    if isinstance(layer, str):
+        named_layer = getattr(getattr(pdk, "layers", None), layer, None)
+        return _layer_tuple(named_layer, pdk, component)
     nested_layer = getattr(layer, "layer", None)
     datatype = getattr(layer, "datatype", None)
     if isinstance(nested_layer, int) and isinstance(datatype, int):
         return nested_layer, datatype
     if nested_layer is not None:
-        return _layer_tuple(nested_layer)
+        return _layer_tuple(nested_layer, pdk, component)
+    if isinstance(layer, int) and component is not None:
+        info = component.kcl.get_info(layer)
+        return int(info.layer), int(info.datatype)
     return None
 
 
 def _visibility_by_layer(
-    views: Mapping[str, Any], parent_visible: bool = True
+    views: Mapping[str, Any], parent_visible: bool = True, *, layers: Any = None
 ) -> dict[tuple[int, int], bool]:
     """Include the visibility of every enclosing layer-view group."""
     visibility = {}
-    for view in views.values():
+    for name, view in views.items():
         visible = parent_visible and getattr(view, "visible", True)
         layer = _layer_tuple(getattr(view, "layer", None))
+        if layer is None:
+            layer = _layer_tuple(getattr(layers, name, None))
         if layer is not None:
             visibility[layer] = visible
         visibility.update(
-            _visibility_by_layer(getattr(view, "group_members", {}), visible)
+            _visibility_by_layer(
+                getattr(view, "group_members", {}), visible, layers=layers
+            )
         )
     return visibility
 
@@ -85,13 +97,21 @@ def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, Group
     stack = getattr(resolved, "layer_stack", None)
     if stack is None:
         return {}
-    pdk_views = getattr(getattr(resolved, "pdk", None), "layer_views", None)
-    visibility = _visibility_by_layer(getattr(pdk_views, "layer_views", {}))
+    pdk = getattr(resolved, "pdk", None)
+    component = getattr(resolved, "component", None)
+    pdk_views = getattr(pdk, "layer_views", None)
+    get_layer_views = getattr(pdk, "get_layer_views", None)
+    if pdk_views is not None and callable(get_layer_views):
+        pdk_views = get_layer_views()
+    visibility = _visibility_by_layer(
+        getattr(pdk_views, "layer_views", {}),
+        layers=getattr(pdk_views, "layers", None),
+    )
     styles: dict[str, GroupStyle] = {}
     for name, level in stack.layers.items():
         style: GroupStyle = {}
         for declared_layer in (level.derived_layer, level.layer):
-            layer = _layer_tuple(declared_layer)
+            layer = _layer_tuple(declared_layer, pdk, component)
             if layer is not None and layer in visibility:
                 style["visible"] = visibility[layer]
                 break

@@ -6,8 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import gdsfactory as gf
 import pytest
-from gdsfactory.technology import LayerView, LayerViews, LogicalLayer
+from gdsfactory.technology import LayerMap, LayerView, LayerViews, LogicalLayer
 
 from gsim import fdtd
 from gsim.fdtd.display import layer_group_styles
@@ -77,6 +78,49 @@ def test_missing_derived_view_falls_back_to_source_view():
     resolved = _resolved(
         {"core": _level(derived_layer=LogicalLayer(layer=(100, 0)))}, views
     )
+    assert layer_group_styles(resolved) == {"core": {"visible": False}}
+
+
+def test_named_layer_uses_owning_pdk():
+    views = LayerViews(layer_views={"core": LayerView(layer=(1, 0), visible=False)})
+    resolved = _resolved({"core": _level(layer="CORE")}, views)
+    resolved.pdk.layers = SimpleNamespace(CORE=(1, 0))
+    assert layer_group_styles(resolved) == {"core": {"visible": False}}
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_name_backed_layer_view_respects_group_visibility(grouped):
+    class DisplayLayers(LayerMap):
+        CORE = (1, 0)
+
+    core_view = LayerView(visible=grouped)
+    layer_views = (
+        {"hidden": LayerView(visible=False, group_members={"CORE": core_view})}
+        if grouped
+        else {"CORE": core_view}
+    )
+    views = LayerViews(layers=DisplayLayers, layer_views=layer_views)
+    resolved = _resolved({"core": _level()}, views)
+    assert layer_group_styles(resolved) == {"core": {"visible": False}}
+
+
+def test_layer_index_uses_component_layout():
+    component = gf.Component()
+    layer_index = component.kcl.layer(17, 3)
+    views = LayerViews(layer_views={"core": LayerView(layer=(17, 3), visible=False)})
+    resolved = _resolved({"core": _level(layer=layer_index)}, views)
+    resolved.component = component
+    assert layer_group_styles(resolved) == {"core": {"visible": False}}
+
+
+def test_file_backed_layer_views_use_pdk_loader(tmp_path):
+    view_path = tmp_path / "layer_views.yaml"
+    view_path.write_text(
+        "LayerViews:\n  core:\n    layer: [1, 0]\n    visible: false\n"
+    )
+    pdk = gf.Pdk(name="generic_display", layer_views=view_path)
+    resolved = _resolved({"core": _level()})
+    resolved.pdk = pdk
     assert layer_group_styles(resolved) == {"core": {"visible": False}}
 
 
