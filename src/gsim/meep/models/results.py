@@ -6,11 +6,15 @@ import contextlib
 import csv
 import json
 import logging
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
+
+from gsim.common.s_matrix import SMatrix, SMatrixRun, assemble_s_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -365,6 +369,99 @@ class SParameterResult(BaseModel):
             ),
         )
         return fig
+
+
+def s_matrix(
+    results: SParameterResult | Sequence[SParameterResult],
+    *,
+    port_names: Sequence[str] | None = None,
+    assume_reciprocal: bool = False,
+    assume_unmeasured_zero: bool = False,
+) -> SMatrix:
+    """Build an S-matrix from one result per excited port.
+
+    One Meep run fills one S-matrix column, the entries ``S<receive><source>`` of
+    its source port, so a matrix needs a run per port or an explicit assumption for
+    what no run measured. Meep's values are in time convention exp(-iwt) and are
+    conjugated here to gsim's exp(+jwt).
+
+    Phases are referenced where the port monitors sit, and the source port's monitor
+    is offset from the port centre; gsim does not de-embed them.
+
+    Args:
+        results: One result or a sequence, all with the same ports and wavelengths.
+        port_names: Names for the ports by 1-based index, covering at least the
+            highest index in the results. Ports default to ``port_1``, ``port_2``
+            and so on up to that index, as ``SParameterResult.port_names`` has them.
+        assume_reciprocal: Copy a missing S(a,b) from a measured S(b,a).
+        assume_unmeasured_zero: Set entries that are still missing to zero.
+
+    Returns:
+        The matrix, with ``sax_model()`` and ``write_touchstone()``. ``measured`` is
+        False for every entry filled by an assumption.
+
+    Raises:
+        ValueError: If there are no results; a result has no S-parameters (a preview
+            run); an entry is not named ``S<receive><source>`` with both digits
+            nonzero, which includes the ``S<i>0`` of a fiber source; ``port_names``
+            misses an index; port lists or wavelength grids differ; an entry appears
+            twice; every sample is invalid; or an entry is missing and neither flag
+            fills it.
+    """
+    runs = [results] if isinstance(results, SParameterResult) else results
+    return assemble_s_matrix(
+        [
+            _s_matrix_run(result, f"Meep result {number}", port_names)
+            for number, result in enumerate(runs, start=1)
+        ],
+        assume_reciprocal=assume_reciprocal,
+        assume_unmeasured_zero=assume_unmeasured_zero,
+    )
+
+
+def _s_matrix_run(
+    result: SParameterResult, label: str, port_names: Sequence[str] | None
+) -> SMatrixRun:
+    """Describe one result for assembly, converting exp(-iwt) to exp(+jwt)."""
+    indices = {name: _entry_indices(name, label) for name in result.s_params}
+    highest = max((max(pair) for pair in indices.values()), default=0)
+    if port_names is None:
+        ports = [f"port_{index}" for index in range(1, highest + 1)]
+    elif len(port_names) < highest:
+        raise ValueError(
+            f"{label} measures port {highest}, but port_names has only "
+            f"{len(port_names)} names: {list(port_names)}."
+        )
+    else:
+        ports = list(port_names)
+    return SMatrixRun(
+        label=label,
+        wavelength_um=np.asarray(result.wavelengths, dtype=float),
+        ports=ports,
+        entries={
+            (ports[receive - 1], ports[source - 1]): np.conj(
+                np.asarray(result.s_params[name], dtype=complex)
+            )
+            for name, (receive, source) in indices.items()
+        },
+        valid=np.ones(len(result.wavelengths), dtype=bool),
+    )
+
+
+def _entry_indices(name: str, label: str) -> tuple[int, int]:
+    """Return the 1-based ``(receive, source)`` port indices of an entry name."""
+    match = re.fullmatch(r"S([0-9])([0-9])", name)
+    if match and match[2] == "0":
+        raise ValueError(
+            f"{label}: {name} comes from a fiber source. It is normalised to launched "
+            "flux, so it is not a column of a modal S-matrix."
+        )
+    if match is None or match[1] == "0":
+        raise ValueError(
+            f"{label}: cannot read {name!r} as S<receive><source> with 1-based port "
+            "digits."
+        )
+    return int(match[1]), int(match[2])
 
 
 class ModeResult(BaseModel):
