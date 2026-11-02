@@ -89,6 +89,7 @@ def test_fingerprint_values() -> None:
         "material": "tungsten",
         "layer_type": "via",
         "sidewall_angle": 0.0,
+        "mesh_order": None,
         "via_conductive": True,
     }
     assert "via_conductive" not in json.loads(fp["layer:m1"])
