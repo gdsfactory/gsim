@@ -39,6 +39,7 @@ from gsim.palace.models.results import (
     format_mesh_distortion,
     mesh_identity_lines,
 )
+from gsim.palace.ports.config import PortType
 from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
@@ -1898,7 +1899,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             write_config=write_config,
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
-            absorbing_boundary=self._outer_wall()[0],
+            absorbing_boundary=self._outer_wall(ports)[0],
             absorbing_order=self.absorbing_order,
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
@@ -2164,7 +2165,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 boundary_mode_config=self._get_problem_settings("boundary_mode"),
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
-                absorbing_boundary=self._outer_wall()[0],
+                absorbing_boundary=self._outer_wall(ports)[0],
                 absorbing_order=self.absorbing_order,
                 symmetry_plane=(
                     self._symmetry_planes[0] if self._symmetry_planes else None
@@ -2397,7 +2398,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         groups = getattr(self._last_mesh_result, "groups", None) or {}
         volumes = groups.get("volumes", {})
         if (
-            self._outer_wall()[0]
+            self._outer_wall(self._last_ports)[0]
             and groups.get("boundary_surfaces", {}).get("absorbing")
         ) and not any(is_air_like_material(stack, name) for name in volumes):
             logger.warning(
@@ -2430,11 +2431,14 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         return result
 
-    def _outer_wall(self) -> tuple[bool, bool, bool]:
+    def _outer_wall(self, ports: list | None = None) -> tuple[bool, bool, bool]:
         """Resolve the outer wall as (absorbing, metallic, pec_by_default).
 
         An unset ``absorbing_boundary`` (``None``) is absorbing, except with
-        wave ports, where the wall is PEC like the port eigenproblem's.
+        wave ports, where the wall is PEC like the port eigenproblem's. Wave
+        ports come from ``add_wave_port`` or from the extracted ports (which
+        include ``configure_wave_port`` metadata); ``ports`` defaults to the
+        last extracted ones.
         """
         absorbing = self.absorbing_boundary
         metallic = bool(getattr(self, "metallic_boundaries", False))
@@ -2442,7 +2446,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             return absorbing, metallic, False
         if metallic:
             return False, True, False
-        if getattr(self, "wave_ports", None):
+        extracted = self._last_ports if ports is None else ports
+        if getattr(self, "wave_ports", None) or any(
+            p.port_type == PortType.WAVEPORT for p in extracted
+        ):
             return False, True, True
         return True, False, False
 

@@ -36,10 +36,16 @@ def _stack() -> LayerStack:
     return stack
 
 
-def _sim(monkeypatch, tmp_path, port_type: PortType, **options) -> DrivenSim:
-    """Return a DrivenSim holding a synthetic mesh result and two ports."""
+def _sim(
+    monkeypatch, tmp_path, port_type: PortType, *, declared=True, **options
+) -> DrivenSim:
+    """Return a DrivenSim holding a synthetic mesh result and two ports.
+
+    With ``declared=False`` the wave ports come only from extracted ports (the
+    ``configure_wave_port`` metadata path), not from ``add_wave_port``.
+    """
     sim = DrivenSim(**options)
-    if port_type == PortType.WAVEPORT:
+    if port_type == PortType.WAVEPORT and declared:
         sim.add_wave_port("o1", layer="metal")
         sim.add_wave_port("o2", layer="metal", excited=False)
     monkeypatch.setattr(sim, "_resolve_stack", _stack)
@@ -72,6 +78,23 @@ def test_wave_ports_default_to_pec_wall(monkeypatch, tmp_path):
     boundaries = _boundaries(sim, tmp_path)
     assert "Absorbing" not in boundaries
     assert set(OUTER) <= set(boundaries["PEC"]["Attributes"])
+
+
+def test_metadata_wave_ports_default_to_pec_wall(monkeypatch, tmp_path):
+    """Wave ports from component metadata (no add_wave_port) also get PEC."""
+    sim = _sim(monkeypatch, tmp_path, PortType.WAVEPORT, declared=False)
+    assert not sim.wave_ports
+    boundaries = _boundaries(sim, tmp_path)
+    assert "Absorbing" not in boundaries
+    assert set(OUTER) <= set(boundaries["PEC"]["Attributes"])
+
+
+def test_metadata_wave_ports_pec_wall_at_meshing(monkeypatch, tmp_path):
+    """The meshing step sees the extracted wave ports, not just wave_ports."""
+    sim = _sim(monkeypatch, tmp_path, PortType.WAVEPORT, declared=False)
+    ports = list(sim._last_ports)
+    sim._last_ports = []  # stale: extraction has not stored them yet
+    assert sim._outer_wall(ports) == (False, True, True)
 
 
 def test_lumped_ports_keep_absorbing_wall(monkeypatch, tmp_path):
