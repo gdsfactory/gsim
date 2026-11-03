@@ -86,6 +86,75 @@ def test_mode_selection_axis_must_be_transverse(
         simulation.write(tmp_path)
 
 
+@pytest.mark.parametrize("kind", ["te_like", "tm_like"])
+@pytest.mark.parametrize(
+    ("source_port", "te_axis", "invalid_port"),
+    [("o1", "y", "o2"), ("o2", "x", "o1")],
+)
+def test_mode_selection_axis_must_be_transverse_to_every_guided_port(
+    tmp_path: Path,
+    fdtd_pdk_module,
+    kind: str,
+    source_port: str,
+    te_axis: str,
+    invalid_port: str,
+) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("bend", mesh_size_nm=750)
+    simulation.source(port=source_port, mode={"kind": kind, "te_axis": te_axis})
+
+    with pytest.raises(
+        fdtd.FDTDConfigError, match=f"te_axis.*{te_axis!r}.*{invalid_port!r}"
+    ):
+        simulation.write(tmp_path)
+    assert not (tmp_path / "config.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["te_like", "tm_like"])
+@pytest.mark.parametrize(
+    ("component", "te_axis"),
+    [("straight", "y"), ("bend", "z"), ("vertical_coupler", "z")],
+)
+def test_mode_selection_axis_transverse_to_guided_ports_serializes(
+    tmp_path: Path,
+    fdtd_pdk_module,
+    kind: str,
+    component: str,
+    te_axis: str,
+) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry(component, mesh_size_nm=750)
+    mode = {"kind": kind, "te_axis": te_axis}
+    simulation.source(port="o1", mode=mode)
+
+    artifacts = simulation.write(tmp_path)
+    document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
+
+    assert document["excitation"]["mode"] == mode
+    if component == "vertical_coupler":
+        assert set(document["geometry"]["ports"]) == {"o1"}
+        assert document["monitors"][0]["name"] == "o2"
+
+
+@pytest.mark.parametrize(
+    "mode", [None, {"kind": "fundamental"}, {"kind": "mode_order", "mode_order": 2}]
+)
+def test_bend_mode_selection_without_polarization_axis_serializes(
+    tmp_path: Path,
+    fdtd_pdk_module,
+    mode: dict | None,
+) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("bend", mesh_size_nm=750)
+    simulation.source(port="o1", mode=mode)
+
+    artifacts = simulation.write(tmp_path)
+    document = json.loads(artifacts.config_path.read_text(encoding="utf8"))
+
+    assert document["excitation"].get("mode") == mode
+    assert set(document["geometry"]["ports"]) == {"o1", "o2"}
+
+
 def test_material_override_participates_in_gpdk_resolution() -> None:
     gf.gpdk.PDK.activate()
     simulation = fdtd.Simulation(pdk=gf.gpdk.PDK)

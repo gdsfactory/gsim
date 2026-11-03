@@ -219,7 +219,10 @@ The selector is also available as `fdtd.ModeSelection`. `te_like` and `tm_like`
 select the first candidate with the requested polarization; those selectors
 require a transverse `te_axis` and can set `num_candidate_modes` and
 `min_polarization_fraction`. With no selector, the fundamental mode is used.
-The implicit port monitors use the same selection as the source.
+The implicit guided-port monitors use the same selection as the source.
+`te_axis` is a global coordinate axis and must be transverse to every guided
+port. Components with both x-normal and y-normal ports, such as a 90-degree
+bend, require `te_axis="z"`. Vertical fiber monitors do not use this selector.
 
 Replace `sim.source` to use another physical source:
 
