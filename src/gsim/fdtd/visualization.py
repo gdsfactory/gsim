@@ -80,6 +80,7 @@ class VisualizationMixin(RuntimeConfigMixin):
             self._selected_port_name()
         self._validate_explicit_domain_contents()
         materials = self._material_snapshots()
+        vertical_ports = self._vertical_port_configs(materials)
         if position_um is None:
             normal_axis = "xyz".index(axis)
             position_um = (
@@ -116,7 +117,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 legend=legend,
                 aspect=aspect,
                 figsize=figsize,
-                vertical_ports=self._vertical_port_configs(materials),
+                vertical_ports=vertical_ports,
             )
 
     def _plot_viewer(

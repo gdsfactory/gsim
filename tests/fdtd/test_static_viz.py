@@ -333,3 +333,14 @@ def test_failed_preview_removes_temporary_mesh_and_preserves_artifacts(
     assert simulation._last_artifacts is previous_artifacts
     assert len(mesh_paths) == 1
     assert not mesh_paths[0].parent.exists()
+
+
+def test_non_port_source_does_not_reserve_vertical_monitor_names(fdtd_pdk_module):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module, mesh_size_nm=750)
+    simulation.geometry("vertical_coupler")
+    simulation.source = fdtd.DipoleSource(position_um=(1, 0, 0.11), current_axis="z")
+    simulation.monitors.add_plane(
+        name="o2", center_um=(1, 0, 0.11), size_um=(1, 1, 0), normal="+z"
+    )
+    ax = simulation.plot_2d_static()
+    assert {text.get_text() for text in ax.texts} >= {"Source", "Monitor o2"}

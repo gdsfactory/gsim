@@ -110,3 +110,34 @@ def test_static_preview_rejects_regions_outside_explicit_domain(
     )
     with pytest.raises(fdtd.FDTDConfigError, match=r"exceeds domain.y_bounds"):
         simulation.plot_2d_static()
+
+
+@pytest.mark.parametrize("source_port", [None, "o1", "o2"])
+def test_preview_rejects_monitor_shadowing_vertical_port_before_meshing(
+    fdtd_pdk_module, monkeypatch, source_port
+):
+    from gsim.fdtd import visualization
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("vertical_coupler")
+    if source_port is not None:
+        simulation.source(port=source_port)
+    simulation.monitors.add_plane(
+        name="o2", center_um=(1, 0, 0.11), size_um=(1, 1, 0), normal="+z"
+    )
+    monkeypatch.setattr(
+        visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
+    )
+    with pytest.raises(fdtd.FDTDConfigError, match="cannot shadow vertical ports"):
+        simulation.plot_2d_static()
+
+
+def test_write_rejects_monitor_shadowing_vertical_port(fdtd_pdk_module, tmp_path):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("vertical_coupler")
+    simulation.source(port="o1")
+    simulation.monitors.add_plane(
+        name="o2", center_um=(1, 0, 0.11), size_um=(1, 1, 0), normal="+z"
+    )
+    with pytest.raises(fdtd.FDTDConfigError, match="cannot shadow vertical ports"):
+        simulation.write(tmp_path / "run")
