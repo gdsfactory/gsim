@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Literal
 
+from gsim.fdtd.api import PortSource
 from gsim.fdtd.mesh import generate_mesh
 from gsim.fdtd.runtime import RuntimeConfigMixin
 from gsim.fdtd.viz import Axis, ViewerMode, validate_slice
@@ -39,7 +41,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         """Write artifacts using the concrete simulation workflow."""
         raise NotImplementedError
 
-    def plot_2d(
+    def plot_2d_static(
         self,
         *,
         axis: Axis = "z",
@@ -74,6 +76,9 @@ class VisualizationMixin(RuntimeConfigMixin):
         if aspect not in {"equal", "auto"}:
             raise ValueError("aspect must be 'equal' or 'auto'")
         resolved = self._resolve_geometry()
+        if isinstance(self.source, PortSource) and self.source.port is not None:
+            self._selected_port_name()
+        self._validate_explicit_domain_contents()
         materials = self._material_snapshots()
         if position_um is None:
             normal_axis = "xyz".index(axis)
@@ -176,6 +181,38 @@ class VisualizationMixin(RuntimeConfigMixin):
         """Show the 3D geometry, optionally with Gmsh surface edges."""
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
+            show_groups=show_groups,
+            hide_groups=hide_groups,
+            zoom_to_cursor=zoom_to_cursor,
+            height=height,
+        )
+
+    def plot_2d(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        height: int = 600,
+    ) -> Any:
+        """Show the HTML slice viewer through its deprecated original name.
+
+        Use plot_2d_interactive() for the same viewer and plot_2d_static() for
+        a Matplotlib cross-section. All original keywords remain supported.
+        """
+        warnings.warn(
+            "plot_2d() is deprecated; use plot_2d_interactive() for the HTML "
+            "viewer or plot_2d_static() for a Matplotlib cross-section.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.plot_2d_interactive(
+            axis=axis,
+            position_um=position_um,
+            show_mesh=show_mesh,
             show_groups=show_groups,
             hide_groups=hide_groups,
             zoom_to_cursor=zoom_to_cursor,

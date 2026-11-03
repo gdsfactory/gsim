@@ -15,7 +15,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.colors import ListedColormap, Normalize
 
 from gsim.common.viz._matplotlib import add_bottom_legend
-from gsim.fdtd.slice_overlay import draw_setup_overlay
+from gsim.fdtd.slice_overlay import draw_setup_overlay, pml_thickness_um
 from gsim.fdtd.viz import validate_slice
 
 if TYPE_CHECKING:
@@ -164,9 +164,9 @@ def plot_mesh_slice(
         hide_groups,
         vertical_ports or {},
     )
-    pml_um = simulation.domain.pml_cells * simulation.solver.cell_size_nm / 1000
-    ax.set_xlim(lower[plane_axes[0]] - pml_um, upper[plane_axes[0]] + pml_um)
-    ax.set_ylim(lower[plane_axes[1]] - pml_um, upper[plane_axes[1]] + pml_um)
+    pml_x, pml_y = pml_thickness_um(simulation)[plane_axes]
+    ax.set_xlim(lower[plane_axes[0]] - pml_x, upper[plane_axes[0]] + pml_x)
+    ax.set_ylim(lower[plane_axes[1]] - pml_y, upper[plane_axes[1]] + pml_y)
     ax.set_xlabel(f"{'xyz'[plane_axes[0]]} (µm)")
     ax.set_ylabel(f"{'xyz'[plane_axes[1]]} (µm)")
     ax.set_title(f"FDTD · {axis} = {position_um:g} µm")

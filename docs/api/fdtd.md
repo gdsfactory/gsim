@@ -139,7 +139,7 @@ sim.domain(
 
 ## Setup visualization
 
-`plot_2d()` produces a static Matplotlib cross-section, like the Meep setup view.
+`plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
 Materials are colored by their real refractive index at the source center
 wavelength, with a colorbar, physical-domain boundary, hatched PML regions, and source
 and monitor annotations where they intersect the slice. The plot uses the FDTD
@@ -147,9 +147,9 @@ transfer mesh, including sidewalls and material priorities. All physical groups
 are shown by default; `show_groups` and `hide_groups` select physical group names.
 
 ```python
-ax = sim.plot_2d()                               # XY at geometry midpoint
-ax = sim.plot_2d(axis="z", position_um=0.11)      # XY at z = 0.11 µm
-ax = sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
+ax = sim.plot_2d_static()                               # XY at geometry midpoint
+ax = sim.plot_2d_static(axis="z", position_um=0.11)      # XY at z = 0.11 µm
+ax = sim.plot_2d_static(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
 ax.figure.savefig("cross_section.png", dpi=200, bbox_inches="tight")
 ```
 
@@ -159,7 +159,11 @@ subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
 An omitted `position_um` uses the geometry midpoint along the requested axis.
 The current geometry and material settings are resolved for every call. A
 temporary mesh is generated; the plot does not require selecting a source port
-or writing run artifacts. Mesh edges describe the tetrahedral transfer mesh,
+or writing run artifacts. A selected source port must exist, and sources and
+monitors must fit any explicit domain bounds, as required by `write()`. The PML
+thickness uses the same per-axis alignment as the metadata estimate: z PML is
+rounded up to a multiple of 16 cells (for example, 20 becomes 32). Guard cells
+are not drawn as PML. Mesh edges describe the tetrahedral transfer mesh,
 rather than the solver's Yee grid.
 
 The interactive setup views use the GDSFactory FDTD Three.js viewer and do not
@@ -185,15 +189,18 @@ The viewer also summarizes the physical domain, estimated Yee-grid dimensions
 and total cell count (including PML). These values are estimates; the solver
 backend is authoritative when it constructs the final grid.
 
-### Migration to static 2D plots (0.9.0)
+### 2D plotting APIs and compatibility (0.9.0)
 
-`plot_2d()` previously returned an interactive HTML `MeshViewer`. It now returns
-a Matplotlib `Axes` so notebook previews and exported figures use the same
-static plotting workflow as Meep. This affects callers accessing `.html`,
-calling `.save()`, or supplying viewer options such as `height` and
-`zoom_to_cursor`. Change those calls to `plot_2d_interactive()` to keep the
-previous behavior and arguments. To export the static plot instead, use
-`ax.figure.savefig(...)`. The interactive method remains supported.
+Use `plot_2d_static()` for a Matplotlib `Axes` and export it with
+`ax.figure.savefig(...)`. Use `plot_2d_interactive()` for an HTML `MeshViewer`
+with `.html` and `.save()`.
+
+The original `plot_2d()` remains an alias for the interactive viewer, accepts
+all original keywords including `height` and `zoom_to_cursor`, and still returns
+`MeshViewer`. Starting with 0.9.0 it emits a `DeprecationWarning` directing callers
+to the explicit methods. The alias will remain for at least two feature releases
+and roughly 12 months after the first released warning. This change does not
+switch its default behavior or remove the old API.
 
 ## Sources
 

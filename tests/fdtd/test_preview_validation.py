@@ -1,0 +1,112 @@
+"""Compatibility and pre-mesh validation for public FDTD preview APIs."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+
+from gsim import fdtd
+from gsim.fdtd.viz import MeshViewer
+from tests.fdtd.test_viz import _write_mesh
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        {"height": 500},
+        {"zoom_to_cursor": False},
+        {"height": 500, "zoom_to_cursor": False},
+    ],
+)
+def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
+    simulation = fdtd.Simulation()
+    cast(Any, simulation)._last_artifacts = SimpleNamespace(
+        mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    with pytest.warns(DeprecationWarning, match=r"plot_2d_interactive.*plot_2d_static"):
+        viewer = simulation.plot_2d(
+            axis="y",
+            position_um=0.25,
+            show_mesh=True,
+            show_groups=["core"],
+            hide_groups=["port_o2"],
+            **options,
+        )
+    assert isinstance(viewer, MeshViewer)
+    assert '"mode":"mesh_slice"' in viewer.html
+    assert '"axis":"y"' in viewer.html
+    assert '"positionUm":0.25' in viewer.html
+    assert '"showGroups":["core"]' in viewer.html
+    assert '"hideGroups":["port_o2"]' in viewer.html
+    assert f'height="{options.get("height", 600)}"' in viewer._repr_html_()
+    zoom = "true" if options.get("zoom_to_cursor", True) else "false"
+    assert f'"zoomToCursor":{zoom}' in viewer.html
+    output = viewer.save(tmp_path / "legacy.html")
+    assert output.read_text() == viewer.html
+
+
+def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path):
+    simulation = fdtd.Simulation()
+    cast(Any, simulation)._last_artifacts = SimpleNamespace(
+        mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    with pytest.warns(DeprecationWarning, match=r"plot_2d\(\) is deprecated"):
+        viewer = simulation.plot_2d()
+    assert isinstance(viewer, MeshViewer)
+    assert '"mode":"slice"' in viewer.html
+
+
+def test_static_preview_rejects_unknown_selected_port_before_meshing(
+    fdtd_pdk_module, monkeypatch
+):
+    from gsim.fdtd import visualization
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    simulation.source(port="nope")
+    monkeypatch.setattr(
+        visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
+    )
+    with pytest.raises(fdtd.FDTDConfigError, match="source port 'nope' is not present"):
+        simulation.plot_2d_static()
+
+
+@pytest.mark.parametrize("region", ["monitor", "dipole", "line_current", "gaussian"])
+def test_static_preview_rejects_regions_outside_explicit_domain(
+    fdtd_pdk_module, monkeypatch, region
+):
+    from gsim.fdtd import visualization
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    simulation.domain(y_bounds=(-1, 1))
+    if region == "monitor":
+        simulation.monitors.add_plane(
+            name="outside", center_um=(1, 1.1, 0.11), size_um=(1, 0.4, 0), normal="+z"
+        )
+    elif region == "dipole":
+        simulation.source = fdtd.DipoleSource(
+            position_um=(1, 1.1, 0.11), current_axis="z"
+        )
+    elif region == "line_current":
+        simulation.source = fdtd.LineCurrentSource(
+            position_um=(1, 0.9, 0.11), line_axis="y", current_axis="z", length_um=0.4
+        )
+    else:
+        simulation.source = fdtd.GaussianBeamSource(
+            center_um=(1, 1.1, 0.11),
+            size_um=(1, 0.4, 0),
+            aperture_normal="-z",
+            propagation_direction=(0, 0, -1),
+            e_polarization=(1, 0, 0),
+            focal_point_um=(1, 0, 0),
+            waist_radius_um=0.1,
+        )
+    monkeypatch.setattr(
+        visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
+    )
+    with pytest.raises(fdtd.FDTDConfigError, match=r"exceeds domain.y_bounds"):
+        simulation.plot_2d_static()

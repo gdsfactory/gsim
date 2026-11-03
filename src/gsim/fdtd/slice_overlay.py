@@ -72,6 +72,14 @@ def _region(
     )
 
 
+def pml_thickness_um(simulation: VisualizationMixin) -> np.ndarray:
+    """Return per-axis PML thickness with the Yee-grid z alignment."""
+    alignment = np.asarray([1, 1, 16])
+    cells = simulation.domain.pml_cells
+    aligned_cells = ((cells + alignment - 1) // alignment) * alignment
+    return aligned_cells * simulation.solver.cell_size_nm / 1000
+
+
 def draw_setup_overlay(
     ax: Axes,
     simulation: VisualizationMixin,
@@ -99,13 +107,13 @@ def draw_setup_overlay(
             zorder=8,
         )
     )
-    pml_um = simulation.domain.pml_cells * simulation.solver.cell_size_nm / 1000
-    if pml_um:
+    pml_x, pml_y = pml_thickness_um(simulation)[plane_axes]
+    if pml_x or pml_y:
         rectangles = [
-            ((start[0] - pml_um, start[1] - pml_um), pml_um, size[1] + 2 * pml_um),
-            ((end[0], start[1] - pml_um), pml_um, size[1] + 2 * pml_um),
-            ((start[0], start[1] - pml_um), size[0], pml_um),
-            ((start[0], end[1]), size[0], pml_um),
+            ((start[0] - pml_x, start[1] - pml_y), pml_x, size[1] + 2 * pml_y),
+            ((end[0], start[1] - pml_y), pml_x, size[1] + 2 * pml_y),
+            ((start[0], start[1] - pml_y), size[0], pml_y),
+            ((start[0], end[1]), size[0], pml_y),
         ]
         for index, (origin, width, height) in enumerate(rectangles):
             patch = Rectangle(

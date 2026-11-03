@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
+from matplotlib.patches import Rectangle
 
 from gsim import fdtd
 from gsim.fdtd.models import MeshGroup, MeshManifest
@@ -29,8 +30,10 @@ def close_figures():
     plt.close("all")
 
 
-def _tetrahedron_view(tmp_path: Path, **kwargs: Any) -> Axes:
-    simulation = fdtd.Simulation(domain={"pml_cells": 2}, solver={"cell_size_nm": 50})
+def _tetrahedron_view(tmp_path: Path, *, pml_cells: int = 2, **kwargs: Any) -> Axes:
+    simulation = fdtd.Simulation(
+        domain={"pml_cells": pml_cells}, solver={"cell_size_nm": 50}
+    )
     cast(Any, simulation)._resolved = SimpleNamespace(ports={}, layers={})
     manifest = MeshManifest(
         volumes={},
@@ -76,8 +79,41 @@ def test_slice_matches_analytic_tetrahedron(tmp_path, axis, labels):
     )
     assert ax.figure.axes[1].get_ylabel() == "Refractive index n at \u03bb=1.55 µm"
     assert ax.get_xlim() == pytest.approx((-0.1, 1.1))
-    assert ax.get_ylim() == pytest.approx((-0.1, 1.1))
+    assert ax.get_ylim() == pytest.approx((-0.1, 1.1) if axis == "z" else (-0.8, 1.8))
     assert [patch.get_label() for patch in ax.patches].count("PML") == 1
+
+
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+@pytest.mark.parametrize("pml_cells", [0, 20])
+def test_pml_rectangles_match_aligned_grid_thickness(tmp_path, axis, pml_cells):
+    ax = _tetrahedron_view(tmp_path, axis=axis, position_um=0.25, pml_cells=pml_cells)
+    # At 50 nm, 20 cells give 1 um in x/y and 32 aligned cells give 1.6 um in z.
+    horizontal_pml = 1.0 if pml_cells else 0
+    vertical_pml = (1.0 if axis == "z" else 1.6) if pml_cells else 0
+    assert ax.get_xlim() == pytest.approx((-horizontal_pml, 1 + horizontal_pml))
+    assert ax.get_ylim() == pytest.approx((-vertical_pml, 1 + vertical_pml))
+    pml = [patch for patch in ax.patches if patch.get_hatch()]
+    if not pml_cells:
+        assert not pml
+        return
+    assert len(pml) == 4
+    for patch, expected in zip(
+        pml,
+        [
+            (-horizontal_pml, -vertical_pml, horizontal_pml, 1 + 2 * vertical_pml),
+            (1, -vertical_pml, horizontal_pml, 1 + 2 * vertical_pml),
+            (0, -vertical_pml, 1, vertical_pml),
+            (0, 1, 1, vertical_pml),
+        ],
+        strict=True,
+    ):
+        assert isinstance(patch, Rectangle)
+        assert (
+            patch.get_x(),
+            patch.get_y(),
+            patch.get_width(),
+            patch.get_height(),
+        ) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(("position", "paths"), [(0, 1), (1, 0)])
@@ -112,7 +148,7 @@ def test_outside_slice_has_clear_error(tmp_path, position):
         _tetrahedron_view(tmp_path, axis="z", position_um=position)
 
 
-@pytest.mark.parametrize("method", ["plot_2d", "plot_2d_interactive"])
+@pytest.mark.parametrize("method", ["plot_2d_static", "plot_2d_interactive"])
 @pytest.mark.parametrize(
     "kwargs",
     [{"axis": "bad"}, {"position_um": float("nan")}, {"position_um": float("inf")}],
@@ -128,7 +164,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, mesh_size_nm=750)
     simulation.geometry("straight")
     # A preview should work before choosing a source port or writing a job.
-    ax = simulation.plot_2d()
+    ax = simulation.plot_2d_static()
     assert isinstance(ax, Axes)
     assert "z = 0.11 µm" in ax.get_title()
     assert simulation._last_artifacts is None
@@ -138,7 +174,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     simulation.materials(overrides={"Si": {"refractive_index": 2.5}})
     simulation.geometry("straight", settings={"length": 3})
     simulation.add_monitors()
-    updated = simulation.plot_2d(show_mesh=True)
+    updated = simulation.plot_2d_static(show_mesh=True)
     assert simulation._last_artifacts is artifacts
     assert updated.get_xlim()[1] == pytest.approx(3 + 32 * 0.06)
     assert {text.get_text() for text in updated.texts} >= {
@@ -152,7 +188,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
 def test_sidewall_section_and_pml_units(fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, mesh_size_nm=750)
     simulation.geometry("straight")
-    ax = simulation.plot_2d(axis="x", position_um=1, legend=False)
+    ax = simulation.plot_2d_static(axis="x", position_um=1, legend=False)
     core = next(
         collection
         for collection in ax.collections
@@ -253,9 +289,9 @@ def test_non_port_source_only_appears_on_intersecting_slice(fdtd_pdk_module, sou
     simulation.monitors.add_plane(
         name="plane", center_um=(1, 0, 0.11), size_um=(0, 0.5, 0.22), normal="+x"
     )
-    ax = simulation.plot_2d()
+    ax = simulation.plot_2d_static()
     assert {text.get_text() for text in ax.texts} >= {"Source", "Monitor plane"}
-    off_plane = simulation.plot_2d(position_um=0.5)
+    off_plane = simulation.plot_2d_static(position_um=0.5)
     assert not off_plane.texts
 
 
@@ -263,13 +299,15 @@ def test_vertical_port_is_drawn_at_runtime_aperture(fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, mesh_size_nm=750)
     simulation.geometry("vertical_coupler")
     simulation.source(port="o2")
-    ax = simulation.plot_2d(axis="y", position_um=0)
+    ax = simulation.plot_2d_static(axis="y", position_um=0)
     labels = {text.get_text() for text in ax.texts}
     assert {"Monitor o1", "Source o2"} <= labels
     source_line = next(line for line in ax.lines if line.get_label() == "Source o2")
     np.testing.assert_allclose(np.asarray(source_line.get_ydata()), [1, 1])
     np.testing.assert_allclose(np.asarray(source_line.get_xdata()), [0.5, 1.5])
-    filtered = simulation.plot_2d(axis="y", position_um=0, hide_groups=["port_o2"])
+    filtered = simulation.plot_2d_static(
+        axis="y", position_um=0, hide_groups=["port_o2"]
+    )
     assert "Source o2" not in {text.get_text() for text in filtered.texts}
 
 
@@ -291,7 +329,7 @@ def test_failed_preview_removes_temporary_mesh_and_preserves_artifacts(
 
     monkeypatch.setattr(visualization, "generate_mesh", fail_meshing)
     with pytest.raises(fdtd.FDTDGeometryError, match="meshing failed"):
-        simulation.plot_2d()
+        simulation.plot_2d_static()
     assert simulation._last_artifacts is previous_artifacts
     assert len(mesh_paths) == 1
     assert not mesh_paths[0].parent.exists()
