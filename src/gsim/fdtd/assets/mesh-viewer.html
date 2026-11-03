@@ -912,6 +912,20 @@
         return value.toLocaleString(undefined, { maximumFractionDigits });
       }
 
+      function estimateYeeGrid(size, cellSizeNm, pmlCells) {
+        // Match metadata.py: aligned interiors, PML, and solver guard cells.
+        const alignment = [1, 1, 16];
+        return size.map((value, axis) => {
+          const group = alignment[axis];
+          const interior = Math.ceil(
+            Number(((value * 1000) / cellSizeNm).toFixed(6)),
+          );
+          const alignedInterior = Math.ceil(interior / group) * group;
+          const alignedPml = Math.ceil(pmlCells / group) * group;
+          return alignedInterior + 2 * (alignedPml + group);
+        });
+      }
+
       function updateStats(mesh) {
         const bounds = new THREE.Box3();
         for (const point of mesh.nodes.values())
@@ -925,10 +939,7 @@
         ];
         if (options.cellSizeNm) {
           const pmlCells = options.pmlCells ?? 0;
-          const interiorGrid = size.map((value) =>
-            Math.ceil((value * 1000) / options.cellSizeNm),
-          );
-          const yeeGrid = interiorGrid.map((count) => count + 2 * pmlCells);
+          const yeeGrid = estimateYeeGrid(size, options.cellSizeNm, pmlCells);
           const totalCells = yeeGrid.reduce(
             (product, count) => product * count,
             1,
@@ -945,7 +956,7 @@
         title.className = "stats-title muted";
         title.textContent = "Simulation estimate";
         title.title =
-          "Yee-grid dimensions include PML cells on both sides of each axis.";
+          "Yee-grid dimensions include aligned interiors, PML, and solver guard cells.";
         const list = document.createElement("dl");
         list.className = "stats-grid";
         for (const [label, value] of stats) {

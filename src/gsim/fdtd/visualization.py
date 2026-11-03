@@ -28,6 +28,7 @@ class VisualizationMixin(RuntimeConfigMixin):
     geometry: Geometry
     _resolved: ResolvedPassivePcell | None
     _last_artifacts: SimulationArtifacts | None
+    _last_artifacts_domain: dict[str, Any] | None
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve the geometry supplied by the concrete simulation."""
@@ -153,9 +154,14 @@ class VisualizationMixin(RuntimeConfigMixin):
                 height=height,
             )
 
+        saved_domain = getattr(self, "_last_artifacts_domain", None)
         if (
             self._last_artifacts is not None
             and self._last_artifacts.mesh_path.is_file()
+            and (
+                saved_domain is None
+                or saved_domain == self.domain.model_dump(exclude={"pml_cells"})
+            )
         ):
             return render(self._last_artifacts.mesh_path)
 
@@ -166,6 +172,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 return render(artifacts.mesh_path)
             finally:
                 self._last_artifacts = previous_artifacts
+                self._last_artifacts_domain = saved_domain
 
     def plot_3d(
         self,
