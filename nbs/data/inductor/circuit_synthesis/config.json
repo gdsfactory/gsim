@@ -1,0 +1,113 @@
+{
+  "Problem": {
+    "Type": "Driven",
+    "Verbose": 3,
+    "Output": "output/palace"
+  },
+  "Model": {
+    "Mesh": "palace.msh",
+    "L0": 1e-6,
+    "Refinement": {
+      "UniformLevels": 0,
+      "Tol": 0.01,
+      "MaxIts": 0
+    }
+  },
+  "Solver": {
+    "Linear": {
+      "Type": "Default",
+      "KSPType": "GMRES",
+      "Tol": 1e-6,
+      "MaxIts": 400
+    },
+    "Order": 2,
+    "Device": "CPU",
+    "Driven": {
+      "Samples": [
+        {
+          "Type": "Linear",
+          "MinFreq": 10.0,
+          "MaxFreq": 200.0,
+          "FreqStep": 0.95,
+          "SaveStep": 0
+        }
+      ],
+      "AdaptiveTol": 0.02,
+      "AdaptiveMaxSamples": 20,
+      "AdaptiveCircuitSynthesis": true
+    }
+  },
+  "Domains": {
+    "Materials": [
+      {
+        "Attributes": [1],
+        "Permittivity": 11.9,
+        "Conductivity": 2.0
+      },
+      {
+        "Attributes": [2],
+        "Permittivity": 4.1,
+        "LossTan": 0.0
+      },
+      {
+        "Attributes": [3],
+        "Permittivity": 7.5,
+        "LossTan": 0.001
+      },
+      {
+        "Attributes": [4],
+        "Permittivity": 1.0,
+        "LossTan": 0.0
+      }
+    ],
+    "Postprocessing": {
+      "Energy": [],
+      "Probe": []
+    }
+  },
+  "Boundaries": {
+    "Conductivity": [
+      {
+        "Attributes": [5],
+        "Conductivity": 37700000.0,
+        "Thickness": 0.41999999999999993
+      },
+      {
+        "Attributes": [6],
+        "Conductivity": 37700000.0,
+        "Thickness": 0.41999999999999993
+      },
+      {
+        "Attributes": [7],
+        "Conductivity": 37700000.0,
+        "Thickness": 3.0
+      },
+      {
+        "Attributes": [8],
+        "Conductivity": 37700000.0,
+        "Thickness": 3.0
+      }
+    ],
+    "LumpedPort": [
+      {
+        "Index": 1,
+        "Direction": "Z",
+        "Excitation": 1,
+        "Attributes": [9],
+        "R": 50.0
+      },
+      {
+        "Index": 2,
+        "Direction": "Z",
+        "Excitation": 2,
+        "Attributes": [10],
+        "R": 50.0
+      }
+    ],
+    "WavePort": [],
+    "Absorbing": {
+      "Attributes": [16],
+      "Order": 2
+    }
+  }
+}
