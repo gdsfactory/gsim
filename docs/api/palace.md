@@ -141,9 +141,10 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 
 ### Boundary-mode path integration
 
-Newer Palace schemas removed `NSamples` from coordinate-path voltage and impedance
-postprocessing after introducing element-wise line integration. The SDK now
-generates this format by default for the Palace `0dd8d015` deployment, containing
+Starting with gsim **0.9.0**, coordinate-path voltage and impedance postprocessing
+omits `NSamples`. The cloud runtime uses Palace commit
+`0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5`, which provides element-wise line
+integration and contains
 [the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
 
 ```python
@@ -158,12 +159,19 @@ This omits `NSamples` from both `Boundaries.Postprocessing.Impedance` and
 unchanged. Palace controls the integration rule; no replacement sample count is
 required.
 
-The legacy format and `include_legacy_nsamples` switch are removed. The `nsamples`
-argument is also removed from `ModePath`, `add_impedance_path`,
-`declare_impedance_paths`, and `declare_terminal_paths`. Update existing calls by
-removing those arguments. Remove `nsamples` from saved `mode_paths` records and
-the compatibility switch from saved simulation settings. Clients targeting older
-Palace schemas must update their runtime for this SDK change.
+This is an intentional breaking change from gsim 0.8.0: `ModePath` no longer has
+a `nsamples` field, and `add_impedance_path`, `declare_impedance_paths`, and
+`declare_terminal_paths` no longer accept `nsamples=`. Existing calls with that
+keyword raise `TypeError`; remove it when upgrading. Old saved `mode_paths`
+records still load, but their `nsamples` values are ignored and omitted when
+saved again. No replacement setting is needed because Palace determines the
+element-wise integration rule.
+
+The local auto-download remains pinned to Palace **0.18.0**. It accepts these
+configurations, but uses its old sampled integration with the default count of
+**100**; gsim no longer exposes a control for that count. The local runtime does
+not gain the cloud runtime's element-wise integration. There is no
+version-dependent configuration switch.
 
 The `nsamples` settings on local field-integration routines such as
 `voltage_line_integral` remain available; they control Python-side quadrature,
