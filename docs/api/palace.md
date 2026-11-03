@@ -139,6 +139,32 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 | `sim.electrostatic.save_fields` | `sim.solver.electrostatic.save_fields` |
 | `sim.boundary_mode.freq` | `sim.solver.boundary_mode.freq` |
 
+### Boundary-mode path integration compatibility
+
+Newer Palace schemas removed `NSamples` from coordinate-path voltage and impedance
+postprocessing after introducing element-wise line integration. Select that
+interface when using a Palace build containing
+[the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
+
+```python
+from gsim.palace import BoundaryModeSim
+
+sim = BoundaryModeSim(include_legacy_nsamples=False)
+sim.add_impedance_path("gap", voltage=[[0.0, 0.0], [1.0, 0.0]])
+```
+
+This omits `NSamples` from both `Boundaries.Postprocessing.Impedance` and
+`Boundaries.Postprocessing.Voltage`. The paths, indices, and current loops are
+unchanged. Palace controls the integration rule; no replacement sample count is
+required.
+
+The default remains `include_legacy_nsamples=True` for existing Palace deployments.
+Existing calls and saved simulations continue to emit their configured `nsamples`
+values. With the new interface selected, those values remain stored and validated
+but are not forwarded to Palace. Set the flag back to `True` when targeting a
+runtime that needs the legacy sampling option. No automatic runtime detection is
+performed during config generation, including cloud submission.
+
 ### MUMPS behavior change
 
 Reloading a saved gsim settings model with `solver_type="MUMPS"` now uses the saved

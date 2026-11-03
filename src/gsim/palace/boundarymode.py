@@ -145,6 +145,10 @@ class BoundaryModeSim(_PalaceSimBase):
     #: Postprocessing paths, in declaration order: Palace reports the
     #: first under index 1, the second under 2, and so on.
     mode_paths: list[ModePath] = Field(default_factory=list)
+    #: Forward path quadrature counts to Palace versions that support NSamples.
+    #: Disable for newer schemas with element-wise coordinate-path integration.
+    #: The default preserves legacy configurations and saved settings.
+    include_legacy_nsamples: bool = True
 
     solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
     absorbing_boundary: bool = False
@@ -330,6 +334,8 @@ class BoundaryModeSim(_PalaceSimBase):
 
         Each path yields an ``Impedance`` entry (``mode-Z.csv``) and a
         ``Voltage`` entry (``mode-V.csv``) under the same index.
+        Set ``include_legacy_nsamples=False`` for Palace schemas that removed
+        ``NSamples``. Path sample counts remain stored for older runtimes.
 
         Returns:
             The block, empty when no path is declared.
@@ -340,18 +346,19 @@ class BoundaryModeSim(_PalaceSimBase):
             entry: dict[str, object] = {
                 "Index": index,
                 "VoltagePath": [list(point) for point in path.voltage_path],
-                "NSamples": path.nsamples,
             }
             if path.current_path is not None:
                 entry["CurrentPath"] = [list(point) for point in path.current_path]
+            if self.include_legacy_nsamples:
+                entry["NSamples"] = path.nsamples
             impedance_entries.append(entry)
-            voltage_entries.append(
-                {
-                    "Index": index,
-                    "VoltagePath": [list(point) for point in path.voltage_path],
-                    "NSamples": path.nsamples,
-                }
-            )
+            voltage_entry: dict[str, object] = {
+                "Index": index,
+                "VoltagePath": [list(point) for point in path.voltage_path],
+            }
+            if self.include_legacy_nsamples:
+                voltage_entry["NSamples"] = path.nsamples
+            voltage_entries.append(voltage_entry)
         result: dict[str, list[dict[str, object]]] = {}
         if impedance_entries:
             result["Impedance"] = impedance_entries

@@ -217,24 +217,16 @@ class TestBoundaryModeFrequencyResolution:
         )
         assert self._material_permittivity(config_path) == pytest.approx(12.1)
 
-    def test_boundarymode_postprocessing_hint_emitted(self, tmp_path):
+    @pytest.mark.parametrize("include_legacy", [True, False])
+    def test_boundarymode_postprocessing_hint_emitted(self, tmp_path, include_legacy):
         """Postprocessing voltage/impedance paths land under Boundaries."""
-        postprocessing = {
-            "Impedance": [
-                {
-                    "Index": 1,
-                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
-                    "NSamples": 200,
-                }
-            ],
-            "Voltage": [
-                {
-                    "Index": 1,
-                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
-                    "NSamples": 200,
-                }
-            ],
-        }
+        from gsim.palace import BoundaryModeSim
+
+        simulation = BoundaryModeSim(include_legacy_nsamples=include_legacy)
+        simulation.add_impedance_path(
+            "gap", voltage=[[-19.8, 0.11], [-20.2, 0.11]], nsamples=200
+        )
+        postprocessing = simulation.mode_postprocessing()
         boundary = BoundaryModeConfig(freq=50e9, num_modes=2, save=1)
         config_path = generate_palace_config(
             groups=self._groups(),
