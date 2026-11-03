@@ -56,8 +56,6 @@ def _synthetic_sparams(n_ports: int, freq_ghz: np.ndarray, seed: int) -> SParams
 
 def test_touchstone_round_trip_2port_real_data(tmp_path: Path):
     """2-port: committed Palace data round-trips far below 1e-9."""
-    if not (TWO_PORT_DATA / "port-S.csv").exists():  # pragma: no cover
-        pytest.skip("circuit-synthesis data not present")
     sp = load_sparams(TWO_PORT_DATA)
 
     path = sp.write_touchstone(tmp_path / "inductor")
