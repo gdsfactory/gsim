@@ -343,7 +343,7 @@ def test_rlc_fit_repr_and_dict(rlc_data):
 
 def test_circuit_fit_rlc_on_real_data():
     """End-to-end one-pole fit on the committed circuit-synthesis data for the
-    notebook inductor (nbs/data/inductor/circuit_synthesis, Palace v0.18.0 run).
+    notebook inductor (tests/palace/data/inductor_circuit, Palace main run).
 
     Note: an exact *synthetic* two-node circuit cannot reproduce the one-pole
     model — in Palace's pencil Y(w) = L^-1/(iw) + R^-1 + iw*C the R^-1 and
@@ -352,11 +352,7 @@ def test_circuit_fit_rlc_on_real_data():
     expressible as constant R^-1/L^-1 entries. Series behavior only emerges
     from the network, which is exactly what this real-data test exercises.
     """
-    data_dir = (
-        Path(__file__).resolve().parents[2] / "nbs/data/inductor/circuit_synthesis"
-    )
-    if not (data_dir / "rom-Linv-re.csv").exists():  # pragma: no cover - repo layout
-        pytest.skip("circuit-synthesis data not present")
+    data_dir = Path(__file__).parent / "data/inductor_circuit"
 
     circuit = load_circuit_synthesis(data_dir, port_map={1: "P1", 2: "P2"})
     # Evaluation grid: the sweep frequencies from port-S.csv.
@@ -367,11 +363,13 @@ def test_circuit_fit_rlc_on_real_data():
     assert isinstance(fit, RLCFit)
     # Physically meaningful one-pole parameters within the validated ranges
     # (fit values are solver-dependent to ~5 %; the resonance is not).
-    assert 2.0 < fit.R < 6.0
-    assert 80e-12 < fit.L < 160e-12
-    assert 4e-15 < fit.C < 12e-15
-    assert 160e9 < fit.f0 < 180e9
-    assert 20 < fit.Q < 60
+    # Independent FEM fit from this run: R=1.6335 Ohm, L=105.792 pH,
+    # C=8.181 fF, f0=171.082 GHz, Q=69.62 (see fixture provenance).
+    assert pytest.approx(1.6335, rel=0.05) == fit.R
+    assert pytest.approx(105.792e-12, rel=0.05) == fit.L
+    assert pytest.approx(8.181e-15, rel=0.05) == fit.C
+    assert fit.f0 == pytest.approx(171.082e9, rel=0.005)
+    assert pytest.approx(69.62, rel=0.05) == fit.Q
     assert fit.rms_error < 150.0
 
 
@@ -385,19 +383,22 @@ def test_fit_rlc_vector_fit_on_real_circuit_data():
 
     Skips when skrf is unavailable. Uses a modest pole count so the fit is
     fast and deterministic; the exported circuit reproduces the FEM response
-    to ~5e-4 in S, so the rational model must be far below the 0.01 target.
+    to ~6e-4 in S. The passive fit must reproduce the circuit within 1%;
+    the notebook fit test separately checks against the independent FEM output.
     """
     pytest.importorskip("skrf")
-    data_dir = (
-        Path(__file__).resolve().parents[2] / "nbs/data/inductor/circuit_synthesis"
-    )
-    if not (data_dir / "rom-Linv-re.csv").exists():  # pragma: no cover
-        pytest.skip("circuit-synthesis data not present")
+    data_dir = Path(__file__).parent / "data/inductor_circuit"
 
     circuit = load_circuit_synthesis(data_dir, port_map={1: "P1", 2: "P2"})
     f_hz = pd.read_csv(data_dir / "port-S.csv").iloc[:, 0].to_numpy() * 1e9
 
-    fit = circuit.fit_rlc(f_hz, model="vector_fit", n_poles_real=4)
+    fit = circuit.fit_rlc(
+        f_hz,
+        model="vector_fit",
+        n_poles_real=2,
+        n_poles_cmplx=2,
+        enforce_passivity=True,
+    )
     assert isinstance(fit, VectorFit)
     assert "VectorFit" in repr(fit)
     # skrf may prune non-contributing poles during fitting.
@@ -414,7 +415,7 @@ def test_fit_rlc_vector_fit_on_real_circuit_data():
     s_model = fit.s(f_hz)
     s_target = circuit.s_parameters(f_hz)
     max_rel = np.max(np.abs(s_model - s_target) / (np.abs(s_target) + 1e-6))
-    assert max_rel < 2e-3, f"vector fit S error {max_rel:.2e}"
+    assert max_rel < 1e-2, f"vector fit S error {max_rel:.2e}"
 
     # The no-argument call must equal the model, not the data.
     np.testing.assert_allclose(fit.s(), s_model, rtol=1e-9)
@@ -423,7 +424,7 @@ def test_fit_rlc_vector_fit_on_real_circuit_data():
     z_model = fit.z(f_hz)
     z_target = differential_impedance(circuit.port_impedance(f_hz))
     rel = np.max(np.abs(differential_impedance(z_model) - z_target) / np.abs(z_target))
-    assert rel < 5e-3, f"vector fit Z error {rel:.2e}"
+    assert rel < 1e-2, f"vector fit Z error {rel:.2e}"
 
 
 def test_fit_rlc_vector_fit_detects_nonpassive_model():

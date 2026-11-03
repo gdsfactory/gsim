@@ -3,7 +3,7 @@
     {
       "portnumber": 1,
       "name": "P1",
-      "Z0": 50.0,
+      "Z0": 50,
       "type": "via",
       "direction": "Z",
       "length": 9.770000000000001,
@@ -18,7 +18,7 @@
     {
       "portnumber": 2,
       "name": "P2",
-      "Z0": 50.0,
+      "Z0": 50,
       "type": "via",
       "direction": "Z",
       "length": 9.770000000000001,

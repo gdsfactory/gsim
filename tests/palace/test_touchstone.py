@@ -14,9 +14,7 @@ import pytest
 
 from gsim.palace.results import SParam, SParams, load_sparams
 
-TWO_PORT_DATA = (
-    Path(__file__).resolve().parents[2] / "nbs/data/inductor/circuit_synthesis"
-)
+TWO_PORT_DATA = Path(__file__).parent / "data/inductor_circuit"
 
 
 def _max_abs_s_error(a: SParams, b: SParams) -> float:
@@ -56,8 +54,6 @@ def _synthetic_sparams(n_ports: int, freq_ghz: np.ndarray, seed: int) -> SParams
 
 def test_touchstone_round_trip_2port_real_data(tmp_path: Path):
     """2-port: committed Palace data round-trips far below 1e-9."""
-    if not (TWO_PORT_DATA / "port-S.csv").exists():  # pragma: no cover
-        pytest.skip("circuit-synthesis data not present")
     sp = load_sparams(TWO_PORT_DATA)
 
     path = sp.write_touchstone(tmp_path / "inductor")
