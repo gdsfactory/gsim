@@ -45,7 +45,7 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
     zoom = "true" if options.get("zoom_to_cursor", True) else "false"
     assert f'"zoomToCursor":{zoom}' in viewer.html
     output = viewer.save(tmp_path / "legacy.html")
-    assert output.read_text() == viewer.html
+    assert output.read_text(encoding="utf8") == viewer.html
 
 
 def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path):
