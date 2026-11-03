@@ -134,8 +134,8 @@ this method for more terminals: with floating grounds the odd half still carries
   The quadrature is 800 sample points per path segment by default (`nsamples`): along a detour path that passes a few
   thousandths of a gap from a metal corner, 200 left 0.9 % in a voltage of a three-terminal port and up to 3.5e-3 in a
   terminal S at 50 GHz. Palace's own integral on the declared paths is separate:
-  Palace controls its element-wise integration rule, and `declare_terminal_paths`
-  takes no sample-count argument.
+  Palace controls its integration rule; omit `nsamples` from `declare_terminal_paths`.
+  The deprecated argument is accepted with a `DeprecationWarning` and ignored.
 - **Currents.** `T_I` comes from Ampere's contour integral of `H` around each terminal's rectangle (`current="contour"`,
   which needs the terminal's outline on mesh edges, as a metal left out of the mesh as a hole has), or from the reaction
   route (`current="reaction"`, no outline needed): with the unconjugated reaction matrix `R = T_V^T T_I`,

@@ -159,13 +159,16 @@ This omits `NSamples` from both `Boundaries.Postprocessing.Impedance` and
 unchanged. Palace controls the integration rule; no replacement sample count is
 required.
 
-This is an intentional breaking change from gsim 0.8.0: `ModePath` no longer has
-a `nsamples` field, and `add_impedance_path`, `declare_impedance_paths`, and
-`declare_terminal_paths` no longer accept `nsamples=`. Existing calls with that
-keyword raise `TypeError`; remove it when upgrading. Old saved `mode_paths`
-records still load, but their `nsamples` values are ignored and omitted when
-saved again. No replacement setting is needed because Palace determines the
-element-wise integration rule.
+Beginning in gsim **0.9.0**, `ModePath.nsamples` and the `nsamples=` argument to
+`add_impedance_path`, `declare_impedance_paths`, and `declare_terminal_paths`
+are deprecated. Existing calls still work, but an explicit count emits
+`DeprecationWarning` and is ignored. Calls that omit the count do not warn.
+Old saved `mode_paths` records also load with a warning for explicit `nsamples`
+values; the field is omitted when saved again. Remove the field or argument to
+migrate. No replacement setting is needed because Palace determines the
+integration rule. The deprecated inputs will be retained for at least two
+feature releases and roughly 12 months after the first released warning, then
+removed only in a release designated for incompatible changes.
 
 The local auto-download remains pinned to Palace **0.18.0**. It accepts these
 configurations, but uses its old sampled integration with the default count of

@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from gsim.common.modes import Conductor, Extent, LineReading
+from gsim.palace._path_sampling import warn_legacy_path_sampling
 from gsim.palace.mode_fields import check_field_is_the_mode
 from gsim.palace.mode_fields import z0_power_current as palace_z0
 
@@ -173,7 +174,9 @@ def line_impedance_paths(
     return ImpedancePaths(voltage=voltage, current=current)
 
 
-def declare_impedance_paths(sim: BoundaryModeSim, paths: ImpedancePaths) -> int:
+def declare_impedance_paths(
+    sim: BoundaryModeSim, paths: ImpedancePaths, *, nsamples: int | None = None
+) -> int:
     """Register the paths as a postprocessing path of the solve.
 
     A ``BoundaryMode`` path is postprocessing only — it loads nothing
@@ -185,10 +188,13 @@ def declare_impedance_paths(sim: BoundaryModeSim, paths: ImpedancePaths) -> int:
         sim: The simulation about to be solved; meshed or not, since the
             paths take no part in meshing.
         paths: What :func:`line_impedance_paths` sized.
+        nsamples: Deprecated and ignored; supplying a count emits
+            ``DeprecationWarning``. Omit it to let Palace integrate the paths.
 
     Returns:
         The index Palace reports the line's impedance under.
     """
+    warn_legacy_path_sampling(nsamples)
     return sim.add_impedance_path(
         IMPEDANCE_PORT,
         voltage=[list(point) for point in paths.voltage],
