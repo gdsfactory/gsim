@@ -1,5 +1,7 @@
 """Reject malformed solver inputs before serializing a configuration."""
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -93,6 +95,41 @@ def test_non_eigenmode_excitation_rejects_mode_selection():
             dipole={"position": [0, 0, 0], "current_axis": "x"},
             mode={"kind": "mode_order", "mode_order": 2},
         )
+
+
+@pytest.mark.parametrize("entrypoint", ["mapping", "json"])
+@pytest.mark.parametrize("kind", ["te_like", "tm_like"])
+@pytest.mark.parametrize(
+    ("source_port", "te_axis", "invalid_port"),
+    [
+        ("o1", "x", "o1"),
+        ("o1", "y", "o2"),
+        ("o2", "x", "o1"),
+        ("o2", "y", "o2"),
+    ],
+)
+def test_runtime_schema_rejects_longitudinal_mode_selection(
+    entrypoint, kind, source_port, te_axis, invalid_port
+):
+    document = _config().model_dump(mode="json")
+    document["geometry"]["ports"]["o2"] = {
+        "phys_group": 24,
+        "layer": "core",
+        "normal": [0, 1, 0],
+    }
+    document["excitation"]["default_port"] = source_port
+    document["excitation"]["mode"] = {"kind": kind, "te_axis": te_axis}
+    validate_config = (
+        FDTDConfig.model_validate_json
+        if entrypoint == "json"
+        else FDTDConfig.model_validate
+    )
+    configuration_data = json.dumps(document) if entrypoint == "json" else document
+
+    with pytest.raises(
+        ValidationError, match=f"te_axis.*{te_axis!r}.*{invalid_port!r}"
+    ):
+        validate_config(configuration_data)
 
 
 @pytest.mark.parametrize(

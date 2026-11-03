@@ -319,15 +319,6 @@ class RuntimeConfigMixin:
                     **common,
                 )
             else:
-                if source.mode is not None and source.mode.te_axis is not None:
-                    axis_index = "xyz".index(source.mode.te_axis)
-                    for port_name, port in self.resolved.ports.items():
-                        if not port.is_vertical and port.normal[axis_index] != 0:
-                            raise FDTDConfigError(
-                                "Mode selection te_axis must be transverse to every "
-                                f"guided port: {source.mode.te_axis!r} is longitudinal "
-                                f"to port {port_name!r}."
-                            )
                 excitation = ExcitationConfig(
                     type="eigenmode",
                     default_port=selected_port,

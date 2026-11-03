@@ -350,6 +350,16 @@ class FDTDConfig(_StrictModel):
             raise ValueError(
                 f"default_port {self.excitation.default_port!r} is not declared"
             )
+        mode = self.excitation.mode
+        if mode is not None and mode.te_axis is not None:
+            axis_index = "xyz".index(mode.te_axis)
+            for port_name, port in self.geometry.ports.items():
+                if port.normal[axis_index] != 0:
+                    raise ValueError(
+                        "Mode selection te_axis must be transverse to every "
+                        f"guided port: {mode.te_axis!r} is longitudinal "
+                        f"to port {port_name!r}."
+                    )
         monitor_names = [monitor.name for monitor in self.monitors]
         if len(monitor_names) != len(set(monitor_names)):
             raise ValueError("monitor names must be unique")
