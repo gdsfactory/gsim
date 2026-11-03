@@ -173,9 +173,7 @@ def line_impedance_paths(
     return ImpedancePaths(voltage=voltage, current=current)
 
 
-def declare_impedance_paths(
-    sim: BoundaryModeSim, paths: ImpedancePaths, *, nsamples: int = 100
-) -> int:
+def declare_impedance_paths(sim: BoundaryModeSim, paths: ImpedancePaths) -> int:
     """Register the paths as a postprocessing path of the solve.
 
     A ``BoundaryMode`` path is postprocessing only — it loads nothing
@@ -187,7 +185,6 @@ def declare_impedance_paths(
         sim: The simulation about to be solved; meshed or not, since the
             paths take no part in meshing.
         paths: What :func:`line_impedance_paths` sized.
-        nsamples: Quadrature order of each line integral.
 
     Returns:
         The index Palace reports the line's impedance under.
@@ -196,7 +193,6 @@ def declare_impedance_paths(
         IMPEDANCE_PORT,
         voltage=[list(point) for point in paths.voltage],
         current=[list(point) for point in paths.current],
-        nsamples=nsamples,
     )
 
 

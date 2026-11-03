@@ -139,17 +139,17 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 | `sim.electrostatic.save_fields` | `sim.solver.electrostatic.save_fields` |
 | `sim.boundary_mode.freq` | `sim.solver.boundary_mode.freq` |
 
-### Boundary-mode path integration compatibility
+### Boundary-mode path integration
 
 Newer Palace schemas removed `NSamples` from coordinate-path voltage and impedance
-postprocessing after introducing element-wise line integration. Select that
-interface when using a Palace build containing
+postprocessing after introducing element-wise line integration. The SDK now
+generates this format by default for the Palace `0dd8d015` deployment, containing
 [the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
 
 ```python
 from gsim.palace import BoundaryModeSim
 
-sim = BoundaryModeSim(include_legacy_nsamples=False)
+sim = BoundaryModeSim()
 sim.add_impedance_path("gap", voltage=[[0.0, 0.0], [1.0, 0.0]])
 ```
 
@@ -158,12 +158,16 @@ This omits `NSamples` from both `Boundaries.Postprocessing.Impedance` and
 unchanged. Palace controls the integration rule; no replacement sample count is
 required.
 
-The default remains `include_legacy_nsamples=True` for existing Palace deployments.
-Existing calls and saved simulations continue to emit their configured `nsamples`
-values. With the new interface selected, those values remain stored and validated
-but are not forwarded to Palace. Set the flag back to `True` when targeting a
-runtime that needs the legacy sampling option. No automatic runtime detection is
-performed during config generation, including cloud submission.
+The legacy format and `include_legacy_nsamples` switch are removed. The `nsamples`
+argument is also removed from `ModePath`, `add_impedance_path`,
+`declare_impedance_paths`, and `declare_terminal_paths`. Update existing calls by
+removing those arguments. Remove `nsamples` from saved `mode_paths` records and
+the compatibility switch from saved simulation settings. Clients targeting older
+Palace schemas must update their runtime for this SDK change.
+
+The `nsamples` settings on local field-integration routines such as
+`voltage_line_integral` remain available; they control Python-side quadrature,
+which is separate from Palace's path declarations.
 
 ### MUMPS behavior change
 

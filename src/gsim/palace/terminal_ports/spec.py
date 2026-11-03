@@ -321,7 +321,6 @@ def declare_terminal_paths(
     spec: TerminalPortSpec,
     domain: Extent,
     *,
-    nsamples: int = 100,
     clearance_fraction: float = PATH_CLEARANCE_FRACTION,
 ) -> list[int]:
     """Register every terminal's voltage path on a boundary-mode solve.
@@ -334,7 +333,6 @@ def declare_terminal_paths(
         sim: The boundary-mode simulation about to be solved.
         spec: The port's conductors.
         domain: The meshed domain (um), as for :func:`terminal_paths`.
-        nsamples: Quadrature order of each line integral in Palace.
         clearance_fraction: Inset of the path ends, as for :func:`terminal_paths`.
 
     Returns:
@@ -347,7 +345,6 @@ def declare_terminal_paths(
         sim.add_impedance_path(
             f"{spec.name}:{name}",
             voltage=[[h, v] for h, v in points],
-            nsamples=nsamples,
         )
         for name, points in paths.items()
     ]
