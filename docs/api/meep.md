@@ -91,9 +91,10 @@ Meep's monitors sit inward from each port center, by `source_port_offset` at non
 `source_port_offset + distance_source_to_monitors` at the source port. So in a matrix merged from several runs, the
 diagonal and off-diagonal entries are referenced to different planes: a reflection's phase differs by
 2·beta·`distance_source_to_monitors`, with beta the mode's propagation constant, from what the transmission entries
-received at that port imply. gsim cannot correct this from the result file, which holds neither the offsets nor the mode
-index. Transmission phases are consistent between runs when the ports share one beta, but do not rely on reflection
-phases in circuits sensitive to them, such as resonators.
+received at that port imply. This follows from the monitor positions and has not been measured. gsim cannot correct it
+from the result file, which holds neither the offsets nor the mode index. Transmission phases are consistent between runs
+when the ports share one beta (S21 and S12 agree to about 2e-4 rad on a real 10 µm straight waveguide), but do not rely on
+reflection phases in circuits sensitive to them, such as resonators.
 
 [`s_matrix`][gsim.meep.s_matrix] warns about this and names the entries affected: each nonzero measured reflection, and
 each entry copied with `assume_reciprocal`, in a matrix merged from several runs. A matrix from one run does not warn,

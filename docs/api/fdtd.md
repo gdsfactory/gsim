@@ -370,7 +370,8 @@ matrix = fdtd.s_matrix(
 matrix.measured  # False for every assumed entry
 ```
 
-Runs must share their ports and wavelengths. Samples below the source noise floor are dropped, with a warning.
+Runs must share their ports and wavelengths. Samples below the source noise floor are dropped, with a warning. This
+often affects a band-edge sample, which narrows the band the model accepts.
 
 The model takes `wl` in micrometers and covers the simulated band only: a wavelength outside it raises. It interpolates
 magnitude and unwrapped phase, so sample finely enough that phase changes by less than pi between wavelengths: a
@@ -389,8 +390,10 @@ The two exports use different conventions:
 `sax.parsers.parse_touchstone` keeps the phase sign of the file and reads `s[i, j]` as (in, out), so a file written here
 does not compose correctly with SAX's photonic models that way. Use `sax_model()` to reach SAX.
 
-**Time convention of the solver.** gsim takes the solver's values as exp(+jωt). This is inferred from the solver's
-source spectrum and not stated by the solver. [`s_matrix`][gsim.fdtd.s_matrix] warns if the strongest transmission has a
+**Time convention of the solver.** gsim takes the solver's values as exp(+jωt). The solver does not state this, so it was
+checked on a real run of a 10 µm silicon straight waveguide: phase falls with frequency at every sample, with a delay of
+139 fs against 137 fs from the group index of a separate mode solver. That is one device, so
+[`s_matrix`][gsim.fdtd.s_matrix] still warns if the strongest transmission has a
 negative group delay. A transmission whose phase does not move across the band gives no sign to judge. On a grid too
 coarse to unwrap phase, this check can stay silent even when the sign is wrong, so silence is not proof.
 

@@ -4,6 +4,9 @@ Results go through ``SParameterResult.from_csv``, so the runner's CSV layout (ma
 phase in degrees, descending wavelength) is what the builder sees. Expected values come
 from an independent reference: the analytic line, ``sax.models.straight`` or
 ``skrf.Network`` reading the written file.
+
+``data/straight_10um_*.csv`` is real Meep output: a 10 um ``gf.components.straight`` in
+silicon (n = 3.47) and SiO2, resolution 20, one run per port, 21 frequencies.
 """
 
 from __future__ import annotations
@@ -27,6 +30,13 @@ WL0_UM = 1.55
 NEFF = 2.34
 NG = 3.4
 LENGTH_UM = 100.0
+
+DATA_DIR = Path(__file__).parent / "data"
+# Meep's eigenmode solve of the same waveguide, recorded in the run's debug output.
+MODE_NEFF_AT_1550NM = 2.364
+MODE_GROUP_INDEX = 4.109
+# 10 um less the monitor offsets: 0.1 at the output port, 0.1 + 0.2 at the source port.
+REAL_MONITOR_SPACING_UM = 9.6
 
 
 def _line_phase(wavelength_um: np.ndarray) -> np.ndarray:
@@ -385,3 +395,73 @@ def test_builder_works_without_meep_sax_or_jax_installed() -> None:
     )
 
     assert complex(completed.stdout.strip()) == -0.5j
+
+
+def _real_straight() -> list[SParameterResult]:
+    return [
+        SParameterResult.from_csv(DATA_DIR / f"straight_10um_{port}.csv")
+        for port in ("o1", "o2")
+    ]
+
+
+def test_real_straight_has_a_physical_delay_after_conversion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="gsim.common.s_matrix"):
+        matrix = s_matrix(_real_straight())
+
+    # Ascending frequency. Steps far below pi, so unwrapping cannot have chosen a sign.
+    phase = np.unwrap(np.angle(matrix.s[::-1, 1, 0]))
+    assert np.all(np.diff(phase) < 0)
+    assert np.abs(np.diff(phase)).max() < 0.25 * np.pi
+    omega = 2 * np.pi * matrix.frequency_hz[::-1]
+    delay_s = -np.polyfit(omega, phase, 1)[0]
+    expected_s = MODE_GROUP_INDEX * REAL_MONITOR_SPACING_UM / 299792458.0e6
+    assert delay_s == pytest.approx(expected_s, rel=0.05)
+    assert "group delay" not in caplog.text
+    assert "between samples" not in caplog.text
+
+
+def test_real_runs_agree_on_transmission_phase_between_ports() -> None:
+    matrix = s_matrix(_real_straight())
+
+    # Each run moves its own source monitor, and the two ports share one beta.
+    np.testing.assert_allclose(matrix.s[:, 1, 0], matrix.s[:, 0, 1], atol=1e-3)
+
+
+def test_real_reflections_warn_only_when_merged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first, _ = _real_straight()
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(first, assume_reciprocal=True, assume_unmeasured_zero=True)
+    assert _plane_warnings(caplog) == []
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(_real_straight(), port_names=["o1", "o2"])
+    (message,) = _plane_warnings(caplog)
+    assert "S(o1,o1)" in message
+    assert "S(o2,o2)" in message
+
+
+def test_real_straight_reaches_sax_like_its_straight_model() -> None:
+    sax = pytest.importorskip("sax")
+    model = s_matrix(_real_straight(), port_names=["o1", "o2"]).sax_model()
+    wavelength_um = np.linspace(1.51, 1.59, 17)
+    named = sax.PortNamer(1, 1)
+    reference = sax.models.straight(
+        wl=wavelength_um,
+        wl0=1.55,
+        neff=MODE_NEFF_AT_1550NM,
+        ng=MODE_GROUP_INDEX,
+        length=REAL_MONITOR_SPACING_UM,
+    )
+
+    # The mode phase sets a constant offset, so compare the phase across the band.
+    ratio = model(wl=wavelength_um)["o1", "o2"] * np.conj(
+        np.asarray(reference[named.in0, named.out0])
+    )
+    residual = np.unwrap(np.angle(ratio))
+
+    assert np.ptp(residual) < 0.5

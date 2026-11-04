@@ -2,6 +2,10 @@
 
 Results go through ``FDTDResult.from_file`` so the solver's JSON layout, including
 descending wavelengths, is what the builder sees.
+
+``data/straight_10um_*.json`` is real solver output, trimmed to the fields the loader
+reads: a 10 um ``gf.components.straight`` in silicon (n = 3.47) and SiO2, 50 nm cells,
+one run per port, 21 wavelengths from 1500 to 1600 nm.
 """
 
 from __future__ import annotations
@@ -20,6 +24,12 @@ from gsim.fdtd import FDTDResult
 WAVELENGTH_NM = [1600.0, 1575.0, 1550.0, 1525.0, 1500.0]
 LENGTH_UM = 2.0  # Keeps the phase step per sample under pi, so it unwraps.
 N_GROUP = 3.4
+
+DATA_DIR = Path(__file__).parent / "data"
+# Meep's eigenmode solve of the same waveguide, a different solver from the one tested.
+MODE_NEFF_AT_1550NM = 2.364
+MODE_GROUP_INDEX = 4.109
+REAL_LENGTH_UM = 10.0
 
 
 def _delay_samples(scale: float = 1.0) -> list[dict[str, float]]:
@@ -220,7 +230,7 @@ def test_all_below_noise_floor_refused(tmp_path: Path) -> None:
         fdtd.s_matrix(run, assume_unmeasured_zero=True)
 
 
-def test_inverted_phase_warns_because_the_convention_is_inferred(
+def test_inverted_phase_warns_about_the_convention(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     conjugated = [{"re": s["re"], "im": -s["im"]} for s in _delay_samples()]
@@ -230,3 +240,61 @@ def test_inverted_phase_warns_because_the_convention_is_inferred(
         fdtd.s_matrix(run, assume_unmeasured_zero=True)
 
     assert any("convention" in record.getMessage() for record in caplog.records)
+
+
+def _real_straight() -> list[FDTDResult]:
+    return [
+        FDTDResult.from_file(DATA_DIR / f"straight_10um_{port}.json")
+        for port in ("o1", "o2")
+    ]
+
+
+def test_real_straight_has_the_delay_of_exp_plus_jwt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The check of the convention: a real delay reads as falling phase, unconverted."""
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        matrix = fdtd.s_matrix(_real_straight())
+
+    # Ascending frequency. Steps far below pi, so unwrapping cannot have chosen a sign.
+    phase = np.unwrap(np.angle(matrix.s[::-1, 1, 0]))
+    assert np.all(np.diff(phase) < 0)
+    assert np.abs(np.diff(phase)).max() < 0.25 * np.pi
+    omega = 2 * np.pi * matrix.frequency_hz[::-1]
+    delay_s = -np.polyfit(omega, phase, 1)[0]
+    expected_s = MODE_GROUP_INDEX * REAL_LENGTH_UM / 299792458.0e6
+    assert delay_s == pytest.approx(expected_s, rel=0.05)
+
+    # The solver flags the 1500 nm sample; nothing else warns on this trace.
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == ["Dropped 1 of 21 samples flagged invalid or non-finite."]
+    assert matrix.wavelength_um[0] == pytest.approx(1.505)
+
+
+def test_real_straight_is_reciprocal_between_runs() -> None:
+    matrix = fdtd.s_matrix(_real_straight())
+
+    np.testing.assert_allclose(matrix.s[:, 1, 0], matrix.s[:, 0, 1], atol=1e-3)
+    np.testing.assert_allclose(np.abs(matrix.s[:, 1, 0]), 1.0, atol=2e-3)
+
+
+def test_real_straight_reaches_sax_like_its_straight_model() -> None:
+    sax = pytest.importorskip("sax")
+    model = fdtd.s_matrix(_real_straight()).sax_model()
+    wavelength_um = np.linspace(1.51, 1.59, 17)
+    named = sax.PortNamer(1, 1)
+    reference = sax.models.straight(
+        wl=wavelength_um,
+        wl0=1.55,
+        neff=MODE_NEFF_AT_1550NM,
+        ng=MODE_GROUP_INDEX,
+        length=REAL_LENGTH_UM,
+    )
+
+    # The reference plane sets a constant offset, so compare the phase across the band.
+    ratio = model(wl=wavelength_um)["o1", "o2"] * np.conj(
+        np.asarray(reference[named.in0, named.out0])
+    )
+    residual = np.unwrap(np.angle(ratio))
+
+    assert np.ptp(residual) < 0.5
