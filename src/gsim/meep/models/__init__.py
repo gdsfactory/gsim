@@ -28,7 +28,7 @@ from gsim.meep.models.config import (
     SymmetryEntry,
     WavelengthConfig,
 )
-from gsim.meep.models.results import ModeResult, SParameterResult
+from gsim.meep.models.results import ModeResult, SParameterResult, s_matrix
 
 # Backward compatibility alias
 FDTDConfig = WavelengthConfig
@@ -61,4 +61,5 @@ __all__ = [
     "Symmetry",
     "SymmetryEntry",
     "WavelengthConfig",
+    "s_matrix",
 ]
