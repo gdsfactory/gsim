@@ -437,6 +437,34 @@ def test_repeats_differing_only_by_csv_rounding_become_one_sample() -> None:
     assert s_matrix(result).s.shape == (1, 1, 1)
 
 
+def test_span_finer_than_the_csv_rounding_merges_each_repeated_group() -> None:
+    """A 1.2 pm span at 11 points, as the runner's 6 decimals write it."""
+    frequency = np.linspace(1 / (1.55 + 6e-7), 1 / (1.55 - 6e-7), 11)
+    wavelengths = [float(f"{1 / value:.6f}") for value in frequency]
+    assert sorted(set(wavelengths)) == [1.549999, 1.55, 1.550001]
+    values = {1.549999: 0.2 + 0j, 1.55: 0.3 + 0j, 1.550001: 0.4 + 0j}
+
+    matrix = s_matrix(
+        SParameterResult(
+            wavelengths=wavelengths,
+            s_params={"S11": [values[wl] for wl in wavelengths]},
+        )
+    )
+
+    np.testing.assert_allclose(matrix.wavelength_um, [1.549999, 1.55, 1.550001])
+    np.testing.assert_allclose(matrix.s[:, 0, 0], [0.2, 0.3, 0.4])
+
+
+def test_repeated_group_inside_a_sweep_that_disagrees_is_refused() -> None:
+    result = SParameterResult(
+        wavelengths=[1.5, 1.55, 1.55, 1.6],
+        s_params={"S11": [0.1 + 0j, 0.2 + 0j, 0.3 + 0j, 0.4 + 0j]},
+    )
+
+    with pytest.raises(ValueError, match=r"1\.55 um with different values"):
+        s_matrix(result)
+
+
 def test_two_zero_span_runs_merge_on_their_one_sample(tmp_path: Path) -> None:
     grid = np.full(11, 1.55)
     runs = [

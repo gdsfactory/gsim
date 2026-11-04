@@ -100,5 +100,10 @@ reflection phases in circuits sensitive to them, such as resonators.
 cannot show whether the ports share one beta. The warning names each nonzero measured reflection and each entry copied
 with `assume_reciprocal`. A matrix from one run does not warn, because that run gives each port a single plane.
 
-A run with `wavelength_span=0` repeats one frequency `num_freqs` times, and these samples become one. Export supports at
-most 9 ports, because Meep's entry names are ambiguous from 10 ports up: `S111` may be port 1 from 11 or port 11 from 1.
+Two more things are unchecked on that real straight waveguide. Its delay is 3.3% longer than a mode solver's group index
+predicts over the 9.6 µm between monitors, and one length cannot tell whether this comes from the group index or the
+monitor positions. Ports of different widths have not been run.
+
+Samples that repeat a wavelength, from `wavelength_span=0` or a span finer than the result file's 6 decimals, become one
+if their values agree, and are refused otherwise. Export supports at most 9 ports, because Meep's entry names are
+ambiguous from 10 ports up: `S111` may be port 1 from 11 or port 11 from 1.

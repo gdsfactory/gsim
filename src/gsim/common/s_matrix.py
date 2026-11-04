@@ -38,6 +38,9 @@ _GRID_RTOL = 1e-9
 # Phase steps this close to pi leave unwrapping no margin. np.unwrap bounds every step
 # by pi, so the limit itself can never be observed.
 _COARSE_PHASE_STEP_RAD = 0.75 * np.pi
+# Entries weaker than this fraction of the strongest are not checked for undersampling:
+# the weak reflections of a matched device have an erratic phase that matters little.
+_COARSE_CHECK_MIN_RELATIVE_PEAK = 0.1
 # A 1 nm waveguide across a 100 nm band still swings by about 1e-3 rad.
 _MIN_PHASE_SWING_RAD = 1e-6
 
@@ -305,19 +308,62 @@ def assemble_s_matrix(
             "assume_unmeasured_zero=True (sets what is left to zero)."
         )
     matrix = SMatrix(wavelength_um[keep], ports, s, measured)
-    _check_strongest_transmission(matrix)
+    if matrix.wavelength_um.size >= 3:
+        _warn_if_undersampled(matrix)
+        _warn_if_not_causal(matrix)
     return matrix
 
 
-def _check_strongest_transmission(matrix: SMatrix) -> None:
-    """Warn when the strongest measured transmission looks undersampled or acausal.
+def _warn_if_undersampled(matrix: SMatrix) -> None:
+    """Warn when phase moves nearly pi between samples of any significant entry.
 
-    These checks only warn. Samples alone cannot reveal every problem: a constant
-    delay on a grid uniform in frequency can alias to a smaller delay of either sign,
-    with every step well below pi.
+    Every measured entry with at least a tenth of the strongest peak is checked. Steps
+    touching a sample below half of an entry's own peak are ignored, because phase
+    legitimately jumps by pi across a transmission null.
+
+    This only warns, and samples alone cannot reveal every problem: a constant delay on
+    a grid uniform in frequency can alias to a smaller delay of either sign, with every
+    step well below pi.
+    """
+    peaks = np.abs(matrix.s).max(axis=0)
+    strongest = peaks[matrix.measured].max(initial=0.0)
+    if strongest == 0:
+        return
+    worst_step = 0.0
+    coarse = []
+    significant = matrix.measured & (
+        peaks >= _COARSE_CHECK_MIN_RELATIVE_PEAK * strongest
+    )
+    for i, j in np.argwhere(significant):
+        trace = matrix.s[::-1, i, j]
+        strong = np.abs(trace) >= peaks[i, j] / 2
+        steps = np.abs(np.diff(np.unwrap(np.angle(trace))))
+        step = steps[strong[1:] & strong[:-1]].max(initial=0.0)
+        if step >= _COARSE_PHASE_STEP_RAD:
+            coarse.append(_entry_name(matrix.ports[i], matrix.ports[j]))
+            worst_step = max(worst_step, step)
+    if coarse:
+        omega = 2 * np.pi * matrix.frequency_hz[::-1]
+        logger.warning(
+            "Phase moves by up to %.2f pi between samples in %s, too close to the pi "
+            "limit of unwrapping to be trusted. This grid resolves group delays only "
+            "up to %.3g s; use more wavelengths.",
+            worst_step / np.pi,
+            ", ".join(coarse),
+            np.pi / np.diff(omega).max(),
+        )
+
+
+def _warn_if_not_causal(matrix: SMatrix) -> None:
+    """Warn when the strongest measured transmission has a negative group delay.
+
+    In exp(+jwt) a delay gives ``tau = -d(unwrapped phase)/d(omega) > 0``. A phase that
+    does not move across the band has no delay whose sign could be judged. The check
+    is the one guard on a solver's assumed phase convention, so it only warns, and real
+    anomalous dispersion can also trigger it.
     """
     off_diagonal = matrix.measured & ~np.eye(len(matrix.ports), dtype=bool)
-    if matrix.wavelength_um.size < 3 or not off_diagonal.any():
+    if not off_diagonal.any():
         return
     strength = np.where(off_diagonal, np.abs(matrix.s).sum(axis=0), -1.0)
     i, j = np.unravel_index(np.argmax(strength), strength.shape)
@@ -325,52 +371,16 @@ def _check_strongest_transmission(matrix: SMatrix) -> None:
     magnitude = np.abs(trace)
     if not magnitude.any():
         return
-    name = _entry_name(matrix.ports[i], matrix.ports[j])
     omega = 2 * np.pi * matrix.frequency_hz[::-1]
-    steps = np.diff(np.unwrap(np.angle(trace)))
-    _warn_if_undersampled(name, steps, magnitude, omega)
-    _warn_if_not_causal(name, steps, magnitude, omega)
-
-
-def _warn_if_undersampled(
-    name: str, steps: np.ndarray, magnitude: np.ndarray, omega: np.ndarray
-) -> None:
-    """Warn when phase moves nearly pi between samples where the entry is strong.
-
-    Steps touching a sample below half the peak magnitude are ignored, because the
-    phase legitimately jumps by pi across a transmission null.
-    """
-    strong = magnitude >= magnitude.max() / 2
-    strong_steps = np.abs(steps[strong[1:] & strong[:-1]])
-    if strong_steps.size and strong_steps.max() >= _COARSE_PHASE_STEP_RAD:
-        logger.warning(
-            "%s changes phase by up to %.2f pi between samples, too close to the pi "
-            "limit of unwrapping for its phase to be trusted. This grid resolves group "
-            "delays only up to %.3g s; use more wavelengths.",
-            name,
-            strong_steps.max() / np.pi,
-            np.pi / np.diff(omega).max(),
-        )
-
-
-def _warn_if_not_causal(
-    name: str, steps: np.ndarray, magnitude: np.ndarray, omega: np.ndarray
-) -> None:
-    """Warn when the magnitude-weighted group delay is negative.
-
-    In exp(+jwt) a passive device delays its output, so
-    ``tau = -d(unwrapped phase)/d(omega)`` is positive. A phase that does not move
-    across the band has no delay whose sign could be judged. The check is the one
-    guard on a solver's assumed phase convention.
-    """
-    weights = (magnitude[1:] + magnitude[:-1]) / 2
-    tau = float(np.average(-steps / np.diff(omega), weights=weights))
+    delays = -np.diff(np.unwrap(np.angle(trace))) / np.diff(omega)
+    tau = float(np.average(delays, weights=(magnitude[1:] + magnitude[:-1]) / 2))
     if tau < 0 and abs(tau) * (omega[-1] - omega[0]) >= _MIN_PHASE_SWING_RAD:
         logger.warning(
-            "%s has a negative group delay (%.3g s): the solver's phase convention "
-            "differs from the assumed one, or the sampling is too coarse to unwrap "
-            "phase.",
-            name,
+            "%s has a negative group delay (%.3g s). The device may have anomalous "
+            "dispersion, as inside a ring notch. Otherwise the solver's phase "
+            "convention differs from the assumed one, or the sampling is too coarse "
+            "to unwrap phase.",
+            _entry_name(matrix.ports[i], matrix.ports[j]),
             tau,
         )
 

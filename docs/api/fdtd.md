@@ -374,11 +374,11 @@ Runs must share their ports and wavelengths. Samples below the source noise floo
 often affects a band-edge sample, which narrows the band the model accepts.
 
 The model takes `wl` in micrometers and covers the simulated band only: a wavelength outside it raises. It interpolates
-magnitude and unwrapped phase, so sample finely enough that phase changes by less than pi between wavelengths: a
-wavelength step below λ²/(2·n_g·L), about 3.5 nm for 100 µm at n_g = 3.4 and 1.55 µm. [`s_matrix`][gsim.fdtd.s_matrix]
-warns if the strongest transmission moves by 3/4 pi or more between samples. It cannot catch every undersampled grid,
-because a delay can alias to a smaller one with small steps, so choose the step from the longest path in your device. The
-model computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
+magnitude and unwrapped phase, and unwrapping needs phase to change by less than pi between wavelengths, which means a
+wavelength step below λ²/(2·n_g·L). Stay below 3/4 of that step, about 2.6 nm for 100 µm at n_g = 3.4 and 1.55 µm:
+[`s_matrix`][gsim.fdtd.s_matrix] warns from 3/4 pi, for each measured entry with at least a tenth of the strongest peak.
+It cannot catch every undersampled grid, because a delay can alias to a smaller one with small steps, so choose the step
+from the longest path in your device. The model computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
 
 The two exports use different conventions:
 
@@ -394,7 +394,8 @@ does not compose correctly with SAX's photonic models that way. Use `sax_model()
 checked on a real run of a 10 µm silicon straight waveguide: phase falls with frequency at every sample, with a delay of
 139 fs against 137 fs from the group index of a separate mode solver. That is one device, so
 [`s_matrix`][gsim.fdtd.s_matrix] still warns if the strongest transmission has a
-negative group delay. A transmission whose phase does not move across the band gives no sign to judge. On a grid too
+negative group delay. Real anomalous dispersion, such as inside a ring notch, can also trigger this warning. A
+transmission whose phase does not move across the band gives no sign to judge. On a grid too
 coarse to unwrap phase, this check can stay silent even when the sign is wrong, so silence is not proof.
 
 Phases are referenced where the solver's port monitors sit, and gsim does not de-embed them. The `z0` argument of

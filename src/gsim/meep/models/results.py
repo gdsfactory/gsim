@@ -401,10 +401,10 @@ def s_matrix(
     gets a WARNING, which names each nonzero measured reflection and each entry copied
     by reciprocity. One run gives each port a single plane, so it does not warn.
 
-    A run with ``wavelength_span=0`` repeats one frequency ``num_freqs`` times, and
-    these samples become one. Meep's entry names cannot be read from 10 ports up,
-    because ``S111`` may be port 1 from 11 or port 11 from 1, so such results are
-    refused.
+    Samples that repeat a wavelength, from ``wavelength_span=0`` or a span finer than
+    the CSV's 6 decimals, become one if their values agree. Meep's entry names cannot
+    be read from 10 ports up, because ``S111`` may be port 1 from 11 or port 11 from 1,
+    so such results are refused.
 
     Args:
         results: One result or a sequence, all with the same ports and wavelengths.
@@ -499,10 +499,7 @@ def _s_matrix_run(
         )
         for name, (receive, source) in indices.items()
     }
-    if wavelength_um.size > 1 and np.ptp(wavelength_um) == 0:
-        wavelength_um, entries = _collapse_repeated_samples(
-            wavelength_um, entries, label
-        )
+    wavelength_um, entries = _collapse_repeated_samples(wavelength_um, entries, label)
     return SMatrixRun(
         label=label,
         wavelength_um=wavelength_um,
@@ -517,14 +514,21 @@ def _collapse_repeated_samples(
     entries: dict[tuple[str, str], np.ndarray],
     label: str,
 ) -> tuple[np.ndarray, dict[tuple[str, str], np.ndarray]]:
-    """Reduce a zero-span run to one sample, refusing repeats that disagree."""
+    """Reduce each repeated wavelength to one sample, refusing repeats that disagree."""
+    unique_um, first, group = np.unique(
+        wavelength_um, return_index=True, return_inverse=True
+    )
+    if unique_um.size == wavelength_um.size:
+        return wavelength_um, entries
     for values in entries.values():
-        if not np.allclose(values, values[0], rtol=0.0, atol=_REPEATED_SAMPLE_ATOL):
+        differs = np.abs(values - values[first][group]) > _REPEATED_SAMPLE_ATOL
+        if differs.any():
             raise ValueError(
-                f"{label} repeats wavelength {wavelength_um[0]} um with different "
-                "values, so it cannot be reduced to one sample."
+                f"{label} repeats wavelength {wavelength_um[differs][0]} um with "
+                "different values, so its samples cannot be reduced to one. Use a "
+                "wider wavelength span or fewer frequencies."
             )
-    return wavelength_um[:1], {key: values[:1] for key, values in entries.items()}
+    return unique_um, {key: values[first] for key, values in entries.items()}
 
 
 def _entry_indices(name: str, label: str) -> tuple[int, int]:

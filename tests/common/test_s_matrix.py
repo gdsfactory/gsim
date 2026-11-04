@@ -834,6 +834,85 @@ def test_delay_free_pass_through_does_not_blame_the_convention(
     assert _warnings(caplog) == []
 
 
+def _coarse_and_clean_runs(coarse_magnitude: float) -> list[SMatrixRun]:
+    """Return a clean unit transmission beside a weaker entry stepping 0.8 pi."""
+    n_samples = 21
+    grid_um = _frequency_uniform_grid_um(n_samples)
+    valid = np.ones(n_samples, dtype=bool)
+    # Ascending wavelength is descending frequency, so a delay's phase rises here.
+    clean = np.exp(1j * 0.3 * np.pi * np.arange(n_samples))
+    coarse = coarse_magnitude * np.exp(1j * 0.8 * np.pi * np.arange(n_samples))
+    return [
+        _single_run({("o2", "o1"): clean}, wavelength_um=grid_um, valid=valid),
+        _single_run({("o1", "o2"): coarse}, wavelength_um=grid_um, valid=valid),
+    ]
+
+
+def test_weaker_entry_with_a_coarse_phase_warns_naming_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(_coarse_and_clean_runs(0.3), assume_unmeasured_zero=True)
+
+    (message,) = _warnings(caplog)
+    assert "S(o1,o2)" in message
+    assert "S(o2,o1)" not in message
+
+
+@pytest.mark.parametrize(
+    ("magnitude", "warns"),
+    [(0.09, False), (0.11, True)],
+    ids=["below-tenth", "above-tenth"],
+)
+def test_undersampling_checks_entries_from_a_tenth_of_the_strongest_peak(
+    magnitude: float, warns: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            _coarse_and_clean_runs(magnitude), assume_unmeasured_zero=True
+        )
+
+    assert bool(_warnings(caplog)) is warns
+
+
+def test_coarse_reflection_warns_without_any_transmission(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run = _trace_with_step(0.8 * np.pi)
+    reflection = {("o1", "o1"): next(iter(run.entries.values()))}
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_single_run(reflection, wavelength_um=run.wavelength_um, valid=run.valid)],
+            assume_unmeasured_zero=True,
+        )
+
+    (message,) = _warnings(caplog)
+    assert "S(o1,o1)" in message
+
+
+def test_well_sampled_ring_notch_names_anomalous_dispersion(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All-pass ring, t > a: phase reverses through the notch of its closed form."""
+    t, a = 0.99, 0.95
+    wavelength_um = np.linspace(1.5496, 1.5504, 201)
+    frequency_hz = 299792458.0e6 / wavelength_um
+    round_trip_s = 3.4 * 62.8 / 299792458.0e6
+    # On resonance at the middle of the band, in exp(+jwt).
+    detuning = 2j * np.pi * (frequency_hz - frequency_hz[100]) * round_trip_s
+    through = (t - a * np.exp(-detuning)) / (1 - t * a * np.exp(-detuning))
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_transmission_run({("o2", "o1"): through})], assume_unmeasured_zero=True
+        )
+
+    (message,) = _warnings(caplog)
+    assert "negative group delay" in message
+    assert "anomalous dispersion" in message
+
+
 def test_short_delay_of_the_wrong_sign_still_warns(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

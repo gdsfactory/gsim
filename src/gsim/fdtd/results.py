@@ -549,8 +549,9 @@ def s_matrix(
     noise floor are dropped, with a WARNING giving the count. Values are taken as
     exp(+jwt) without conversion. The solver does not state this convention. It was
     checked on one real straight waveguide, and a WARNING fires if the strongest
-    transmission has a negative group delay. Another fires if its phase moves by
-    3/4 pi or more between samples.
+    transmission has a negative group delay. Another fires if the phase of a measured
+    entry moves by 3/4 pi or more between samples, for each entry with at least a tenth
+    of the strongest peak.
 
     Phases are referenced where the solver's port monitors sit; gsim does not
     de-embed them.
