@@ -96,6 +96,9 @@ from the result file, which holds neither the offsets nor the mode index. Transm
 when the ports share one beta (S21 and S12 agree to about 2e-4 rad on a real 10 µm straight waveguide), but do not rely on
 reflection phases in circuits sensitive to them, such as resonators.
 
-[`s_matrix`][gsim.meep.s_matrix] warns about this and names the entries affected: each nonzero measured reflection, and
-each entry copied with `assume_reciprocal`, in a matrix merged from several runs. A matrix from one run does not warn,
-because that run gives each port a single plane.
+[`s_matrix`][gsim.meep.s_matrix] warns about this on every matrix merged from several runs, because the result file
+cannot show whether the ports share one beta. The warning names each nonzero measured reflection and each entry copied
+with `assume_reciprocal`. A matrix from one run does not warn, because that run gives each port a single plane.
+
+A run with `wavelength_span=0` repeats one frequency `num_freqs` times, and these samples become one. Export supports at
+most 9 ports, because Meep's entry names are ambiguous from 10 ports up: `S111` may be port 1 from 11 or port 11 from 1.

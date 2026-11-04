@@ -365,19 +365,106 @@ def test_one_run_has_one_plane_per_port_and_does_not_warn(
     assert _plane_warnings(caplog) == []
 
 
-def test_merged_transmission_without_reflection_does_not_warn(
+def test_merged_transmission_with_unequal_phases_warns_without_any_reflection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A taper's two runs shift S21 and S12 differently, with nothing else to flag."""
+    zeros = np.zeros(WAVELENGTH_UM.size)
+    runs = [
+        _load_csv(tmp_path, {"S11": zeros, "S21": _meep_line()}),
+        _load_csv(tmp_path, {"S12": _meep_line() * np.exp(0.5j), "S22": zeros}),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(runs)
+
+    (message,) = _plane_warnings(caplog)
+    assert "propagation constant" in message
+    assert "do not fit" not in message
+
+
+def test_merged_entries_that_are_all_zero_have_no_phase_to_warn_about(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     zeros = np.zeros(WAVELENGTH_UM.size)
     runs = [
-        _load_csv(tmp_path, {"S11": zeros, "S21": _meep_line()}),
-        _load_csv(tmp_path, {"S12": _meep_line(), "S22": zeros}),
+        _load_csv(tmp_path, {"S11": zeros, "S21": zeros}),
+        _load_csv(tmp_path, {"S12": zeros, "S22": zeros}),
     ]
 
     with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
         s_matrix(runs)
 
     assert _plane_warnings(caplog) == []
+
+
+def test_real_zero_span_run_becomes_one_sample(tmp_path: Path) -> None:
+    """Meep's output for wavelength_span=0 at the default of 11 frequencies."""
+    skrf = pytest.importorskip("skrf")
+    path = DATA_DIR / "straight_3um_zero_span.csv"
+    result = SParameterResult.from_csv(path)
+    assert result.wavelengths == [1.55] * 11
+
+    matrix = s_matrix(result, assume_reciprocal=True, assume_unmeasured_zero=True)
+    network = skrf.Network(str(matrix.write_touchstone(tmp_path / "device")))
+
+    assert matrix.s.shape == (1, 2, 2)
+    np.testing.assert_allclose(matrix.wavelength_um, [1.55])
+    # Touchstone holds the conjugate of the file's row, and SAX the row itself.
+    expected = np.conj(result.s_params["S21"][0])
+    np.testing.assert_allclose(network.s[0, 1, 0], expected, atol=1e-9)
+    np.testing.assert_allclose(
+        matrix.sax_model()(wl=1.55)["port_1", "port_2"], np.conj(expected), atol=1e-9
+    )
+    with pytest.raises(ValueError, match="outside the simulated band"):
+        matrix.sax_model()(wl=1.56)
+
+
+def test_repeated_wavelength_with_different_values_is_refused() -> None:
+    result = SParameterResult(
+        wavelengths=[1.55, 1.55, 1.55], s_params={"S11": [0.1 + 0j, 0.2 + 0j, 0.1 + 0j]}
+    )
+
+    with pytest.raises(ValueError, match=r"1\.55 um with different values"):
+        s_matrix(result)
+
+
+def test_repeats_differing_only_by_csv_rounding_become_one_sample() -> None:
+    result = SParameterResult(
+        wavelengths=[1.55, 1.55], s_params={"S11": [0.1 + 0j, 0.100001 + 0j]}
+    )
+
+    assert s_matrix(result).s.shape == (1, 1, 1)
+
+
+def test_two_zero_span_runs_merge_on_their_one_sample(tmp_path: Path) -> None:
+    grid = np.full(11, 1.55)
+    runs = [
+        _load_csv(
+            tmp_path,
+            {"S11": np.full(11, 0.1), "S21": np.full(11, 0.9)},
+            wavelength_um=grid,
+        ),
+        _load_csv(
+            tmp_path,
+            {"S12": np.full(11, 0.8), "S22": np.full(11, 0.2)},
+            wavelength_um=grid,
+        ),
+    ]
+
+    matrix = s_matrix(runs)
+
+    np.testing.assert_allclose(matrix.s[0], [[0.1, 0.8], [0.9, 0.2]], atol=1e-9)
+
+
+def test_results_from_ten_ports_up_are_refused_naming_the_limit() -> None:
+    result = SParameterResult(
+        wavelengths=[1.5, 1.55, 1.6],
+        s_params={"S11": [0.1 + 0j] * 3, "S101": [0.9 + 0j] * 3},
+    )
+
+    with pytest.raises(ValueError, match=r"S101.*at most 9 ports"):
+        s_matrix(result, assume_unmeasured_zero=True)
 
 
 def test_builder_works_without_meep_sax_or_jax_installed() -> None:
