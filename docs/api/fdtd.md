@@ -139,22 +139,48 @@ sim.domain(
 
 ## Setup visualization
 
-FDTD setup views use the ported GDSFactory FDTD Three.js viewer and do not depend on
-PyVista. All physical groups are shown by default. Smaller material groups are
-listed first, followed by the largest volumetric group and then the ports.
+`plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
+Materials are colored by their real refractive index at the source center
+wavelength, with a colorbar, physical-domain boundary, hatched PML regions, and source
+and monitor annotations where they intersect the slice. The plot uses the FDTD
+transfer mesh, including sidewalls and material priorities. All physical groups
+are shown by default; `show_groups` and `hide_groups` select physical group names.
+
+```python
+ax = sim.plot_2d_static()                               # XY at geometry midpoint
+ax = sim.plot_2d_static(axis="z", position_um=0.11)      # XY at z = 0.11 µm
+ax = sim.plot_2d_static(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
+ax.figure.savefig("cross_section.png", dpi=200, bbox_inches="tight")
+```
+
+The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
+subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
+`aspect="auto"` to fill the axes, or `figsize=(8, 4)` to set the figure size.
+An omitted `position_um` uses the geometry midpoint along the requested axis.
+The current geometry and material settings are resolved for every call. A
+temporary mesh is generated; the plot does not require selecting a source port
+or writing run artifacts. A selected source port must exist, and sources and
+monitors must fit any explicit domain bounds, as required by `write()`. The PML
+thickness uses the same per-axis alignment as the metadata estimate: z PML is
+rounded up to a multiple of 16 cells (for example, 20 becomes 32). Guard cells
+are not drawn as PML. Mesh edges describe the tetrahedral transfer mesh,
+rather than the solver's Yee grid.
+
+The interactive setup views use the GDSFactory FDTD Three.js viewer and do not
+depend on PyVista. Smaller material groups are listed first, followed by the
+largest volumetric group and then the ports.
 
 ```python
 sim.plot_3d()                                   # solid interactive geometry
 sim.plot_3d(show_mesh=True)                     # add Gmsh surface edges
 sim.plot_3d(zoom_to_cursor=False)               # zoom toward the view center
-sim.plot_2d(axis="z", position_um=0.11)         # filled cross-section
-sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # add cell edges
+sim.plot_2d_interactive(axis="z", position_um=0.11)  # movable cross-section
+viewer = sim.plot_2d_interactive(show_mesh=True)     # add transfer-mesh edges
+viewer.save("mesh.html")
 ```
 
-Omit `position_um` to start at the geometry midpoint. The 2D viewer includes a
-slider that moves the plane through the mesh. Both methods return a standalone
-`MeshViewer`. Set `show_mesh=True` when element edges are useful, or use
-`viewer.save("mesh.html")` to share the visualization outside a notebook.
+The interactive 2D viewer includes a slider that moves the plane through the
+mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
 Zooming moves toward the pointer by default; set `zoom_to_cursor=False` to zoom
 toward the view center instead. The same choice is available in the viewer's
 **Zoom toward** controls.
@@ -162,6 +188,19 @@ toward the view center instead. The same choice is available in the viewer's
 The viewer also summarizes the physical domain, estimated Yee-grid dimensions
 and total cell count (including PML). These values are estimates; the solver
 backend is authoritative when it constructs the final grid.
+
+### 2D plotting APIs and compatibility (0.9.0)
+
+Use `plot_2d_static()` for a Matplotlib `Axes` and export it with
+`ax.figure.savefig(...)`. Use `plot_2d_interactive()` for an HTML `MeshViewer`
+with `.html` and `.save()`.
+
+The original `plot_2d()` remains an alias for the interactive viewer, accepts
+all original keywords including `height` and `zoom_to_cursor`, and still returns
+`MeshViewer`. Starting with 0.9.0 it emits a `DeprecationWarning` directing callers
+to the explicit methods. The alias will remain for at least two feature releases
+and roughly 12 months after the first released warning. This change does not
+switch its default behavior or remove the old API.
 
 ## Sources
 

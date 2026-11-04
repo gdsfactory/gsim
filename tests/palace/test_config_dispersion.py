@@ -219,22 +219,11 @@ class TestBoundaryModeFrequencyResolution:
 
     def test_boundarymode_postprocessing_hint_emitted(self, tmp_path):
         """Postprocessing voltage/impedance paths land under Boundaries."""
-        postprocessing = {
-            "Impedance": [
-                {
-                    "Index": 1,
-                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
-                    "NSamples": 200,
-                }
-            ],
-            "Voltage": [
-                {
-                    "Index": 1,
-                    "VoltagePath": [[-19.8, 0.11], [-20.2, 0.11]],
-                    "NSamples": 200,
-                }
-            ],
-        }
+        from gsim.palace import BoundaryModeSim
+
+        simulation = BoundaryModeSim()
+        simulation.add_impedance_path("gap", voltage=[[-19.8, 0.11], [-20.2, 0.11]])
+        postprocessing = simulation.mode_postprocessing()
         boundary = BoundaryModeConfig(freq=50e9, num_modes=2, save=1)
         config_path = generate_palace_config(
             groups=self._groups(),
@@ -251,3 +240,5 @@ class TestBoundaryModeFrequencyResolution:
         )
         config = json.loads(config_path.read_text())
         assert config["Boundaries"]["Postprocessing"] == postprocessing
+        for entries in postprocessing.values():
+            assert all("NSamples" not in entry for entry in entries)

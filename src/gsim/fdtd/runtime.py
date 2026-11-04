@@ -213,6 +213,10 @@ class RuntimeConfigMixin:
         }
         if not vertical_ports:
             return {}
+        if vertical_ports.keys() & {monitor.name for monitor in self.monitors}:
+            raise FDTDConfigError(
+                "Explicit monitor names cannot shadow vertical ports."
+            )
         bounds = self._background_bounds_nm()
         background_index = material_snapshots[
             self.materials.background
@@ -345,11 +349,6 @@ class RuntimeConfigMixin:
             self._plane_monitor_config(monitor, material_snapshots)
             for monitor in self.monitors
         ]
-        names = [monitor.name for monitor in [*derived_monitors, *public_monitors]]
-        if len(names) != len(set(names)):
-            raise FDTDConfigError(
-                "Explicit monitor names cannot shadow vertical ports."
-            )
         return excitation, [*derived_monitors, *public_monitors]
 
     def _explicit_gaussian_beam(
