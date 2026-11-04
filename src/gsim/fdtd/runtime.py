@@ -309,7 +309,10 @@ class RuntimeConfigMixin:
         derived_monitors = [monitor for _, monitor in vertical_configs.values()]
         if isinstance(source, PortSource):
             selected_port = self._selected_port_name()
-            if self.resolved.ports[selected_port].is_vertical:
+            resolved_port = self.resolved.ports[selected_port]
+            if resolved_port.is_vertical:
+                if source.mode is not None:
+                    raise FDTDConfigError("Mode selection requires a guided PDK port.")
                 excitation = ExcitationConfig(
                     type="gaussian_beam",
                     gaussian_beam=vertical_configs[selected_port][0],
@@ -317,7 +320,10 @@ class RuntimeConfigMixin:
                 )
             else:
                 excitation = ExcitationConfig(
-                    type="eigenmode", default_port=selected_port, **common
+                    type="eigenmode",
+                    default_port=selected_port,
+                    mode=source.mode,
+                    **common,
                 )
         elif isinstance(source, DipoleSource):
             excitation = ExcitationConfig(
