@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat
 
 from gsim.common.sweep import ScalarSweep
+from gsim.tcad.silicon import SILICON_RELATIVE_PERMITTIVITY
 
 if TYPE_CHECKING:
     from gsim.common.junction import JunctionBranch
@@ -131,12 +132,19 @@ class BiasPoint(BaseModel):
 
 
 class BiasSweepResult(ScalarSweep[BiasPoint]):
-    """Ordered collection of solved bias points from a voltage sweep."""
+    """Ordered collection of solved bias points from a voltage sweep.
+
+    Attributes:
+        contact: The swept contact.
+        semiconductor_permittivity: Static relative permittivity of the
+            doped Regions the sweep was solved with.
+    """
 
     sweep_noun = "bias sweep"
     key_unit = "V"
 
     contact: str
+    semiconductor_permittivity: PositiveFloat = SILICON_RELATIVE_PERMITTIVITY
 
     def _key(self, point: BiasPoint) -> float:
         """A Bias point is keyed on the bias it was solved at."""

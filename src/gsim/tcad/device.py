@@ -404,6 +404,14 @@ class Device:
             for region in layout.regions:
                 self._apply_doping(devsim, device, region)
                 sp.SetSiliconParameters(device, region, self.materials.temperature_k)
+                # In DEVSIM's own vacuum value, which is rounded: the default
+                # then reproduces simple_physics' product exactly.
+                devsim.set_parameter(
+                    device=device,
+                    region=region,
+                    name="Permittivity",
+                    value=self.materials.semiconductor_permittivity * sp.eps_0,
+                )
                 # simple_physics keeps n_i at its 300 K value whatever the
                 # temperature; the SRH trap densities n1 = p1 = n_i follow.
                 n_i = intrinsic_density_cm3(self.materials.temperature_k)
