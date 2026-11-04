@@ -394,7 +394,9 @@ def s_matrix(
     imply. gsim cannot correct this from the result file, which holds neither the
     offsets nor the mode index. Transmission phases are consistent between runs when
     the ports share one ``beta``, but do not rely on reflection phases in circuits
-    sensitive to them, such as resonators.
+    sensitive to them, such as resonators. A WARNING names the entries affected: a
+    nonzero measured reflection, or an entry copied by reciprocity, in a matrix merged
+    from several runs. One run gives each port a single plane, so it does not warn.
 
     Args:
         results: One result or a sequence, all with the same ports and wavelengths.
@@ -417,7 +419,7 @@ def s_matrix(
             fills it.
     """
     runs = [results] if isinstance(results, SParameterResult) else results
-    return assemble_s_matrix(
+    matrix = assemble_s_matrix(
         [
             _s_matrix_run(result, f"Meep result {number}", port_names)
             for number, result in enumerate(runs, start=1)
@@ -425,6 +427,41 @@ def s_matrix(
         assume_reciprocal=assume_reciprocal,
         assume_unmeasured_zero=assume_unmeasured_zero,
     )
+    _warn_if_reference_planes_differ(matrix, assume_reciprocal=assume_reciprocal)
+    return matrix
+
+
+def _warn_if_reference_planes_differ(
+    matrix: SMatrix, *, assume_reciprocal: bool
+) -> None:
+    """Warn when a merged matrix holds entries referenced to different port planes.
+
+    Each run moves the monitor of its own source port further inward, so a port's
+    plane differs between the runs that source it and those that receive at it. One
+    run has one plane per port, which also makes its reciprocal copies exact.
+    """
+    measured = matrix.measured
+    if np.count_nonzero(measured.any(axis=0)) < 2:
+        return
+    reflections = [
+        f"S({port},{port})"
+        for i, port in enumerate(matrix.ports)
+        if measured[i, i] and np.any(matrix.s[:, i, i])
+    ]
+    copies = [
+        f"S({receive},{source})"
+        for i, receive in enumerate(matrix.ports)
+        for j, source in enumerate(matrix.ports)
+        if assume_reciprocal and measured[j, i] and not measured[i, j]
+    ]
+    if reflections or copies:
+        logger.warning(
+            "Meep results merged from several runs mix port reference planes, because "
+            "the source-port monitor sits distance_source_to_monitors further inward. "
+            "Phases that do not fit the other entries, with magnitudes unaffected: "
+            "%s. Do not rely on them in phase-sensitive circuits, such as resonators.",
+            ", ".join(reflections + copies),
+        )
 
 
 def _s_matrix_run(

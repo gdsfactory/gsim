@@ -723,6 +723,133 @@ def test_all_zero_transmission_gives_no_delay_to_judge(
     assert _warnings(caplog) == []
 
 
+def _frequency_uniform_grid_um(n_samples: int) -> np.ndarray:
+    """Return an ascending wavelength grid uniform in frequency, as Meep samples."""
+    frequency_hz = np.linspace(299792458.0e6 / 1.6, 299792458.0e6 / 1.5, n_samples)
+    return 299792458.0e6 / frequency_hz[::-1]
+
+
+def _trace_with_step(step_rad: float, n_samples: int = 21) -> SMatrixRun:
+    """Return a unit transmission whose phase falls by step_rad per sample."""
+    # Ascending wavelength is descending frequency, so the phase rises along the array.
+    phase = step_rad * np.arange(n_samples)
+    return _single_run(
+        {("o2", "o1"): np.exp(1j * phase)},
+        wavelength_um=_frequency_uniform_grid_um(n_samples),
+        valid=np.ones(n_samples, dtype=bool),
+    )
+
+
+def test_aliased_delay_that_passes_the_delay_sign_check_still_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """3 ps on 6 wavelengths: about 15 pi per sample, positive apparent delay."""
+    wavelength_um = np.linspace(1.5, 1.6, 6)
+    through = np.exp(-2j * np.pi * (299792458.0e6 / wavelength_um) * 3e-12)
+    midpoint_um = (wavelength_um[2] + wavelength_um[3]) / 2
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        matrix = assemble_s_matrix(
+            [_transmission_run({("o2", "o1"): through})], assume_unmeasured_zero=True
+        )
+
+    (message,) = _warnings(caplog)
+    assert "S(o2,o1)" in message
+    assert "more wavelengths" in message
+    # The harm the warning reports: the conjugated SAX value is wrong between samples.
+    exact = np.exp(2j * np.pi * (299792458.0e6 / midpoint_um) * 3e-12)
+    assert abs(matrix.sax_model()(wl=midpoint_um)["o1", "o2"] - exact) > 1.0
+
+
+def test_undersampling_warning_reports_the_grid_delay_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run = _trace_with_step(0.8 * np.pi)
+    frequency_hz = 299792458.0e6 / run.wavelength_um
+    # Closed form: a step of pi at the grid's frequency spacing, tau = 1 / (2 df).
+    limit_s = 1 / (2 * np.abs(np.diff(frequency_hz)).max())
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix([run], assume_unmeasured_zero=True)
+
+    (message,) = _warnings(caplog)
+    assert "0.80 pi" in message
+    assert f"{limit_s:.3g} s" in message
+
+
+@pytest.mark.parametrize(
+    ("step_over_pi", "warns"),
+    [(0.74, False), (0.76, True)],
+    ids=["below-limit", "above-limit"],
+)
+def test_undersampling_limit_on_a_falling_phase(
+    step_over_pi: float, warns: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_trace_with_step(step_over_pi * np.pi)], assume_unmeasured_zero=True
+        )
+
+    assert bool(_warnings(caplog)) is warns
+
+
+def test_resolved_transmission_null_is_not_undersampling(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Mach-Zehnder's phase jumps by pi across each null, and that is no alias."""
+    wavelength_um = np.linspace(1.5, 1.6, 401)
+    frequency_hz = 299792458.0e6 / wavelength_um
+    short_s, long_s = 3.4 * 100 / 299792458.0e6, 3.4 * 150 / 299792458.0e6
+    through = 0.5 * (
+        np.exp(-2j * np.pi * frequency_hz * short_s)
+        + np.exp(-2j * np.pi * frequency_hz * long_s)
+    )
+    assert np.abs(np.diff(np.unwrap(np.angle(through)))).max() > 0.75 * np.pi
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_transmission_run({("o2", "o1"): through})], assume_unmeasured_zero=True
+        )
+
+    assert _warnings(caplog) == []
+
+
+@pytest.mark.parametrize(
+    "through",
+    [
+        np.full(11, 0.9 + 0j),
+        np.full(11, 0.9 * np.exp(-0.3j)),
+        0.9 * np.exp(1j * (1 - 1e-9 * np.arange(11) / 10)),
+    ],
+    ids=["zero-phase", "constant-phase", "phase-at-rounding-level"],
+)
+def test_delay_free_pass_through_does_not_blame_the_convention(
+    through: np.ndarray, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_transmission_run({("o2", "o1"): through})], assume_unmeasured_zero=True
+        )
+
+    assert _warnings(caplog) == []
+
+
+def test_short_delay_of_the_wrong_sign_still_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """1 um of line swings about 0.9 rad; 1 nm about 1e-3 rad, still above the floor."""
+    wavelength_um = np.linspace(1.5, 1.6, 11)
+    wrong_sign = np.exp(+1j * _line_phase(wavelength_um, 1e-3))
+
+    with caplog.at_level("WARNING", logger="gsim.common.s_matrix"):
+        assemble_s_matrix(
+            [_transmission_run({("o2", "o1"): wrong_sign})], assume_unmeasured_zero=True
+        )
+
+    (message,) = _warnings(caplog)
+    assert "negative group delay" in message
+
+
 def test_importing_the_module_loads_neither_sax_nor_jax_nor_skrf() -> None:
     code = (
         "import sys; import gsim.common.s_matrix; "

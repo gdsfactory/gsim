@@ -288,7 +288,86 @@ def test_meep_sign_is_causal_after_conversion_and_the_opposite_sign_warns(
     backwards = np.conj(_meep_line())
     with caplog.at_level(logging.WARNING, logger="gsim.common.s_matrix"):
         s_matrix(_load_csv(tmp_path, {"S12": backwards, "S22": zeros}), **flags)
-    assert "non-positive group delay" in caplog.text
+    assert "negative group delay" in caplog.text
+
+
+def _plane_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "reference planes" in record.getMessage()
+    ]
+
+
+def test_merged_reflections_warn_about_reference_planes_and_name_them(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    reflection = np.full(WAVELENGTH_UM.size, 0.1 + 0j)
+    runs = [
+        _load_csv(tmp_path, {"S11": reflection, "S21": _meep_line()}),
+        _load_csv(tmp_path, {"S12": _meep_line(), "S22": 0 * reflection}),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(runs, port_names=["o1", "o2"])
+
+    (message,) = _plane_warnings(caplog)
+    assert "S(o1,o1)" in message
+    assert "distance_source_to_monitors" in message
+    # S(o2,o2) is exactly zero, so it has no phase to misplace.
+    assert "S(o2,o2)" not in message
+
+
+def test_reciprocal_copy_in_a_merged_matrix_warns_naming_the_copy(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    zeros = np.zeros(WAVELENGTH_UM.size)
+    runs = [
+        _load_csv(tmp_path, {"S11": zeros, "S21": _meep_line(), "S31": zeros}),
+        _load_csv(tmp_path, {"S12": _meep_line(), "S22": zeros, "S32": _meep_line()}),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        matrix = s_matrix(
+            runs,
+            port_names=["o1", "o2", "o3"],
+            assume_reciprocal=True,
+            assume_unmeasured_zero=True,
+        )
+
+    (message,) = _plane_warnings(caplog)
+    assert not matrix.measured[1, 2]
+    assert "S(o2,o3)" in message
+    assert "S(o1,o3)" in message
+    assert "S(o3,o3)" not in message
+
+
+def test_one_run_has_one_plane_per_port_and_does_not_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    result = _load_csv(
+        tmp_path, {"S11": np.full(WAVELENGTH_UM.size, 0.1), "S21": _meep_line()}
+    )
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(result, assume_reciprocal=True, assume_unmeasured_zero=True)
+
+    assert _plane_warnings(caplog) == []
+
+
+def test_merged_transmission_without_reflection_does_not_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    zeros = np.zeros(WAVELENGTH_UM.size)
+    runs = [
+        _load_csv(tmp_path, {"S11": zeros, "S21": _meep_line()}),
+        _load_csv(tmp_path, {"S12": _meep_line(), "S22": zeros}),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="gsim.meep.models.results"):
+        s_matrix(runs)
+
+    assert _plane_warnings(caplog) == []
 
 
 def test_builder_works_without_meep_sax_or_jax_installed() -> None:

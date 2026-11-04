@@ -334,8 +334,11 @@ matrix.measured  # False for every assumed entry
 Runs must share their ports and wavelengths. Samples below the source noise floor are dropped, with a warning.
 
 The model takes `wl` in micrometers and covers the simulated band only: a wavelength outside it raises. It interpolates
-magnitude and unwrapped phase, so sample finely enough that phase changes by less than pi between wavelengths. It
-computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
+magnitude and unwrapped phase, so sample finely enough that phase changes by less than pi between wavelengths: a
+wavelength step below λ²/(2·n_g·L), about 3.5 nm for 100 µm at n_g = 3.4 and 1.55 µm. [`s_matrix`][gsim.fdtd.s_matrix]
+warns if the strongest transmission moves by 3/4 pi or more between samples. It cannot catch every undersampled grid,
+because a delay can alias to a smaller one with small steps, so choose the step from the longest path in your device. The
+model computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
 
 The two exports use different conventions:
 
@@ -349,8 +352,8 @@ does not compose correctly with SAX's photonic models that way. Use `sax_model()
 
 **Time convention of the solver.** gsim takes the solver's values as exp(+jωt). This is inferred from the solver's
 source spectrum and not stated by the solver. [`s_matrix`][gsim.fdtd.s_matrix] warns if the strongest transmission has a
-non-positive group delay. On a grid too coarse to unwrap phase, this check can stay silent even when the sign is wrong,
-so silence is not proof.
+negative group delay. A transmission whose phase does not move across the band gives no sign to judge. On a grid too
+coarse to unwrap phase, this check can stay silent even when the sign is wrong, so silence is not proof.
 
 Phases are referenced where the solver's port monitors sit, and gsim does not de-embed them. The `z0` argument of
 `write_touchstone` only fills the file header, because the S-parameters are normalized per mode.

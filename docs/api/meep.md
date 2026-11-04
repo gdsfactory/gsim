@@ -94,3 +94,7 @@ diagonal and off-diagonal entries are referenced to different planes: a reflecti
 received at that port imply. gsim cannot correct this from the result file, which holds neither the offsets nor the mode
 index. Transmission phases are consistent between runs when the ports share one beta, but do not rely on reflection
 phases in circuits sensitive to them, such as resonators.
+
+[`s_matrix`][gsim.meep.s_matrix] warns about this and names the entries affected: each nonzero measured reflection, and
+each entry copied with `assume_reciprocal`, in a matrix merged from several runs. A matrix from one run does not warn,
+because that run gives each port a single plane.

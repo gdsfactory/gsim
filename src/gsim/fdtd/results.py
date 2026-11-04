@@ -548,8 +548,8 @@ def s_matrix(
     port or an explicit assumption for what no run measured. Samples below the
     noise floor are dropped, with a WARNING giving the count. Values are taken as
     exp(+jwt) without conversion: this convention is inferred, not confirmed by the
-    solver, so a WARNING fires if the strongest transmission has a non-positive
-    group delay.
+    solver, so a WARNING fires if the strongest transmission has a negative group
+    delay. Another fires if its phase moves by 3/4 pi or more between samples.
 
     Phases are referenced where the solver's port monitors sit; gsim does not
     de-embed them.
