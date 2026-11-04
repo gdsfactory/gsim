@@ -139,6 +139,47 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 | `sim.electrostatic.save_fields` | `sim.solver.electrostatic.save_fields` |
 | `sim.boundary_mode.freq` | `sim.solver.boundary_mode.freq` |
 
+### Boundary-mode path integration
+
+Starting with gsim **0.9.0**, coordinate-path voltage and impedance postprocessing
+omits `NSamples`. The cloud runtime uses Palace commit
+`0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5`, which provides element-wise line
+integration and contains
+[the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
+
+```python
+from gsim.palace import BoundaryModeSim
+
+sim = BoundaryModeSim()
+sim.add_impedance_path("gap", voltage=[[0.0, 0.0], [1.0, 0.0]])
+```
+
+This omits `NSamples` from both `Boundaries.Postprocessing.Impedance` and
+`Boundaries.Postprocessing.Voltage`. The paths, indices, and current loops are
+unchanged. Palace controls the integration rule; no replacement sample count is
+required.
+
+Beginning in gsim **0.9.0**, `ModePath.nsamples` and the `nsamples=` argument to
+`add_impedance_path`, `declare_impedance_paths`, and `declare_terminal_paths`
+are deprecated. Existing calls still work, but an explicit count emits
+`DeprecationWarning` and is ignored. Calls that omit the count do not warn.
+Old saved `mode_paths` records also load with a warning for explicit `nsamples`
+values; the field is omitted when saved again. Remove the field or argument to
+migrate. No replacement setting is needed because Palace determines the
+integration rule. The deprecated inputs will be retained for at least two
+feature releases and roughly 12 months after the first released warning, then
+removed only in a release designated for incompatible changes.
+
+The local auto-download remains pinned to Palace **0.18.0**. It accepts these
+configurations, but uses its old sampled integration with the default count of
+**100**; gsim no longer exposes a control for that count. The local runtime does
+not gain the cloud runtime's element-wise integration. There is no
+version-dependent configuration switch.
+
+The `nsamples` settings on local field-integration routines such as
+`voltage_line_integral` remain available; they control Python-side quadrature,
+which is separate from Palace's path declarations.
+
 ### MUMPS behavior change
 
 Reloading a saved gsim settings model with `solver_type="MUMPS"` now uses the saved

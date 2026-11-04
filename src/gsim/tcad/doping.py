@@ -20,10 +20,8 @@ solutions behind the ``NetDoping`` node model.
 
 Every shape is a member of the :data:`DopingProfile` union, so a profile
 reaches the solve through the same seam whatever its shape:
-``sim.add_doping(...)`` on a :class:`~gsim.tcad.sim.ChargeTransportSim`,
-or ``Device(doping=[...])`` on a
-:class:`~gsim.modulator.study.Study`. Profiles naming the same region
-superpose.
+``sim.doping.add(...)`` on a :class:`~gsim.tcad.Simulation`. Profiles
+naming the same region superpose.
 """
 
 from __future__ import annotations

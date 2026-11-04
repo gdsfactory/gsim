@@ -5,9 +5,6 @@ types — DrivenSim, EigenmodeSim, ElectrostaticSim and BoundaryModeSim:
 geometry and stack configuration, meshing, config generation, and the
 local run, including what a run that dies on a signal means.
 :class:`_PalaceSimBase` declares, once, the state those methods share.
-
-:class:`MeshSourceMixin` is the same surface for a simulation that does
-not mesh for itself but delegates to one that does.
 """
 
 from __future__ import annotations
@@ -176,144 +173,6 @@ def _wrote_solver_output(postpro_dir: Path) -> bool:
     )
 
 
-class MeshSourceMixin:
-    """The configuration and mesh reads of whoever holds the mesh.
-
-    A simulation that does not mesh for itself still has to be
-    configured like one and asked the same questions afterwards: give it
-    a geometry, a stack, a Cross-section and its contacts, then ask
-    where the mesh landed and what groups it carries. A charge-transport
-    sim is that case — it delegates every one of them to a
-    :class:`~gsim.palace.BoundaryModeSim` it owns — and hand-mirroring
-    the surface is how the two drift apart.
-
-    Subclasses name the simulation that actually holds the mesh through
-    :meth:`_mesh_source`, and say whether it exists yet through
-    :meth:`_mesh_source_or_none`: the setters build it, the readers
-    answer for an unconfigured simulation rather than building one to
-    ask. The guard names the concrete class, so a user reads the sim
-    they called, not the delegate they never saw.
-    """
-
-    def _mesh_source(self) -> Any:
-        """The simulation that owns the mesh, built if it does not exist."""
-        raise NotImplementedError
-
-    def _mesh_source_or_none(self) -> Any | None:
-        """The simulation that owns the mesh, or ``None`` if never built."""
-        raise NotImplementedError
-
-    def _meshed_mesh_source(self) -> Any:
-        """The mesh source, or the report that nothing has meshed yet."""
-        source = self._mesh_source_or_none()
-        if source is None or not source.has_mesh:
-            raise ValueError(
-                f"No mesh generated for this {type(self).__name__}. Call mesh() first."
-            )
-        return source
-
-    # -------------------------------------------------------------------------
-    # Delegated configuration
-    # -------------------------------------------------------------------------
-
-    def set_geometry(self, component: Any) -> None:
-        """Set the gdsfactory component (delegates to the mesh pipeline)."""
-        self._mesh_source().set_geometry(component)
-
-    def set_stack(self, *args: Any, **kwargs: Any) -> None:
-        """Configure the layer stack (same arguments as the palace backends)."""
-        self._mesh_source().set_stack(*args, **kwargs)
-
-    def set_airbox(self, **kwargs: Any) -> None:
-        """Configure the background region around the clipped domain."""
-        self._mesh_source().set_airbox(**kwargs)
-
-    def set_output_dir(self, path: str | Path) -> None:
-        """Set the output directory for mesh files."""
-        self._mesh_source().set_output_dir(path)
-
-    def set_cross_section(
-        self,
-        plane: Any,
-        *,
-        window: tuple[float, float] | None = None,
-        window_z: tuple[float, float] | None = None,
-    ) -> None:
-        """Set the cross-section plane and the window clipping the mesh.
-
-        Args:
-            plane: Plane spec (``"x=<value>"`` / ``"y=<value>"``) or a
-                prebuilt ``CrossSectionPlaneConfig``.
-            window: In-plane ``(min, max)`` clip in um.
-            window_z: Vertical ``(min, max)`` clip in um.
-        """
-        self._mesh_source().set_cross_section(plane, window=window, window_z=window_z)
-
-    def add_contact(self, *, name: str, layer_a: str, layer_b: str) -> None:
-        """Declare a named contact at the interface between two layers."""
-        self._mesh_source().add_contact(name=name, layer_a=layer_a, layer_b=layer_b)
-
-    def add_interface(self, *, name: str, layer_a: str, layer_b: str) -> None:
-        """Declare a named interface between two semiconductor layers.
-
-        An interface is never a contact: it carries continuity across the
-        junction and no terminal voltage, and the mesh keeps the two
-        apart.
-
-        Args:
-            name: Interface / physical-group name (e.g. ``"junction"``).
-            layer_a: First doped region layer name.
-            layer_b: Second doped region layer name.
-        """
-        self._mesh_source().add_interface(name=name, layer_a=layer_a, layer_b=layer_b)
-
-    # -------------------------------------------------------------------------
-    # Delegated reads
-    # -------------------------------------------------------------------------
-
-    @property
-    def contact_specs(self) -> list[Any]:
-        """Declared contacts — the ohmic terminals, and nothing else."""
-        source = self._mesh_source_or_none()
-        return list(source.contact_specs) if source is not None else []
-
-    @property
-    def interface_specs(self) -> list[Any]:
-        """Declared semiconductor-semiconductor interfaces."""
-        source = self._mesh_source_or_none()
-        return list(source.interface_specs) if source is not None else []
-
-    @property
-    def output_dir(self) -> Path | None:
-        """Output directory (or None)."""
-        source = self._mesh_source_or_none()
-        return source.output_dir if source is not None else None
-
-    @property
-    def has_mesh(self) -> bool:
-        """Whether ``mesh()`` has run and left a mesh to read."""
-        source = self._mesh_source_or_none()
-        return source is not None and bool(source.has_mesh)
-
-    @property
-    def mesh_path(self) -> Path:
-        """Path of the generated mesh (um), once meshed.
-
-        Raises:
-            ValueError: When read before ``mesh()`` has run.
-        """
-        return Path(self._meshed_mesh_source().mesh_path)
-
-    @property
-    def mesh_groups(self) -> dict[str, Any]:
-        """Physical groups of the generated mesh, once meshed.
-
-        Raises:
-            ValueError: When read before ``mesh()`` has run.
-        """
-        return dict(self._meshed_mesh_source().mesh_groups)
-
-
 class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -476,6 +335,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         substrate_thickness: float | None = None,
         include_substrate: bool = False,
         add_oxide_dielectric: bool = True,
+        pdk_authoritative: bool = False,
+        dielectrics: list[dict[str, Any]] | None = None,
+        role_overrides: dict[str, str] | None = None,
+        use_pdk_overlay: bool = True,
         **kwargs,
     ) -> None:
         """Configure the layer stack.
@@ -519,6 +382,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 With ``False`` the stack bottom comes from the PDK's own
                 dielectric regions, or from the lowest layer when there are
                 none, not from ``substrate_thickness``.
+            pdk_authoritative: Build directly from the PDK LayerStack without
+                synthetic oxide or substrate; unknown materials raise. Defaults
+                to ``False`` to preserve legacy behavior.
+            dielectrics: Explicit bulk regions with
+                ``name``/``material``/``zmin``/``zmax`` in authoritative mode.
+            role_overrides: Explicit ``{layer_key: role}`` declarations in
+                authoritative mode.
+            use_pdk_overlay: Apply the reviewed per-PDK overlay in authoritative
+                mode. Defaults to ``True``.
             **kwargs: Additional args passed to extract_layer_stack.
 
         The bottom of the Palace domain is the lowest non-air dielectric
@@ -539,6 +411,13 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         Example:
             >>> sim.set_stack(substrate_thickness=2.0)
+            >>> sim.set_stack(
+            ...     pdk_authoritative=True,
+            ...     dielectrics=[
+            ...         {"name": "ild", "material": "sio2", "zmin": -2.0, "zmax": 14.03}
+            ...     ],
+            ...     role_overrides={"via1": "via"},
+            ... )  # PDK-authoritative stack with explicit background/roles
         """
         if stack is not None:
             # Directly use a pre-built LayerStack — skip lazy resolution
@@ -553,10 +432,25 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 "z_above=..., z_below=...)."
             )
 
+        if pdk_authoritative:
+            self._warn_on_ignored_legacy_stack_kwargs(
+                yaml_path=yaml_path,
+                substrate_thickness=substrate_thickness,
+                include_substrate=include_substrate,
+                add_oxide_dielectric=add_oxide_dielectric,
+                extra_kwargs=kwargs,
+            )
+        elif not use_pdk_overlay:
+            raise ValueError("use_pdk_overlay=False requires pdk_authoritative=True")
+
         self._stack_kwargs = {
             "yaml_path": yaml_path,
             "include_substrate": include_substrate,
             "add_oxide_dielectric": add_oxide_dielectric,
+            "pdk_authoritative": pdk_authoritative,
+            "dielectrics": dielectrics,
+            "role_overrides": role_overrides,
+            "use_pdk_overlay": use_pdk_overlay,
             **kwargs,
         }
         # Left out when unset so the stack builder can tell the 2.0 um default
@@ -565,6 +459,44 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._stack_kwargs["substrate_thickness"] = substrate_thickness
         # Stack will be resolved lazily during mesh() or simulate()
         self.stack = None
+
+    def _warn_on_ignored_legacy_stack_kwargs(
+        self,
+        *,
+        yaml_path: str | Path | None,
+        substrate_thickness: float | None,
+        include_substrate: bool,
+        add_oxide_dielectric: bool,
+        extra_kwargs: dict[str, Any],
+    ) -> None:
+        """Raise/warn when legacy (inferred-stack) kwargs cannot apply.
+
+        With ``pdk_authoritative=True`` the PDK LayerStack is used verbatim, so
+        the legacy extractor tuning is meaningless.  Passing it silently would
+        be a trap (gsim#230 review), so reject the mutually-exclusive options
+        and warn about the rest.
+        """
+        if yaml_path is not None:
+            raise ValueError(
+                "set_stack(pdk_authoritative=True) resolves the active PDK "
+                "LayerStack directly and cannot be combined with yaml_path."
+            )
+
+        ignored: list[str] = []
+        if substrate_thickness is not None:
+            ignored.append(f"substrate_thickness={substrate_thickness!r}")
+        if include_substrate:
+            ignored.append("include_substrate=True")
+        if not add_oxide_dielectric:
+            ignored.append("add_oxide_dielectric=False")
+        ignored.extend(f"{key}={value!r}" for key, value in extra_kwargs.items())
+        if ignored:
+            raise ValueError(
+                "set_stack(pdk_authoritative=True) ignores legacy stack "
+                f"options ({', '.join(sorted(ignored))}); they only apply to "
+                "the inferred legacy extractor. Remove them or use explicit "
+                "dielectrics=[...]/role_overrides={...} instead."
+            )
 
     def set_airbox(
         self,
@@ -1020,6 +952,81 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             for name, props in self.materials.items():
                 self.stack.materials[name] = props.to_dict()
             return self.stack
+
+        # PDK-authoritative path (gsim#230): build directly from the PDK
+        # LayerStack, with no synthetic geometry or silent material fallbacks.
+        # Read (do not pop) these options: if resolution raises, a caller that
+        # follows the error's advice (e.g. calls set_airbox() and retries) must
+        # still resolve through the authoritative path.
+        dielectrics = self._stack_kwargs.get("dielectrics")
+        role_overrides = self._stack_kwargs.get("role_overrides")
+        pdk_authoritative = bool(self._stack_kwargs.get("pdk_authoritative", False))
+        if pdk_authoritative:
+            from gsim.common.pdk import resolve_layer_stack
+            from gsim.palace.stack import build_palace_layer_stack
+
+            resolved = resolve_layer_stack(
+                self.component,
+                dielectrics=dielectrics,
+                role_overrides=role_overrides,
+                use_pdk_overlay=bool(self._stack_kwargs.get("use_pdk_overlay", True)),
+            )
+            canonical = build_palace_layer_stack(resolved)
+
+            # Apply material overrides to both canonical names and PDK tokens
+            # that resolve to them. Layers retain their original material token.
+            from gsim.common.stack.materials import MATERIAL_ALIASES
+
+            for name, props in self.materials.items():
+                target = MATERIAL_ALIASES.get(name.lower(), name.lower())
+                for token in canonical.materials:
+                    if MATERIAL_ALIASES.get(token.lower(), token.lower()) == target:
+                        canonical.materials[token] = props.to_dict()
+                canonical.materials[name] = props.to_dict()
+
+            # Keep stack free of synthetic air regions; Palace airboxes are
+            # generated explicitly from set_airbox().
+            canonical.dielectrics = [
+                d
+                for d in canonical.dielectrics
+                if str(d.get("material", "")).lower() != "air"
+            ]
+
+            has_airbox = bool(getattr(self, "_airbox_config", None))
+            if not canonical.dielectrics and not has_airbox:
+                raise ValueError(
+                    "PDK-authoritative stack has no bulk dielectric region and "
+                    "no airbox is configured, so Palace would fail with "
+                    "'No dielectric volumes in mesh'. Pass "
+                    "dielectrics=[...] to set_stack() or call set_airbox()."
+                )
+            if not canonical.dielectrics:
+                logger.warning(
+                    "PDK-authoritative stack has no bulk dielectric region; the "
+                    "domain background will be air only. Pass dielectrics=[...] "
+                    "to set_stack() to model the BEOL/cladding."
+                )
+
+            self._stack_kwargs["pdk_authoritative"] = True
+            self._stack_kwargs["dielectrics"] = dielectrics
+            self._stack_kwargs["role_overrides"] = role_overrides
+            self._stack_kwargs["use_pdk_overlay"] = bool(
+                self._stack_kwargs.get("use_pdk_overlay", True)
+            )
+            self.stack = canonical
+            return canonical
+
+        # Legacy path: the authoritative-only options must not reach the
+        # inferred extractor.
+        dielectrics = self._stack_kwargs.pop("dielectrics", None)
+        role_overrides = self._stack_kwargs.pop("role_overrides", None)
+        self._stack_kwargs.pop("pdk_authoritative", None)
+        self._stack_kwargs.pop("use_pdk_overlay", None)
+        if dielectrics or role_overrides:
+            logger.warning(
+                "set_stack(dielectrics=/role_overrides=) only applies with "
+                "pdk_authoritative=True; ignoring them."
+            )
 
         from gsim.common.stack import get_stack
 

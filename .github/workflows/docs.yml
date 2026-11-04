@@ -76,6 +76,9 @@ jobs:
           nbs/palace_*.ipynb)
             uv pip install ihp-gdsfactory==2.0.1
             ;;
+          nbs/tcad_twmzm.ipynb)
+            uv sync --no-default-groups --group docs --extra tcad --extra femwell
+            ;;
           nbs/tcad_*.ipynb)
             uv sync --no-default-groups --group docs --extra tcad
             ;;

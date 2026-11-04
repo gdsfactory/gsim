@@ -15,6 +15,14 @@ ViewerMode = Literal["surface", "mesh", "slice", "mesh_slice"]
 Axis = Literal["x", "y", "z"]
 
 
+def validate_slice(axis: Axis, position_um: float | None) -> None:
+    """Reject invalid slice coordinates before resolving or meshing geometry."""
+    if axis not in {"x", "y", "z"}:
+        raise ValueError(f"axis must be 'x', 'y', or 'z', got {axis!r}")
+    if position_um is not None and not isfinite(position_um):
+        raise ValueError("position_um must be finite when provided")
+
+
 @dataclass(frozen=True)
 class MeshViewer:
     """A self-contained interactive mesh document displayable in notebooks."""

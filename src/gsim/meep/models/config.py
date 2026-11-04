@@ -359,6 +359,14 @@ class LayerStackEntry(BaseModel):
     zmax: float
     material: str
     sidewall_angle: float = Field(default=0.0, description="Sidewall angle in degrees")
+    mesh_order: int | None = Field(
+        default=None,
+        description=(
+            "PDK overlap priority: lower values win. Equal values retain input "
+            "order; Meep's last object wins ties. None preserves legacy relative "
+            "order and precedes explicitly ranked layers."
+        ),
+    )
 
 
 class LorentzianPoleConfig(BaseModel):

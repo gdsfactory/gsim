@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import replace
 from math import isfinite
 from pathlib import Path
-from tempfile import TemporaryDirectory, mkdtemp
+from tempfile import mkdtemp
 from typing import Any, Self
 
 import gdsfactory as gf
@@ -43,8 +43,7 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
-from gsim.fdtd.runtime import RuntimeConfigMixin
-from gsim.fdtd.viz import Axis, ViewerMode
+from gsim.fdtd.visualization import VisualizationMixin
 
 # Flat constructor arguments of the original API, as (concern, field).
 # wavelength_halfspan_um is translated separately: it doubles into a span.
@@ -124,7 +123,7 @@ def _constant_material_card(name: str, refractive_index: float) -> Any:
     )
 
 
-class Simulation(CloudJobMixin, RuntimeConfigMixin):
+class Simulation(CloudJobMixin, VisualizationMixin):
     """Configure, serialize, and run a GDSFactory FDTD simulation."""
 
     _cloud_job_type = "fdtd"
@@ -432,107 +431,6 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             manifest=manifest,
         )
         return self._last_artifacts
-
-    def _plot_viewer(
-        self,
-        *,
-        mode: ViewerMode,
-        axis: Axis = "z",
-        position_um: float | None = None,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Render the current or a temporary mesh with the FDTD viewer."""
-        from gsim.fdtd.viz import plot_mesh
-
-        if (
-            self._last_artifacts is not None
-            and self._last_artifacts.mesh_path.is_file()
-        ):
-            return plot_mesh(
-                self._last_artifacts.mesh_path,
-                mode=mode,
-                axis=axis,
-                position_um=position_um,
-                show_groups=show_groups,
-                hide_groups=hide_groups,
-                zoom_to_cursor=zoom_to_cursor,
-                cell_size_nm=self.solver.cell_size_nm,
-                pml_cells=self.domain.pml_cells,
-                height=height,
-            )
-
-        previous_artifacts = self._last_artifacts
-        with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
-            try:
-                artifacts = self.write(directory)
-                return plot_mesh(
-                    artifacts.mesh_path,
-                    mode=mode,
-                    axis=axis,
-                    position_um=position_um,
-                    show_groups=show_groups,
-                    hide_groups=hide_groups,
-                    zoom_to_cursor=zoom_to_cursor,
-                    cell_size_nm=self.solver.cell_size_nm,
-                    pml_cells=self.domain.pml_cells,
-                    height=height,
-                )
-            finally:
-                self._last_artifacts = previous_artifacts
-
-    def plot_3d(
-        self,
-        *,
-        show_mesh: bool = False,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
-        return self._plot_viewer(
-            mode="mesh" if show_mesh else "surface",
-            show_groups=show_groups,
-            hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
-        )
-
-    def plot_2d(
-        self,
-        *,
-        axis: Axis = "z",
-        position_um: float | None = None,
-        show_mesh: bool = False,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show a filled cross-section, optionally with intersected cell edges."""
-        position_um = self._default_slice_position(axis, position_um)
-        return self._plot_viewer(
-            mode="mesh_slice" if show_mesh else "slice",
-            axis=axis,
-            position_um=position_um,
-            show_groups=show_groups,
-            hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
-        )
-
-    def _default_slice_position(
-        self, axis: Axis, position_um: float | None
-    ) -> float | None:
-        """Prefer the configured geometry midpoint over the padded domain center."""
-        if position_um is not None or self._resolved is None:
-            return position_um
-        axis_index = {"x": 0, "y": 1, "z": 2}[axis]
-        lower, upper = self.resolved.bounds
-        return (lower[axis_index] + upper[axis_index]) / 2
 
 
 __all__ = ["Simulation"]

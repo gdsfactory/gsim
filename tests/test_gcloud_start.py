@@ -284,13 +284,107 @@ class TestGetStatus:
 # ---------------------------------------------------------------------------
 
 
+class TestStatusDescriptions:
+    @pytest.mark.parametrize("mode", ["pipe", "tty", "jupyter"])
+    @pytest.mark.parametrize("job_count", [1, 2])
+    @pytest.mark.parametrize(
+        ("status", "bar", "description"),
+        [
+            ("created", "[#...................]", "Job created..."),
+            ("pending", "[##..................]", "Job pending..."),
+            ("queued", "[###.................]", "Job queued..."),
+            ("starting", "[######..............]", "Job starting..."),
+            (SimStatus.RUNNING, "[##########..........]", "Job in progress..."),
+            (SimStatus.COMPLETED, "[####################]", "Job completed"),
+            (SimStatus.FAILED, "[####################]", "Job failed"),
+            ("", "[#...................]", "Job starting..."),
+            ("unknown", "[#...................]", "Job unknown..."),
+            ("timed_out", "[#...................]", "Job timed out..."),
+            (
+                "waiting-for-capacity",
+                "[#...................]",
+                "Job waiting for capacity...",
+            ),
+        ],
+    )
+    def test_descriptions_replace_percentages(
+        self, mode, job_count, status, bar, description, capsys
+    ):
+        from gsim.gcloud import _print_status_table
+
+        jobs = {
+            f"job-{i}": FakeJob(job_name=f"meep-{i}", status=status)
+            for i in range(job_count)
+        }
+        with (
+            patch("gsim.gcloud._output_mode", return_value=mode),
+            patch("gsim.gcloud.time.monotonic", return_value=222.0),
+            patch(
+                "gsim.gcloud.shutil.get_terminal_size",
+                return_value=MagicMock(columns=200),
+            ),
+            patch("IPython.display.clear_output") as clear_output,
+        ):
+            lines = _print_status_table(jobs, dict.fromkeys(jobs, 0.0), final=True)
+
+        output = capsys.readouterr().out
+        assert "%" not in output
+        assert output.count(bar) == job_count
+        assert output.count(description) == job_count
+        assert output.count("elapsed 3m 42s") == job_count
+        assert lines == (1 if job_count == 1 else job_count + 1)
+        if mode == "jupyter":
+            clear_output.assert_called_once_with(wait=True)
+        else:
+            clear_output.assert_not_called()
+
+    @pytest.mark.parametrize("encoding", ["ascii", "cp437", "cp850"])
+    @pytest.mark.parametrize("job_count", [1, 2])
+    def test_polling_with_strict_legacy_stdout(
+        self, encoding, job_count, monkeypatch, tmp_path
+    ):
+        import io
+
+        from gsim import gcloud
+
+        buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(buffer, encoding=encoding, errors="strict")
+        monkeypatch.setattr("sys.stdout", stdout)
+        monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+        monkeypatch.setattr(
+            gcloud.shutil, "get_terminal_size", lambda: MagicMock(columns=200)
+        )
+        monkeypatch.setattr(gcloud.time, "sleep", lambda _: None)
+        running = FakeJob(job_name="meep-running", status="running")
+        completed = FakeJob(
+            job_name="meep-running", status="completed", job_def_name="custom"
+        )
+        monkeypatch.setattr(
+            gcloud.sim,
+            "get_job",
+            MagicMock(side_effect=[running] * job_count + [completed] * job_count),
+        )
+        monkeypatch.setattr(gcloud.sim, "download_results", lambda *_a, **_kw: {})
+
+        gcloud.wait_for_results(
+            *(f"job-{i}" for i in range(job_count)),
+            parent_dir=tmp_path,
+            estimated_runtime_seconds=240,
+        )
+
+        stdout.flush()
+        output = buffer.getvalue().decode(encoding)
+        assert "Job in progress... ETA" in output
+        assert "Job completed" in output
+
+
 class TestWaitForResultsSingle:
     """Tests for wait_for_results with a single job."""
 
     @patch("gsim.gcloud._output_mode", new=lambda: "pipe")
     @patch("gsim.gcloud.sim")
     def test_status_display_includes_progress_bar(self, mock_sim, capsys):
-        """Status mode renders a lifecycle progress estimate and elapsed time."""
+        """Status mode keeps the bar with a description instead of a percentage."""
         from gsim.gcloud import _print_status_table
 
         mock_sim.SimStatus = SimStatus
@@ -299,8 +393,8 @@ class TestWaitForResultsSingle:
         _print_status_table({"job-1": job}, {"job-1": 0.0}, final=True)
 
         output = capsys.readouterr().out
-        assert "[##########..........]  50%" in output
-        assert "running" in output
+        assert "[##########..........]  Job in progress..." in output
+        assert "%" not in output
         assert "elapsed" in output
 
     @patch("gsim.gcloud._output_mode", new=lambda: "pipe")
@@ -318,7 +412,8 @@ class TestWaitForResultsSingle:
         )
 
         output = capsys.readouterr().out
-        assert "[##########..........]  50%" in output
+        assert "[##########..........]  Job in progress..." in output
+        assert "%" not in output
         assert "ETA 2m 00s" in output
         assert mock_monotonic.called
 
@@ -359,7 +454,9 @@ class TestWaitForResultsSingle:
 
         assert shown["job-1"] == 30
         assert mock_monotonic.called
-        assert " 30%" in capsys.readouterr().out
+        output = capsys.readouterr().out
+        assert "[######..............]  Job in progress..." in output
+        assert "%" not in output
 
     @patch("gsim.gcloud.sim")
     def test_already_completed(self, mock_sim, tmp_path):

@@ -34,6 +34,7 @@ from pydantic import (
     field_validator,
 )
 
+from gsim.palace._path_sampling import warn_legacy_path_sampling
 from gsim.palace.base import _PalaceSimBase
 from gsim.palace.models import (
     BoundaryModeConfig,
@@ -78,7 +79,8 @@ class ModePath(BaseModel):
             law it encloses the displacement current of the gap as well
             as the conduction current of the metal, and a wider loop
             reads less current. ``None`` asks for the voltage alone.
-        nsamples: Quadrature order of each line integral.
+        nsamples: Deprecated, ignored sample count. Explicit values warn;
+            this compatibility field is excluded from saved settings.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -86,7 +88,14 @@ class ModePath(BaseModel):
     name: str = Field(min_length=1)
     voltage_path: list[list[float]] = Field(min_length=2)
     current_path: list[list[float]] | None = Field(default=None, min_length=3)
-    nsamples: int = Field(default=100, ge=1)
+    nsamples: int = Field(default=100, ge=1, exclude=True)
+
+    @field_validator("nsamples")
+    @classmethod
+    def _warn_legacy_sampling(cls, value: int) -> int:
+        """Keep old constructor inputs and assignments working with a warning."""
+        warn_legacy_path_sampling(value)
+        return value
 
     @field_validator("voltage_path", "current_path")
     @classmethod
@@ -282,7 +291,7 @@ class BoundaryModeSim(_PalaceSimBase):
         *,
         voltage: list[list[float]],
         current: list[list[float]] | None = None,
-        nsamples: int = 100,
+        nsamples: int | None = None,
     ) -> int:
         """Declare a voltage path and current loop Palace evaluates a Mode on.
 
@@ -304,7 +313,8 @@ class BoundaryModeSim(_PalaceSimBase):
                 conductor agrees with the field-based power-current
                 impedance. :func:`gsim.palace.line_impedance.line_impedance_paths`
                 places one from the electrode layout.
-            nsamples: Quadrature order of each line integral.
+            nsamples: Deprecated and ignored; supplying a count emits
+                ``DeprecationWarning``. Omit it to let Palace integrate the path.
 
         Returns:
             The 1-based index Palace reports this path under.
@@ -312,9 +322,8 @@ class BoundaryModeSim(_PalaceSimBase):
         Raises:
             ValueError: When a path repeats a point, which Palace aborts on.
         """
-        path = ModePath(
-            name=name, voltage_path=voltage, current_path=current, nsamples=nsamples
-        )
+        warn_legacy_path_sampling(nsamples)
+        path = ModePath(name=name, voltage_path=voltage, current_path=current)
         paths = list(self.mode_paths)
         for index, existing in enumerate(paths):
             if existing.name == name:
@@ -330,6 +339,8 @@ class BoundaryModeSim(_PalaceSimBase):
 
         Each path yields an ``Impedance`` entry (``mode-Z.csv``) and a
         ``Voltage`` entry (``mode-V.csv``) under the same index.
+        Palace integrates coordinate paths element by element and controls the
+        integration rule. No sample-count setting is emitted.
 
         Returns:
             The block, empty when no path is declared.
@@ -340,18 +351,15 @@ class BoundaryModeSim(_PalaceSimBase):
             entry: dict[str, object] = {
                 "Index": index,
                 "VoltagePath": [list(point) for point in path.voltage_path],
-                "NSamples": path.nsamples,
             }
             if path.current_path is not None:
                 entry["CurrentPath"] = [list(point) for point in path.current_path]
             impedance_entries.append(entry)
-            voltage_entries.append(
-                {
-                    "Index": index,
-                    "VoltagePath": [list(point) for point in path.voltage_path],
-                    "NSamples": path.nsamples,
-                }
-            )
+            voltage_entry: dict[str, object] = {
+                "Index": index,
+                "VoltagePath": [list(point) for point in path.voltage_path],
+            }
+            voltage_entries.append(voltage_entry)
         result: dict[str, list[dict[str, object]]] = {}
         if impedance_entries:
             result["Impedance"] = impedance_entries

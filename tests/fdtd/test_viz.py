@@ -127,11 +127,14 @@ def test_simulation_view_methods_reuse_last_mesh(tmp_path: Path) -> None:
     assert '"cellSizeNm":60.0' in simulation.plot_3d().html
     assert '"pmlCells":32' in simulation.plot_3d().html
     assert '"zoomToCursor":false' in simulation.plot_3d(zoom_to_cursor=False).html
-    slice_html = simulation.plot_2d().html
+    slice_html = simulation.plot_2d_interactive().html
     assert '"mode":"slice"' in slice_html
     assert '"positionUm":0.2' in slice_html
-    assert '"mode":"mesh_slice"' in simulation.plot_2d(show_mesh=True).html
-    assert '"zoomToCursor":false' in simulation.plot_2d(zoom_to_cursor=False).html
+    assert '"mode":"mesh_slice"' in simulation.plot_2d_interactive(show_mesh=True).html
+    assert (
+        '"zoomToCursor":false'
+        in simulation.plot_2d_interactive(zoom_to_cursor=False).html
+    )
     assert not hasattr(simulation, "plot_mesh")
     assert not hasattr(simulation, "plot_mesh_slice")
 
