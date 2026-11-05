@@ -371,6 +371,8 @@ unresolved-import = "ignore"
 include = ["src"]
 
 [tool.uv]
+# KLayout 0.30.13 has no Windows wheels; its source build needs unavailable headers.
+constraint-dependencies = ["klayout!=0.30.13; sys_platform == 'win32'"]
 # IHP's SAX dependency requires scikit-rf<2; the calibration guide needs >=2.1.
 conflicts = [
   [{ group = "test" }, { group = "rf-analysis" }],
