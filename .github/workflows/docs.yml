@@ -85,6 +85,10 @@ jobs:
         esac
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
+    - name: Check SVG figure output
+      env:
+        IPYTHONDIR: ${{ github.workspace }}/scripts/ipython
+      run: uv run --no-sync python scripts/check_inline_svg.py gsim
     - name: Execute notebook
       timeout-minutes: 100
       if: >-

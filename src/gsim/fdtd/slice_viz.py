@@ -150,6 +150,8 @@ def plot_mesh_slice(
             linewidths=0.35 if show_mesh else 0,
             antialiaseds=show_mesh,
             label=f"{group.name} ({group.material})",
+            # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+            rasterized=True,
         )
         ax.add_collection(collection)
     plane_axes = [index for index in range(3) if index != normal_axis]
