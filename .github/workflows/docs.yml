@@ -4,6 +4,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      fresh_inductor:
+        description: Run all three inductor simulations without cached results
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -92,7 +97,13 @@ jobs:
       env:
         GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
         NOTEBOOK: ${{ matrix.notebook }}
-      run: uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim
+        FRESH_INDUCTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_inductor }}
+      run: |
+        if [[ "$NOTEBOOK" == "nbs/palace_inductor.ipynb" && "$FRESH_INDUCTOR" == "true" ]]; then
+          uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim -p check_cache false
+        else
+          uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim
+        fi
     - name: Strip absolute paths
       env:
         NOTEBOOK: ${{ matrix.notebook }}
