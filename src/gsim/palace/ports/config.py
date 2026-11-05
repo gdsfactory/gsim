@@ -24,7 +24,7 @@ class PortType(Enum):
 
     LUMPED = "lumped"  # LumpedPort: internal boundary with circuit impedance
     WAVEPORT = "waveport"  # WavePort: domain boundary, modal port
-    # SURFACE_CURRENT = "surface_current"  # Future: inductance matrix extraction
+    SURFACE_CURRENT = "surface_current"  # SurfaceCurrent: magnetostatic source sheet
     # TERMINAL = "terminal"  # Future: capacitance matrix extraction (electrostatics)
 
 

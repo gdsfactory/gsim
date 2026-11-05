@@ -6,7 +6,8 @@ offering validation, serialization, and a clean API.
 Submodules:
     - geometry: GeometryConfig
     - stack: MaterialConfig (Layer/Stack are in gsim.common.stack)
-    - ports: PortConfig, CPWPortConfig, TerminalConfig, WavePortConfig
+    - ports: PortConfig, CPWPortConfig, TerminalConfig, CurrentSourceConfig,
+      WavePortConfig
     - mesh: MeshConfig
     - solver: SolverConfig, LinearSolverConfig and problem-specific subclasses
     - numerical: NumericalConfig (deprecated compatibility model), RefinementConfig
@@ -27,6 +28,7 @@ from gsim.palace.models.numerical import NumericalConfig, RefinementConfig
 from gsim.palace.models.pec import PECBlockConfig
 from gsim.palace.models.ports import (
     CPWPortConfig,
+    CurrentSourceConfig,
     ImpedanceBoundaryConfig,
     PortConfig,
     TerminalConfig,
@@ -48,6 +50,7 @@ from gsim.palace.models.solver import (
     EigenmodeSolverConfig,
     ElectrostaticSolverConfig,
     LinearSolverConfig,
+    MagnetostaticSolverConfig,
     SolverConfig,
 )
 from gsim.palace.models.stack import MaterialConfig
@@ -59,6 +62,7 @@ __all__ = [
     "CPWPortConfig",
     "ContactSpec",
     "CrossSectionPlaneConfig",
+    "CurrentSourceConfig",
     "DrivenConfig",
     "DrivenSolverConfig",
     "EigenmodeConfig",
@@ -70,6 +74,7 @@ __all__ = [
     "InterfaceSpec",
     "LinearSolverConfig",
     "MagnetostaticConfig",
+    "MagnetostaticSolverConfig",
     "MaterialConfig",
     "MeshConfig",
     "NumericalConfig",

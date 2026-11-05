@@ -22,7 +22,7 @@ import pytest
 from shapely import Polygon
 
 from gsim.common.stack.extractor import Layer, LayerStack
-from gsim.palace import ElectrostaticSim
+from gsim.palace import DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.mesh.geometry import extract_geometry
 from gsim.palace.mesh.nets import Nets, extract_nets
 
@@ -542,6 +542,19 @@ def test_electrostatic_sim_names_nets_by_electrical_ports_only() -> None:
 def test_electrostatic_sim_without_geometry_says_so() -> None:
     with pytest.raises(ValueError, match="set_geometry"):
         ElectrostaticSim().nets()
+
+
+@pytest.mark.parametrize("sim_class", [DrivenSim, EigenmodeSim])
+def test_every_palace_sim_reports_the_nets_of_its_geometry(sim_class) -> None:
+    sim = sim_class()
+    sim.set_geometry(
+        _component(
+            [A, B, BAR, VIA_A],
+            ports=[("PLUS", 0.5, 0.5, "m1"), ("MINUS", 3.5, 0.5, "m1")],
+        )
+    )
+    sim.set_stack(_stack())
+    assert [net.name for net in sim.nets()] == ["PLUS", "MINUS"]
 
 
 # ----- real layouts from the IHP SG13G2 cells ---------------------------------------

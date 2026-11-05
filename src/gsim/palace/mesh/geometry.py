@@ -11,7 +11,7 @@ import itertools
 import logging
 import math
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import klayout.db as kdb
 from shapely import Polygon as ShapelyPolygon
@@ -2651,12 +2651,17 @@ def add_ports(
                 kernel, xmin, ymin, port.zmin, xmax, ymax, port.zmax
             )
             port_tags[f"P{port_num}"] = [surface]
+            # A current source has no reference impedance.
+            identity: dict[str, Any] = (
+                {"type": "surface_current"}
+                if port.port_type == PortType.SURFACE_CURRENT
+                else {"Z0": port.impedance, "type": "lumped"}
+            )
             port_info.append(
                 {
                     "portnumber": port_num,
                     "name": port.name,
-                    "Z0": port.impedance,
-                    "type": "lumped",
+                    **identity,
                     "direction": port.direction.upper(),
                     "length": port.width,
                     "width": port.zmax - port.zmin,

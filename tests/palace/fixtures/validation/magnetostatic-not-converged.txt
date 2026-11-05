@@ -1,0 +1,27 @@
+Computing magnetostatic fields for 2 source boundaries
+
+It 1/2: Current Index = 1 (elapsed time = 2.52e-04 s)
+ Residual norms for PCG solve
+ 0 KSP residual norm ||r||_B = 6.232373e-03
+ 9 KSP residual norm ||r||_B = 4.697267e-03
+10 KSP residual norm ||r||_B = 3.675442e-03
+PCG solver did NOT converge in 10 iterations (avg. reduction factor: 9.486e-01)
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 5.897e-01 (norm(b) = 6.232e-03)!
+
+
+It 2/2: Current Index = 2 (elapsed time = 2.77e+00 s)
+ Residual norms for PCG solve
+10 KSP residual norm ||r||_B = 6.642385e-02
+PCG solver did NOT converge in 10 iterations (avg. reduction factor: 1.258e+00)
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 9.933e+00 (norm(b) = 6.687e-03)!
+
+ Field energy H = 4.678e-14 J
+ Field energy H = 7.268e-13 J
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 4.926e-01, global unknowns = 91916
+ Max. iterations = 0, tol. = 1.000e-02

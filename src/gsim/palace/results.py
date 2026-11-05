@@ -988,18 +988,18 @@ def load_text_results(source: str | Path | dict) -> PalaceTextResults:
     for name, path in sorted(parseable.items()):
         suffix = path.suffix.lower()
         if suffix == ".csv":
-            with path.open(newline="") as f:
+            with path.open(newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 rows = [{k or "": v or "" for k, v in row.items()} for row in reader]
             csv_tables[name] = rows
             continue
 
         if suffix == ".json":
-            with path.open() as f:
+            with path.open(encoding="utf-8") as f:
                 json_data[name] = json.load(f)
             continue
 
-        with path.open(errors="replace") as f:
+        with path.open(encoding="utf-8", errors="replace") as f:
             text_data[name] = [line.rstrip("\n") for line in f]
 
     return PalaceTextResults(

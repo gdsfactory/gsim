@@ -4,7 +4,8 @@ This module provides a comprehensive API for setting up and running
 electromagnetic simulations using the Palace solver with gdsfactory components.
 
 Features:
-    - Problem-specific simulation classes (DrivenSim, EigenmodeSim, ElectrostaticSim)
+    - Problem-specific simulation classes (DrivenSim, EigenmodeSim,
+      ElectrostaticSim, MagnetostaticSim, BoundaryModeSim)
     - Layer stack extraction from PDK
     - Lumped-port geometry (inplane, gap, interlayer, CPW)
     - Mesh generation with quality presets
@@ -110,6 +111,12 @@ from gsim.palace.fields import (
     resolve_scalar_field,
 )
 
+# Inductance matrix of magnetostatic runs
+from gsim.palace.inductance import InductanceMatrix, load_inductance
+
+# Inductance extraction (magnetostatic)
+from gsim.palace.magnetostatic import MagnetostaticSim
+
 # Material resolution with dispersion
 from gsim.palace.materials import resolve_palace_materials_at_frequency
 
@@ -135,6 +142,7 @@ from gsim.palace.models import (
     BoundaryModeSolverConfig,
     CPWPortConfig,
     CrossSectionPlaneConfig,
+    CurrentSourceConfig,
     DrivenConfig,
     DrivenSolverConfig,
     EigenmodeConfig,
@@ -144,6 +152,7 @@ from gsim.palace.models import (
     GeometryConfig,
     LinearSolverConfig,
     MagnetostaticConfig,
+    MagnetostaticSolverConfig,
     MaterialConfig,
     NumericalConfig,
     PECBlockConfig,
@@ -243,6 +252,7 @@ __all__ = [
     "CapacitanceMatrices",
     "CircuitSynthesis",
     "CrossSectionPlaneConfig",
+    "CurrentSourceConfig",
     "DrivenConfig",
     "DrivenSim",
     "DrivenSolverConfig",
@@ -254,11 +264,14 @@ __all__ = [
     "ElectrostaticSolverConfig",
     "Geometry",
     "GeometryConfig",
+    "InductanceMatrix",
     "Layer",
     "LayerStack",
     "LinearSolverConfig",
     "LumpedTerminal",
     "MagnetostaticConfig",
+    "MagnetostaticSim",
+    "MagnetostaticSolverConfig",
     "MaterialConfig",
     "MaterialProperties",
     "MeshConfig",
@@ -332,6 +345,7 @@ __all__ = [
     "load_circuit_synthesis",
     "load_field_context",
     "load_fields",
+    "load_inductance",
     "load_modal_run",
     "load_port_mode_fields",
     "load_refinement_history",

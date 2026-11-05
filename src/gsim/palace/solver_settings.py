@@ -75,12 +75,8 @@ class SolverSettingsMixin:
         order: int = _DEFAULT_SOLVER.order,
         tolerance: float | None = None,
         max_iterations: int = _DEFAULT_SOLVER.linear.max_iterations,
-        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = (
-            _DEFAULT_SOLVER.linear.solver_type
-        ),
-        preconditioner: Literal["Default", "AMS", "BoomerAMG"] = (
-            _DEFAULT_SOLVER.linear.preconditioner
-        ),
+        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] | None = None,
+        preconditioner: Literal["Default", "AMS", "BoomerAMG"] | None = None,
         device: Literal["CPU", "GPU"] = _DEFAULT_SOLVER.device,
         mg_max_levels: int = _DEFAULT_SOLVER.linear.mg_max_levels,
         pc_mat_real: bool = _DEFAULT_SOLVER.linear.pc_mat_real,
@@ -91,29 +87,33 @@ class SolverSettingsMixin:
     ) -> None:
         """Set common solver controls, preserving problem-specific settings.
 
-        Defaults match the simulation constructor: order 2, complex MUMPS
-        multigrid, 400 iterations, and CPU. Linear tolerance is 1e-9 for
-        eigenmode simulations and 1e-6 otherwise. Error estimator controls left
-        as None are chosen by AMR state. Set individual
+        Defaults match the simulation constructor: order 2, 400 iterations,
+        and CPU. Tolerance, backend and preconditioner left as None take the
+        simulation class's own linear defaults: complex MUMPS multigrid at 1e-6
+        (1e-9 for eigenmode), or AMS at 1e-8 for magnetostatic. Error
+        estimator controls left as None are chosen by AMR state. Set individual
         controls directly through ``sim.solver`` to retain other common values.
 
         Example:
             >>> sim.set_solver(order=1, tolerance=1e-6)
             >>> sim.solver.eigenmode.target = 4e9
         """
+        defaults = type(self.solver)().linear
         self._replace_common_solver(
             SolverConfig(
                 order=order,
                 device=device,
                 linear=LinearSolverConfig(
-                    tolerance=(
-                        type(self.solver)().linear.tolerance
-                        if tolerance is None
-                        else tolerance
-                    ),
+                    tolerance=defaults.tolerance if tolerance is None else tolerance,
                     max_iterations=max_iterations,
-                    solver_type=solver_type,
-                    preconditioner=preconditioner,
+                    solver_type=(
+                        defaults.solver_type if solver_type is None else solver_type
+                    ),
+                    preconditioner=(
+                        defaults.preconditioner
+                        if preconditioner is None
+                        else preconditioner
+                    ),
                     mg_max_levels=mg_max_levels,
                     pc_mat_real=pc_mat_real,
                     complex_coarse_solve=complex_coarse_solve,
@@ -130,12 +130,8 @@ class SolverSettingsMixin:
         order: int | _UnsetOrder = _UnsetOrder.DEFAULT,
         tolerance: float | None = None,
         max_iterations: int = _DEFAULT_SOLVER.linear.max_iterations,
-        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = (
-            _DEFAULT_SOLVER.linear.solver_type
-        ),
-        preconditioner: Literal["Default", "AMS", "BoomerAMG"] = (
-            _DEFAULT_SOLVER.linear.preconditioner
-        ),
+        solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] | None = None,
+        preconditioner: Literal["Default", "AMS", "BoomerAMG"] | None = None,
         device: Literal["CPU", "GPU"] = _DEFAULT_SOLVER.device,
         mg_max_levels: int = _DEFAULT_SOLVER.linear.mg_max_levels,
         pc_mat_real: bool = _DEFAULT_SOLVER.linear.pc_mat_real,

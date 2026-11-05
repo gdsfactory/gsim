@@ -87,6 +87,19 @@ def test_lumped_port_contact_rejects_orphan(sim_dir: Path) -> None:
         check_lumped_port_contact(sim_dir)
 
 
+def test_surface_current_contact_rejects_orphan(sim_dir: Path) -> None:
+    path = sim_dir / "config.json"
+    config = json.loads(path.read_text())
+    config["Boundaries"]["SurfaceCurrent"] = [
+        {"Index": 1, "Attributes": [2], "Direction": "+X"},
+        {"Index": 2, "Attributes": [3], "Direction": "+X"},
+    ]
+    del config["Boundaries"]["LumpedPort"]
+    path.write_text(json.dumps(config))
+    with pytest.raises(ValueError, match=r"surface currents \[2\].*share no nodes"):
+        check_lumped_port_contact(sim_dir)
+
+
 def test_lumped_port_contact_uses_configured_attributes(sim_dir: Path) -> None:
     path = sim_dir / "config.json"
     config = json.loads(path.read_text())
