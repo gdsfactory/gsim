@@ -194,7 +194,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         _airbox_config: dict[str, Any]
         _pec_blocks: list
         _symmetry_planes: list[SymmetryPlaneConfig]
-        _hints: dict[str, Any]
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
         _configured_ports: bool
         _last_mesh_result: Any
@@ -2394,6 +2393,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         return result
 
+    def _config_options(self) -> dict[str, Any]:
+        """Keyword arguments only this problem type gives the config generator."""
+        return {}
+
     def write_config(
         self,
         *,
@@ -2444,29 +2447,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
-        # Thread impedance boundary configs through hints
-        hints = dict(self._hints)
-        if self._impedance_boundaries:
-            hints["_impedance_boundaries"] = self._impedance_boundaries
-        if getattr(self, "metallic_boundaries", False):
-            hints["_metallic_boundaries"] = True
-        if getattr(self, "conductor_boundary", "conductivity") == "pec":
-            hints["_conductor_boundary"] = "pec"
-
-        # BoundaryMode voltage/impedance postprocessing paths. They do not
-        # affect the 2D eigenproblem; the boundary-mode sim declares them.
-        mode_postprocessing = getattr(self, "mode_postprocessing", None)
-        if mode_postprocessing is not None:
-            postprocessing = mode_postprocessing()
-            if postprocessing:
-                hints["_mode_postprocessing"] = postprocessing
-
-        # The 2D mesh of a cross-section has its own axes; the config
-        # generator writes material tensors in them (_to_section_frame).
-        cross_section = getattr(self, "cross_section", None)
-        if self.simulation_type == "boundarymode" and cross_section is not None:
-            hints["_cross_section_axis"] = cross_section.axis
-
         config_path = gen_write_config(
             mesh_result=self._last_mesh_result,
             stack=stack,
@@ -2479,10 +2459,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=self.absorbing_boundary,
             absorbing_order=self.absorbing_order,
-            hints=hints,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
+            impedance_boundaries=self._impedance_boundaries,
+            metallic_boundaries=getattr(self, "metallic_boundaries", False),
+            **self._config_options(),
         )
 
         # Validate mesh and config unless this is a photonic workflow.
@@ -3141,7 +3123,6 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
     _pec_blocks: list = PrivateAttr(default_factory=list)
     _symmetry_planes: list[SymmetryPlaneConfig] = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
     _impedance_boundaries: list[ImpedanceBoundaryConfig] = PrivateAttr(
         default_factory=list
     )
