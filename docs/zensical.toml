@@ -125,6 +125,7 @@ summary = true
 [project.theme]
 name = "material"
 custom_dir = "overrides"
+favicon = "assets/img/gsim-icon.png"
 features = ["content.action.copy"]
 
 [[project.theme.palette]]
