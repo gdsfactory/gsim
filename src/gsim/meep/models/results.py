@@ -987,6 +987,8 @@ class ModeResult(BaseModel):
         for i, comp in enumerate(comps):
             ax_i = axes[i]
             data = self._apply_norm(self.fields[comp], norm)
+            # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+            kwargs.setdefault("rasterized", True)
             im = ax_i.pcolormesh(
                 h_grid,
                 z,
@@ -1005,6 +1007,7 @@ class ModeResult(BaseModel):
                     cmap="Greys",
                     alpha=0.25,
                     shading="auto",
+                    rasterized=True,
                 )
             if geometry:
                 self._draw_geometry_overlay_2d(ax_i, **(geom_kwargs or {}))
@@ -1371,6 +1374,8 @@ class ModeResult(BaseModel):
         else:
             fig, ax = plt.subplots(figsize=figsize)
 
+        # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+        kwargs.setdefault("rasterized", True)
         im = ax.pcolormesh(
             h_grid,
             self.z_grid,

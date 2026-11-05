@@ -1248,6 +1248,7 @@ def plot_topview(
                     norm=norm,
                     vmin=plot_vmin,
                     vmax=plot_vmax,
+                    rasterized=True,
                 )
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
                 ax.set_title(title)
@@ -1303,6 +1304,7 @@ def plot_topview(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
     ax.set_title(title)
@@ -1499,6 +1501,7 @@ def plot_cross_section(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
 
     if quiver:
