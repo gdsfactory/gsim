@@ -2607,9 +2607,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             >>> # For DrivenSim: `results` is SParams -> results.s21.db
             >>> # For eigen / electrostatic: `results` is dict[str, Path]
         """
+        import json
         import subprocess
 
-        from gsim.palace.runtime import local_abort_report, resolve_launch, run_palace
+        from gsim.palace.runtime import (
+            local_abort_report,
+            resolve_launch,
+            run_palace,
+            strip_crack,
+        )
 
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
@@ -2686,6 +2692,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 logger.info("%s", msg)
             else:
                 logger.warning("%s", msg)
+
+        # Palace before 0.19 rejects "Crack" and always cracks. An upload writes
+        # config.json again, so only this local run loses the key.
+        config_text = config_path.read_text()
+        if '"Crack"' in config_text:
+            config = json.loads(config_text)
+            local_config = strip_crack(config)
+            if local_config is not config:
+                config_path.write_text(json.dumps(local_config, indent=4))
 
         try:
             run_palace(
