@@ -83,3 +83,26 @@ def test_generated_fallback_problem_config(tmp_path, simulation_type):
         "ComplexCoarseSolve": True,
         "EstimatorTol": 1e-2,
     }
+
+
+@pytest.mark.parametrize("simulation_type", ["driven", "eigenmode", "electrostatic"])
+def test_generated_config_prints_krylov_residual_samples(tmp_path, simulation_type):
+    config_path = generate_palace_config(
+        groups={
+            "volumes": {"airbox": {"phys_group": 1}},
+            "conductor_surfaces": {},
+            "port_surfaces": {},
+            "boundary_surfaces": {},
+        },
+        ports=[],
+        port_info=[],
+        stack=LayerStack(),
+        output_path=tmp_path,
+        model_name="palace",
+        fmax=60e9,
+        simulation_type=simulation_type,
+    )
+    problem = json.loads(config_path.read_text())["Problem"]
+
+    # load_static_solver_metrics needs these per-iteration monitor lines.
+    assert problem["Verbose"] >= 2
