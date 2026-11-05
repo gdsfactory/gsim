@@ -33,11 +33,13 @@ the same thing — the runtime rather than the model.
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import logging
 import os
 import platform
+import re
 import shutil
 import signal
 import stat
@@ -47,6 +49,7 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.request import Request, urlopen
 from zipfile import ZipFile, is_zipfile
 
@@ -64,6 +67,7 @@ __all__ = [
     "resolve_palace_library_dir",
     "resolve_palace_runtime",
     "run_palace",
+    "strip_crack",
 ]
 
 _DEFAULT_BINARY_TAG = "0.18.0"
@@ -91,6 +95,35 @@ def _runtime_cache_dir() -> Path:
 def _binary_tag() -> str:
     """Return the Palace CPU runtime version tag to download."""
     return os.environ.get(_TAG_ENV, _DEFAULT_BINARY_TAG).strip() or _DEFAULT_BINARY_TAG
+
+
+def strip_crack(config: dict[str, Any], tag: str | None = None) -> dict[str, Any]:
+    """Drop ``Crack`` from the conductor boundaries for a Palace older than 0.19.
+
+    Palace 0.18 checks its configuration against a schema that has no
+    ``Crack`` key and rejects it, and it always cracks, so leaving the key out
+    gives the same model there.
+
+    Args:
+        config: A Palace configuration. It is not modified.
+        tag: The Palace version to run on. Defaults to the local runtime tag,
+            :data:`_TAG_ENV` included.
+
+    Returns:
+        ``config`` itself when nothing has to go, otherwise a copy without the
+        key.
+    """
+    version = re.match(r"v?(\d+)\.(\d+)", (tag or _binary_tag()).strip())
+    # A tag that is not a version keeps the key; Palace reports it if it objects.
+    if version is None or tuple(map(int, version.groups())) >= (0, 19):
+        return config
+    entries = config.get("Boundaries", {}).get("Conductivity", [])
+    if not any("Crack" in entry for entry in entries):
+        return config
+    stripped = copy.deepcopy(config)
+    for entry in stripped["Boundaries"]["Conductivity"]:
+        entry.pop("Crack", None)
+    return stripped
 
 
 def _binary_wheel_url(tag: str) -> str:

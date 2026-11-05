@@ -694,6 +694,13 @@ def generate_palace_config(
     conductors: list[dict[str, object]] = []
     conductor_attrs: list[int] = []
 
+    # Palace >= 0.19 reads an interior Conductivity boundary as a thin film
+    # unless it is cracked. A 3D conductor is meshed as a shell with the
+    # dielectric inside, so its boundary is interior and "Crack" keeps it a
+    # thick conductor. A native 2D conductor is a hole in the mesh, so its
+    # boundary is exterior and takes no key.
+    crack_conductors = simulation_type in ("driven", "eigenmode")
+
     for name, info in groups["conductor_surfaces"].items():
         # Extract layer name from "layer_xy" / "layer_z" (3D) or use
         # the raw key directly for native 2D conductor boundaries.
@@ -701,13 +708,14 @@ def generate_palace_config(
         layer = stack.layers.get(layer_name)
         if layer:
             mat_props = stack_materials.get(layer.material, {})
-            conductors.append(
-                {
-                    "Attributes": [info["phys_group"]],
-                    "Conductivity": mat_props.get("conductivity", 5.8e7),
-                    "Thickness": layer.zmax - layer.zmin,
-                }
-            )
+            conductor: dict[str, object] = {
+                "Attributes": [info["phys_group"]],
+                "Conductivity": mat_props.get("conductivity", 5.8e7),
+                "Thickness": layer.zmax - layer.zmin,
+            }
+            if crack_conductors:
+                conductor["Crack"] = True
+            conductors.append(conductor)
             conductor_attrs.append(info["phys_group"])
 
     # Handle PEC surfaces (planar conductors + PEC blocks)
