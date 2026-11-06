@@ -60,6 +60,7 @@ __all__ = [
     "PalaceRuntime",
     "binary_that_ran",
     "install_palace_runtime",
+    "launch_version",
     "local_abort_report",
     "require_palace_binary",
     "resolve_launch",
@@ -74,6 +75,10 @@ _DEFAULT_BINARY_TAG = "0.18.0"
 _AUTO_DOWNLOAD_ENV = "PALACETOOLKIT_AUTO_DOWNLOAD_BINARY"
 _TAG_ENV = "PALACETOOLKIT_PALACE_CPU_TAG"
 _CACHE_ENV = "PALACETOOLKIT_RUNTIME_DIR"
+
+# Runtimes gsim itself installs. Their directory is named by the tag, so the
+# tag is their version; any other Palace has to be asked.
+_GSIM_RUNTIMES = ("gsim cached runtime", "gsim downloaded runtime")
 
 
 def _is_linux_x86_64() -> bool:
@@ -97,7 +102,17 @@ def _binary_tag() -> str:
     return os.environ.get(_TAG_ENV, _DEFAULT_BINARY_TAG).strip() or _DEFAULT_BINARY_TAG
 
 
-def strip_crack(config: dict[str, Any], tag: str | None = None) -> dict[str, Any]:
+def _release(text: str) -> tuple[int, int] | None:
+    """The ``(major, minor)`` of the first release number in ``text``, if any.
+
+    A number with a suffix (``0.18.0-dev``, ``v0.18.0-12-gabc123``) names a
+    build between two releases, so it is not read as a release.
+    """
+    found = re.search(r"(?<![\w.])v?(\d+)\.(\d+)(?:\.\d+)?(?![\w+-]|\.\d)", text)
+    return None if found is None else (int(found.group(1)), int(found.group(2)))
+
+
+def strip_crack(config: dict[str, Any], version: str | None = None) -> dict[str, Any]:
     """Drop ``Crack`` from the conductor boundaries for a Palace older than 0.19.
 
     Palace 0.18 checks its configuration against a schema that has no
@@ -106,16 +121,17 @@ def strip_crack(config: dict[str, Any], tag: str | None = None) -> dict[str, Any
 
     Args:
         config: A Palace configuration. It is not modified.
-        tag: The Palace version to run on. Defaults to the local runtime tag,
-            :data:`_TAG_ENV` included.
+        version: The Palace version that will read it, from
+            :func:`launch_version`. ``None``, or anything that is not a release
+            number, keeps the key: a schema error is loud, while a thick
+            conductor read as a thin film is silent.
 
     Returns:
         ``config`` itself when nothing has to go, otherwise a copy without the
         key.
     """
-    version = re.match(r"v?(\d+)\.(\d+)", (tag or _binary_tag()).strip())
-    # A tag that is not a version keeps the key; Palace reports it if it objects.
-    if version is None or tuple(map(int, version.groups())) >= (0, 19):
+    release = None if version is None else _release(version)
+    if release is None or release >= (0, 19):
         return config
     entries = config.get("Boundaries", {}).get("Conductivity", [])
     if not any("Crack" in entry for entry in entries):
@@ -622,6 +638,9 @@ class PalaceLaunch:
     """The process environment, with a bundled runtime's libraries on
     ``LD_LIBRARY_PATH``."""
     apptainer: bool = False
+    version: str | None = None
+    """The Palace version, when the runtime that was resolved names it;
+    ``None`` when it has to be asked, see :func:`launch_version`."""
 
     @property
     def binary(self) -> str:
@@ -717,6 +736,7 @@ def resolve_launch(
         )
 
     library_dir: Path | None = None
+    version: str | None = None
     if executable is not None:
         exe_path = Path(executable).expanduser().resolve()
     else:
@@ -725,6 +745,8 @@ def resolve_launch(
             exe_path = Path("palace")
         else:
             exe_path, library_dir = found.binary, found.library_dir
+            if found.source in _GSIM_RUNTIMES:
+                version = _binary_tag()
             if verbose:
                 _log_runtime(found)
 
@@ -751,7 +773,42 @@ def resolve_launch(
         logger.debug(
             "Injected LD_LIBRARY_PATH for bundled Palace: %s", env["LD_LIBRARY_PATH"]
         )
-    return PalaceLaunch((str(exe_path),), env)
+    return PalaceLaunch((str(exe_path),), env, version=version)
+
+
+def launch_version(launch: PalaceLaunch, timeout: float = 30.0) -> str | None:
+    """The ``major.minor`` Palace version a launch runs, or ``None`` if unknown.
+
+    gsim's own runtime is named by its tag. Any other Palace, a binary the user
+    installed or a SIF, is asked with ``--version`` and has to answer with a
+    release number such as ``v0.18.0``.
+
+    Args:
+        launch: Which Palace, and how, from :func:`resolve_launch`.
+        timeout: Seconds to wait for the answer.
+
+    Returns:
+        A version such as ``"0.18"``, or ``None`` when Palace does not answer
+        or prints something that is not a release number.
+    """
+    text = launch.version
+    if text is None:
+        try:
+            result = subprocess.run(  # noqa: S603
+                [*launch.command, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=launch.env,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        text = result.stdout or ""
+    release = _release(text)
+    return None if release is None else f"{release[0]}.{release[1]}"
 
 
 def _log_runtime(found: PalaceRuntime) -> None:
@@ -777,8 +834,9 @@ def run_palace(
     num_threads: int | None = None,
     verbose: bool = True,
     emit: Callable[[str], None] | None = None,
+    config: str = "config.json",
 ) -> None:
-    """Run Palace on the ``config.json`` in ``cwd``.
+    """Run Palace on a configuration file in ``cwd``.
 
     Args:
         launch: Which Palace, and how, from :func:`resolve_launch`.
@@ -787,6 +845,7 @@ def run_palace(
         num_threads: OpenMP threads, when set.
         verbose: Stream Palace's output line by line through ``emit``.
         emit: Where streamed lines go; defaults to this module's logger.
+        config: Name of the configuration file in ``cwd``.
 
     Raises:
         subprocess.CalledProcessError: If Palace exits nonzero, carrying the
@@ -797,7 +856,7 @@ def run_palace(
     cmd = [*launch.command, "-np", str(num_processes)]
     if num_threads is not None:
         cmd.extend(["-nt", str(num_threads)])
-    cmd.append("config.json")
+    cmd.append(config)
     if verbose:
         how = "via Apptainer" if launch.apptainer else "directly"
         emit(f"Running Palace simulation in {cwd} {how}")

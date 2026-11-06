@@ -2645,6 +2645,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         import subprocess
 
         from gsim.palace.runtime import (
+            launch_version,
             local_abort_report,
             resolve_launch,
             run_palace,
@@ -2727,16 +2728,28 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             else:
                 logger.warning("%s", msg)
 
-        # Palace before 0.19 rejects "Crack" and always cracks. An upload writes
-        # config.json again, so only this local run loses the key.
+        # A Palace known to be older than 0.19 rejects "Crack" and always cracks,
+        # so it is handed a copy without the key. config.json keeps it for a later
+        # run on a newer Palace and for an upload; the copy sits beside it so the
+        # relative paths in it still hold. Its name is made up by mkstemp, so a
+        # file of the user's in this folder is never overwritten or removed.
+        run_config = config_path
+        local_config = None
         config_text = config_path.read_text()
         if '"Crack"' in config_text:
             config = json.loads(config_text)
-            local_config = strip_crack(config)
-            if local_config is not config:
-                config_path.write_text(json.dumps(local_config, indent=4))
+            stripped = strip_crack(config, launch_version(launch))
+            if stripped is not config:
+                local_config = stripped
 
         try:
+            if local_config is not None:
+                handle, name = tempfile.mkstemp(
+                    dir=output_dir, prefix="config.", suffix=".json"
+                )
+                run_config = Path(name)
+                with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                    json.dump(local_config, stream, indent=4)
             run_palace(
                 launch,
                 cwd=output_dir,
@@ -2744,6 +2757,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 num_threads=num_threads,
                 verbose=verbose,
                 emit=_emit_info,
+                config=run_config.name,
             )
         except subprocess.CalledProcessError as failure:
             raise RuntimeError(
@@ -2756,6 +2770,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     remedy=remedy,
                 )
             ) from failure
+        finally:
+            if run_config != config_path:
+                run_config.unlink(missing_ok=True)
 
         if verbose:
             _emit_info("Simulation completed successfully")
