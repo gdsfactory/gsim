@@ -93,6 +93,8 @@ def _solve_both(sim):
         epsilon=eps,
         wavelength_um=WL_UM,
         num_modes=1,
+        # N_EFF_RTOL was set for femwell at order 1 against Palace's
+        # order 2; keep the solver pair it was calibrated on.
         order=1,
     )
     n_eff_femwell = complex(modes[0].n_eff)
