@@ -87,6 +87,9 @@ lib64/
 parts/
 pip-wheel-metadata/
 profile_default/
+!/scripts/ipython/profile_default/
+/scripts/ipython/profile_default/*
+!/scripts/ipython/profile_default/ipython_kernel_config.py
 sdist/
 share/python-wheels/
 site/

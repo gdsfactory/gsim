@@ -97,12 +97,20 @@ jobs:
         esac
         uv pip check
         uv run --no-sync python -m ipykernel install --user --name gsim --display-name gsim
+    - name: Check SVG figure output
+      if: >-
+        github.event_name != 'pull_request' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
+      env:
+        IPYTHONDIR: ${{ github.workspace }}/scripts/ipython
+      run: uv run --no-sync python scripts/check_inline_svg.py gsim
     - name: Execute notebook
       timeout-minutes: 100
       if: >-
         github.event_name != 'pull_request' || needs.discover-notebooks.outputs.run_all == 'true' || contains(fromJSON(needs.discover-notebooks.outputs.changed_notebooks), matrix.notebook)
       env:
         GFP_API_KEY: ${{ secrets.GFP_API_KEY }}
+        # Kernel config that exports matplotlib figures as SVG.
+        IPYTHONDIR: ${{ github.workspace }}/scripts/ipython
         NOTEBOOK: ${{ matrix.notebook }}
         FRESH_INDUCTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_inductor }}
       run: |
