@@ -21,6 +21,7 @@ def _resolved(levels, views=None):
         Any,
         SimpleNamespace(
             layer_stack=SimpleNamespace(layers=levels),
+            layers=levels,
             pdk=SimpleNamespace(layer_views=views),
         ),
     )
@@ -58,6 +59,29 @@ def test_hidden_layer_view_groups_and_stack_override():
     assert layer_group_styles(_resolved(levels, views)) == {"core": {"visible": False}}
     levels["core"].info["visible"] = True
     assert layer_group_styles(_resolved(levels, views)) == {"core": {"visible": True}}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("grouped", [False, True])
+@pytest.mark.parametrize("visible", [False, True])
+def test_duplicate_layer_views_are_visible_if_any_view_is_visible(
+    reverse, grouped, visible
+):
+    hidden = LayerView(layer=(1, 0), visible=False)
+    if grouped:
+        hidden = LayerView(
+            visible=False,
+            group_members={"child": LayerView(layer=(1, 0), visible=True)},
+        )
+    entries = [
+        ("hidden", hidden),
+        ("other", LayerView(layer=(1, 0), visible=visible)),
+    ]
+    views = LayerViews(layer_views=dict(reversed(entries) if reverse else entries))
+
+    assert layer_group_styles(_resolved({"core": _level()}, views)) == {
+        "core": {"visible": visible}
+    }
 
 
 def test_derived_layer_view_takes_precedence():
@@ -180,3 +204,40 @@ def test_simulation_3d_passes_stack_metadata_and_preserves_run(
     assert '"groupStyles":{}' in simulation.plot_2d_interactive().html
     assert artifacts.config_path.read_bytes() == config_before
     assert artifacts.mesh_path.read_bytes() == mesh_before
+
+
+@pytest.mark.parametrize("saved_mesh", [False, True])
+@pytest.mark.parametrize(
+    "selection", [{}, {"hide_groups": ["unused"]}, {"show_groups": ["core"]}]
+)
+def test_simulation_3d_ignores_unused_display_metadata(
+    tmp_path, fdtd_pdk_module, saved_mesh, selection
+):
+    levels = fdtd_pdk_module.PDK.layer_stack.layers
+    levels["unused"] = levels.pop("thin_core")
+    levels["unused"].info["opacity"] = 50
+    levels["core"].info["opacity"] = 0.2
+    simulation = fdtd.Simulation(
+        pdk=fdtd_pdk_module, mesh_size_nm=750, default_port="o1"
+    )
+    simulation.geometry("straight")
+    if saved_mesh:
+        simulation.write(tmp_path)
+
+    viewer = simulation.plot_3d(**selection)
+
+    assert '"groupStyles":{"core":{"opacity":0.2}}' in viewer.html
+    assert (simulation._last_artifacts is not None) == saved_mesh
+
+
+def test_simulation_3d_rejects_invalid_opacity_on_used_layer(fdtd_pdk_module):
+    fdtd_pdk_module.PDK.layer_stack.layers["core"].info["opacity"] = 50
+    simulation = fdtd.Simulation(
+        pdk=fdtd_pdk_module, mesh_size_nm=750, default_port="o1"
+    )
+    simulation.geometry("straight")
+
+    with pytest.raises(
+        ValueError, match="Group 'core' opacity must be between 0 and 1"
+    ):
+        simulation.plot_3d()

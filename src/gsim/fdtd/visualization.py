@@ -186,9 +186,10 @@ class VisualizationMixin(RuntimeConfigMixin):
         """Show 3D geometry with PDK opacity and initial visibility defaults.
 
         Stack info.opacity controls surface opacity; info.visible overrides
-        layer-view visibility. Zero opacity starts a layer hidden. Hidden layers
-        can be enabled in the viewer. Explicit show_groups and hide_groups take
-        precedence over PDK visibility, with hide_groups taking priority.
+        layer-view visibility. Zero opacity starts a layer hidden and becomes
+        fully opaque when enabled in the viewer. Explicit show_groups and
+        hide_groups take precedence over PDK visibility, with hide_groups
+        taking priority.
         """
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
