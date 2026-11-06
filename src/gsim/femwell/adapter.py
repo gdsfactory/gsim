@@ -236,11 +236,16 @@ def solve_modes(
         order: Finite element order of the mode solve. Order 2, the
             default, converges faster under mesh refinement than order 1
             on optical and RF modes alike. Where the mesh is coarse away
-            from the structure, order 1 can stay wrong however finely the
-            structure itself is meshed: the series impedance of a lossy
-            metal line (``gamma * Z0``) comes out percent low that way.
-            Order 2 costs a few times more per solve; pass ``order=1``
-            for a cheaper solve where that accuracy is not needed.
+            from the structure, refining the structure itself does not
+            fix order 1: the series impedance of a lossy metal line
+            (``gamma * Z0``) comes out percent low that way, and order 2
+            brings it to a few 1e-3 or better. Order 2 does not remove
+            the error left by the coarse far mesh; cap the element size
+            there as well when the series impedance must be accurate to
+            1e-4. Order 2 costs more per solve, from about 2.5 times on
+            a mesh of a hundred elements to about 10 times above a
+            thousand; pass ``order=1`` for a cheaper solve where that
+            accuracy is not needed.
         metallic_boundaries: Enforce PEC on the outer boundary.
         n_guess: Effective-index guess centering the eigenvalue search.
             femwell's default guess tracks the largest permittivity, which

@@ -8,11 +8,15 @@ current with no loss of its own. The resistance is read the way a line
 solve reads it, ``R' = Re(gamma Z0)`` from the Mode's index and its
 power-current impedance.
 
-The mesh is fine at the strip and coarse in the oxide, like a typical
-cross-section mesh. At element order 1 this reads R' about 8 % low, and
-refining only around the strip does not move it; at order 2 the same
-mesh lands within 5e-4. The default order of ``solve_modes`` must be the
-one that gets it right.
+The mesh is fine at the strip (50 nm) and coarse in the oxide (2 um),
+like a typical cross-section mesh. At element order 1 this reads R'
+8.0 % low; at order 2 the same mesh lands within 5e-4. The error comes
+from the coarse oxide, not from the strip. Refining only around the
+strip does not fix it: at 25 nm, order 1 reads 12.6 % low and order 2
+3.2e-3 low. Capping the oxide at 0.5 um does: order 1 then reads 1.0 %
+low and order 2 7e-5 high. So order 2 reduces this error by one to two
+orders of magnitude on a coarse oxide but does not remove it. The test
+holds the default order to the tolerance it reaches on this mesh.
 """
 
 from __future__ import annotations
