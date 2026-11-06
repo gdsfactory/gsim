@@ -328,7 +328,9 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         if xy and xy_name is None:
             warnings.warn(
                 "The default XY monitor name 'overview_xy' is deprecated and "
-                "will change to 'field_xy' in 0.10.0, after a released warning. "
+                "will change to 'field_xy' no earlier than 0.11.0 and only after "
+                "at least two feature releases and 12 months have passed since "
+                "the first released warning. "
                 "Pass xy_name='field_xy' to adopt the new name, or "
                 "xy_name='overview_xy' to retain the existing generated name.",
                 DeprecationWarning,

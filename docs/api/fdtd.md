@@ -313,8 +313,9 @@ name for the device-wide intensity image. Existing `sim.add_monitors()` calls
 still generate `overview_xy`, preserving monitor iteration, serialized settings,
 `config.json`, raw result keys, and cache inputs for contained planes. Omitting
 `xy_name` when `xy=True` emits a `DeprecationWarning` announcing the new name.
-The default is planned to change to `field_xy` in the 0.10.0 feature release,
-after this warning has shipped in a released version. Set
+The default will remain `overview_xy` for at least two feature releases and
+roughly 12 months after the first released warning. The default change targets
+0.11.0 or a later feature release, whichever first satisfies both conditions. Set
 `xy_name="overview_xy"` explicitly to retain the old generated name indefinitely.
 `xy_name` is ignored when `xy=False`, which does not issue a naming warning.
 
