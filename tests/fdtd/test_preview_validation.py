@@ -21,10 +21,13 @@ from tests.fdtd.test_viz import _write_mesh
         {"height": 500, "zoom_to_cursor": False},
     ],
 )
-def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
+def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation._last_artifacts
     )
     with pytest.warns(DeprecationWarning, match=r"plot_2d_interactive.*plot_2d_static"):
         viewer = simulation.plot_2d(
@@ -48,10 +51,13 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
     assert output.read_text(encoding="utf8") == viewer.html
 
 
-def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path):
+def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation._last_artifacts
     )
     with pytest.warns(DeprecationWarning, match=r"plot_2d\(\) is deprecated"):
         viewer = simulation.plot_2d()

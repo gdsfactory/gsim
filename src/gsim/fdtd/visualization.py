@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -28,6 +29,7 @@ class VisualizationMixin(RuntimeConfigMixin):
     geometry: Geometry
     _resolved: ResolvedPassivePcell | None
     _last_artifacts: SimulationArtifacts | None
+    _last_artifacts_domain: dict[str, Any] | None
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve the geometry supplied by the concrete simulation."""
@@ -132,16 +134,23 @@ class VisualizationMixin(RuntimeConfigMixin):
         height: int = 600,
         use_pdk_styles: bool = False,
     ) -> Any:
-        """Render the current or a temporary mesh with the FDTD viewer."""
+        """Render a fresh temporary mesh without changing saved run artifacts."""
         from gsim.fdtd.display import layer_group_styles
         from gsim.fdtd.viz import plot_mesh
 
         def render(mesh_path: Path) -> Any:
+            metadata_path = mesh_path.with_name("metadata.json")
+            grid_shape = None
+            if metadata_path.is_file():
+                metadata = json.loads(metadata_path.read_text(encoding="utf8"))
+                grid_shape = metadata["grid"]["cell_counts"]["total_cells_xyz"]
             return plot_mesh(
                 mesh_path,
                 mode=mode,
                 axis=axis,
-                position_um=position_um,
+                position_um=self._default_slice_position(axis, position_um)
+                if mode in {"slice", "mesh_slice"}
+                else position_um,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
                 group_styles=layer_group_styles(self._resolved)
@@ -150,14 +159,9 @@ class VisualizationMixin(RuntimeConfigMixin):
                 zoom_to_cursor=zoom_to_cursor,
                 cell_size_nm=self.solver.cell_size_nm,
                 pml_cells=self.domain.pml_cells,
+                grid_shape=grid_shape,
                 height=height,
             )
-
-        if (
-            self._last_artifacts is not None
-            and self._last_artifacts.mesh_path.is_file()
-        ):
-            return render(self._last_artifacts.mesh_path)
 
         previous_artifacts = self._last_artifacts
         with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
@@ -238,7 +242,6 @@ class VisualizationMixin(RuntimeConfigMixin):
     ) -> Any:
         """Show the legacy interactive cross-section with a movable slice plane."""
         validate_slice(axis, position_um)
-        position_um = self._default_slice_position(axis, position_um)
         return self._plot_viewer(
             mode="mesh_slice" if show_mesh else "slice",
             axis=axis,
