@@ -43,7 +43,9 @@ class Geometry(BaseModel):
 
     component: Any | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
-    port_layer_map: dict[tuple[int, int], str] = Field(default_factory=dict)
+    port_layer_map: dict[tuple[int, int], str | tuple[str, ...]] = Field(
+        default_factory=dict
+    )
     mesh_size_nm: float = Field(default=1000.0, gt=0)
     geometry_tolerance_nm: float = Field(default=10.0, gt=0, le=30.0)
     _resolver: Any = PrivateAttr(default=None)
@@ -57,7 +59,7 @@ class Geometry(BaseModel):
         component: Any | None = None,
         *,
         settings: Mapping[str, Any] | None = None,
-        port_layer_map: Mapping[tuple[int, int], str] | None = None,
+        port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]] | None = None,
         mesh_size_nm: float | None = None,
         geometry_tolerance_nm: float | None = None,
     ) -> Any:

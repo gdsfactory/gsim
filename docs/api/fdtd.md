@@ -56,12 +56,25 @@ sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
 The marker layer is not added to the mesh. The mapped physical entry supplies
 the port's material and vertical position, and must contain the port location.
 Unmapped ports still need to match resolved LayerStack geometry directly.
-When a port matches abutting vertical bands of the same material, its mesh
-surface includes those bands and its center uses their combined height.
+When an unmapped port matches abutting vertical bands of the same material, its
+mesh surface includes those bands and its center uses their combined height.
 Overlapping entries are not joined; candidates are considered in mesh-priority
 order. The saved port `layer` is the primary material and priority reference;
 the port's mesh physical group defines its complete cross-section.
 An explicit single-entry mapping keeps the port limited to that entry.
+
+For a core represented by several physical bands, select their LayerStack keys
+as a tuple:
+
+```python
+sim.geometry(component=waveguide, port_layer_map={(100, 0): ("lower", "upper")})
+```
+
+All selected bands must have resolved geometry at the port location, use the
+same material, and abut without overlaps or gaps. Empty selections, duplicate
+keys, and incompatible bands raise `UnsupportedPortError`. The first key stays
+the primary material/priority reference; the mesh covers the complete selected
+height. Existing string mappings retain their single-band behavior.
 
 ### Bounded PDK stacks
 

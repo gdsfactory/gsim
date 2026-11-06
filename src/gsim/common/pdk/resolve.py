@@ -263,25 +263,50 @@ def _port_layer(port: Any) -> tuple[int, int]:
 def _port_candidates(
     port: Any,
     layers: Mapping[str, ResolvedLayer],
-    port_layer_map: Mapping[tuple[int, int], str],
+    port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]],
 ) -> list[ResolvedLayer]:
     """Find physical layers that own a port's position and GDS layer."""
     port_layer = _port_layer(port)
     center = Point(float(port.dcenter[0]), float(port.dcenter[1]))
     if port_layer in port_layer_map:
-        layer_key = port_layer_map[port_layer]
-        mapped_layer = layers.get(layer_key)
-        if mapped_layer is None:
+        selection = port_layer_map[port_layer]
+        layer_keys = (selection,) if isinstance(selection, str) else selection
+        if (
+            not isinstance(layer_keys, tuple)
+            or not layer_keys
+            or any(not isinstance(key, str) or not key for key in layer_keys)
+        ):
             raise UnsupportedPortError(
-                f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
-                f"entry {layer_key!r}, which has no resolved geometry."
+                f"Port {port.name!r} on layer {port_layer} requires a nonempty "
+                "LayerStack key or tuple of nonempty keys."
             )
-        if not mapped_layer.geometry.buffer(_PORT_POSITION_TOLERANCE_UM).covers(center):
+        if len(set(layer_keys)) != len(layer_keys):
             raise UnsupportedPortError(
-                f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
-                f"entry {layer_key!r}, but its center is outside resolved geometry."
+                f"Port {port.name!r} on layer {port_layer} maps to duplicate "
+                "LayerStack keys."
             )
-        return [mapped_layer]
+        mapped = []
+        for layer_key in layer_keys:
+            mapped_layer = layers.get(layer_key)
+            if mapped_layer is None:
+                raise UnsupportedPortError(
+                    f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
+                    f"entry {layer_key!r}, which has no resolved geometry."
+                )
+            if not mapped_layer.geometry.buffer(_PORT_POSITION_TOLERANCE_UM).covers(
+                center
+            ):
+                raise UnsupportedPortError(
+                    f"Port {port.name!r} on layer {port_layer} maps to LayerStack "
+                    f"entry {layer_key!r}, but its center is outside resolved geometry."
+                )
+            mapped.append(mapped_layer)
+        if len(_connected_port_layers(mapped)) != len(mapped):
+            raise UnsupportedPortError(
+                f"Port {port.name!r} on layer {port_layer} must map to abutting, "
+                "non-overlapping bands of the same material."
+            )
+        return mapped
     candidates = []
     for resolved_layer in layers.values():
         source_layers = _layer_tuples(resolved_layer.layer)
@@ -294,7 +319,7 @@ def _port_candidates(
 
 
 def _connected_port_layers(candidates: list[ResolvedLayer]) -> list[ResolvedLayer]:
-    """Join abutting bands in priority order, excluding overlapping owners."""
+    """Join abutting bands in candidate order, excluding overlapping owners."""
     if not candidates:
         return []
     connected = [candidates[0]]
@@ -322,7 +347,7 @@ def _connected_port_layers(candidates: list[ResolvedLayer]) -> list[ResolvedLaye
 def _resolved_ports(
     component: Any,
     layers: Mapping[str, ResolvedLayer],
-    port_layer_map: Mapping[tuple[int, int], str],
+    port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]],
     z_bounds: tuple[float, float] | None = None,
 ) -> dict[str, ResolvedPort]:
     """Map every component port to one resolved physical layer."""
@@ -389,7 +414,7 @@ def resolve_passive_pcell(
     pdk: Any | None = None,
     settings: Mapping[str, Any] | None = None,
     wavelength_um: float = 1.55,
-    port_layer_map: Mapping[tuple[int, int], str] | None = None,
+    port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]] | None = None,
     z_bounds: tuple[float, float] | None = None,
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
@@ -400,8 +425,9 @@ def resolve_passive_pcell(
     resolved component are evaluated, so unrelated process materials are not
     required. MaterialCards attached to the project PDK take precedence over
     gsim's built-in fallbacks. ``port_layer_map`` associates a virtual port
-    layer with the key of a physical LayerStack entry. The port must still lie
-    on that entry's resolved geometry.
+    layer with one physical LayerStack key or a tuple of abutting same-material
+    bands. Each selected entry must contain the port location; the first key
+    remains its primary material/priority reference.
 
     Optional axis bounds omit external films and footprints before material
     lookup. Intersecting layers retain their original extrusion profiles; the
