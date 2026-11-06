@@ -220,6 +220,15 @@ class Solver(MutableModel):
             the series-RC junction fit reads: high enough that the
             capacitive current dominates the DC leakage, far below the
             branch's own RC rolloff.
+        edge_couples: Edge couples and node volumes of DEVSIM's finite-box
+            assembly. ``"signed"`` (default) gives each edge the
+            cotangent weight of the P1 finite-element Laplacian, so the
+            potential solve is exact P1 on any triangulation.
+            ``"builtin"`` keeps DEVSIM's own couples, which take the
+            absolute cotangent: they add coupling across every obtuse
+            triangle and overestimate capacitance on meshes that have
+            them. ``"builtin"`` reproduces results from before signed
+            couples became the default.
         claim_devsim_namespace: Claim DEVSIM's process-global namespace at
             device setup: drop the circuit and the devices gsim created
             earlier. Foreign DEVSIM devices are never touched. Turn it off
@@ -239,6 +248,8 @@ class Solver(MutableModel):
 
     small_signal_freq_hz: PositiveFloat = 1.0
     junction_freq_hz: PositiveFloat = 1e9
+
+    edge_couples: Literal["signed", "builtin"] = "signed"
 
     claim_devsim_namespace: bool = True
 

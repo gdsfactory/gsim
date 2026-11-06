@@ -59,6 +59,17 @@ def solved_sweep(meshed_diode):
     return meshed_diode.sweep(_REVERSE_BIASES, contact="cathode")
 
 
+@pytest.fixture(scope="module")
+def builtin_sweep(meshed_diode):
+    """The sweep with DEVSIM's own edge couples, as before signed couples."""
+    meshed_diode.materials.temperature_k = 300.0
+    meshed_diode.solver.edge_couples = "builtin"
+    try:
+        return meshed_diode.sweep(_REVERSE_BIASES, contact="cathode")
+    finally:
+        meshed_diode.solver.edge_couples = "signed"
+
+
 class TestDriftDiffusionSolve:
     def test_carrier_maps_physical(self, solved_sweep):
         point = solved_sweep.points[0]
@@ -116,6 +127,8 @@ class TestParityWithChargeTransportSim:
 
     Reference numbers from ``ChargeTransportSim`` on #298
     (``feat/tcad-twmzm``), same device, same mesh settings, same biases.
+    That API assembled with DEVSIM's own edge couples, which
+    ``Solver(edge_couples="builtin")`` restores.
     """
 
     C_F_PER_CM = (5.457119288045399e-12, 4.105770096334684e-12, 3.3610442251991344e-12)
@@ -137,24 +150,24 @@ class TestParityWithChargeTransportSim:
         2.7241141392524362e20,
     )
 
-    def test_capacitance(self, solved_sweep):
+    def test_capacitance(self, builtin_sweep):
         np.testing.assert_allclose(
-            solved_sweep.capacitance_f_per_cm, self.C_F_PER_CM, rtol=1e-6
+            builtin_sweep.capacitance_f_per_cm, self.C_F_PER_CM, rtol=1e-6
         )
 
-    def test_terminal_currents(self, solved_sweep):
-        currents = [p.currents_a_per_cm["cathode"] for p in solved_sweep.points]
+    def test_terminal_currents(self, builtin_sweep):
+        currents = [p.currents_a_per_cm["cathode"] for p in builtin_sweep.points]
         np.testing.assert_allclose(
             currents, self.I_CATHODE_A_PER_CM, rtol=1e-3, atol=1e-20
         )
 
-    def test_small_signal_admittance(self, solved_sweep):
-        admittance = [p.admittance_s_per_cm for p in solved_sweep.points]
+    def test_small_signal_admittance(self, builtin_sweep):
+        admittance = [p.admittance_s_per_cm for p in builtin_sweep.points]
         np.testing.assert_allclose(admittance, self.Y_S_PER_CM, rtol=1e-6)
 
-    def test_carrier_maps(self, solved_sweep):
+    def test_carrier_maps(self, builtin_sweep):
         for point, n_sum, p_sum in zip(
-            solved_sweep.points,
+            builtin_sweep.points,
             self.ELECTRONS_SUM_CM3,
             self.HOLES_SUM_CM3,
             strict=True,
