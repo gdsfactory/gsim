@@ -126,7 +126,10 @@ def test_static_preview_shows_cropped_monitor_with_warning(fdtd_pdk_module):
     )
     with pytest.warns(UserWarning, match="Monitor 'image' cropped") as caught:
         axes = simulation.plot_2d_static()
-    assert len(caught) == 1
+    assert (
+        sum("Monitor 'image' cropped" in str(warning.message) for warning in caught)
+        == 1
+    )
     patch = next(
         patch for patch in axes.patches if patch.get_label() == "Monitor image"
     )

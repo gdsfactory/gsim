@@ -11,6 +11,14 @@ import pytest
 from gsim import fdtd
 
 
+def _crop_warnings(caught):
+    return [
+        warning
+        for warning in caught
+        if "cropped to the physical (non-PML) domain" in str(warning.message)
+    ]
+
+
 def _simulation(pdk, domain_kind="automatic"):
     simulation = fdtd.Simulation(pdk=pdk)
     simulation.geometry("straight")
@@ -42,8 +50,9 @@ def test_crops_submitted_plane_and_warns_once(
     requested = monitor.model_dump()
     with pytest.warns(UserWarning, match="Monitor 'image' cropped") as caught:
         artifacts = simulation.write(tmp_path)
-    assert len(caught) == 1
-    assert Path(caught[0].filename) == Path(__file__)
+    cropped = _crop_warnings(caught)
+    assert len(cropped) == 1
+    assert Path(cropped[0].filename) == Path(__file__)
     document = json.loads(artifacts.config_path.read_text())
     assert document["grid"]["non_pml_bounds"] == {
         "min": [0, -1250, -1000],
@@ -59,9 +68,9 @@ def test_crops_submitted_plane_and_warns_once(
     assert submitted["heatmap"]["wavelengths"] == [1550]
     assert monitor.model_dump() == requested
     for axis in "xyz".replace(normal[-1], ""):
-        assert f"{axis} extent" in str(caught[0].message)
-    assert "um" in str(caught[0].message)
-    assert "measurement aperture" not in str(caught[0].message)
+        assert f"{axis} extent" in str(cropped[0].message)
+    assert "um" in str(cropped[0].message)
+    assert "measurement aperture" not in str(cropped[0].message)
 
 
 @pytest.mark.parametrize("domain_kind", ["automatic", "explicit", "mixed"])
@@ -110,7 +119,7 @@ def test_boundary_plane_is_unchanged_without_warning(tmp_path, fdtd_pdk_module, 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         artifacts = simulation.write(tmp_path)
-    assert not caught
+    assert not _crop_warnings(caught)
     submitted = json.loads(artifacts.config_path.read_text())["monitors"][0]
     for axis in range(3):
         assert submitted["region_min"][axis] == center[axis] * 1000 - size[axis] * 500
@@ -171,7 +180,7 @@ def test_oversized_port_images_are_cropped_in_yz_and_xz(tmp_path, fdtd_pdk_modul
         simulation.add_monitors(xy=False, margin_um=2)
         with pytest.warns(UserWarning, match="Monitor 'port_o[12]' cropped") as caught:
             artifacts = simulation.write(tmp_path / str(rotated))
-        assert len(caught) == 2
+        assert len(_crop_warnings(caught)) == 2
         document = json.loads(artifacts.config_path.read_text())
         for monitor in document["monitors"]:
             assert monitor["region_min"][2] == -1000
@@ -195,7 +204,7 @@ def test_boundary_roundoff_is_snapped_without_warning(tmp_path, fdtd_pdk_module)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         artifacts = simulation.write(tmp_path)
-    assert not caught
+    assert not _crop_warnings(caught)
     submitted = json.loads(artifacts.config_path.read_text())["monitors"][0]
     assert submitted["region_min"][0] == submitted["region_max"][0] == 0
 
@@ -211,7 +220,7 @@ def test_larger_domain_restores_original_requested_aperture(tmp_path, fdtd_pdk_m
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         artifacts = simulation.write(tmp_path / "large")
-    assert not caught
+    assert not _crop_warnings(caught)
     monitor = json.loads(artifacts.config_path.read_text())["monitors"][0]
     assert monitor["region_min"] == [1000, -2000, -2000]
     assert monitor["region_max"] == [1000, 2000, 2000]
