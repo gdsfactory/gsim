@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from gsim.fdtd.api import PortSource
 from gsim.fdtd.mesh import generate_mesh
@@ -84,10 +84,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         materials = self._material_snapshots()
         vertical_ports = self._vertical_port_configs(materials)
         if position_um is None:
-            normal_axis = "xyz".index(axis)
-            position_um = (
-                resolved.bounds[0][normal_axis] + resolved.bounds[1][normal_axis]
-            ) / 2
+            position_um = cast(float, self._default_slice_position(axis, None))
         with TemporaryDirectory(prefix="gsim-fdtd-slice-") as directory:
             mesh_path = Path(directory) / "mesh.msh"
             manifest = generate_mesh(
@@ -103,6 +100,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 x_bounds=self.domain.x_bounds,
                 y_bounds=self.domain.y_bounds,
                 z_bounds=self.domain.z_bounds,
+                clip_geometry=self.domain.clip_geometry,
             )
             return plot_mesh_slice(
                 mesh_path,
@@ -259,5 +257,8 @@ class VisualizationMixin(RuntimeConfigMixin):
         if position_um is not None or self._resolved is None:
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
+        if self.domain.clip_geometry:
+            bounds = self._background_bounds_nm()
+            return (bounds[axis_index] + bounds[axis_index + 3]) / 2000
         lower, upper = self.resolved.bounds
         return (lower[axis_index] + upper[axis_index]) / 2

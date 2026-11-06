@@ -145,8 +145,11 @@ def draw_setup_overlay(
         port_upper[width_axis] += port.width / 2
         if port.layer_key is None:
             raise FDTDGeometryError(f"Guided port {name!r} has no resolved layer.")
-        layer = simulation.resolved.layers[port.layer_key]
-        port_lower[2], port_upper[2] = layer.z_bounds
+        owners = [simulation.resolved.layers[key] for key in port.physical_layer_keys]
+        port_lower[2], port_upper[2] = port.z_bounds or (
+            min(layer.z_bounds[0] for layer in owners),
+            max(layer.z_bounds[1] for layer in owners),
+        )
         is_source = (
             isinstance(simulation.source, PortSource) and simulation.source.port == name
         )
