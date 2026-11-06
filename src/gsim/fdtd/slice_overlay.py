@@ -15,6 +15,7 @@ from gsim.fdtd.api import (
     PortSource,
 )
 from gsim.fdtd.models import FDTDGeometryError
+from gsim.fdtd.monitor_bounds import monitor_region_nm
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -212,14 +213,21 @@ def draw_setup_overlay(
                 "#d62728" if is_source else "#1f77b4",
             )
     for monitor in simulation.monitors:
-        center, half_size = (
-            np.asarray(monitor.center_um),
-            np.asarray(monitor.size_um) / 2,
+        monitor_lower, monitor_upper = monitor_region_nm(
+            monitor,
+            (
+                lower[0] * 1000,
+                lower[1] * 1000,
+                lower[2] * 1000,
+                upper[0] * 1000,
+                upper[1] * 1000,
+                upper[2] * 1000,
+            ),
         )
         _region(
             ax,
-            center - half_size,
-            center + half_size,
+            np.asarray(monitor_lower) / 1000,
+            np.asarray(monitor_upper) / 1000,
             normal_axis,
             position,
             f"Monitor {monitor.name}",

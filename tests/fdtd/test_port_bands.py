@@ -1,6 +1,7 @@
 """Guided ports join disjoint bands and respect bounded diagnostic windows."""
 
 import json
+import warnings
 
 import gdsfactory as gf
 import meshio
@@ -116,14 +117,17 @@ def test_bounded_port_monitors_match_the_clipped_mesh(
     low, high = z_bounds
     assert simulation.resolved.ports["o1"].center[2] == pytest.approx((low + high) / 2)
     assert simulation.resolved.ports["o1"].z_bounds == pytest.approx(z_bounds)
-    simulation.add_monitors(margin_um=margin_um)
+    simulation.add_monitors(xy_name="field_xy", margin_um=margin_um)
     monitor = simulation.monitors["port_o1"]
     assert monitor.center_um == pytest.approx((0.18, 0, (low + high) / 2))
-    assert monitor.size_um == pytest.approx((0, 0.4, high - low))
-    overview = simulation.monitors["overview_xy"]
+    assert monitor.size_um == pytest.approx(
+        (0, 0.6 + 2 * margin_um, high - low + 2 * margin_um)
+    )
+    overview = simulation.monitors["field_xy"]
     assert overview.center_um[2] == pytest.approx((low + high) / 2)
-    assert overview.size_um == pytest.approx((2, 0.4, 0))
-    artifacts = simulation.write(tmp_path)
+    assert overview.size_um == pytest.approx((2, 0.6, 0))
+    with pytest.warns(UserWarning, match="cropped to the physical"):
+        artifacts = simulation.write(tmp_path)
     vertices = _port_vertices(artifacts)
     assert vertices[:, :, 2].min() == pytest.approx(low * 1000)
     assert vertices[:, :, 2].max() == pytest.approx(high * 1000)
@@ -132,6 +136,13 @@ def test_bounded_port_monitors_match_the_clipped_mesh(
     saved = next(plane for plane in config["monitors"] if plane["name"] == "port_o1")
     assert saved["region_min"][2] == pytest.approx(low * 1000)
     assert saved["region_max"][2] == pytest.approx(high * 1000)
+    assert saved["region_min"][1] == pytest.approx(-200)
+    assert saved["region_max"][1] == pytest.approx(200)
+    saved_xy = next(
+        plane for plane in config["monitors"] if plane["name"] == "field_xy"
+    )
+    assert saved_xy["region_min"] == pytest.approx((0, -200, (low + high) * 500))
+    assert saved_xy["region_max"] == pytest.approx((2000, 200, (low + high) * 500))
     # Clipping ports must not flatten the original sidewall/extrusion profiles.
     assert module.PDK.layer_stack.layers["core"].thickness == 0.1
     assert simulation.resolved.layers["core"].z_bounds == (0, 0.1)
@@ -151,6 +162,32 @@ def test_crop_missing_diagnostic_aperture_fails_before_mutation(band_stack):
     _, component = band_stack
     component.add_polygon([(0, 1), (2, 1), (2, 2), (0, 2)], layer=(1, 0))
     simulation = _simulation(band_stack, y_bounds=(1.1, 1.3))
-    with pytest.raises(fdtd.FDTDGeometryError, match=r"intersect domain.y_bounds"):
+    with pytest.raises(fdtd.FDTDConfigError, match=r"Monitor 'port_o1'.*no area"):
         simulation.add_monitors(xy=False, margin_um=0)
     assert len(simulation.monitors) == 0
+
+
+def test_bounded_diagnostics_recover_requested_margins_when_domain_grows(
+    tmp_path, band_stack
+):
+    simulation = _simulation(band_stack, y_bounds=(-0.2, 0.2), z_bounds=(0.04, 0.23))
+    simulation.geometry(band_stack[1], port_layer_map={(1, 0): ("core", "upper")})
+    simulation.add_monitors(xy_name="field_xy", margin_um=0.25)
+    requested = simulation.monitors.model_dump()
+    with pytest.warns(UserWarning, match="cropped to the physical"):
+        simulation.write(tmp_path / "small")
+    simulation.domain(y_bounds=(-1, 1), z_bounds=(-1, 1))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        artifacts = simulation.write(tmp_path / "large")
+    assert not any("cropped to the physical" in str(item.message) for item in caught)
+    assert simulation.monitors.model_dump() == requested
+    config = json.loads(artifacts.config_path.read_text())
+    port = next(plane for plane in config["monitors"] if plane["name"] == "port_o1")
+    assert port["region_min"] == pytest.approx((180, -550, -210))
+    assert port["region_max"] == pytest.approx((180, 550, 480))
+    assert config["geometry"]["ports"]["o1"]["layer"] == "core"
+    assert simulation.resolved.ports["o1"].physical_layer_keys == ("core", "upper")
+    field = next(plane for plane in config["monitors"] if plane["name"] == "field_xy")
+    assert field["region_min"] == pytest.approx((0, -300, 135))
+    assert field["region_max"] == pytest.approx((2000, 300, 135))

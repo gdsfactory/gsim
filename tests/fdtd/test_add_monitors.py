@@ -26,7 +26,8 @@ def test_default_diagnostic_planes_serialize(tmp_path, fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     simulation.source(port="o1", wavelength_um=1.55)
     simulation.geometry("straight", settings={"length": 4})
-    assert simulation.add_monitors() is simulation
+    with pytest.warns(DeprecationWarning, match="default XY monitor name"):
+        assert simulation.add_monitors() is simulation
     planes = {plane.name: plane for plane in simulation.monitors}
     assert set(planes) == {"port_o1", "port_o2", "overview_xy"}
     assert planes["port_o1"].center_um == pytest.approx((0.18, 0, 0.11))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import replace
 from math import isfinite
@@ -43,6 +44,8 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
+from gsim.fdtd.monitor_bounds import monitor_region_nm
+from gsim.fdtd.monitor_names import resolve_monitor_name
 from gsim.fdtd.visualization import VisualizationMixin
 
 # Flat constructor arguments of the original API, as (concern, field).
@@ -231,14 +234,22 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         return self._job_id
 
     def add_monitors(
-        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+        self,
+        *,
+        xy: bool = True,
+        xy_name: str | None = None,
+        z_um: float | None = None,
+        margin_um: float = 0.75,
     ) -> Self:
-        """Add center-wavelength port intensity images and an optional XY overview.
+        """Add center-wavelength port intensity images and an optional XY field image.
 
         Args:
-            xy: Include the component-wide XY overview (default: True).
-            z_um: Overview height in micrometers. None uses the resolved geometry's
-                vertical midpoint. Ignored when xy is False.
+            xy: Include a component-wide XY field image (default: True).
+            xy_name: XY image name. Use field_xy for new code. None retains
+                overview_xy with a DeprecationWarning during the transition.
+                Ignored when xy is False.
+            z_um: XY image height in micrometers. None uses the resolved geometry's
+                vertical midpoint within any opted-in crop. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
                 active cross section, in micrometers (default: 0.75).
 
@@ -246,9 +257,10 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows follow the port width and active layer bounds,
-            plus margin_um, three Yee cells inward from each port. Opted-in
-            domain crops also bound diagnostic extents and cladding margins.
+            Optical port windows follow the port width and selected physical
+            bands' active bounds, plus margin_um, three Yee cells inward from
+            each port. Preview and output windows are cropped to the domain
+            without changing the requested settings.
             Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
@@ -279,19 +291,17 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             normal: SignedAxis = (
                 ("+x" if nx > 0 else "-x") if nx else ("+y" if ny > 0 else "-y")
             )
-            center, size = self._diagnostic_window(
-                (
-                    port.center[0] - nx * offset_um,
-                    port.center[1] - ny * offset_um,
-                    (z_lower + z_upper) / 2,
-                ),
-                (0, width_um, height_um) if nx else (width_um, 0, height_um),
-            )
             planes.append(
                 PlaneMonitor(
                     name=f"port_{port.name}",
-                    center_um=center,
-                    size_um=size,
+                    center_um=(
+                        port.center[0] - nx * offset_um,
+                        port.center[1] - ny * offset_um,
+                        (z_lower + z_upper) / 2,
+                    ),
+                    size_um=(0, width_um, height_um)
+                    if nx
+                    else (width_um, 0, height_um),
                     normal=normal,
                     flux=False,
                     wavelengths_um=[wavelength_um],
@@ -308,15 +318,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                     high = min(high, self.domain.z_bounds[1])
                 z_um = (low + high) / 2
             component = resolved.component
-            center, size = self._diagnostic_window(
-                (component.dx, component.dy, z_um),
-                (component.dxsize, component.dysize, 0),
-            )
             planes.append(
                 PlaneMonitor(
-                    name="overview_xy",
-                    center_um=center,
-                    size_um=size,
+                    name="overview_xy" if xy_name is None else xy_name,
+                    center_um=(component.dx, component.dy, z_um),
+                    size_um=(component.dxsize, component.dysize, 0),
                     normal="+z",
                     flux=False,
                     wavelengths_um=[wavelength_um],
@@ -327,36 +333,27 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         existing_names = {monitor.name for monitor in self.monitors}
         for plane in planes:
-            if plane.name in existing_names:
+            if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
+            existing_names.add(plane.name)
+        if self.domain.clip_geometry:
+            bounds = self._background_bounds_nm()
+            for plane in planes:
+                monitor_region_nm(plane, bounds, warn=False)
+        if xy and xy_name is None:
+            warnings.warn(
+                "The default XY monitor name 'overview_xy' is deprecated and "
+                "will change to 'field_xy' no earlier than 0.11.0 and only after "
+                "at least two feature releases and 12 months have passed since "
+                "the first released warning. "
+                "Pass xy_name='field_xy' to adopt the new name, or "
+                "xy_name='overview_xy' to retain the existing generated name.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         for plane in planes:
             self.monitors.add(plane)
         return self
-
-    def _diagnostic_window(
-        self, center: tuple[float, float, float], size: tuple[float, float, float]
-    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-        """Fit diagnostic extents and cladding margins into an opted-in crop."""
-        if not self.domain.clip_geometry:
-            return center, size
-        position, extent = list(center), list(size)
-        for axis, name in enumerate("xyz"):
-            bounds = getattr(self.domain, f"{name}_bounds")
-            if bounds is None or extent[axis] == 0:
-                continue
-            low = max(position[axis] - extent[axis] / 2, bounds[0])
-            high = min(position[axis] + extent[axis] / 2, bounds[1])
-            if low >= high:
-                raise FDTDGeometryError(
-                    f"Diagnostic plane does not intersect domain.{name}_bounds."
-                )
-            position[axis] = (low + high) / 2
-            extent[axis] = high - low
-        return (position[0], position[1], position[2]), (
-            extent[0],
-            extent[1],
-            extent[2],
-        )
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve current geometry at the current source wavelength."""
@@ -447,6 +444,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         config_path = directory / "config.json"
         material_snapshots = self._material_snapshots()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         manifest = generate_mesh(
             resolved,
             mesh_path,

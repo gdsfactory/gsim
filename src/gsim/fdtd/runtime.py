@@ -31,6 +31,7 @@ from gsim.fdtd.config import (
 )
 from gsim.fdtd.mesh import background_bounds_nm
 from gsim.fdtd.models import FDTDConfigError, MeshManifest
+from gsim.fdtd.monitor_bounds import monitor_region_nm
 
 if TYPE_CHECKING:
     from gsim.common.pdk import ResolvedPassivePcell
@@ -94,7 +95,7 @@ class RuntimeConfigMixin:
         )
 
     def _validate_explicit_domain_contents(self) -> None:
-        """Require public sources and monitors to fit explicit axis bounds."""
+        """Require source regions and fiber foci to fit explicit axis bounds."""
         explicit_bounds = (
             self.domain.x_bounds,
             self.domain.y_bounds,
@@ -139,16 +140,6 @@ class RuntimeConfigMixin:
             )
 
         for monitor in self.monitors:
-            center = _scale_vector(monitor.center_um, 1000)
-            half_size = _scale_vector(monitor.size_um, 500)
-            lower, upper = _vector_bounds(center, half_size)
-            regions.append(
-                (
-                    f"Monitor {monitor.name!r}",
-                    lower,
-                    upper,
-                )
-            )
             if monitor.fiber_mode is not None:
                 focal_point = _scale_vector(monitor.fiber_mode.focal_point_um, 1000)
                 regions.append(
@@ -169,6 +160,12 @@ class RuntimeConfigMixin:
                         f"{label} {axis_name}-extent {extent_um} exceeds "
                         f"domain.{axis_name}_bounds {requested_bounds}."
                     )
+
+    def _validate_monitor_regions(self) -> None:
+        """Reject unusable plane monitors before generating any mesh artifacts."""
+        bounds = self._background_bounds_nm()
+        for monitor in self.monitors:
+            monitor_region_nm(monitor, bounds, warn=False)
 
     def _selected_port_name(self) -> str:
         """Validate and return the explicitly selected source port."""
@@ -385,9 +382,9 @@ class RuntimeConfigMixin:
         material_snapshots: Mapping[str, MaterialSnapshot],
     ) -> PlaneMonitorConfig:
         """Translate one public plane-monitor definition."""
-        center_nm = _scale_vector(monitor.center_um, 1000)
-        half_size_nm = _scale_vector(monitor.size_um, 500)
-        region_min, region_max = _vector_bounds(center_nm, half_size_nm)
+        region_min, region_max = monitor_region_nm(
+            monitor, self._background_bounds_nm()
+        )
         fiber_mode = self._fiber_mode_config(monitor.fiber_mode, material_snapshots)
         return PlaneMonitorConfig(
             name=monitor.name,
