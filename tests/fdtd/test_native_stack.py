@@ -113,6 +113,12 @@ def test_port_faces_cover_both_contiguous_material_bands(tmp_path, native_stack)
     port = simulation.resolved.ports["o1"]
     assert port.physical_layer_keys == ("lower", "upper")
     artifacts = simulation.write(tmp_path)
+    config = json.loads(artifacts.config_path.read_text())
+    assert config["geometry"]["ports"]["o1"]["layer"] == "lower"
+    assert {
+        config["geometry"]["layers"][key]["material"]
+        for key in port.physical_layer_keys
+    } == {config["geometry"]["layers"]["lower"]["material"]}
     mesh = meshio.read(artifacts.mesh_path)
     triangles = mesh.cells_dict["triangle"]
     tags = mesh.cell_data_dict["gmsh:physical"]["triangle"]

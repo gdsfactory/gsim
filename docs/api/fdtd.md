@@ -56,8 +56,11 @@ sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
 The marker layer is not added to the mesh. The mapped physical entry supplies
 the port's material and vertical position, and must contain the port location.
 Unmapped ports still need to match resolved LayerStack geometry directly.
-When a port matches contiguous vertical bands of the same material, its mesh
-surface includes all those bands and its center uses their combined height.
+When a port matches abutting vertical bands of the same material, its mesh
+surface includes those bands and its center uses their combined height.
+Overlapping entries are not joined; candidates are considered in mesh-priority
+order. The saved port `layer` is the primary material and priority reference;
+the port's mesh physical group defines its complete cross-section.
 An explicit single-entry mapping keeps the port limited to that entry.
 
 ### Bounded PDK stacks
@@ -79,6 +82,10 @@ Intersecting layers keep their original sidewall profiles and are clipped by
 the mesher; the PDK object is not modified. Missing materials inside the window
 still raise an error. With the default `clip_geometry=False`, explicit bounds
 must continue to contain the resolved geometry.
+
+Port centers and diagnostic windows follow the clipped active bands. Automatic
+diagnostic planes, including their cladding margins, stay inside explicit crop
+bounds; the original LayerStack extrusion and sidewall fields are retained.
 
 Linear PDK sidewall angles are represented as continuous ruled solids between
 their exact bottom and top contours. If polygon offsetting changes component,

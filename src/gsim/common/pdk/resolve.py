@@ -294,7 +294,7 @@ def _port_candidates(
 
 
 def _connected_port_layers(candidates: list[ResolvedLayer]) -> list[ResolvedLayer]:
-    """Join touching bands of the primary material at a port's position."""
+    """Join abutting bands in priority order, excluding overlapping owners."""
     if not candidates:
         return []
     connected = [candidates[0]]
@@ -302,17 +302,20 @@ def _connected_port_layers(candidates: list[ResolvedLayer]) -> list[ResolvedLaye
     while remaining:
         lower = min(layer.z_bounds[0] for layer in connected)
         upper = max(layer.z_bounds[1] for layer in connected)
-        touching = [
-            layer
-            for layer in remaining
-            if layer.material == connected[0].material
-            and layer.z_bounds[0] <= upper + _PORT_POSITION_TOLERANCE_UM
-            and layer.z_bounds[1] >= lower - _PORT_POSITION_TOLERANCE_UM
-        ]
-        if not touching:
+        for index, layer in enumerate(remaining):
+            if layer.material != connected[0].material:
+                continue
+            start, end = layer.z_bounds
+            if (
+                abs(start - upper) <= _PORT_POSITION_TOLERANCE_UM
+                or abs(end - lower) <= _PORT_POSITION_TOLERANCE_UM
+            ):
+                # Add one owner at a time: two candidates can abut this edge
+                # while overlapping each other. Keep the higher-priority one.
+                connected.append(remaining.pop(index))
+                break
+        else:
             break
-        connected.extend(touching)
-        remaining = [layer for layer in remaining if layer not in touching]
     return connected
 
 
@@ -320,6 +323,7 @@ def _resolved_ports(
     component: Any,
     layers: Mapping[str, ResolvedLayer],
     port_layer_map: Mapping[tuple[int, int], str],
+    z_bounds: tuple[float, float] | None = None,
 ) -> dict[str, ResolvedPort]:
     """Map every component port to one resolved physical layer."""
     resolved: dict[str, ResolvedPort] = {}
@@ -337,6 +341,9 @@ def _resolved_ports(
         layer = owners[0] if owners else None
         z_lower = min((owner.z_bounds[0] for owner in owners), default=0.0)
         z_upper = max((owner.z_bounds[1] for owner in owners), default=0.0)
+        if owners and z_bounds is not None:
+            z_lower = max(z_lower, z_bounds[0])
+            z_upper = min(z_upper, z_bounds[1])
         resolved[port.name] = ResolvedPort(
             name=port.name,
             center=(
@@ -351,6 +358,7 @@ def _resolved_ports(
             layer_key=layer.key if layer is not None else None,
             material=layer.material if layer is not None else None,
             layer_keys=tuple(owner.key for owner in owners) if len(owners) > 1 else (),
+            z_bounds=(z_lower, z_upper) if owners else None,
         )
     return resolved
 
@@ -433,7 +441,7 @@ def resolve_passive_pcell(
                 f"Could not resolve material {material_name!r} used by layers "
                 f"{layer_names}: {error}"
             ) from error
-    ports = _resolved_ports(resolved_component, layers, port_layer_map or {})
+    ports = _resolved_ports(resolved_component, layers, port_layer_map or {}, z_bounds)
     return ResolvedPassivePcell(
         component=resolved_component,
         derived_component=derived_component,

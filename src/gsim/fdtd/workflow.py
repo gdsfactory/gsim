@@ -246,9 +246,10 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows follow the port width and owning PDK layer's
-            vertical bounds, plus margin_um, three Yee cells inward from each
-            port. Each plane records only the source center wavelength,
+            Optical port windows follow the port width and active layer bounds,
+            plus margin_um, three Yee cells inward from each port. Opted-in
+            domain crops also bound diagnostic extents and cladding margins.
+            Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
             raise ValueError before any planes are added. This method does not
@@ -269,24 +270,28 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                     f"Optical port {port.name!r} has no owning layer"
                 )
             owners = [resolved.layers[key] for key in port.physical_layer_keys]
-            z_lower = min(layer.z_bounds[0] for layer in owners)
-            z_upper = max(layer.z_bounds[1] for layer in owners)
+            z_lower, z_upper = port.z_bounds or (
+                min(layer.z_bounds[0] for layer in owners),
+                max(layer.z_bounds[1] for layer in owners),
+            )
             width_um = port.width + 2 * margin_um
             height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
                 ("+x" if nx > 0 else "-x") if nx else ("+y" if ny > 0 else "-y")
             )
+            center, size = self._diagnostic_window(
+                (
+                    port.center[0] - nx * offset_um,
+                    port.center[1] - ny * offset_um,
+                    (z_lower + z_upper) / 2,
+                ),
+                (0, width_um, height_um) if nx else (width_um, 0, height_um),
+            )
             planes.append(
                 PlaneMonitor(
                     name=f"port_{port.name}",
-                    center_um=(
-                        port.center[0] - nx * offset_um,
-                        port.center[1] - ny * offset_um,
-                        port.center[2],
-                    ),
-                    size_um=(0, width_um, height_um)
-                    if nx
-                    else (width_um, 0, height_um),
+                    center_um=center,
+                    size_um=size,
                     normal=normal,
                     flux=False,
                     wavelengths_um=[wavelength_um],
@@ -297,13 +302,21 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         if xy:
             if z_um is None:
-                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+                low, high = resolved.bounds[0][2], resolved.bounds[1][2]
+                if self.domain.clip_geometry and self.domain.z_bounds is not None:
+                    low = max(low, self.domain.z_bounds[0])
+                    high = min(high, self.domain.z_bounds[1])
+                z_um = (low + high) / 2
             component = resolved.component
+            center, size = self._diagnostic_window(
+                (component.dx, component.dy, z_um),
+                (component.dxsize, component.dysize, 0),
+            )
             planes.append(
                 PlaneMonitor(
                     name="overview_xy",
-                    center_um=(component.dx, component.dy, z_um),
-                    size_um=(component.dxsize, component.dysize, 0),
+                    center_um=center,
+                    size_um=size,
                     normal="+z",
                     flux=False,
                     wavelengths_um=[wavelength_um],
@@ -319,6 +332,31 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         for plane in planes:
             self.monitors.add(plane)
         return self
+
+    def _diagnostic_window(
+        self, center: tuple[float, float, float], size: tuple[float, float, float]
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        """Fit diagnostic extents and cladding margins into an opted-in crop."""
+        if not self.domain.clip_geometry:
+            return center, size
+        position, extent = list(center), list(size)
+        for axis, name in enumerate("xyz"):
+            bounds = getattr(self.domain, f"{name}_bounds")
+            if bounds is None or extent[axis] == 0:
+                continue
+            low = max(position[axis] - extent[axis] / 2, bounds[0])
+            high = min(position[axis] + extent[axis] / 2, bounds[1])
+            if low >= high:
+                raise FDTDGeometryError(
+                    f"Diagnostic plane does not intersect domain.{name}_bounds."
+                )
+            position[axis] = (low + high) / 2
+            extent[axis] = high - low
+        return (position[0], position[1], position[2]), (
+            extent[0],
+            extent[1],
+            extent[2],
+        )
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve current geometry at the current source wavelength."""
