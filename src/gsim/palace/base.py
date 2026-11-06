@@ -2508,15 +2508,31 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         if self._impedance_boundaries:
             hints["_impedance_boundaries"] = self._impedance_boundaries
         absorbing, metallic, pec_default = self._outer_wall()
+        # The automatic PEC default (pec_default) is a convenience: it only
+        # applies where the mesh has an outer-boundary group to carry it. An
+        # explicit metallic_boundaries=True is not automatic, so it still
+        # reaches the strict check in the config generator.
+        boundary_groups = self._last_mesh_result.groups.get("boundary_surfaces", {})
+        has_outer = boundary_groups.get("absorbing") is not None
+        if pec_default and not has_outer:
+            metallic = False
         if metallic:
             hints["_metallic_boundaries"] = True
         if pec_default and not self._pec_default_noted:
             self._pec_default_noted = True
-            logger.info(
-                "Wave ports: the outer wall is PEC, matching the port "
-                "eigenproblem. Set absorbing_boundary=True to keep an "
-                "absorbing wall."
-            )
+            if has_outer:
+                logger.info(
+                    "Wave ports: the outer wall is PEC, matching the port "
+                    "eigenproblem. Set absorbing_boundary=True to keep an "
+                    "absorbing wall."
+                )
+            else:
+                logger.info(
+                    "Wave ports: the mesh has no outer-boundary group (for "
+                    "example an airbox with zero margin), so the default PEC "
+                    "outer wall has nothing to attach to and no outer-wall "
+                    "entry is written."
+                )
         if getattr(self, "conductor_boundary", "conductivity") == "pec":
             hints["_conductor_boundary"] = "pec"
 

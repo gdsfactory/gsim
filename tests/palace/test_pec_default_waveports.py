@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import pytest
@@ -133,3 +134,67 @@ def test_pec_default_is_noted_once(monkeypatch, tmp_path, caplog):
         sim.write_config(validate_mesh=False)
     notes = [r for r in caplog.records if "outer wall is PEC" in r.getMessage()]
     assert len(notes) == 1
+
+
+NO_OUTER_MESSAGE = (
+    "metallic_boundaries asks for a perfect-conductor outer wall, but the mesh "
+    "carries no outer-boundary physical group to put it on."
+)
+
+
+def _sim_without_outer(
+    monkeypatch, tmp_path, *, declared=True, **options
+) -> DrivenSim:
+    """Return a wave-port sim whose mesh has no outer-boundary group.
+
+    This is the mesh of an airbox with zero margin: ``boundary_surfaces`` has
+    no ``"absorbing"`` entry.
+    """
+    sim = _sim(monkeypatch, tmp_path, PortType.WAVEPORT, declared=declared, **options)
+    del sim._last_mesh_result.groups["boundary_surfaces"]["absorbing"]
+    return sim
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_default_pec_tolerates_missing_outer_group(monkeypatch, tmp_path, declared):
+    """No outer group, nothing set: the config writes with no outer-wall entry."""
+    sim = _sim_without_outer(monkeypatch, tmp_path, declared=declared)
+    boundaries = _boundaries(sim, tmp_path)
+    assert "Absorbing" not in boundaries
+    assert "PEC" not in boundaries
+    assert boundaries["WavePort"]
+
+
+def test_default_pec_matches_absorbing_true_without_outer_group(
+    monkeypatch, tmp_path
+):
+    """absorbing_boundary=True writes the same wall entries for this mesh."""
+    default = _boundaries(_sim_without_outer(monkeypatch, tmp_path), tmp_path)
+    absorbing = _boundaries(
+        _sim_without_outer(monkeypatch, tmp_path, absorbing_boundary=True), tmp_path
+    )
+    for key in ("Absorbing", "PEC"):
+        assert key not in default
+        assert key not in absorbing
+
+
+@pytest.mark.parametrize("options", [{}, {"absorbing_boundary": False}])
+def test_explicit_metallic_without_outer_group_still_raises(
+    monkeypatch, tmp_path, options
+):
+    """metallic_boundaries=True is a request, not a default: it stays strict."""
+    sim = _sim_without_outer(monkeypatch, tmp_path, metallic_boundaries=True, **options)
+    with pytest.raises(ValueError, match=re.escape(NO_OUTER_MESSAGE)):
+        sim.write_config(validate_mesh=False)
+
+
+def test_missing_outer_group_is_noted_once(monkeypatch, tmp_path, caplog):
+    """The no-outer-group case logs one info note, not the PEC-wall note."""
+    sim = _sim_without_outer(monkeypatch, tmp_path)
+    with caplog.at_level(logging.INFO, logger="gsim.palace.base"):
+        sim.write_config(validate_mesh=False)
+        sim.write_config(validate_mesh=False)
+    notes = [r for r in caplog.records if "no outer-boundary group" in r.getMessage()]
+    assert len(notes) == 1
+    assert notes[0].levelno == logging.INFO
+    assert not any("outer wall is PEC" in r.getMessage() for r in caplog.records)
