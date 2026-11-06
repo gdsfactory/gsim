@@ -64,6 +64,7 @@ def test_optional_xy_and_explicit_zero_height(fdtd_pdk_module, xy, z_um):
 
 
 def test_y_ports_use_current_source_and_solver(fdtd_pdk_module):
+    fdtd_pdk_module.PDK.activate()
     component = fdtd_pdk_module.PDK.get_component("straight").copy()
     component.rotate(90)
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)

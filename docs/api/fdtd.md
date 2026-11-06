@@ -56,6 +56,51 @@ sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
 The marker layer is not added to the mesh. The mapped physical entry supplies
 the port's material and vertical position, and must contain the port location.
 Unmapped ports still need to match resolved LayerStack geometry directly.
+When an unmapped port matches abutting vertical bands of the same material, its
+mesh surface includes those bands and its center uses their combined height.
+Overlapping entries are not joined; candidates are considered in mesh-priority
+order. The saved port `layer` is the primary material and priority reference;
+the port's mesh physical group defines its complete cross-section.
+An explicit single-entry mapping keeps the port limited to that entry.
+
+For a core represented by several physical bands, select their LayerStack keys
+as a tuple:
+
+```python
+sim.geometry(component=waveguide, port_layer_map={(100, 0): ("lower", "upper")})
+```
+
+All selected bands must have resolved geometry at the port location, use the
+same material, and abut without overlaps or gaps. Empty selections, duplicate
+keys, and incompatible bands raise `UnsupportedPortError`. The first key stays
+the primary material/priority reference; the mesh covers the complete selected
+height. Existing string mappings retain their single-band behavior.
+
+### Bounded PDK stacks
+
+Keep the PDK's LayerStack unchanged and opt into clipping when the simulation
+uses only a smaller physical window:
+
+```python
+sim = fdtd.Simulation(pdk=pdk)
+sim.domain(z_bounds=(-0.5, 1.0), clip_geometry=True)
+sim.geometry(component=waveguide)
+```
+
+Set the bounds before resolving geometry. Films wholly outside the vertical
+window and footprints outside the XY window are omitted before their materials
+are required. Sidewall overhangs are retained conservatively. This includes
+films with negative thickness; boundary-only contact has no material volume.
+Intersecting layers keep their original sidewall profiles and are clipped by
+the mesher; the PDK object is not modified. Missing materials inside the window
+still raise an error. With the default `clip_geometry=False`, explicit bounds
+must continue to contain the resolved geometry.
+
+Port centers and diagnostic windows follow the clipped active bands. Automatic
+diagnostic planes, including their cladding margins, are intersected with the
+physical domain when previewed or written. The requested monitor windows remain
+available if the domain is enlarged; the original LayerStack extrusion and
+sidewall fields are retained.
 
 Linear PDK sidewall angles are represented as continuous ruled solids between
 their exact bottom and top contours. If polygon offsetting changes component,
@@ -66,6 +111,12 @@ Use `write(path)` to generate `mesh.msh` and `config.json` without submitting.
 The original flat constructor keywords remain accepted for compatibility.
 
 ## Material dispersion
+
+MaterialCards attached to the PDK object or exported by its module are discovered
+automatically and take precedence over built-in cards. Schema Lorentz and Drude
+models are evaluated using their angular frequencies in rad/s and the passive
+`n+ik` convention. Their loss and wavelength dependence follow the same solver
+rules as other cards below.
 
 By default, each material reaches the solver as its index at the source
 wavelength. A broadband run therefore uses that one index at every wavelength.
@@ -275,10 +326,12 @@ sim.add_monitors(xy_name="field_xy", margin_um=1.0)  # Alternative: more claddin
 
 These are alternative calls, not a sequence: monitor names must be unique.
 `xy=True` is the default; `z_um=None` chooses the resolved geometry's vertical
-midpoint and is ignored when `xy=False`. Each optical port's plane follows its
-own width and its owning PDK layer's vertical bounds, including negative layer
-thickness. `margin_um=0.75` adds that much cladding on each side of the cross
-section; set it to zero for only the active region or increase it for wider field
+midpoint within any opted-in crop and is ignored when `xy=False`. Each optical
+port's plane follows its
+own width and its selected physical bands' active vertical bounds, including
+negative layer thickness and any opted-in geometry crop. `margin_um=0.75` adds
+that much cladding on each side of the cross section; set it to zero for only
+the active region or increase it for wider field
 tails. This is a geometric window, not an automatically mode-converged aperture.
 The plane is three grid cells inward along its normal. Port images are named
 `port_<port_name>` (for example, `port_o1`); the `field_xy` image spans the component's

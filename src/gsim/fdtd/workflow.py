@@ -44,6 +44,7 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
+from gsim.fdtd.monitor_bounds import monitor_region_nm
 from gsim.fdtd.monitor_names import resolve_monitor_name
 from gsim.fdtd.visualization import VisualizationMixin
 
@@ -248,7 +249,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 overview_xy with a DeprecationWarning during the transition.
                 Ignored when xy is False.
             z_um: XY image height in micrometers. None uses the resolved geometry's
-                vertical midpoint. Ignored when xy is False.
+                vertical midpoint within any opted-in crop. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
                 active cross section, in micrometers (default: 0.75).
 
@@ -256,9 +257,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows follow the port width and owning PDK layer's
-            vertical bounds, plus margin_um, three Yee cells inward from each
-            port. Each plane records only the source center wavelength,
+            Optical port windows follow the port width and selected physical
+            bands' active bounds, plus margin_um, three Yee cells inward from
+            each port. Preview and output windows are cropped to the domain
+            without changing the requested settings.
+            Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
             raise ValueError before any planes are added. This method does not
@@ -278,7 +281,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 raise FDTDGeometryError(
                     f"Optical port {port.name!r} has no owning layer"
                 )
-            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            owners = [resolved.layers[key] for key in port.physical_layer_keys]
+            z_lower, z_upper = port.z_bounds or (
+                min(layer.z_bounds[0] for layer in owners),
+                max(layer.z_bounds[1] for layer in owners),
+            )
             width_um = port.width + 2 * margin_um
             height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
@@ -290,7 +297,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                     center_um=(
                         port.center[0] - nx * offset_um,
                         port.center[1] - ny * offset_um,
-                        port.center[2],
+                        (z_lower + z_upper) / 2,
                     ),
                     size_um=(0, width_um, height_um)
                     if nx
@@ -305,7 +312,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         if xy:
             if z_um is None:
-                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+                low, high = resolved.bounds[0][2], resolved.bounds[1][2]
+                if self.domain.clip_geometry and self.domain.z_bounds is not None:
+                    low = max(low, self.domain.z_bounds[0])
+                    high = min(high, self.domain.z_bounds[1])
+                z_um = (low + high) / 2
             component = resolved.component
             planes.append(
                 PlaneMonitor(
@@ -325,6 +336,10 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
             existing_names.add(plane.name)
+        if self.domain.clip_geometry:
+            bounds = self._background_bounds_nm()
+            for plane in planes:
+                monitor_region_nm(plane, bounds, warn=False)
         if xy and xy_name is None:
             warnings.warn(
                 "The default XY monitor name 'overview_xy' is deprecated and "
@@ -353,6 +368,9 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
             port_layer_map=self.geometry.port_layer_map,
+            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
+            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
+            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
         )
         return self._resolved
 
@@ -440,6 +458,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
         config_path.write_text(

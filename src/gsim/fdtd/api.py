@@ -44,7 +44,9 @@ class Geometry(BaseModel):
 
     component: Any | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
-    port_layer_map: dict[tuple[int, int], str] = Field(default_factory=dict)
+    port_layer_map: dict[tuple[int, int], str | tuple[str, ...]] = Field(
+        default_factory=dict
+    )
     mesh_size_nm: float = Field(default=1000.0, gt=0)
     geometry_tolerance_nm: float = Field(default=10.0, gt=0, le=30.0)
     _resolver: Any = PrivateAttr(default=None)
@@ -58,7 +60,7 @@ class Geometry(BaseModel):
         component: Any | None = None,
         *,
         settings: Mapping[str, Any] | None = None,
-        port_layer_map: Mapping[tuple[int, int], str] | None = None,
+        port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]] | None = None,
         mesh_size_nm: float | None = None,
         geometry_tolerance_nm: float | None = None,
     ) -> Any:
@@ -337,6 +339,13 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
+    clip_geometry: bool = Field(
+        default=False,
+        description=(
+            "Clip material geometry to explicit bounds and skip stack films "
+            "outside the vertical window."
+        ),
+    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
