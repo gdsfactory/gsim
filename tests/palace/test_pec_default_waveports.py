@@ -142,9 +142,7 @@ NO_OUTER_MESSAGE = (
 )
 
 
-def _sim_without_outer(
-    monkeypatch, tmp_path, *, declared=True, **options
-) -> DrivenSim:
+def _sim_without_outer(monkeypatch, tmp_path, *, declared=True, **options) -> DrivenSim:
     """Return a wave-port sim whose mesh has no outer-boundary group.
 
     This is the mesh of an airbox with zero margin: ``boundary_surfaces`` has
@@ -165,9 +163,7 @@ def test_default_pec_tolerates_missing_outer_group(monkeypatch, tmp_path, declar
     assert boundaries["WavePort"]
 
 
-def test_default_pec_matches_absorbing_true_without_outer_group(
-    monkeypatch, tmp_path
-):
+def test_default_pec_matches_absorbing_true_without_outer_group(monkeypatch, tmp_path):
     """absorbing_boundary=True writes the same wall entries for this mesh."""
     default = _boundaries(_sim_without_outer(monkeypatch, tmp_path), tmp_path)
     absorbing = _boundaries(
