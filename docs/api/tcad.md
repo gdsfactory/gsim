@@ -177,7 +177,13 @@ The size of the correction depends on the mesh. Measured:
   Carrier totals move by 0.2 %.
 
 Signed couples can be negative on an edge whose opposite angles add up to more than 180°. The Scharfetter-Gummel flux
-takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to a monotone scheme.
+takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to a monotone scheme. Node
+volumes can be negative too, on a node at the end of the long edge of strongly obtuse triangles: two 150° triangles
+sharing their long edge of length `L` give each end of that edge `-0.18 L²`. A Region's volumes still add up to its
+area, but the space charge, recombination and stored charge of a node are weighted by its volume, so a negative volume
+flips their sign at that node. On a 1e17/1e17 cm⁻³ junction with 182 negative couples and 5 negative volumes in 640
+triangles, the depletion width from 0 to 2 V reverse stays within 0.4 % of a right-angle mesh (DEVSIM's own couples
+read 20 % to 25 % low there); with 24 negative volumes it drifts to 5 % at 2 V.
 
 ## Limits
 
