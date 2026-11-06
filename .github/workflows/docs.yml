@@ -107,7 +107,7 @@ jobs:
         FRESH_INDUCTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_inductor }}
       run: |
         if [[ "$NOTEBOOK" == "nbs/palace_inductor.ipynb" && "$FRESH_INDUCTOR" == "true" ]]; then
-          uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim -p check_cache false
+          uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim -y 'check_cache: false'
         else
           uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim
         fi
