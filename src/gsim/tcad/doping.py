@@ -48,6 +48,14 @@ __all__ = [
 ]
 
 
+#: Slack (um) on every hard edge: window bounds, the implant surface and
+#: a zero-fill table's grid ends. DEVSIM holds the mesh in cm, so a node
+#: placed exactly on an edge reads back a rounding error off it
+#: (0.22 um returns as 0.22000000000000003). The slack absorbs that and
+#: stays far below any mesh spacing.
+_EDGE_TOLERANCE_UM: float = 1e-9
+
+
 def _window_mask(
     values: NDArray[np.float64], interval: tuple[float, float] | None
 ) -> NDArray[np.float64]:
@@ -55,7 +63,9 @@ def _window_mask(
     if interval is None:
         return np.ones_like(values)
     lo, hi = interval
-    return ((values >= lo) & (values <= hi)).astype(np.float64)
+    return (
+        (values >= lo - _EDGE_TOLERANCE_UM) & (values <= hi + _EDGE_TOLERANCE_UM)
+    ).astype(np.float64)
 
 
 def _validate_grid(name: str, samples: list[float] | None) -> None:
@@ -98,7 +108,11 @@ def _outside(
     values: NDArray[np.float64], grid: NDArray[np.float64]
 ) -> NDArray[np.bool_]:
     """Mark the values falling beyond either end of an ascending grid."""
-    return np.asarray((values < grid[0]) | (values > grid[-1]), dtype=bool)
+    return np.asarray(
+        (values < grid[0] - _EDGE_TOLERANCE_UM)
+        | (values > grid[-1] + _EDGE_TOLERANCE_UM),
+        dtype=bool,
+    )
 
 
 class _DopingBase(BaseModel):
@@ -229,7 +243,7 @@ class ImplantDoping(_DopingBase):
         gauss = self.peak_cm3 * np.exp(
             -((depth - self.range_um) ** 2) / (2.0 * self.straggle_um**2)
         )
-        inside = (depth >= 0.0).astype(np.float64)
+        inside = (depth >= -_EDGE_TOLERANCE_UM).astype(np.float64)
         return np.asarray(
             gauss * inside * _window_mask(xa, self.x_range), dtype=np.float64
         )
