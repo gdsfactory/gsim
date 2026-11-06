@@ -287,7 +287,9 @@ class Contact(BaseModel):
     """Where an electrode meets a doped Region: an ohmic contact.
 
     The curve the two Regions share becomes a named line group on the
-    mesh, and DEVSIM drives the contact's bias there.
+    mesh, and DEVSIM drives the contact's bias there. Where the curve
+    ends on another solved Region (an Interface, or the oxide), that
+    Region's node touches the same metal and the contact holds it too.
 
     Attributes:
         name: Contact name, also its mesh group name (e.g. ``"anode"``).
