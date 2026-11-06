@@ -159,7 +159,7 @@ def test_layout_only_shapes_crop_the_field_image(tmp_path, fdtd_pdk_module):
     component = simulation.resolved.component.copy()
     component.add_polygon([(10, 10), (12, 10), (12, 12), (10, 12)], layer=(999, 0))
     simulation.geometry(component)
-    simulation.add_monitors()
+    simulation.add_monitors(xy_name="field_xy")
     with pytest.warns(UserWarning, match="Monitor 'field_xy' cropped"):
         artifacts = simulation.write(tmp_path)
     document = json.loads(artifacts.config_path.read_text())

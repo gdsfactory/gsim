@@ -1,6 +1,7 @@
 """XY field-image lookups remain compatible with saved monitor names."""
 
 import json
+import warnings
 
 import pytest
 
@@ -68,3 +69,47 @@ def test_field_alias_collision_does_not_add_diagnostic_planes(fdtd_pdk_module, n
     with pytest.raises(ValueError, match="already exists"):
         simulation.add_monitors()
     assert simulation.monitors.model_dump() == before
+
+
+@pytest.mark.parametrize("name", ["field_xy", "overview_xy", "device_image"])
+def test_explicit_xy_name_serializes_without_naming_warning(
+    tmp_path, fdtd_pdk_module, name
+):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    simulation.source(port="o1", wavelength_span_um=0, num_wavelengths=1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        simulation.add_monitors(xy_name=name)
+        artifacts = simulation.write(tmp_path)
+    assert not any(
+        "default XY monitor name" in str(warning.message) for warning in caught
+    )
+    expected_names = {"port_o1", "port_o2", name}
+    assert {monitor.name for monitor in simulation.monitors} == expected_names
+    assert {
+        monitor["name"] for monitor in simulation.monitors.model_dump()
+    } == expected_names
+    document = json.loads(artifacts.config_path.read_text())
+    assert {monitor["name"] for monitor in document["monitors"]} == expected_names
+
+
+def test_xy_false_ignores_name_without_deprecation_warning(fdtd_pdk_module):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        simulation.add_monitors(xy=False)
+    assert not any(
+        "default XY monitor name" in str(warning.message) for warning in caught
+    )
+    assert {monitor.name for monitor in simulation.monitors} == {"port_o1", "port_o2"}
+
+
+@pytest.mark.parametrize("name", ["port_o1", "port_o2"])
+def test_xy_name_cannot_shadow_a_generated_port_image(fdtd_pdk_module, name):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    with pytest.raises(ValueError, match="already exists"):
+        simulation.add_monitors(xy_name=name)
+    assert len(simulation.monitors) == 0

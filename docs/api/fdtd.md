@@ -267,10 +267,10 @@ For notebook diagnostics, add center-wavelength field intensity images with one
 call after configuring geometry, source and solver:
 
 ```python
-sim.add_monitors()               # Optical port images and a field_xy image.
-sim.add_monitors(xy=False)       # Alternative: optical port images only.
-sim.add_monitors(z_um=0.11)      # Alternative: set the XY height in micrometers.
-sim.add_monitors(margin_um=1.0)  # Alternative: more cladding around each port.
+sim.add_monitors(xy_name="field_xy")                # Optical port images and an XY field image.
+sim.add_monitors(xy=False)                          # Alternative: optical port images only.
+sim.add_monitors(xy_name="field_xy", z_um=0.11)      # Alternative: set the XY height in micrometers.
+sim.add_monitors(xy_name="field_xy", margin_um=1.0)  # Alternative: more cladding around each port.
 ```
 
 These are alternative calls, not a sequence: monitor names must be unique.
@@ -306,17 +306,26 @@ A plane whose normal position is outside the physical domain, or whose
 intersection has zero area, raises `FDTDConfigError` before meshing or submission.
 Planes on the domain boundary are allowed. Sources are never cropped.
 
-### Field-monitor migration (0.9.0)
+### Field-monitor migration (0.9.0 onward)
 
-The helper's device-wide image is now named `field_xy`, replacing the less
-descriptive `overview_xy`. Update monitor-name comparisons and any code reading
-raw configuration or solver JSON to use `field_xy`. Existing
+Starting in 0.9.0, use `sim.add_monitors(xy_name="field_xy")` to choose the clearer
+name for the device-wide intensity image. Existing `sim.add_monitors()` calls
+still generate `overview_xy`, preserving monitor iteration, serialized settings,
+`config.json`, raw result keys, and cache inputs for contained planes. Omitting
+`xy_name` when `xy=True` emits a `DeprecationWarning` announcing the new name.
+The default is planned to change to `field_xy` in the 0.10.0 feature release,
+after this warning has shipped in a released version. Set
+`xy_name="overview_xy"` explicitly to retain the old generated name indefinitely.
+`xy_name` is ignored when `xy=False`, which does not issue a naming warning.
+
+When opting into `field_xy`, update monitor-name comparisons and code reading
+raw configuration or solver JSON to use that name. Existing
 `sim.monitors["overview_xy"]`, `sim.monitors.remove("overview_xy")`, and
 `result.monitors["overview_xy"]` lookups remain supported as compatibility aliases;
 `field_xy` lookups also work on saved results using `overview_xy`. Exact names
 take precedence if both names were explicitly configured. Iteration and
 serialization retain the stored name without duplicate images. The old lookup
-name is discouraged, with no removal planned.
+name remains supported, with no removal planned.
 
 Earlier versions checked monitor containment only on explicitly bounded axes:
 partially outside monitors either failed locally or reached the solver and

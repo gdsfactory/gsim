@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import replace
 from math import isfinite
@@ -232,12 +233,20 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         return self._job_id
 
     def add_monitors(
-        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+        self,
+        *,
+        xy: bool = True,
+        xy_name: str | None = None,
+        z_um: float | None = None,
+        margin_um: float = 0.75,
     ) -> Self:
         """Add center-wavelength port intensity images and an optional XY field image.
 
         Args:
-            xy: Include the component-wide field_xy image (default: True).
+            xy: Include a component-wide XY field image (default: True).
+            xy_name: XY image name. Use field_xy for new code. None retains
+                overview_xy with a DeprecationWarning during the transition.
+                Ignored when xy is False.
             z_um: XY image height in micrometers. None uses the resolved geometry's
                 vertical midpoint. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
@@ -300,7 +309,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             component = resolved.component
             planes.append(
                 PlaneMonitor(
-                    name="field_xy",
+                    name="overview_xy" if xy_name is None else xy_name,
                     center_um=(component.dx, component.dy, z_um),
                     size_um=(component.dxsize, component.dysize, 0),
                     normal="+z",
@@ -315,6 +324,16 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         for plane in planes:
             if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
+            existing_names.add(plane.name)
+        if xy and xy_name is None:
+            warnings.warn(
+                "The default XY monitor name 'overview_xy' is deprecated and "
+                "will change to 'field_xy' in 0.10.0, after a released warning. "
+                "Pass xy_name='field_xy' to adopt the new name, or "
+                "xy_name='overview_xy' to retain the existing generated name.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         for plane in planes:
             self.monitors.add(plane)
         return self

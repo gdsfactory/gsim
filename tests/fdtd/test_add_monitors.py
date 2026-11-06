@@ -26,15 +26,16 @@ def test_default_diagnostic_planes_serialize(tmp_path, fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     simulation.source(port="o1", wavelength_um=1.55)
     simulation.geometry("straight", settings={"length": 4})
-    assert simulation.add_monitors() is simulation
+    with pytest.warns(DeprecationWarning, match="default XY monitor name"):
+        assert simulation.add_monitors() is simulation
     planes = {plane.name: plane for plane in simulation.monitors}
-    assert set(planes) == {"port_o1", "port_o2", "field_xy"}
+    assert set(planes) == {"port_o1", "port_o2", "overview_xy"}
     assert planes["port_o1"].center_um == pytest.approx((0.18, 0, 0.11))
     assert planes["port_o2"].center_um == pytest.approx((3.82, 0, 0.11))
     assert planes["port_o1"].normal == "-x"
     assert planes["port_o2"].normal == "+x"
     assert planes["port_o1"].size_um == pytest.approx((0, 2, 1.72))
-    overview = planes["field_xy"]
+    overview = planes["overview_xy"]
     assert overview.center_um == pytest.approx((2, 0, 0.11))
     assert overview.size_um == pytest.approx((4, 0.5, 0))
     for plane in planes.values():
@@ -57,9 +58,9 @@ def test_optional_xy_and_explicit_zero_height(fdtd_pdk_module, xy, z_um):
     simulation.geometry("straight")
     simulation.add_monitors(xy=xy, z_um=z_um)
     names = {plane.name for plane in simulation.monitors}
-    assert ("field_xy" in names) is xy
+    assert ("overview_xy" in names) is xy
     if xy:
-        assert simulation.monitors["field_xy"].center_um[2] == 0
+        assert simulation.monitors["overview_xy"].center_um[2] == 0
 
 
 def test_y_ports_use_current_source_and_solver(fdtd_pdk_module):
@@ -84,14 +85,14 @@ def test_custom_monitors_and_collision_are_atomic(fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     simulation.geometry("straight")
     custom = simulation.monitors.add_plane(
-        "field_xy", center_um=(1, 0, 0.11), size_um=(2, 0.5, 0), normal="+z"
+        "overview_xy", center_um=(1, 0, 0.11), size_um=(2, 0.5, 0), normal="+z"
     )
     before = simulation.monitors.model_dump()
     with pytest.raises(ValueError, match="already exists"):
         simulation.add_monitors()
     assert simulation.monitors.model_dump() == before
     simulation.add_monitors(xy=False)
-    assert simulation.monitors["field_xy"] is custom
+    assert simulation.monitors["overview_xy"] is custom
     before = simulation.monitors.model_dump()
     with pytest.raises(ValueError, match="already exists"):
         simulation.add_monitors(xy=False)
@@ -102,7 +103,7 @@ def test_vertical_ports_keep_their_existing_workflow(fdtd_pdk_module):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     simulation.geometry("vertical_coupler")
     simulation.add_monitors()
-    assert {plane.name for plane in simulation.monitors} == {"port_o1", "field_xy"}
+    assert {plane.name for plane in simulation.monitors} == {"port_o1", "overview_xy"}
 
 
 def test_missing_geometry_fails_before_monitor_mutation():

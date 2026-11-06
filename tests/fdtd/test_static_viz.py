@@ -173,7 +173,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     artifacts = simulation.write(tmp_path / "run")
     simulation.materials(overrides={"Si": {"refractive_index": 2.5}})
     simulation.geometry("straight", settings={"length": 3})
-    simulation.add_monitors()
+    simulation.add_monitors(xy_name="field_xy")
     updated = simulation.plot_2d_static(show_mesh=True)
     assert simulation._last_artifacts is artifacts
     assert updated.get_xlim()[1] == pytest.approx(3 + 32 * 0.06)
