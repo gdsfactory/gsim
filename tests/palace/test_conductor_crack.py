@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -371,3 +372,50 @@ class TestRunLocal:
         assert (seen["name"] == "config.json") == keeps_key
         assert (output_dir / "config.json").read_text() == canonical
         assert [p.name for p in output_dir.glob("config*.json")] == ["config.json"]
+
+    @pytest.mark.parametrize("palace_fails", [False, True])
+    def test_a_user_file_named_like_the_copy_is_left_alone(
+        self, monkeypatch, tmp_path, palace_fails
+    ):
+        _fake_gsim_runtime(monkeypatch, tmp_path)
+        monkeypatch.delenv("PALACE_SIF", raising=False)
+        monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+        monkeypatch.setenv(TAG_ENV, "0.18.0")
+        output_dir = tmp_path / "sim"
+        sim = DrivenSim()
+        sim._last_mesh_result = _mesh_result(1_000, 1_000)
+        _setup_sim(sim, output_dir)
+        canonical = json.dumps(_config_with_crack())
+        (output_dir / "config.json").write_text(canonical)
+        # the name an earlier version of this code used for its copy
+        theirs = b'{"mine": true}\r\n'
+        (output_dir / "config.local.json").write_bytes(theirs)
+        seen: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["name"] = cmd[-1]
+            seen["config"] = json.loads((Path(kwargs["cwd"]) / cmd[-1]).read_text())
+            seen["files"] = sorted(p.name for p in output_dir.glob("config*.json"))
+            if palace_fails:
+                raise subprocess.CalledProcessError(1, cmd, stderr="boom")
+            return SimpleNamespace(stdout="", stderr="")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        if palace_fails:
+            with pytest.raises(RuntimeError, match="boom"):
+                sim.run_local(num_processes=1, verbose=False)
+        else:
+            sim.run_local(num_processes=1, verbose=False)
+        # Palace was given a third file, stripped of the key, beside the two
+        assert seen["name"] not in ("config.json", "config.local.json")
+        assert seen["files"] == sorted(
+            ["config.json", "config.local.json", seen["name"]]
+        )
+        assert seen["config"] == _without_crack(_config_with_crack())
+        # and it is gone again, whether or not Palace failed
+        assert (output_dir / "config.local.json").read_bytes() == theirs
+        assert (output_dir / "config.json").read_text() == canonical
+        assert sorted(p.name for p in output_dir.glob("config*.json")) == [
+            "config.json",
+            "config.local.json",
+        ]

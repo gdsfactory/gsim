@@ -2697,17 +2697,25 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         # A Palace known to be older than 0.19 rejects "Crack" and always cracks,
         # so it is handed a copy without the key. config.json keeps it for a later
         # run on a newer Palace and for an upload; the copy sits beside it so the
-        # relative paths in it still hold.
+        # relative paths in it still hold. Its name is made up by mkstemp, so a
+        # file of the user's in this folder is never overwritten or removed.
         run_config = config_path
+        local_config = None
         config_text = config_path.read_text()
         if '"Crack"' in config_text:
             config = json.loads(config_text)
-            local_config = strip_crack(config, launch_version(launch))
-            if local_config is not config:
-                run_config = config_path.with_name("config.local.json")
-                run_config.write_text(json.dumps(local_config, indent=4))
+            stripped = strip_crack(config, launch_version(launch))
+            if stripped is not config:
+                local_config = stripped
 
         try:
+            if local_config is not None:
+                handle, name = tempfile.mkstemp(
+                    dir=output_dir, prefix="config.", suffix=".json"
+                )
+                run_config = Path(name)
+                with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                    json.dump(local_config, stream, indent=4)
             run_palace(
                 launch,
                 cwd=output_dir,
