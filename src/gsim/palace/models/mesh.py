@@ -21,7 +21,9 @@ class MeshGrading(BaseModel):
     replaces the sizing that applies to every internal curve without
     grading (half of ``refined_mesh_size`` on the curve, reaching
     ``max_mesh_size`` at ``max_mesh_size / 2``, a growth of about 2 per um):
-    only the chosen features refine the mesh.
+    only the chosen features refine the mesh. The conductors and junctions
+    get ``refined_mesh_size`` itself, twice the size the ungraded mesh puts
+    on them; halve ``refined_mesh_size`` to keep that size.
 
     Attributes:
         growth_per_um: Increase of the element size per um of distance.

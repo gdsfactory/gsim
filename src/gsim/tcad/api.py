@@ -215,7 +215,10 @@ class Solver(MutableModel):
             growth of 0.1 to 0.25 per um gives well-shaped elements in the
             oxide around a small device at node counts close to the
             default mesh, and with it the refinement boxes no longer have
-            to be nested by hand to grade the mesh.
+            to be nested by hand to grade the mesh. Without grading the
+            elements on the internal curves are half of
+            ``refined_mesh_size_um``; with grading the conductors and
+            Interfaces get ``refined_mesh_size_um`` itself.
         absolute_error: Newton absolute error target of ``devsim.solve``.
         relative_error: Newton relative error target of ``devsim.solve``.
             With extended precision the 2D drift-diffusion Newton reaches

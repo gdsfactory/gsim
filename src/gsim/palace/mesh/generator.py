@@ -1194,6 +1194,43 @@ def _curve_length_bound(curve_tags: Sequence[int]) -> float:
     return longest
 
 
+#: Most points Gmsh's Distance field samples on one curve.
+_MAX_CURVE_SAMPLING = 20000
+
+#: Largest excess of the graded size over the feature size on the curve,
+#: as a fraction of that size.
+_GRADED_SIZE_TOLERANCE = 0.1
+
+
+def _graded_curve_sampling(length: float, size: float, rate: float) -> int:
+    """Number of Distance-field samples on a graded curve of ``length`` um.
+
+    The Distance field measures to sample points, so a point on the curve
+    midway between two samples spaced ``h`` apart sits at ``h / 2`` from
+    them and gets the size ``size + rate * h / 2``. The spacing is chosen
+    so that this excess stays within ``_GRADED_SIZE_TOLERANCE * size``,
+    and is never above half the size. A warning is logged when the cap on
+    the number of samples prevents it.
+    """
+    if length <= 0:
+        return 2000
+    spacing = min(0.5 * size, 2.0 * _GRADED_SIZE_TOLERANCE * size / rate)
+    wanted = max(400, math.ceil(length / spacing))
+    if wanted <= _MAX_CURVE_SAMPLING:
+        return wanted
+    excess = rate * length / _MAX_CURVE_SAMPLING / 2.0
+    logger.warning(
+        "Mesh grading samples a %.4g um curve at %d points, so the element "
+        "size on it may reach %.3g um instead of %.3g um. Lower "
+        "growth_per_um or raise the size on that feature.",
+        length,
+        _MAX_CURVE_SAMPLING,
+        size + excess,
+        size,
+    )
+    return _MAX_CURVE_SAMPLING
+
+
 def _setup_graded_fields(
     groups: dict,
     stack,
@@ -1238,12 +1275,7 @@ def _setup_graded_fields(
     field_ids: list[int] = []
     next_field_id = 1
     for curve_tags, size in curve_sets:
-        # Sample each curve at about half the size, so the distance near it
-        # is not overestimated by more than a quarter of the size.
-        length = _curve_length_bound(curve_tags)
-        sampling = (
-            min(20000, max(400, math.ceil(2.0 * length / size))) if length > 0 else 2000
-        )
+        sampling = _graded_curve_sampling(_curve_length_bound(curve_tags), size, rate)
         field_ids.append(
             gmsh_utils.setup_mesh_refinement(
                 curve_tags,

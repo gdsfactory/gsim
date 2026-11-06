@@ -8,7 +8,7 @@ import pytest
 
 from gsim.common import Layer, LayerStack
 from gsim.palace import BoundaryModeSim, MeshGrading
-from gsim.palace.mesh.generator import generate_mesh
+from gsim.palace.mesh.generator import _graded_curve_sampling, generate_mesh
 from gsim.palace.models import MeshConfig
 
 BOX = (0.2, 0.6, 0.0, 0.2, 0.03)
@@ -129,3 +129,39 @@ def test_grading_is_refused_for_a_3d_mesh(tmp_path):
             mesh_grading=MeshGrading(growth_per_um=0.25),
             write_config=False,
         )
+
+
+class TestCurveSampling:
+    """The Distance-field samples are close enough for the grading rate."""
+
+    @staticmethod
+    def _size_between_samples(length, size, rate, sampling):
+        # A point on the curve midway between two samples.
+        return size + rate * (length / sampling) / 2
+
+    @pytest.mark.parametrize("rate", [0.1, 0.25, 1.0, 2.0, 10.0])
+    def test_size_on_the_curve_stays_within_a_tenth(self, rate):
+        length, size = 10.0, 0.05
+        sampling = _graded_curve_sampling(length, size, rate)
+
+        assert self._size_between_samples(length, size, rate, sampling) <= 1.1 * size
+
+    def test_slow_grading_keeps_half_size_spacing(self):
+        # Below a rate of 0.4 per um the spacing is half the size, as before.
+        assert _graded_curve_sampling(10.0, 0.1, 0.25) == 400
+        assert _graded_curve_sampling(100.0, 0.1, 0.25) == 2000
+
+    def test_cap_is_reported(self, caplog):
+        length, size, rate = 1000.0, 0.01, 2.0
+        with caplog.at_level("WARNING", logger="gsim.palace.mesh.generator"):
+            sampling = _graded_curve_sampling(length, size, rate)
+
+        assert sampling == 20000
+        assert "Lower growth_per_um" in caplog.text
+        assert self._size_between_samples(length, size, rate, sampling) > 1.1 * size
+
+    def test_no_warning_below_the_cap(self, caplog):
+        with caplog.at_level("WARNING", logger="gsim.palace.mesh.generator"):
+            _graded_curve_sampling(10.0, 0.05, 2.0)
+
+        assert caplog.text == ""

@@ -87,6 +87,11 @@ of distance up to `max_mesh_size_um`. `sources=` limits the features it grows fr
 `"fine_regions"`). A growth of 0.1 to 0.25 per µm keeps the oxide elements around a small section well shaped at a node
 count close to the ungraded mesh. Grading is off by default, so existing meshes and results do not change.
 
+`refined_mesh_size_um` does not set the same size in the two cases. Without grading, the elements on the internal curves
+are half of `refined_mesh_size_um`; with grading, the elements on the conductors and Interfaces are
+`refined_mesh_size_um` itself. To keep the same size at the contacts and the junction when you turn grading on, halve
+`refined_mesh_size_um`.
+
 ### Doping
 
 A profile names the mesh Region it applies to and its dopant type. `StepDoping` is uniform inside an optional box,
