@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import cos, radians, sin
+from math import cos, isfinite, radians, sin, tan
 from typing import Any
 
 import gdsfactory as gf
 from pdk_schema import MaterialCard
-from shapely import Point
+from shapely import Point, box
 
 from gsim.common.materials import (
     MaterialResolutionError,
@@ -107,19 +107,53 @@ def _resolve_project_cards(
     return get_project_material_cards(pdk)
 
 
+def _inside_xy_window(geometry: Any, level: Any, x_bounds: Any, y_bounds: Any) -> bool:
+    """Conservatively retain any footprint whose sidewalls can reach the window."""
+    if x_bounds is None and y_bounds is None:
+        return True
+    if level.bias not in (None, 0, 0.0) or level.z_to_bias is not None:
+        return True  # Leave unsupported profiles to the backend's diagnostics.
+    slope = tan(radians(float(level.sidewall_angle))) * abs(float(level.thickness))
+    offset = max(0, level.width_to_z * slope, (level.width_to_z - 1) * slope)
+    footprint = geometry.buffer(offset, join_style=2) if offset else geometry
+    xmin, ymin, xmax, ymax = footprint.bounds
+    left, right = x_bounds if x_bounds is not None else (xmin, xmax)
+    bottom, top = y_bounds if y_bounds is not None else (ymin, ymax)
+    return footprint.intersection(box(left, bottom, right, top)).area > 0
+
+
 def _resolved_layers(
-    derived_component: Any, layer_stack: Any
+    derived_component: Any,
+    layer_stack: Any,
+    z_bounds: tuple[float, float] | None = None,
+    x_bounds: tuple[float, float] | None = None,
+    y_bounds: tuple[float, float] | None = None,
 ) -> dict[str, ResolvedLayer]:
     """Extract nonempty physical layers while preserving fabrication fields."""
+    for axis, bounds in (("x", x_bounds), ("y", y_bounds), ("z", z_bounds)):
+        if bounds is not None and (
+            not all(isfinite(value) for value in bounds) or bounds[0] >= bounds[1]
+        ):
+            raise LayerResolutionError(
+                f"{axis}_bounds must be finite and strictly increasing."
+            )
     resolved: dict[str, ResolvedLayer] = {}
     for layer_key, layer_level in layer_stack.layers.items():
+        z_start = float(layer_level.zmin)
+        z_end = z_start + float(layer_level.thickness)
+        if z_bounds is not None and (
+            max(z_start, z_end) <= z_bounds[0] or min(z_start, z_end) >= z_bounds[1]
+        ):
+            continue
         geometry = fuse_polygons(
             derived_component,
             layer_level,
             round_tol=6,
             simplify_tol=0.0,
         )
-        if geometry.is_empty:
+        if geometry.is_empty or not _inside_xy_window(
+            geometry, layer_level, x_bounds, y_bounds
+        ):
             continue
         material = layer_level.material
         if not material:
@@ -259,6 +293,29 @@ def _port_candidates(
     return sorted(candidates, key=lambda layer: (layer.mesh_order, layer.key))
 
 
+def _connected_port_layers(candidates: list[ResolvedLayer]) -> list[ResolvedLayer]:
+    """Join touching bands of the primary material at a port's position."""
+    if not candidates:
+        return []
+    connected = [candidates[0]]
+    remaining = candidates[1:]
+    while remaining:
+        lower = min(layer.z_bounds[0] for layer in connected)
+        upper = max(layer.z_bounds[1] for layer in connected)
+        touching = [
+            layer
+            for layer in remaining
+            if layer.material == connected[0].material
+            and layer.z_bounds[0] <= upper + _PORT_POSITION_TOLERANCE_UM
+            and layer.z_bounds[1] >= lower - _PORT_POSITION_TOLERANCE_UM
+        ]
+        if not touching:
+            break
+        connected.extend(touching)
+        remaining = [layer for layer in remaining if layer not in touching]
+    return connected
+
+
 def _resolved_ports(
     component: Any,
     layers: Mapping[str, ResolvedLayer],
@@ -276,8 +333,10 @@ def _resolved_ports(
                 f"Port {port.name!r} on layer {_port_layer(port)} does not map to "
                 "resolved LayerStack geometry."
             )
-        layer = candidates[0] if candidates else None
-        z_lower, z_upper = layer.z_bounds if layer is not None else (0.0, 0.0)
+        owners = _connected_port_layers(candidates)
+        layer = owners[0] if owners else None
+        z_lower = min((owner.z_bounds[0] for owner in owners), default=0.0)
+        z_upper = max((owner.z_bounds[1] for owner in owners), default=0.0)
         resolved[port.name] = ResolvedPort(
             name=port.name,
             center=(
@@ -291,6 +350,7 @@ def _resolved_ports(
             port_type=port_type,
             layer_key=layer.key if layer is not None else None,
             material=layer.material if layer is not None else None,
+            layer_keys=tuple(owner.key for owner in owners) if len(owners) > 1 else (),
         )
     return resolved
 
@@ -322,6 +382,9 @@ def resolve_passive_pcell(
     settings: Mapping[str, Any] | None = None,
     wavelength_um: float = 1.55,
     port_layer_map: Mapping[tuple[int, int], str] | None = None,
+    z_bounds: tuple[float, float] | None = None,
+    x_bounds: tuple[float, float] | None = None,
+    y_bounds: tuple[float, float] | None = None,
 ) -> ResolvedPassivePcell:
     """Resolve a passive component, fabrication stack, materials, and ports.
 
@@ -331,6 +394,11 @@ def resolve_passive_pcell(
     gsim's built-in fallbacks. ``port_layer_map`` associates a virtual port
     layer with the key of a physical LayerStack entry. The port must still lie
     on that entry's resolved geometry.
+
+    Optional axis bounds omit external films and footprints before material
+    lookup. Intersecting layers retain their original extrusion profiles; the
+    backend clips their solids. Contiguous bands of the same material at an
+    unmapped port contribute to its complete cross-section.
     """
     pdk_object, pdk_or_module = _resolve_pdk(pdk)
     resolved_component = _resolve_component(pdk_object, component, settings)
@@ -343,7 +411,9 @@ def resolve_passive_pcell(
         raise LayerResolutionError(
             f"Could not evaluate derived layers: {error}"
         ) from error
-    layers = _resolved_layers(resolved_component, layer_stack)
+    layers = _resolved_layers(
+        resolved_component, layer_stack, z_bounds, x_bounds, y_bounds
+    )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
     materials = {}
     for material_name in dict.fromkeys(layer.material for layer in layers.values()):

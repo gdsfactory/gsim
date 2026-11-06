@@ -268,7 +268,9 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 raise FDTDGeometryError(
                     f"Optical port {port.name!r} has no owning layer"
                 )
-            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            owners = [resolved.layers[key] for key in port.physical_layer_keys]
+            z_lower = min(layer.z_bounds[0] for layer in owners)
+            z_upper = max(layer.z_bounds[1] for layer in owners)
             width_um = port.width + 2 * margin_um
             height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
@@ -331,6 +333,9 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
             port_layer_map=self.geometry.port_layer_map,
+            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
+            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
+            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
         )
         return self._resolved
 
@@ -417,6 +422,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
         config_path.write_text(

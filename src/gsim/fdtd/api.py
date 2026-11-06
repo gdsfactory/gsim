@@ -336,6 +336,13 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
+    clip_geometry: bool = Field(
+        default=False,
+        description=(
+            "Clip material geometry to explicit bounds and skip stack films "
+            "outside the vertical window."
+        ),
+    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
