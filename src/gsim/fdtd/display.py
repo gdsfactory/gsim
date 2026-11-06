@@ -41,7 +41,7 @@ def _layer_tuple(
 def _visibility_by_layer(
     views: Mapping[str, Any], parent_visible: bool = True, *, layers: Any = None
 ) -> dict[tuple[int, int], bool]:
-    """Include the visibility of every enclosing layer-view group."""
+    """Show a layer if any view and all of that view's parents are visible."""
     visibility = {}
     for name, view in views.items():
         visible = parent_visible and getattr(view, "visible", True)
@@ -49,12 +49,14 @@ def _visibility_by_layer(
         if layer is None:
             layer = _layer_tuple(getattr(layers, name, None))
         if layer is not None:
-            visibility[layer] = visible
-        visibility.update(
-            _visibility_by_layer(
-                getattr(view, "group_members", {}), visible, layers=layers
-            )
+            visibility[layer] = visibility.get(layer, False) or visible
+        child_visibility = _visibility_by_layer(
+            getattr(view, "group_members", {}), visible, layers=layers
         )
+        for child_layer, child_visible in child_visibility.items():
+            visibility[child_layer] = (
+                visibility.get(child_layer, False) or child_visible
+            )
     return visibility
 
 
@@ -92,8 +94,11 @@ def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, Group
 
     Stack info.opacity supplies numeric opacity. Stack info.visible overrides
     the layer view's effective visibility. Derived layers use their derived
-    GDS layer view where present. No display metadata changes simulation inputs.
+    GDS layer view where present. Only layers with resolved geometry are styled
+    and validated. No display metadata changes simulation inputs.
     """
+    if resolved is None:
+        return {}
     stack = getattr(resolved, "layer_stack", None)
     if stack is None:
         return {}
@@ -109,6 +114,8 @@ def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, Group
     )
     styles: dict[str, GroupStyle] = {}
     for name, level in stack.layers.items():
+        if name not in resolved.layers:
+            continue
         style: GroupStyle = {}
         for declared_layer in (level.derived_layer, level.layer):
             layer = _layer_tuple(declared_layer, pdk, component)
