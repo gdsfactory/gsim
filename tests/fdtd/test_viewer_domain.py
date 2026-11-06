@@ -15,6 +15,7 @@ import pytest
 
 from gsim import fdtd
 from gsim.fdtd.metadata import _cell_counts
+from gsim.fdtd.viz import plot_mesh
 
 
 @pytest.mark.parametrize(("previous_y_extent", "new_y_extent"), [(1, 2), (2, 1)])
@@ -45,30 +46,102 @@ def test_viewer_refreshes_domain_without_overwriting_saved_run(
     assert updated_html != original_html
     assert artifacts.mesh_path.read_bytes() == saved_mesh
     assert simulation._last_artifacts is artifacts
-    assert simulation._last_artifacts_domain is not None
-    assert simulation._last_artifacts_domain["y_bounds"] == (
-        -previous_y_extent,
-        previous_y_extent,
+
+
+@pytest.mark.parametrize("method", ["plot_3d", "plot_2d_interactive"])
+@pytest.mark.parametrize("edit", ["component", "settings", "mesh_size", "background"])
+def test_viewer_refreshes_all_mesh_inputs(
+    tmp_path, fdtd_pdk_module, monkeypatch, method, edit
+):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module, default_port="o1")
+    simulation.materials(overrides={"Si": 3.5, "SiO2": 1.44})
+    simulation.geometry("straight", settings={"length": 2.0})
+    artifacts = simulation.write(tmp_path / "saved")
+    saved_files = {path: path.read_bytes() for path in (tmp_path / "saved").iterdir()}
+    original_mesh = meshio.read(artifacts.mesh_path)
+    if edit == "component":
+        simulation.geometry.component = fdtd_pdk_module.PDK.cells["straight"](length=4)
+        simulation.geometry.settings.clear()
+    elif edit == "settings":
+        simulation.geometry.settings["length"] = 4
+    elif edit == "mesh_size":
+        simulation.geometry.mesh_size_nm = 300
+    else:
+        simulation.materials(background="Si", overrides={"Si": 3.5})
+    written = []
+    original_write = simulation.write
+
+    def record_write(directory):
+        preview = original_write(directory)
+        written.append(
+            (
+                meshio.read(preview.mesh_path),
+                json.loads(preview.config_path.read_text()),
+            )
+        )
+        return preview
+
+    monkeypatch.setattr(simulation, "write", record_write)
+    viewer = getattr(simulation, method)(
+        **({"axis": "x"} if method == "plot_2d_interactive" else {})
     )
+
+    assert len(written) == 1
+    preview_mesh, config = written[0]
+    if edit in {"component", "settings"}:
+        assert preview_mesh.points[:, 0].max() == pytest.approx(4000)
+        if method == "plot_2d_interactive":
+            assert '"positionUm":2.0' in viewer.html
+    elif edit == "mesh_size":
+        assert len(preview_mesh.points) > len(original_mesh.points)
+    else:
+        assert config["background_refractive_index"] == 3.5
+    assert simulation._last_artifacts is artifacts
+    assert all(path.read_bytes() == content for path, content in saved_files.items())
 
 
 @pytest.mark.skipif(
     shutil.which("node") is None, reason="Node runs the viewer JavaScript"
 )
 @pytest.mark.parametrize(
-    ("size_um", "cell_size_nm", "pml_cells", "expected_shape"),
+    ("size_nm", "cell_size_nm", "pml_cells", "expected_shape"),
     [
-        ((12, 9, 2.5), 60, 32, [266, 216, 144]),
-        ((12, 6, 2.5), 60, 32, [266, 166, 144]),
-        ((12, 6, 0.6), 60, 32, [266, 166, 112]),
-        ((1, 1, 1), 100, 0, [12, 12, 48]),
-        ((1, 1, 1), 100, 3, [18, 18, 80]),
-        ((0.18, 0.18, 0.18), 60, 32, [69, 69, 112]),
+        ((12000, 9000, 2500), 60, 32, [266, 216, 144]),
+        ((12000, 6000, 2500), 60, 32, [266, 166, 144]),
+        ((12000, 6000, 600), 60, 32, [266, 166, 112]),
+        ((1000, 1000, 1000), 100, 0, [12, 12, 48]),
+        ((1000, 1000, 1000), 100, 3, [18, 18, 80]),
+        ((180, 180, 180), 60, 32, [69, 69, 112]),
+        ((1260.00003, 1000, 1000), 60, 0, [23, 19, 64]),
+        ((1260.00003, 1260.00003, 960.00003), 60, 0, [23, 23, 64]),
+        ((1260.000029, 1260.000029, 960.000029), 60, 0, [23, 23, 48]),
+        ((1260.000031, 1260.000031, 960.000031), 60, 0, [24, 24, 64]),
     ],
 )
 def test_viewer_grid_estimate_matches_metadata(
-    size_um, cell_size_nm, pml_cells, expected_shape
+    tmp_path, size_nm, cell_size_nm, pml_cells, expected_shape
 ):
+    mesh_path = tmp_path / "grid.msh"
+    meshio.write(
+        mesh_path,
+        meshio.Mesh(
+            points=[
+                [0, 0, 0],
+                [size_nm[0], 0, 0],
+                [0, size_nm[1], 0],
+                [0, 0, size_nm[2]],
+            ],
+            cells=[("tetra", [[0, 1, 2, 3]])],
+            cell_data={"gmsh:physical": [[2]], "gmsh:geometrical": [[1]]},
+            field_data={"core": [2, 3]},
+        ),
+        file_format="gmsh22",
+        binary=False,
+    )
+    viewer = plot_mesh(mesh_path, cell_size_nm=cell_size_nm, pml_cells=pml_cells)
+    options_match = re.search(r"const options = (.*);", viewer.html)
+    assert options_match is not None
+    options = json.loads(options_match.group(1))
     template = files("gsim.fdtd").joinpath("assets/mesh-viewer.html").read_text("utf8")
     stats_code = template[
         template.index("function formatNumber(") : template.index(
@@ -120,11 +193,8 @@ console.log(JSON.stringify({
 }));
 """
     script = (
-        script.replace("INPUT_SIZE", json.dumps(size_um))
-        .replace(
-            "INPUT_OPTIONS",
-            json.dumps({"cellSizeNm": cell_size_nm, "pmlCells": pml_cells}),
-        )
+        script.replace("INPUT_SIZE", json.dumps([value / 1000 for value in size_nm]))
+        .replace("INPUT_OPTIONS", json.dumps(options))
         .replace("STATS_CODE", stats_code)
     )
     node_path = shutil.which("node")
@@ -142,9 +212,7 @@ console.log(JSON.stringify({
             Any,
             SimpleNamespace(
                 grid=SimpleNamespace(
-                    non_pml_bounds=SimpleNamespace(
-                        min=[0, 0, 0], max=[value * 1000 for value in size_um]
-                    ),
+                    non_pml_bounds=SimpleNamespace(min=[0, 0, 0], max=size_nm),
                     nanometers_per_cell=cell_size_nm,
                     pml_cells=pml_cells,
                 )

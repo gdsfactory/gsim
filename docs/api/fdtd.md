@@ -181,6 +181,9 @@ viewer.save("mesh.html")
 
 The interactive 2D viewer includes a slider that moves the plane through the
 mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
+Each call resolves the current settings and generates a temporary mesh, so edits
+to geometry, meshing, background material, and domain settings appear immediately.
+Previously written simulation artifacts are preserved.
 The 3D viewer uses each PDK stack entry's `info["opacity"]` and layer-view
 visibility by default, including hidden parent groups. If several layer views
 refer to the same GDS layer, it is initially visible when any of those views
@@ -197,7 +200,8 @@ toward the view center instead. The same choice is available in the viewer's
 **Zoom toward** controls.
 
 The viewer also summarizes the physical domain, estimated Yee-grid dimensions
-and total cell count (including PML). These values are estimates; the solver
+and total cell count (including PML). Grid counts use the same Python calculation
+as `metadata.json`, preserving its rounding and per-axis alignment. These values are estimates; the solver
 backend is authoritative when it constructs the final grid.
 
 ### 2D plotting APIs and compatibility (0.9.0)

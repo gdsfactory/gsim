@@ -11,7 +11,10 @@ from math import isfinite
 from pathlib import Path
 from typing import Literal
 
+import meshio
+
 from gsim.fdtd.display import GroupStyle, normalize_group_styles
+from gsim.fdtd.metadata import estimate_cell_counts
 
 ViewerMode = Literal["surface", "mesh", "slice", "mesh_slice"]
 Axis = Literal["x", "y", "z"]
@@ -60,6 +63,7 @@ def plot_mesh(
     zoom_to_cursor: bool = True,
     cell_size_nm: float | None = None,
     pml_cells: int | None = None,
+    grid_shape: Sequence[int] | None = None,
     height: int = 600,
 ) -> MeshViewer:
     """Build an interactive GDSFactory FDTD viewer for a Gmsh mesh.
@@ -69,6 +73,8 @@ def plot_mesh(
     same public CDN used by the original GDSFactory FDTD viewer.
     ``group_styles`` supplies optional initial visibility and surface opacity
     by physical-group name. Explicit show/hide selections override visibility.
+    ``grid_shape`` supplies metadata's grid dimensions when available. Otherwise
+    grid counts are computed in Python from the mesh's original nanometer bounds.
     """
     path = Path(mesh_path)
     if not path.is_file():
@@ -85,6 +91,22 @@ def plot_mesh(
         raise ValueError("pml_cells must be nonnegative when provided")
     if height <= 0:
         raise ValueError("height must be positive")
+    if grid_shape is not None and (
+        len(grid_shape) != 3
+        or any(
+            isinstance(count, bool) or not isinstance(count, int) or count <= 0
+            for count in grid_shape
+        )
+    ):
+        raise ValueError("grid_shape must contain three positive integers")
+    if grid_shape is None and cell_size_nm is not None:
+        mesh = meshio.read(path)
+        grid_shape = estimate_cell_counts(
+            mesh.points.min(axis=0).tolist(),
+            mesh.points.max(axis=0).tolist(),
+            cell_size_nm,
+            pml_cells or 0,
+        )["total_cells_xyz"]
 
     template = files("gsim.fdtd").joinpath("assets/mesh-viewer.html").read_text("utf8")
     options = {
@@ -92,6 +114,7 @@ def plot_mesh(
         "cellSizeNm": cell_size_nm,
         "hideGroups": list(hide_groups),
         "groupStyles": normalize_group_styles(group_styles or {}),
+        "gridShape": None if grid_shape is None else list(grid_shape),
         "mode": mode,
         "pmlCells": pml_cells,
         "positionUm": position_um,

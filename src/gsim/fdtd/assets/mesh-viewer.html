@@ -912,20 +912,6 @@
         return value.toLocaleString(undefined, { maximumFractionDigits });
       }
 
-      function estimateYeeGrid(size, cellSizeNm, pmlCells) {
-        // Match metadata.py: aligned interiors, PML, and solver guard cells.
-        const alignment = [1, 1, 16];
-        return size.map((value, axis) => {
-          const group = alignment[axis];
-          const interior = Math.ceil(
-            Number(((value * 1000) / cellSizeNm).toFixed(6)),
-          );
-          const alignedInterior = Math.ceil(interior / group) * group;
-          const alignedPml = Math.ceil(pmlCells / group) * group;
-          return alignedInterior + 2 * (alignedPml + group);
-        });
-      }
-
       function updateStats(mesh) {
         const bounds = new THREE.Box3();
         for (const point of mesh.nodes.values())
@@ -937,9 +923,8 @@
             `${size.map((value) => formatNumber(value)).join(" × ")} µm`,
           ],
         ];
-        if (options.cellSizeNm) {
-          const pmlCells = options.pmlCells ?? 0;
-          const yeeGrid = estimateYeeGrid(size, options.cellSizeNm, pmlCells);
+        if (options.gridShape) {
+          const yeeGrid = options.gridShape;
           const totalCells = yeeGrid.reduce(
             (product, count) => product * count,
             1,

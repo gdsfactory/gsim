@@ -166,7 +166,6 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         self.geometry.bind(self._resolve_geometry)
         self._resolved: ResolvedPassivePcell | None = None
         self._last_artifacts: SimulationArtifacts | None = None
-        self._last_artifacts_domain: dict[str, Any] | None = None
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Validate source replacements while keeping concern mutation concise."""
@@ -431,7 +430,6 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             config_path=config_path,
             manifest=manifest,
         )
-        self._last_artifacts_domain = self.domain.model_dump(exclude={"pml_cells"})
         return self._last_artifacts
 
 
