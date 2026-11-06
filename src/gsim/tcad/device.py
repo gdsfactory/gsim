@@ -62,21 +62,8 @@ _ELECTRODE_GROUPS: tuple[str, ...] = ("volumes", "conductor_surfaces", "pec_surf
 SIGNED_EDGE_COUPLE: str = "SignedEdgeCouple"
 SIGNED_NODE_VOLUME: str = "SignedNodeVolume"
 
-#: The DEVSIM parameters naming the couple and volume models, and their
-#: values for each choice of ``Solver.edge_couples``.
-_COUPLE_MODELS: dict[str, dict[str, str]] = {
-    "signed": {
-        "edge_couple_model": SIGNED_EDGE_COUPLE,
-        "node_volume_model": SIGNED_NODE_VOLUME,
-    },
-    "builtin": {
-        "edge_couple_model": "EdgeCouple",
-        "node_volume_model": "NodeVolume",
-    },
-}
 
-
-def _install_signed_couples(devsim: Any, device: str, region: str) -> None:
+def _install_region_couples(devsim: Any, device: str, region: str) -> None:
     """Store a Region's signed edge couples and node volumes as DEVSIM models.
 
     The couple of an edge is the sum, over the Region's triangles holding
@@ -144,29 +131,22 @@ def _install_signed_couples(devsim: Any, device: str, region: str) -> None:
     )
 
 
-def apply_edge_couples(
-    devsim: Any, device: str, regions: Iterable[str], kind: str
-) -> None:
-    """Choose the edge couples and node volumes DEVSIM assembles with.
+def _install_signed_couples(devsim: Any, device: str, regions: Iterable[str]) -> None:
+    """Make DEVSIM assemble the device with signed couples and volumes.
 
-    Args:
-        devsim: The DEVSIM module.
-        device: The DEVSIM device.
-        regions: Every Region of the device.
-        kind: ``"signed"`` installs the finite-element couples of
-            :func:`_install_signed_couples`; ``"builtin"`` keeps DEVSIM's
-            own ``EdgeCouple`` and ``NodeVolume``.
-
-    Raises:
-        ValueError: For any other *kind*.
+    Installs :func:`_install_region_couples` in every Region and points
+    the device's ``edge_couple_model`` and ``node_volume_model``
+    parameters at them. The parameters are set on the device alone, so
+    other DEVSIM devices in the process keep their own.
     """
-    if kind not in _COUPLE_MODELS:
-        raise ValueError(f"Unknown edge couples {kind!r}: 'signed' or 'builtin'.")
-    if kind == "signed":
-        for region in regions:
-            _install_signed_couples(devsim, device, region)
-    for name, value in _COUPLE_MODELS[kind].items():
-        devsim.set_parameter(device=device, name=name, value=value)
+    for region in regions:
+        _install_region_couples(devsim, device, region)
+    devsim.set_parameter(
+        device=device, name="edge_couple_model", value=SIGNED_EDGE_COUPLE
+    )
+    devsim.set_parameter(
+        device=device, name="node_volume_model", value=SIGNED_NODE_VOLUME
+    )
 
 
 def _unique_devsim_name(kind: str) -> str:
@@ -513,11 +493,10 @@ class Device:
         self.name = device
         _LIVE_DEVICES.add(device)
         try:
-            apply_edge_couples(
-                devsim,
-                device,
-                [*layout.regions, *layout.insulators],
-                self.solver.edge_couples,
+            # DEVSIM's own couples misread obtuse triangles; see
+            # _install_region_couples.
+            _install_signed_couples(
+                devsim, device, [*layout.regions, *layout.insulators]
             )
             bound = self._bind_insulator_interfaces(devsim, device)
             for region in layout.regions:

@@ -119,10 +119,13 @@ def p1_capacitance(mesh) -> float:
 
 
 def _devsim_device(mesh, kind: str) -> tuple[Any, str]:
-    """Carriers-off DEVSIM device on the mesh with the chosen couples."""
+    """Carriers-off DEVSIM device on the mesh.
+
+    ``kind`` is ``"signed"`` for gsim's couples, ``"builtin"`` for DEVSIM's own.
+    """
     from devsim.python_packages import simple_physics as sp
 
-    from gsim.tcad.device import apply_edge_couples
+    from gsim.tcad.device import _install_signed_couples
     from gsim.tcad.runtime import require_devsim
 
     devsim = require_devsim()
@@ -157,7 +160,8 @@ def _devsim_device(mesh, kind: str) -> tuple[Any, str]:
     )
     devsim.finalize_mesh(mesh=mesh_name)
     devsim.create_device(mesh=mesh_name, device=device)
-    apply_edge_couples(devsim, device, ["lower", "upper"], kind)
+    if kind == "signed":
+        _install_signed_couples(devsim, device, ["lower", "upper"])
     for region, permittivity in _PERMITTIVITY.items():
         devsim.set_parameter(
             device=device,

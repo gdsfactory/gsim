@@ -93,15 +93,9 @@ class TestDefaults:
         assert solver.max_iterations == 100
         assert solver.extended_precision is True
         assert solver.claim_devsim_namespace is True
-        assert solver.edge_couples == "signed"
 
 
 class TestValidation:
-    def test_edge_couples_are_signed_or_builtin(self):
-        assert Solver(edge_couples="builtin").edge_couples == "builtin"
-        with pytest.raises(ValidationError, match="edge_couples"):
-            Solver(edge_couples="absolute")
-
     def test_a_temperature_must_be_positive(self):
         with pytest.raises(ValidationError, match="temperature_k"):
             Materials(temperature_k=0.0)

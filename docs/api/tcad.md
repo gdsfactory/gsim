@@ -76,8 +76,7 @@ their unit.
 - `interfaces`: `add(name=, region_a=, region_b=)`, `remove(name)`, `sim.interfaces[name]`, iteration.
 - `solver(...)`: mesh resolution (`mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `refinement_boxes`),
   Newton convergence (`absolute_error`, `relative_error`, `max_iterations`, `bias_step_v`, `extended_precision`), the
-  small-signal frequencies (`small_signal_freq_hz`, `junction_freq_hz`), the finite-box couples (`edge_couples`) and
-  `claim_devsim_namespace`.
+  small-signal frequencies (`small_signal_freq_hz`, `junction_freq_hz`) and `claim_devsim_namespace`.
 
 ### Doping
 
@@ -160,20 +159,25 @@ The solve takes DEVSIM's silicon parameters, with one change: the intrinsic carr
 - **Temperature:** `materials.temperature_k` sets the thermal voltage, the intrinsic density and the SRH trap densities.
   The Masetti mobility is its 300 K fit at every temperature.
 
-## Edge couples
+## Edge couples and node volumes
 
 DEVSIM assembles its equations by finite boxes: each mesh edge carries a couple, the length of the boundary shared by
-its two nodes' boxes, and each node a volume. DEVSIM's own couples take the absolute cotangent of the angle opposite
-the edge, so every obtuse triangle adds coupling the potential equation should not have, and the capacitance comes out
-too high on meshes with obtuse triangles. By default (`solver.edge_couples = "signed"`) gsim installs the signed
-cotangent couples and the node volumes that go with them: the potential equation is then the P1 finite-element
-Laplacian on any triangulation, and the node volumes of each Region add up to its area. On the padded diode of the test
-suite the small-signal capacitance falls by 9 % to 13 % against DEVSIM's own couples and moves closer to the depletion
-approximation. `solver.edge_couples = "builtin"` restores DEVSIM's couples and the results of earlier versions.
+its two nodes' boxes, and each node a volume. DEVSIM's own couples and volumes take the absolute cotangent of the angle
+opposite each edge, which is wrong on every obtuse triangle: the potential equation gains coupling it should not have,
+capacitance comes out too high and the node volumes of a Region add up to more than its area. gsim corrects this: each
+device is assembled with the signed cotangent couples and the node volumes that go with them, so the potential equation
+is the P1 finite-element Laplacian on any triangulation and the node volumes of each Region add up to its area.
 
-Signed couples can be negative on an edge whose opposite angles add up to more than 180°. The drift-diffusion
-Scharfetter-Gummel flux takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to
-a monotone scheme.
+The size of the correction depends on the mesh. Measured:
+
+- A carriers-off capacitor on a mesh with obtuse triangles in both dielectrics now matches an independent P1
+  finite-element solve (scikit-fem) to 1e-14; DEVSIM's own couples read 35 % high on that mesh.
+- On the padded PN diode of the test suite (0, 0.5 and 1 V reverse bias), the small-signal capacitance falls by 9.3 %
+  to 12.8 % and the reverse current by up to 19 %, and the capacitance moves closer to the depletion approximation.
+  Carrier totals move by 0.2 %.
+
+Signed couples can be negative on an edge whose opposite angles add up to more than 180°. The Scharfetter-Gummel flux
+takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to a monotone scheme.
 
 ## Limits
 
