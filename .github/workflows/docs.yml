@@ -32,7 +32,14 @@ jobs:
       uses: astral-sh/setup-uv@v6
     - name: List published notebooks
       id: notebooks
-      run: echo "notebooks=$(uv run python scripts/list_docs_notebooks.py --json)" >> "$GITHUB_OUTPUT"
+      env:
+        FRESH_INDUCTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_inductor }}
+      run: |
+        if [[ "$FRESH_INDUCTOR" == "true" ]]; then
+          echo 'notebooks=["nbs/palace_inductor.ipynb"]' >> "$GITHUB_OUTPUT"
+        else
+          echo "notebooks=$(uv run python scripts/list_docs_notebooks.py --json)" >> "$GITHUB_OUTPUT"
+        fi
     - name: Detect changed notebooks
       if: github.event_name == 'pull_request'
       id: changed-notebooks
@@ -122,6 +129,7 @@ jobs:
         retention-days: 1
   build:
     name: Build docs
+    if: github.event_name != 'workflow_dispatch' || !inputs.fresh_inductor
     needs: execute-notebooks
     runs-on: ubuntu-latest
     steps:
@@ -148,13 +156,13 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: just docs
     - name: Upload Pages artifact
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
       uses: actions/upload-pages-artifact@v3
       with:
         path: docs/site
   pages:
     name: Deploy to GitHub Pages
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: build
     permissions:

@@ -122,12 +122,21 @@ def passive_two_port():
 
 
 def test_notebook_enforces_passivity_and_preserves_analytic_impedance(
-    notebook_workflow, passive_two_port
+    notebook_workflow, passive_two_port, monkeypatch
 ):
     """The tutorial's exact 2+2 fit stays passive and within its 5% error limit."""
     fit, validate = notebook_workflow
     circuit, frequencies, reference_z_diff = passive_two_port
+    enforced_limits = []
+    original_enforce = VectorFit.passivity_enforce
+
+    def record_enforcement(self, **kwargs):
+        enforced_limits.append(kwargs.get("f_max"))
+        return original_enforce(self, **kwargs)
+
+    monkeypatch.setattr(VectorFit, "passivity_enforce", record_enforcement)
     fitted = fit(circuit, frequencies)
+    assert enforced_limits == [float(frequencies.max())]
     relative_error, max_singular_value = validate(fitted, frequencies, reference_z_diff)
     assert relative_error < 0.04
     assert max_singular_value <= 1 + 1e-6
