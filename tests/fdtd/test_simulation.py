@@ -381,6 +381,7 @@ def test_vertical_port_becomes_fiber_monitor_not_material_port(
 
     assert document["excitation"]["type"] == "eigenmode"
     assert document["excitation"]["default_port"] == "o1"
+    assert "mode" not in document["excitation"]
     assert set(document["geometry"]["ports"]) == {"o1"}
     assert "port_o2" not in mesh.field_data
     assert document["monitors"][0]["name"] == "o2"

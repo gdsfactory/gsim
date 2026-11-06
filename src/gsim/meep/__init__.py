@@ -49,6 +49,7 @@ from gsim.meep.models import (
     SParameterResult,
     Symmetry,
     WavelengthConfig,
+    s_matrix,
 )
 from gsim.meep.results import ModeSweepResult
 from gsim.meep.simulation import BuildResult, Simulation
@@ -96,6 +97,7 @@ __all__ = [
     "mode_y_grid",
     "mode_z_grid",
     "refractive_index_profile",
+    "s_matrix",
     "solve_cross_section_mode",
     "solve_slab_mode",
     "solve_slab_modes",

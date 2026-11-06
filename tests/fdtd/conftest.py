@@ -60,6 +60,22 @@ def vertical_coupler_component(length: float = 2.0) -> gf.Component:
     return component
 
 
+def bend_component() -> gf.Component:
+    """Return an L bend with guided ports facing negative x and positive y."""
+    component = gf.Component()
+    component.add_polygon(
+        [(0, -0.25), (2.25, -0.25), (2.25, 2), (1.75, 2), (1.75, 0.25), (0, 0.25)],
+        layer=(1, 0),
+    )
+    component.add_port(
+        name="o1", center=(0, 0), width=0.5, orientation=180, layer=(1, 0)
+    )
+    component.add_port(
+        name="o2", center=(2, 2), width=0.5, orientation=90, layer=(1, 0)
+    )
+    return component
+
+
 def ten_nm_feature_component(length: float = 2.0) -> gf.Component:
     """Return a waveguide plus one explicit 10 nm-wide material feature."""
     component = gf.Component()
@@ -124,6 +140,7 @@ def fdtd_pdk_module() -> SimpleNamespace:
         name="fdtd_test_pdk",
         cells={
             "straight": straight_component,
+            "bend": bend_component,
             "vertical_coupler": vertical_coupler_component,
             "ten_nm_feature": ten_nm_feature_component,
         },

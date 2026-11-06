@@ -80,6 +80,15 @@ the round trip. The junction model file format is specified in
 - [`terminated_response`][gsim.common.circuit.terminated_response]
 - [`line_driven_response`][gsim.common.circuit.line_driven_response]
 
+## S-matrix export
+
+An n-port S-matrix built from photonic solver runs by [`gsim.fdtd.s_matrix`][gsim.fdtd.s_matrix] or
+[`gsim.meep.s_matrix`][gsim.meep.s_matrix], with exports to a SAX model and a Touchstone file.
+
+- [`SMatrix`][gsim.common.s_matrix.SMatrix]
+- [`SMatrixRun`][gsim.common.s_matrix.SMatrixRun]
+- [`assemble_s_matrix`][gsim.common.s_matrix.assemble_s_matrix]
+
 ## Traveling-wave MZM figures of merit
 
 The traveling-wave Mach-Zehnder modulator on plain arrays: the electro-optic and walk-off responses, $V_\pi L$, the

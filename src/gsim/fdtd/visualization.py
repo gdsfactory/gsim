@@ -1,0 +1,255 @@
+"""Static and interactive setup views for GDSFactory FDTD simulations."""
+
+from __future__ import annotations
+
+import warnings
+from collections.abc import Sequence
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, Any, Literal
+
+from gsim.fdtd.api import PortSource
+from gsim.fdtd.mesh import generate_mesh
+from gsim.fdtd.runtime import RuntimeConfigMixin
+from gsim.fdtd.viz import Axis, ViewerMode, validate_slice
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
+    from gsim.common.materials import MaterialSnapshot
+    from gsim.common.pdk import ResolvedPassivePcell
+    from gsim.fdtd.api import Geometry
+    from gsim.fdtd.models import SimulationArtifacts
+
+
+class VisualizationMixin(RuntimeConfigMixin):
+    """Render FDTD setup geometry without importing Matplotlib until requested."""
+
+    geometry: Geometry
+    _resolved: ResolvedPassivePcell | None
+    _last_artifacts: SimulationArtifacts | None
+
+    def _resolve_geometry(self) -> ResolvedPassivePcell:
+        """Resolve the geometry supplied by the concrete simulation."""
+        raise NotImplementedError
+
+    def _material_snapshots(self) -> dict[str, MaterialSnapshot]:
+        """Resolve optical properties supplied by the concrete simulation."""
+        raise NotImplementedError
+
+    def write(self, output_dir: str | Path) -> SimulationArtifacts:
+        """Write artifacts using the concrete simulation workflow."""
+        raise NotImplementedError
+
+    def plot_2d_static(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        ax: Axes | None = None,
+        cmap: str = "Blues",
+        legend: bool = True,
+        aspect: Literal["equal", "auto"] = "equal",
+        figsize: tuple[float, float] | None = None,
+    ) -> Axes:
+        """Plot a static refractive-index cross-section with setup annotations.
+
+        The normal axis defaults to z (an XY view). Positions and axis labels
+        are in micrometers; an omitted position uses the geometry midpoint.
+        Colors show the real refractive index at the source center wavelength.
+        PML is hatched outside the physical domain. Source and monitor marks
+        appear only when intersected by the slice.
+
+        The returned Matplotlib Axes supports normal figure export. Pass ax
+        to compose subplots, show_mesh=True to draw transfer-mesh edges, or
+        use plot_2d_interactive() for the original HTML slider viewer.
+        Geometry is resolved afresh so edits to the setup are reflected. A
+        temporary mesh is generated without writing run artifacts or requiring
+        a selected source port.
+        """
+        from gsim.fdtd.slice_viz import plot_mesh_slice
+
+        validate_slice(axis, position_um)
+        if aspect not in {"equal", "auto"}:
+            raise ValueError("aspect must be 'equal' or 'auto'")
+        resolved = self._resolve_geometry()
+        if isinstance(self.source, PortSource) and self.source.port is not None:
+            self._selected_port_name()
+        self._validate_explicit_domain_contents()
+        materials = self._material_snapshots()
+        vertical_ports = self._vertical_port_configs(materials)
+        if position_um is None:
+            normal_axis = "xyz".index(axis)
+            position_um = (
+                resolved.bounds[0][normal_axis] + resolved.bounds[1][normal_axis]
+            ) / 2
+        with TemporaryDirectory(prefix="gsim-fdtd-slice-") as directory:
+            mesh_path = Path(directory) / "mesh.msh"
+            manifest = generate_mesh(
+                resolved,
+                mesh_path,
+                background_material=self.materials.background,
+                padding=self.domain.padding,
+                padding_x=self.domain.padding_x,
+                padding_y=self.domain.padding_y,
+                padding_z=self.domain.padding_z,
+                mesh_size_nm=self.geometry.mesh_size_nm,
+                geometry_tolerance_nm=self.geometry.geometry_tolerance_nm,
+                x_bounds=self.domain.x_bounds,
+                y_bounds=self.domain.y_bounds,
+                z_bounds=self.domain.z_bounds,
+            )
+            return plot_mesh_slice(
+                mesh_path,
+                manifest,
+                materials,
+                self,
+                axis=axis,
+                position_um=position_um,
+                show_mesh=show_mesh,
+                show_groups=show_groups,
+                hide_groups=hide_groups,
+                ax=ax,
+                cmap=cmap,
+                legend=legend,
+                aspect=aspect,
+                figsize=figsize,
+                vertical_ports=vertical_ports,
+            )
+
+    def _plot_viewer(
+        self,
+        *,
+        mode: ViewerMode,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        height: int = 600,
+    ) -> Any:
+        """Render the current or a temporary mesh with the FDTD viewer."""
+        from gsim.fdtd.viz import plot_mesh
+
+        if (
+            self._last_artifacts is not None
+            and self._last_artifacts.mesh_path.is_file()
+        ):
+            return plot_mesh(
+                self._last_artifacts.mesh_path,
+                mode=mode,
+                axis=axis,
+                position_um=position_um,
+                show_groups=show_groups,
+                hide_groups=hide_groups,
+                zoom_to_cursor=zoom_to_cursor,
+                cell_size_nm=self.solver.cell_size_nm,
+                pml_cells=self.domain.pml_cells,
+                height=height,
+            )
+
+        previous_artifacts = self._last_artifacts
+        with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
+            try:
+                artifacts = self.write(directory)
+                return plot_mesh(
+                    artifacts.mesh_path,
+                    mode=mode,
+                    axis=axis,
+                    position_um=position_um,
+                    show_groups=show_groups,
+                    hide_groups=hide_groups,
+                    zoom_to_cursor=zoom_to_cursor,
+                    cell_size_nm=self.solver.cell_size_nm,
+                    pml_cells=self.domain.pml_cells,
+                    height=height,
+                )
+            finally:
+                self._last_artifacts = previous_artifacts
+
+    def plot_3d(
+        self,
+        *,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        height: int = 600,
+    ) -> Any:
+        """Show the 3D geometry, optionally with Gmsh surface edges."""
+        return self._plot_viewer(
+            mode="mesh" if show_mesh else "surface",
+            show_groups=show_groups,
+            hide_groups=hide_groups,
+            zoom_to_cursor=zoom_to_cursor,
+            height=height,
+        )
+
+    def plot_2d(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        height: int = 600,
+    ) -> Any:
+        """Show the HTML slice viewer through its deprecated original name.
+
+        Use plot_2d_interactive() for the same viewer and plot_2d_static() for
+        a Matplotlib cross-section. All original keywords remain supported.
+        """
+        warnings.warn(
+            "plot_2d() is deprecated; use plot_2d_interactive() for the HTML "
+            "viewer or plot_2d_static() for a Matplotlib cross-section.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.plot_2d_interactive(
+            axis=axis,
+            position_um=position_um,
+            show_mesh=show_mesh,
+            show_groups=show_groups,
+            hide_groups=hide_groups,
+            zoom_to_cursor=zoom_to_cursor,
+            height=height,
+        )
+
+    def plot_2d_interactive(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        zoom_to_cursor: bool = True,
+        height: int = 600,
+    ) -> Any:
+        """Show the legacy interactive cross-section with a movable slice plane."""
+        validate_slice(axis, position_um)
+        position_um = self._default_slice_position(axis, position_um)
+        return self._plot_viewer(
+            mode="mesh_slice" if show_mesh else "slice",
+            axis=axis,
+            position_um=position_um,
+            show_groups=show_groups,
+            hide_groups=hide_groups,
+            zoom_to_cursor=zoom_to_cursor,
+            height=height,
+        )
+
+    def _default_slice_position(
+        self, axis: Axis, position_um: float | None
+    ) -> float | None:
+        """Prefer the configured geometry midpoint over the padded domain center."""
+        if position_um is not None or self._resolved is None:
+            return position_um
+        axis_index = {"x": 0, "y": 1, "z": 2}[axis]
+        lower, upper = self.resolved.bounds
+        return (lower[axis_index] + upper[axis_index]) / 2

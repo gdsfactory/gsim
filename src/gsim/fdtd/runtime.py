@@ -213,6 +213,10 @@ class RuntimeConfigMixin:
         }
         if not vertical_ports:
             return {}
+        if vertical_ports.keys() & {monitor.name for monitor in self.monitors}:
+            raise FDTDConfigError(
+                "Explicit monitor names cannot shadow vertical ports."
+            )
         bounds = self._background_bounds_nm()
         background_index = material_snapshots[
             self.materials.background
@@ -305,7 +309,10 @@ class RuntimeConfigMixin:
         derived_monitors = [monitor for _, monitor in vertical_configs.values()]
         if isinstance(source, PortSource):
             selected_port = self._selected_port_name()
-            if self.resolved.ports[selected_port].is_vertical:
+            resolved_port = self.resolved.ports[selected_port]
+            if resolved_port.is_vertical:
+                if source.mode is not None:
+                    raise FDTDConfigError("Mode selection requires a guided PDK port.")
                 excitation = ExcitationConfig(
                     type="gaussian_beam",
                     gaussian_beam=vertical_configs[selected_port][0],
@@ -313,7 +320,10 @@ class RuntimeConfigMixin:
                 )
             else:
                 excitation = ExcitationConfig(
-                    type="eigenmode", default_port=selected_port, **common
+                    type="eigenmode",
+                    default_port=selected_port,
+                    mode=source.mode,
+                    **common,
                 )
         elif isinstance(source, DipoleSource):
             excitation = ExcitationConfig(
@@ -345,11 +355,6 @@ class RuntimeConfigMixin:
             self._plane_monitor_config(monitor, material_snapshots)
             for monitor in self.monitors
         ]
-        names = [monitor.name for monitor in [*derived_monitors, *public_monitors]]
-        if len(names) != len(set(names)):
-            raise FDTDConfigError(
-                "Explicit monitor names cannot shadow vertical ports."
-            )
         return excitation, [*derived_monitors, *public_monitors]
 
     def _explicit_gaussian_beam(
