@@ -84,6 +84,9 @@ A profile names the mesh Region it applies to and its dopant type. `StepDoping` 
 `GaussianDoping` and `ImplantDoping` are analytic implants, `TableDoping` interpolates a sampled profile (a SIMS depth
 profile, a process simulator's output) and `CallableDoping` evaluates a function of `(x, y)` in µm. Profiles on the same
 Region add up; donors and acceptors compensate in the net doping and add up as scatterers in the mobility.
+Box and window edges, the implant surface and the ends of a zero-fill table are inclusive, with a 1e-9 µm slack that
+absorbs DEVSIM's µm to cm rounding. Two boxes on the same Region that abut therefore both dope the nodes on their shared
+edge, which then carry the sum; one box covering both dopes that edge once.
 
 ### Contacts, interfaces and insulators
 
