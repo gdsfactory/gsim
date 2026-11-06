@@ -177,9 +177,15 @@ def _p1_capacitance_f_per_m(points, triangles, eps, lines) -> float:
     return float(u @ (stiffness @ u))
 
 
-def _device(mesh: TCADMesh, *, oxide: bool) -> Device:
+def _device(
+    mesh: TCADMesh, *, oxide: bool, doping_cm3: dict[str, float] | None = None
+) -> Device:
     doping = [
-        StepDoping(region=region, dopant_type=kind, concentration_cm3=DOPING_CM3)
+        StepDoping(
+            region=region,
+            dopant_type=kind,
+            concentration_cm3=(doping_cm3 or {}).get(region, DOPING_CM3),
+        )
         for region, kind in DOPANT.items()
     ]
     contacts = [
@@ -221,4 +227,57 @@ def test_the_capacitance_holds_every_node_of_the_contact(tmp_path, oxide):
     assert abs(point.admittance_s_per_m.real) < 1e-3 * point.admittance_s_per_m.imag
     assert point.capacitance_f_per_m == pytest.approx(
         _p1_capacitance_f_per_m(points, triangles, eps, lines), rel=1e-5, abs=0.0
+    )
+
+
+def _potential_at(device: Device, region: str, point_um) -> float:
+    import devsim
+
+    values = {
+        name: np.asarray(
+            devsim.get_node_model_values(device=device.name, region=region, name=name)
+        )
+        for name in ("x", "y", "Potential")
+    }
+    at = np.hypot(
+        values["x"] - point_um[0] * UM_TO_CM, values["y"] - point_um[1] * UM_TO_CM
+    )
+    assert at.min() < 1e-12
+    return float(values["Potential"][np.argmin(at)])
+
+
+def test_a_doping_step_at_a_contact_end_holds_each_side_neutral(tmp_path):
+    # The cathode's pad is ten times more doped than the rib it ends on: a
+    # high-low step at the Contact's end, as a contact implant beside a
+    # plus implant.
+    import devsim
+
+    doping = {"n_pad": 1e18, "n_rib": 1e17, "p_rib": 1e17, "p_pad": 1e17}
+    mesh, *_ = _write_mesh(tmp_path, oxide=False)
+    device = _device(mesh, oxide=False, doping_cm3=doping)
+    try:
+        point = device.solve_point(1.0, "cathode")
+        v_t = float(
+            devsim.get_parameter(device=device.name, region="n_pad", name="V_t")
+        )
+        n_i = float(
+            devsim.get_parameter(device=device.name, region="n_pad", name="n_i")
+        )
+        end = (SPANS["n_pad"][1], SLAB[1])
+        # Each side of the step at the end is an ohmic contact of its own
+        # doping, as every node of a Contact is: neutral, at the metal's
+        # Fermi level. The potential steps by the high-low built-in voltage
+        # there, V_t ln(10), as it does across the step a Debye length in.
+        for region in ("n_pad", "n_rib"):
+            assert _potential_at(device, region, end) == pytest.approx(
+                1.0 + v_t * np.arcsinh(doping[region] / (2 * n_i)), abs=1e-9
+            )
+    finally:
+        device.release()
+    # The end's carrier currents are the cathode's: what leaves the anode
+    # enters the cathode.
+    currents = point.currents_a_per_cm
+    assert abs(currents["cathode"]) > 0
+    assert currents["cathode"] + currents["anode"] == pytest.approx(
+        0.0, abs=1e-6 * abs(currents["cathode"])
     )

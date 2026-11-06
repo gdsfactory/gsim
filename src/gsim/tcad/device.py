@@ -162,6 +162,9 @@ def _write_contact_ends(
             for node in sorted(curve & nodes):
                 if (other, node) in held:
                     continue
+                # The first Contact, in declaration order, to reach a node
+                # keeps it: a node takes one boundary condition only.
+                held.add((other, node))
                 name = f"{contact}_end_{other}_{node}"
                 while name in taken:
                     name += "_"
