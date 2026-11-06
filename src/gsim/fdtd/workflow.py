@@ -43,6 +43,7 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
+from gsim.fdtd.monitor_names import resolve_monitor_name
 from gsim.fdtd.visualization import VisualizationMixin
 
 # Flat constructor arguments of the original API, as (concern, field).
@@ -233,11 +234,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
     def add_monitors(
         self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
     ) -> Self:
-        """Add center-wavelength port intensity images and an optional XY overview.
+        """Add center-wavelength port intensity images and an optional XY field image.
 
         Args:
-            xy: Include the component-wide XY overview (default: True).
-            z_um: Overview height in micrometers. None uses the resolved geometry's
+            xy: Include the component-wide field_xy image (default: True).
+            z_um: XY image height in micrometers. None uses the resolved geometry's
                 vertical midpoint. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
                 active cross section, in micrometers (default: 0.75).
@@ -299,7 +300,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             component = resolved.component
             planes.append(
                 PlaneMonitor(
-                    name="overview_xy",
+                    name="field_xy",
                     center_um=(component.dx, component.dy, z_um),
                     size_um=(component.dxsize, component.dysize, 0),
                     normal="+z",
@@ -312,7 +313,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         existing_names = {monitor.name for monitor in self.monitors}
         for plane in planes:
-            if plane.name in existing_names:
+            if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
         for plane in planes:
             self.monitors.add(plane)
@@ -404,6 +405,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         config_path = directory / "config.json"
         material_snapshots = self._material_snapshots()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         manifest = generate_mesh(
             resolved,
             mesh_path,

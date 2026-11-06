@@ -18,6 +18,7 @@ from pydantic import (
 from gsim.common.config import MutableModel as _MutableModel
 from gsim.fdtd.domain import Padding, padding_pair
 from gsim.fdtd.mode_selection import ModeSelection
+from gsim.fdtd.monitor_names import resolve_monitor_name
 
 Vector3 = tuple[float, float, float]
 Axis = Literal["x", "y", "z"]
@@ -294,7 +295,7 @@ class Monitors:
 
     def remove(self, name: str) -> PlaneMonitor:
         """Remove and return one named plane monitor."""
-        return self._items.pop(name)
+        return self._items.pop(resolve_monitor_name(name, self._items))
 
     def clear(self) -> None:
         """Remove all explicitly configured plane monitors."""
@@ -302,7 +303,7 @@ class Monitors:
 
     def __getitem__(self, name: str) -> PlaneMonitor:
         """Return one monitor by name."""
-        return self._items[name]
+        return self._items[resolve_monitor_name(name, self._items)]
 
     def __iter__(self) -> Iterator[PlaneMonitor]:
         """Iterate over monitors in insertion order."""

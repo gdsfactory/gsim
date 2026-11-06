@@ -180,7 +180,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     assert {text.get_text() for text in updated.texts} >= {
         "Source o1",
         "Monitor o2",
-        "Monitor overview_xy",
+        "Monitor field_xy",
     }
     assert updated.figure.axes[1].get_ylim()[1] == pytest.approx(2.5)
 

@@ -81,6 +81,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         if isinstance(self.source, PortSource) and self.source.port is not None:
             self._selected_port_name()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         materials = self._material_snapshots()
         vertical_ports = self._vertical_port_configs(materials)
         if position_um is None:

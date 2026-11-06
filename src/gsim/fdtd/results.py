@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from gsim.common.s_matrix import SMatrix, SMatrixRun, assemble_s_matrix
+from gsim.fdtd.monitor_names import MonitorNameAliases
 
 _S_PARAMETER_PATTERN = re.compile(r"S\(([^,]+),([^\)]+)\)")
 
@@ -335,7 +336,7 @@ class PlaneMonitorResult:
         return ax.figure, ax
 
 
-class MonitorResults(dict[str, PlaneMonitorResult]):
+class MonitorResults(MonitorNameAliases[PlaneMonitorResult]):
     """Plane-monitor results keyed by the names configured on the simulation."""
 
 

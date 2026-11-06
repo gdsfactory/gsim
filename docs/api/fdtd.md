@@ -267,7 +267,7 @@ For notebook diagnostics, add center-wavelength field intensity images with one
 call after configuring geometry, source and solver:
 
 ```python
-sim.add_monitors()               # Optical port images and an XY overview.
+sim.add_monitors()               # Optical port images and a field_xy image.
 sim.add_monitors(xy=False)       # Alternative: optical port images only.
 sim.add_monitors(z_um=0.11)      # Alternative: set the XY height in micrometers.
 sim.add_monitors(margin_um=1.0)  # Alternative: more cladding around each port.
@@ -280,16 +280,51 @@ own width and its owning PDK layer's vertical bounds, including negative layer
 thickness. `margin_um=0.75` adds that much cladding on each side of the cross
 section; set it to zero for only the active region or increase it for wider field
 tails. This is a geometric window, not an automatically mode-converged aperture.
-The plane is three grid cells inward along its normal; the XY overview spans the component's
-bounding box. All these planes use the source center wavelength, record intensity
+The plane is three grid cells inward along its normal. Port images are named
+`port_<port_name>` (for example, `port_o1`); the `field_xy` image spans the component's
+bounding box at a constant Z height. All these planes use the source center wavelength, record intensity
 without flux, and leave implicit guided-port responses unchanged. They show the
 driven field, not independent source eigenmode profiles. Existing custom monitors
 are preserved, and name collisions fail before adding any of these planes.
 Changing geometry/source/solver later requires recreating the diagnostic planes.
-This helper only configures monitors; it does not mesh or submit a job. Explicit
-domain bounds still need to contain the requested planes. Dimensional suffixes
+This helper only configures monitors; it does not mesh or submit a job. Dimensional suffixes
 follow the existing `center_um`/`position_um` conventions; the domain's `padding`
 rename is specific to its directional-padding API.
+
+During `write()` or `run()`, every explicitly configured plane monitor is
+intersected with the physical, non-PML domain, whether the domain is automatic
+or explicitly bounded. This applies to XY, YZ, and XZ planes, including port
+images and custom heatmap, flux, and fiber-overlap monitors. Each cropped
+monitor emits one `UserWarning` identifying its name and the original and cropped
+extent on every changed axis, in micrometers. Flux and fiber-overlap warnings
+also note that the measurement aperture changes. The physical domain and the
+requested `sim.monitors` settings remain unchanged; the submitted `config.json`
+contains the cropped bounds, and results report the actual sampled extents.
+`plot_2d_static()` shows the same cropped monitor windows and warnings.
+
+A plane whose normal position is outside the physical domain, or whose
+intersection has zero area, raises `FDTDConfigError` before meshing or submission.
+Planes on the domain boundary are allowed. Sources are never cropped.
+
+### Field-monitor migration (0.9.0)
+
+The helper's device-wide image is now named `field_xy`, replacing the less
+descriptive `overview_xy`. Update monitor-name comparisons and any code reading
+raw configuration or solver JSON to use `field_xy`. Existing
+`sim.monitors["overview_xy"]`, `sim.monitors.remove("overview_xy")`, and
+`result.monitors["overview_xy"]` lookups remain supported as compatibility aliases;
+`field_xy` lookups also work on saved results using `overview_xy`. Exact names
+take precedence if both names were explicitly configured. Iteration and
+serialization retain the stored name without duplicate images. The old lookup
+name is discouraged, with no removal planned.
+
+Earlier versions checked monitor containment only on explicitly bounded axes:
+partially outside monitors either failed locally or reached the solver and
+could fail there. The 0.9.0 behavior crops overlapping windows with a warning
+and rejects unusable planes locally, avoiding wasted cloud setup. To retain a
+requested measurement aperture, enlarge the physical domain where allowed by
+guided-port constraints; otherwise reduce the window or move the plane into
+the domain. Rewriting artifacts applies these checks to existing configurations.
 
 Additional plane monitors can independently record flux, scalar heatmaps, and
 Gaussian fiber overlap:
