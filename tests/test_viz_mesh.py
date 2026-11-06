@@ -576,6 +576,7 @@ def test_set_interactive_mode_toggles_flag() -> None:
 def test_start_xvfb_skipped_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
     """Windows and macOS have no Xvfb, so no import is attempted."""
     monkeypatch.setattr(viz, "_XVFB", None)
+    monkeypatch.setattr(viz, "_XVFB_FAILED_PID", None)
     monkeypatch.setattr(viz.sys, "platform", "win32")
     monkeypatch.setitem(sys.modules, "pyvirtualdisplay", None)
 
@@ -587,6 +588,7 @@ def test_start_xvfb_missing_is_not_a_warning(
 ) -> None:
     """A missing pyvirtualdisplay on Linux is logged below WARNING."""
     monkeypatch.setattr(viz, "_XVFB", None)
+    monkeypatch.setattr(viz, "_XVFB_FAILED_PID", None)
     monkeypatch.setattr(viz.sys, "platform", "linux")
     monkeypatch.setitem(sys.modules, "pyvirtualdisplay", None)
 

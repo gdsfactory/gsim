@@ -21,6 +21,7 @@ def test_forced_offscreen_environment(monkeypatch, xvfb_failure):
     monkeypatch.setattr(pv, "OFF_SCREEN", False)
     startup = Mock(side_effect=RuntimeError("no display")) if xvfb_failure else Mock()
     monkeypatch.setattr(viz, "_start_xvfb", startup)
+    monkeypatch.setattr(viz, "_XVFB", None)
     assert viz._is_headless()
     assert viz._ensure_pyvista() is pv
     assert pv.OFF_SCREEN
@@ -32,6 +33,7 @@ def test_virtual_display_startup(monkeypatch):
     display = Mock()
     registered = []
     monkeypatch.setattr(viz, "_XVFB", None)
+    monkeypatch.setattr(viz, "_XVFB_FAILED_PID", None)
     monkeypatch.setattr(viz.atexit, "register", registered.append)
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setitem(
@@ -54,11 +56,60 @@ def test_forked_child_leaves_parent_display_running(monkeypatch):
     display.stop.assert_not_called()
 
 
+def _fake_display_module(monkeypatch, display):
+    factory = Mock(return_value=display)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(viz.atexit, "register", lambda _func: None)
+    monkeypatch.setitem(
+        sys.modules, "pyvirtualdisplay", SimpleNamespace(Display=factory)
+    )
+    return factory
+
+
+def test_failed_virtual_display_is_not_retried(monkeypatch):
+    """A host where Xvfb cannot start is tried once, not on every plot."""
+    display = Mock()
+    display.start.side_effect = RuntimeError("no Xvfb")
+    monkeypatch.setattr(viz, "_XVFB", None)
+    monkeypatch.setattr(viz, "_XVFB_FAILED_PID", None)
+    factory = _fake_display_module(monkeypatch, display)
+    viz._start_xvfb()
+    viz._start_xvfb()
+    factory.assert_called_once()
+    assert viz._XVFB is None
+
+
+def test_forked_child_starts_its_own_display(monkeypatch):
+    """A child process ignores the display handle inherited from its parent."""
+    parent_display = Mock()
+    child_display = Mock()
+    monkeypatch.setattr(viz, "_XVFB", (parent_display, os.getpid() + 1))
+    monkeypatch.setattr(viz, "_XVFB_FAILED_PID", os.getpid() + 1)
+    _fake_display_module(monkeypatch, child_display)
+    viz._start_xvfb()
+    child_display.start.assert_called_once()
+    assert (child_display, os.getpid()) == viz._XVFB
+    parent_display.stop.assert_not_called()
+
+
+def test_reused_virtual_display_restores_display(monkeypatch):
+    """Reusing the running display points DISPLAY back at it."""
+    display = Mock(new_display_var=":4242")
+    monkeypatch.setattr(viz, "_XVFB", (display, os.getpid()))
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    viz._start_xvfb()
+    assert os.environ["DISPLAY"] == ":4242"
+    display.start.assert_not_called()
+
+
 _FAKE_PYVIRTUALDISPLAY = """
 import os
 
 
 class Display:
+    new_display_var = ":4242"
+
     def __init__(self, **kwargs):
         pass
 
@@ -68,6 +119,7 @@ class Display:
 
     def start(self):
         self._log("start")
+        os.environ["DISPLAY"] = self.new_display_var
         return self
 
     def stop(self):
@@ -77,10 +129,13 @@ class Display:
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Xvfb is Linux-only")
-def test_virtual_display_is_lazy_and_stopped_at_exit(tmp_path):
+@pytest.mark.parametrize("force_offscreen", [False, True])
+def test_virtual_display_is_lazy_and_stopped_at_exit(tmp_path, force_offscreen):
     """Import alone starts no display; rendering starts one, reused, then stopped.
 
-    A recording stand-in replaces ``pyvirtualdisplay`` so no real Xvfb runs.
+    Every render after the first still sees the virtual display, also when
+    ``GSIM_FORCE_OFFSCREEN=1`` drops other displays.  A recording stand-in
+    replaces ``pyvirtualdisplay`` so no real Xvfb runs.
     """
     fake = tmp_path / "fake"
     fake.mkdir()
@@ -98,10 +153,14 @@ def test_virtual_display_is_lazy_and_stopped_at_exit(tmp_path):
         assert not log.exists(), "import started a virtual display"
         for _ in range(2):
             viz._make_plotter(False).close()
+            assert os.environ.get("DISPLAY") == ":4242", os.environ.get("DISPLAY")
         """
     )
     env = {k: v for k, v in os.environ.items() if k != "DISPLAY"}
     env.pop("GSIM_FORCE_OFFSCREEN", None)
+    env.pop("GSIM_VIZ_MODE", None)
+    if force_offscreen:
+        env["GSIM_FORCE_OFFSCREEN"] = "1"
     env["FAKE_XVFB_LOG"] = str(log)
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(fake), env.get("PYTHONPATH")])
