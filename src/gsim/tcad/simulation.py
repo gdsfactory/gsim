@@ -341,6 +341,7 @@ class Simulation:
             refined_mesh_size=solver.refined_mesh_size_um,
             max_mesh_size=solver.max_mesh_size_um,
             refinement_boxes=solver.refinement_boxes,
+            mesh_grading=solver.mesh_grading,
             verbose=verbose,
         )
         devsim_mesh_path = write_scaled_msh(

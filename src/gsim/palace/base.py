@@ -25,6 +25,7 @@ from gsim.palace.models import (
     ImpedanceBoundaryConfig,
     MaterialConfig,
     MeshConfig,
+    MeshGrading,
     PortConfig,
     RefinementConfig,
     SymmetryPlaneConfig,
@@ -1078,6 +1079,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement_boxes: (
             list[tuple[float, float, float, float, float]] | None
         ) = None,
+        mesh_grading: MeshGrading | None = None,
         algorithm_3d: Literal["delaunay", "hxt"] | None = None,
         threads: int | None = None,
         surface_threads: int | None = None,
@@ -1180,6 +1182,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         mesh_config.high_order_order = existing_config.high_order_order
         mesh_config.high_order_optimize = existing_config.high_order_optimize
         mesh_config.refinement_boxes = list(existing_config.refinement_boxes)
+        mesh_config.mesh_grading = existing_config.mesh_grading
         mesh_config.algorithm_3d = existing_config.algorithm_3d
         mesh_config.threads = existing_config.threads
         mesh_config.surface_threads = existing_config.surface_threads
@@ -1227,6 +1230,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             mesh_config.high_order_optimize = high_order_optimize
         if refinement_boxes is not None:
             mesh_config.refinement_boxes = refinement_boxes
+        if mesh_grading is not None:
+            mesh_config.mesh_grading = mesh_grading
         if algorithm_3d is not None:
             mesh_config.algorithm_3d = algorithm_3d
         if threads is not None:
@@ -1878,6 +1883,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
             refinement_boxes=mesh_config.refinement_boxes,
+            mesh_grading=mesh_config.mesh_grading,
             algorithm_3d=mesh_config.algorithm_3d,
             threads=mesh_config.threads,
             surface_threads=mesh_config.surface_threads,
@@ -2145,6 +2151,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 high_order_order=mesh_config.high_order_order,
                 high_order_optimize=mesh_config.high_order_optimize,
                 refinement_boxes=mesh_config.refinement_boxes,
+                mesh_grading=mesh_config.mesh_grading,
                 algorithm_3d=mesh_config.algorithm_3d,
                 threads=mesh_config.threads,
                 surface_threads=mesh_config.surface_threads,
@@ -2190,6 +2197,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement_boxes: (
             list[tuple[float, float, float, float, float]] | None
         ) = None,
+        mesh_grading: MeshGrading | None = None,
         algorithm_3d: Literal["delaunay", "hxt"] | None = None,
         threads: int | None = None,
         surface_threads: int | None = None,
@@ -2256,6 +2264,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 to an element size, each ``(h_min, h_max, z_min, z_max, size)``
                 in um. Refinement lines size the elements on them only; a box
                 holds the size over an area.
+            mesh_grading: Native-2D cross-section meshes only: a
+                :class:`~gsim.palace.models.MeshGrading` whose element size
+                grows from chosen features at a set rate per um, in place of
+                the fixed growth from every internal curve. Defaults to the
+                value in ``sim.mesh_config`` (``None``, the fixed growth).
             algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
             threads: Threads for 3D meshing (see ``MeshConfig``).
             surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
@@ -2312,6 +2325,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
             refinement_boxes=refinement_boxes,
+            mesh_grading=mesh_grading,
             algorithm_3d=algorithm_3d,
             threads=threads,
             surface_threads=surface_threads,
