@@ -145,8 +145,8 @@ class Materials(MutableModel):
         temperature_k: Lattice temperature (K) of the silicon parameter set.
         semiconductor: DEVSIM material name given to the doped Regions.
         semiconductor_permittivity: Static relative permittivity of every
-            doped Region. The default, 11.1, is DEVSIM's silicon value; the
-            insulators keep their own.
+            doped Region, at least 1. The default, 11.1, is DEVSIM's silicon
+            value; the insulators keep their own.
         mobility: Low-field mobility against the total doping, evaluated
             node by node. DEVSIM's own silicon defaults are two constants
             whatever the doping, which misstates the series resistance of
@@ -161,7 +161,9 @@ class Materials(MutableModel):
 
     temperature_k: float = Field(default=300.0, gt=0.0)
     semiconductor: str = Field(default="Silicon", min_length=1)
-    semiconductor_permittivity: PositiveFloat = SILICON_RELATIVE_PERMITTIVITY
+    semiconductor_permittivity: float = Field(
+        default=SILICON_RELATIVE_PERMITTIVITY, ge=1.0
+    )
     mobility: MobilityModel = Field(default_factory=MobilityModel.masetti_silicon)
     insulators: dict[str, PositiveFloat] = Field(default_factory=dict)
 

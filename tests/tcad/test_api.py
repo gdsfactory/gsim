@@ -113,9 +113,16 @@ class TestValidation:
         with pytest.raises(ValidationError, match="temperature_k"):
             Materials(temperature_k=0.0)
 
-    def test_a_semiconductor_permittivity_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            Materials(semiconductor_permittivity=0.0)
+    @pytest.mark.parametrize("value", [0.0, 0.5])
+    def test_a_semiconductor_permittivity_below_vacuum_is_rejected(self, value):
+        with pytest.raises(ValidationError, match="semiconductor_permittivity"):
+            Materials(semiconductor_permittivity=value)
+
+    def test_a_semiconductor_permittivity_below_vacuum_fails_at_assignment(self):
+        materials = Materials()
+        with pytest.raises(ValidationError, match="semiconductor_permittivity"):
+            materials.semiconductor_permittivity = 0.5
+        assert materials.semiconductor_permittivity == 11.1
 
     def test_an_insulator_permittivity_must_be_positive(self):
         with pytest.raises(ValidationError, match="insulators"):
