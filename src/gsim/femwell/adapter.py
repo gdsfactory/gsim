@@ -217,7 +217,7 @@ def solve_modes(
     epsilon: dict[str, complex] | ArrayLike,
     wavelength_um: float,
     num_modes: int = 1,
-    order: int = 1,
+    order: int = 2,
     metallic_boundaries: bool = False,
     n_guess: float | None = None,
 ) -> Any:
@@ -233,7 +233,14 @@ def solve_modes(
         wavelength_um: Vacuum wavelength in um. For RF, pass the free-space
             wavelength of the target frequency (``c0 / f`` in um).
         num_modes: Number of modes to compute.
-        order: Finite element order of the mode solve.
+        order: Finite element order of the mode solve. The default, 2,
+            is what an RF line with lossy metal needs: at order 1 the
+            series impedance read off the Mode (``gamma * Z0``) comes out
+            percent low on a mesh that is fine at the conductors and
+            coarse in the dielectric, and refining only at the conductors
+            does not fix it. Order 2 costs a few times more per solve;
+            pass ``order=1`` for a cheaper solve where that accuracy is
+            not needed.
         metallic_boundaries: Enforce PEC on the outer boundary.
         n_guess: Effective-index guess centering the eigenvalue search.
             femwell's default guess tracks the largest permittivity, which

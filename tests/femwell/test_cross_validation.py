@@ -93,6 +93,7 @@ def _solve_both(sim):
         epsilon=eps,
         wavelength_um=WL_UM,
         num_modes=1,
+        order=1,
     )
     n_eff_femwell = complex(modes[0].n_eff)
     return n_eff_palace, n_eff_femwell
