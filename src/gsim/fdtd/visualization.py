@@ -130,43 +130,40 @@ class VisualizationMixin(RuntimeConfigMixin):
         hide_groups: Sequence[str] = (),
         zoom_to_cursor: bool = True,
         height: int = 600,
+        use_pdk_styles: bool = False,
     ) -> Any:
         """Render the current or a temporary mesh with the FDTD viewer."""
+        from gsim.fdtd.display import layer_group_styles
         from gsim.fdtd.viz import plot_mesh
 
-        if (
-            self._last_artifacts is not None
-            and self._last_artifacts.mesh_path.is_file()
-        ):
+        def render(mesh_path: Path) -> Any:
             return plot_mesh(
-                self._last_artifacts.mesh_path,
+                mesh_path,
                 mode=mode,
                 axis=axis,
                 position_um=position_um,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
+                group_styles=layer_group_styles(self._resolved)
+                if use_pdk_styles
+                else None,
                 zoom_to_cursor=zoom_to_cursor,
                 cell_size_nm=self.solver.cell_size_nm,
                 pml_cells=self.domain.pml_cells,
                 height=height,
             )
 
+        if (
+            self._last_artifacts is not None
+            and self._last_artifacts.mesh_path.is_file()
+        ):
+            return render(self._last_artifacts.mesh_path)
+
         previous_artifacts = self._last_artifacts
         with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
             try:
                 artifacts = self.write(directory)
-                return plot_mesh(
-                    artifacts.mesh_path,
-                    mode=mode,
-                    axis=axis,
-                    position_um=position_um,
-                    show_groups=show_groups,
-                    hide_groups=hide_groups,
-                    zoom_to_cursor=zoom_to_cursor,
-                    cell_size_nm=self.solver.cell_size_nm,
-                    pml_cells=self.domain.pml_cells,
-                    height=height,
-                )
+                return render(artifacts.mesh_path)
             finally:
                 self._last_artifacts = previous_artifacts
 
@@ -179,13 +176,21 @@ class VisualizationMixin(RuntimeConfigMixin):
         zoom_to_cursor: bool = True,
         height: int = 600,
     ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
+        """Show 3D geometry with PDK opacity and initial visibility defaults.
+
+        Stack info.opacity controls surface opacity; info.visible overrides
+        layer-view visibility. Zero opacity starts a layer hidden and becomes
+        fully opaque when enabled in the viewer. Explicit show_groups and
+        hide_groups take precedence over PDK visibility, with hide_groups
+        taking priority.
+        """
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
             show_groups=show_groups,
             hide_groups=hide_groups,
             zoom_to_cursor=zoom_to_cursor,
             height=height,
+            use_pdk_styles=True,
         )
 
     def plot_2d(

@@ -748,14 +748,23 @@
       function shouldShow(mesh, group) {
         const name = groupName(mesh, group);
         if (
-          options.showGroups &&
-          !options.showGroups.includes(name) &&
-          !options.showGroups.includes(group)
+          options.hideGroups.includes(name) ||
+          options.hideGroups.includes(group)
         )
           return false;
+        if (options.showGroups)
+          return (
+            options.showGroups.includes(name) ||
+            options.showGroups.includes(group)
+          );
+        return groupStyle(mesh, group).visible !== false;
+      }
+
+      function groupStyle(mesh, group) {
         return (
-          !options.hideGroups.includes(name) &&
-          !options.hideGroups.includes(group)
+          options.groupStyles?.[groupName(mesh, group)] ??
+          options.groupStyles?.[group] ??
+          {}
         );
       }
 
@@ -853,7 +862,10 @@
           rawGeometry.dispose();
         }
         const color = colorFor(mesh, group);
-        const opacity = isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1;
+        const style = groupStyle(mesh, group);
+        const opacity =
+          style.opacity ?? (isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1);
+        const transparent = opacity < 1;
         const material = new THREE.MeshStandardMaterial({
           color,
           roughness: 0.72,
@@ -862,9 +874,9 @@
             isSlice || group.startsWith("2_")
               ? THREE.DoubleSide
               : THREE.FrontSide,
-          transparent: isLargestMaterial,
+          transparent,
           opacity,
-          depthWrite: !isLargestMaterial,
+          depthWrite: !transparent,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
