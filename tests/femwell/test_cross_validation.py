@@ -38,8 +38,11 @@ pytestmark = pytest.mark.palace_local
 WL_UM = 1.55
 FREQ_HZ = C0 / (WL_UM * 1e-6)
 # Same finite-element problem, different discretizations (Palace order-2
-# Nedelec vs femwell order-1): agreement to ~1e-2 relative on n_eff.
-N_EFF_RTOL = 1e-2
+# Nedelec vs femwell at its default, order 2). Measured on this mesh: 4.1e-5
+# relative on Re(n_eff) for the optical case and 2.9e-4 on the complex n_eff
+# for the RF materials. femwell at order 1 sits at 9e-3 on both, which this
+# bound rejects.
+N_EFF_RTOL = 1e-3
 SIGMA_S_PER_M = 5e3
 
 
@@ -93,9 +96,6 @@ def _solve_both(sim):
         epsilon=eps,
         wavelength_um=WL_UM,
         num_modes=1,
-        # N_EFF_RTOL was set for femwell at order 1 against Palace's
-        # order 2; keep the solver pair it was calibrated on.
-        order=1,
     )
     n_eff_femwell = complex(modes[0].n_eff)
     return n_eff_palace, n_eff_femwell
