@@ -302,9 +302,11 @@ requested `sim.monitors` settings remain unchanged; the submitted `config.json`
 contains the cropped bounds, and results report the actual sampled extents.
 `plot_2d_static()` shows the same cropped monitor windows and warnings.
 
-A plane whose normal position is outside the physical domain, or whose
-intersection has zero area, raises `FDTDConfigError` before meshing or submission.
-Planes on the domain boundary are allowed. Sources are never cropped.
+A plane whose normal position is outside the physical domain, whose window is
+disjoint from it, or whose cropping collapses a requested nonzero extent raises
+`FDTDConfigError` before meshing or submission. Planes on the domain boundary
+and already contained zero-width line or point probes retain their existing
+behavior. Sources are never cropped.
 
 ### Field-monitor migration (0.9.0 onward)
 

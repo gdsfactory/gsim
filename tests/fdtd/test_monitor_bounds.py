@@ -87,7 +87,7 @@ def test_crops_submitted_plane_and_warns_once(
         ("+y", (4, 0, 0), (1, 0, 1), "no area"),
         ("+z", (1, 3, 0), (1, 1, 0), "no area"),
         ("+z", (3, 0, 0), (2, 1, 0), "no area"),
-        ("+z", (1, 0, 0), (0, 1, 0), "no area"),
+        ("+z", (3, 0, 0), (0, 1, 0), "no area"),
     ],
 )
 def test_unusable_monitor_fails_before_meshing(
@@ -224,3 +224,32 @@ def test_larger_domain_restores_original_requested_aperture(tmp_path, fdtd_pdk_m
     monitor = json.loads(artifacts.config_path.read_text())["monitors"][0]
     assert monitor["region_min"] == [1000, -2000, -2000]
     assert monitor["region_max"] == [1000, 2000, 2000]
+
+
+@pytest.mark.parametrize("normal", ["+x", "-x", "+y", "-y", "+z", "-z"])
+@pytest.mark.parametrize("point_probe", [False, True])
+def test_contained_zero_width_probes_keep_their_requested_extent(
+    tmp_path, fdtd_pdk_module, normal, point_probe
+):
+    simulation = _simulation(fdtd_pdk_module)
+    normal_axis = "xyz".index(normal[-1])
+    size = [0, 0, 0] if point_probe else [2, 2, 2]
+    size[normal_axis] = 0
+    size[(normal_axis + 1) % 3] = 0
+    center = (1, 0, 0)
+    simulation.monitors.add_plane(
+        "probe",
+        center_um=center,
+        size_um=size,
+        normal=normal,
+        flux=False,
+        heatmap=fdtd.Heatmap(wavelengths_um=[1.55]),
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        artifacts = simulation.write(tmp_path)
+    assert not _crop_warnings(caught)
+    monitor = json.loads(artifacts.config_path.read_text())["monitors"][0]
+    for axis in range(3):
+        assert monitor["region_min"][axis] == center[axis] * 1000 - size[axis] * 500
+        assert monitor["region_max"][axis] == center[axis] * 1000 + size[axis] * 500

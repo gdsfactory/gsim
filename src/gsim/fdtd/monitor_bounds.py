@@ -18,7 +18,7 @@ def monitor_region_nm(
     *,
     warn: bool = True,
 ) -> tuple[Vector3, Vector3]:
-    """Crop in-plane extents, rejecting outside positions and empty windows.
+    """Crop in-plane extents, rejecting outside positions and disjoint windows.
 
     Requested settings remain unchanged. Tiny floating-point excursions are
     snapped to the domain boundary without warning; actual cropping emits one
@@ -45,12 +45,17 @@ def monitor_region_nm(
             )
         cropped_lower_nm = min(max(lower_nm, domain_lower_nm), domain_upper_nm)
         cropped_upper_nm = max(min(upper_nm, domain_upper_nm), domain_lower_nm)
-        if axis != normal_axis and cropped_lower_nm >= cropped_upper_nm:
+        disjoint = (
+            upper_nm < domain_lower_nm - _BOUNDS_TOLERANCE_NM
+            or lower_nm > domain_upper_nm + _BOUNDS_TOLERANCE_NM
+        )
+        collapsed = lower_nm < upper_nm and cropped_lower_nm >= cropped_upper_nm
+        if axis != normal_axis and (disjoint or collapsed):
             raise FDTDConfigError(
                 f"Monitor {monitor.name!r} has no area inside the physical domain: "
                 f"{axis_name}-extent [{lower_nm / 1000:g}, {upper_nm / 1000:g}] um "
                 f"does not overlap [{domain_lower_nm / 1000:g}, "
-                f"{domain_upper_nm / 1000:g}] um with positive width."
+                f"{domain_upper_nm / 1000:g}] um without losing its extent."
             )
         region_min.append(cropped_lower_nm)
         region_max.append(cropped_upper_nm)
