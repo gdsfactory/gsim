@@ -25,6 +25,13 @@ except ImportError:
     PYVISTA_AVAILABLE = False
 
 
+def _prepare_rendering() -> None:
+    """Configure headless rendering (virtual display) before a plotter exists."""
+    from gsim.viz import _ensure_pyvista
+
+    _ensure_pyvista()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -64,6 +71,7 @@ def plot_prisms_3d(
             "Install with: pip install pyvista"
         )
 
+    _prepare_rendering()
     plotter = (
         pv.Plotter(notebook=notebook, **kwargs) if notebook else pv.Plotter(**kwargs)
     )
@@ -163,6 +171,7 @@ def create_web_export(
     if not PYVISTA_AVAILABLE:
         raise ImportError("PyVista is required for web export.")
 
+    _prepare_rendering()
     plotter = pv.Plotter(notebook=False, off_screen=True)
     layer_meshes = _convert_prisms_to_meshes(geometry_model)
     colors = generate_layer_colors(list(layer_meshes.keys()))
