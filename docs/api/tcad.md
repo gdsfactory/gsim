@@ -74,9 +74,23 @@ their unit.
 - `doping`: the doping profiles, with `add(profile)`, `remove(profile)`, `clear()`, iteration and `len()`.
 - `contacts`: `add(name=, semiconductor=, electrode=)`, `remove(name)`, `sim.contacts[name]`, iteration.
 - `interfaces`: `add(name=, region_a=, region_b=)`, `remove(name)`, `sim.interfaces[name]`, iteration.
-- `solver(...)`: mesh resolution (`mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `refinement_boxes`),
+- `solver(...)`: mesh resolution (`mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `refinement_boxes`,
+  `mesh_grading`),
   Newton convergence (`absolute_error`, `relative_error`, `max_iterations`, `bias_step_v`, `extended_precision`), the
   small-signal frequencies (`small_signal_freq_hz`, `junction_freq_hz`) and `claim_devsim_namespace`.
+
+Without grading, the mesh refines along every internal curve and the element size grows about 2 per µm from it, whatever
+the sizes set; a refinement box holds its size inside and steps to the surrounding size at its edge.
+`mesh_grading=MeshGrading(growth_per_um=0.25)` replaces that: the size is `refined_mesh_size_um` on the conductors and
+the declared Interfaces, and a box's own size inside each refinement box, and grows from them by `growth_per_um` per µm
+of distance up to `max_mesh_size_um`. `sources=` limits the features it grows from (`"conductors"`, `"junctions"`,
+`"fine_regions"`). A growth of 0.1 to 0.25 per µm keeps the oxide elements around a small section well shaped at a node
+count close to the ungraded mesh. Grading is off by default, so existing meshes and results do not change.
+
+`refined_mesh_size_um` does not set the same size in the two cases. Without grading, the elements on the internal curves
+are half of `refined_mesh_size_um`; with grading, the elements on the conductors and Interfaces are
+`refined_mesh_size_um` itself. To keep the same size at the contacts and the junction when you turn grading on, halve
+`refined_mesh_size_um`.
 
 ### Doping
 
