@@ -12,10 +12,12 @@ DEVSIM is faked (see conftest).
 from __future__ import annotations
 
 import gdsfactory as gf
+import meshio
 import pytest
 
 from gsim import tcad
 from gsim.tcad import Simulation, StepDoping
+from gsim.tcad.mesh import line_group_points
 
 from .conftest import build_contacted_diode
 
@@ -238,7 +240,63 @@ class TestContactRoles:
         devsim, _sp = fake_devsim
         sim._setup_device()
         contacts = {c["name"]: c["region"] for c in devsim.called("add_gmsh_contact")}
-        assert contacts == {"cathode": "n_pad", "anode": "p_pad"}
+        assert {name: contacts[name] for name in ("cathode", "anode")} == {
+            "cathode": "n_pad",
+            "anode": "p_pad",
+        }
+
+    # The fake DEVSIM's three nodes match none of the mesh's.
+    @pytest.mark.filterwarnings("ignore:Insulator Interface nodes")
+    @pytest.mark.parametrize("oxide", [False, True], ids=["silicon", "with-oxide"])
+    def test_its_ends_on_other_regions_answer_to_its_circuit_node(
+        self, sim, fake_devsim, oxide
+    ):
+        # Each electrode is as wide as its pad: the Contact ends on the
+        # Interface to the rib, and on the oxide when it is solved. The
+        # other Regions' nodes there touch the same metal.
+        devsim, _sp = fake_devsim
+        if oxide:
+            sim.materials.insulators = {"sio2": 3.9}
+        sim._setup_device()
+        declared = {"cathode", "anode"}
+        ends = {
+            call["name"]: call["region"]
+            for call in devsim.called("add_gmsh_contact")
+            if call["name"] not in declared
+        }
+        circuit = {
+            call["contact"]: call["circuit_node"]
+            for call in devsim.called("contact_equation")
+            if call["name"] == "PotentialEquation"
+        }
+        expected = {("cathode", "n_rib"), ("anode", "p_rib")}
+        if oxide:
+            expected |= {("cathode", "sio2"), ("anode", "sio2")}
+        assert {
+            (circuit[name].removesuffix("_bias"), region)
+            for name, region in ends.items()
+        } == expected
+
+        # Each end holds one node, on its Contact's curve.
+        mesh = meshio.read(str(devsim.called("create_gmsh_mesh")[0]["file"]))
+        tags = {name: int(data[0]) for name, data in mesh.field_data.items()}
+        vertices = {
+            int(tag): int(node)
+            for block, phys in zip(
+                mesh.cells, mesh.cell_data["gmsh:physical"], strict=True
+            )
+            if block.type == "vertex"
+            for node, tag in zip(block.data[:, 0], phys, strict=True)
+        }
+        for name in ends:
+            contact = circuit[name].removesuffix("_bias")
+            on_curve = {
+                tuple(point)
+                for point in line_group_points(
+                    sim._current_mesh().devsim_mesh_path, contact
+                )
+            }
+            assert tuple(mesh.points[vertices[tags[name]], :2]) in on_curve
 
     def test_an_undoped_semiconductor_is_refused(self, sim):
         sim.doping = [p for p in sim.doping if p.region != "n_pad"]

@@ -104,6 +104,16 @@ class FakeDevsim(types.ModuleType):
         self._record("set_parameter", **kwargs)
         self.parameters[kwargs["name"]] = kwargs["value"]
 
+    def get_parameter(self, **kwargs):
+        self._record("get_parameter", **kwargs)
+        return self.parameters.get(kwargs["name"], 0.0259)
+
+    def contact_node_model(self, **kwargs):
+        self._record("contact_node_model", **kwargs)
+
+    def contact_equation(self, **kwargs):
+        self._record("contact_equation", **kwargs)
+
     def solve(self, **kwargs):
         self._record("solve", **kwargs)
         # DEVSIM reports every Newton iteration on sys.stdout.
