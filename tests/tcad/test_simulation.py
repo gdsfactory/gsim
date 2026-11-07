@@ -402,6 +402,24 @@ class TestReviewOfPR370:
         for name in ("extended_solver", "extended_model", "extended_equation"):
             assert devsim.parameters[name] is extended
 
+    def test_the_device_assembles_with_signed_couples(self, sim, fake_devsim):
+        devsim, _sp = fake_devsim
+        device = sim._setup_device()
+        chosen = {
+            c["name"]: c["value"]
+            for c in devsim.called("set_parameter")
+            if c.get("device") == device and "region" not in c
+        }
+        assert chosen["edge_couple_model"] == "SignedEdgeCouple"
+        assert chosen["node_volume_model"] == "SignedNodeVolume"
+        regions = {c["region"] for c in devsim.called("add_gmsh_region")}
+        installed = {
+            c["region"]
+            for c in devsim.called("edge_solution")
+            if c["name"] == "SignedEdgeCouple"
+        }
+        assert installed == regions
+
     def test_a_missing_interface_between_doped_regions_is_refused(self, sim):
         original = list(sim.interfaces)
         sim.interfaces.remove("n_link")

@@ -111,30 +111,33 @@ class TestAnalyticCrossCheck:
         assert width == pytest.approx(junction.w_um, rel=0.5)
 
 
-class TestParityWithChargeTransportSim:
-    """The concern-grouped API solves the same device as the setter API did.
+class TestReferenceSweep:
+    """Regression reference: the padded diode's sweep, solved by gsim.
 
-    Reference numbers from ``ChargeTransportSim`` on #298
-    (``feat/tcad-twmzm``), same device, same mesh settings, same biases.
+    Recorded with signed edge couples. The earlier ``ChargeTransportSim``
+    (#298) assembled with DEVSIM's own couples, which read obtuse
+    triangles wrong: its C was 10 % to 15 % above these values (signed
+    couples lower it by 9.3 % to 12.8 %), its reverse current up to 24 %
+    above, and its carrier sums within 0.2 %.
     """
 
-    C_F_PER_CM = (5.457119288045399e-12, 4.105770096334684e-12, 3.3610442251991344e-12)
-    I_CATHODE_A_PER_CM = (0.0, -4.1014068148460336e-15, -4.869532720050845e-15)
+    C_F_PER_CM = (4.947358481043972e-12, 3.578515613706044e-12, 2.929373295368441e-12)
+    I_CATHODE_A_PER_CM = (0.0, -3.528761886027468e-15, -3.924130997825855e-15)
     Y_S_PER_CM = (
-        7.371280401253742e-05 + 0.03428791396284675j,
-        3.988263646248467e-05 + 0.025797243202074j,
-        2.6081073943502278e-05 + 0.021118024977971262j,
+        6.727108327147895e-05 + 0.031085007941224277j,
+        3.376227991223994e-05 + 0.022484417930863587j,
+        2.2109611177306638e-05 + 0.018405762944039356j,
     )
     N_NODES = 639
     ELECTRONS_SUM_CM3 = (
-        2.7794164626005203e20,
-        2.7416658783555882e20,
-        2.714170863614466e20,
+        2.7845711609212944e20,
+        2.745474466504581e20,
+        2.717844237021558e20,
     )
     HOLES_SUM_CM3 = (
-        2.7884171689711665e20,
-        2.7512049656009238e20,
-        2.7241141392524362e20,
+        2.7932762258659302e20,
+        2.7544611645204146e20,
+        2.7268334047103297e20,
     )
 
     def test_capacitance(self, solved_sweep):

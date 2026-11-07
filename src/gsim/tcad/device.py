@@ -32,6 +32,8 @@ from gsim.tcad.runtime import import_simple_physics, require_devsim
 from gsim.tcad.silicon import intrinsic_density_cm3
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from gsim.tcad.api import Contact, Interface, Materials, Solver, TCADMesh
 
 # DEVSIM keeps meshes and devices in one process-wide namespace, so every
@@ -54,6 +56,97 @@ INSULATOR_MATERIAL: str = "Oxide"
 #: Mesh groups that name a Region an electrode can be: a meshed volume, or
 #: a conductor the mesh pipeline turned into a boundary.
 _ELECTRODE_GROUPS: tuple[str, ...] = ("volumes", "conductor_surfaces", "pec_surfaces")
+
+
+#: DEVSIM models holding the signed edge couples and node volumes.
+SIGNED_EDGE_COUPLE: str = "SignedEdgeCouple"
+SIGNED_NODE_VOLUME: str = "SignedNodeVolume"
+
+
+def _install_region_couples(devsim: Any, device: str, region: str) -> None:
+    """Store a Region's signed edge couples and node volumes as DEVSIM models.
+
+    The couple of an edge is the sum, over the Region's triangles holding
+    it, of ``cot(theta) / 2`` times its length, ``theta`` the triangle's
+    angle opposite the edge: the weight of the P1 finite-element
+    Laplacian. Each triangle gives both ends of each of its edges a volume
+    of ``couple * length / 4``; per triangle these add up to its area.
+    DEVSIM's own ``EdgeCouple`` and ``NodeVolume`` take ``|cot(theta)|``,
+    which differs on every obtuse triangle.
+    """
+    xy = np.column_stack(
+        [
+            np.asarray(
+                devsim.get_node_model_values(device=device, region=region, name=axis),
+                dtype=np.float64,
+            )
+            for axis in ("x", "y")
+        ]
+    )
+    triangles = np.asarray(
+        devsim.get_element_node_list(device=device, region=region), dtype=np.int64
+    ).reshape(-1, 3)
+    devsim.edge_from_node_model(device=device, region=region, node_model="node_index")
+    ends = np.column_stack(
+        [
+            np.asarray(
+                devsim.get_edge_model_values(
+                    device=device, region=region, name=f"node_index@{end}"
+                )
+            )
+            for end in ("n0", "n1")
+        ]
+    ).astype(np.int64)
+    n_nodes = xy.shape[0]
+
+    def edge_keys(a: NDArray[np.int64], b: NDArray[np.int64]) -> NDArray[np.int64]:
+        return np.minimum(a, b) * n_nodes + np.maximum(a, b)
+
+    edge_index = dict(
+        zip(edge_keys(ends[:, 0], ends[:, 1]).tolist(), itertools.count())
+    )
+
+    couples = np.zeros(ends.shape[0])
+    volumes = np.zeros(n_nodes)
+    for k in range(3):
+        apex = triangles[:, k]
+        a, b = triangles[:, (k + 1) % 3], triangles[:, (k + 2) % 3]
+        u, v = xy[a] - xy[apex], xy[b] - xy[apex]
+        cross = np.abs(u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0])
+        half_cot = 0.5 * np.einsum("ij,ij->i", u, v) / cross
+        length = np.hypot(*(xy[a] - xy[b]).T)
+        edges = np.array([edge_index[key] for key in edge_keys(a, b).tolist()])
+        np.add.at(couples, edges, half_cot * length)
+        volume = 0.25 * half_cot * length**2
+        np.add.at(volumes, a, volume)
+        np.add.at(volumes, b, volume)
+
+    devsim.edge_solution(device=device, region=region, name=SIGNED_EDGE_COUPLE)
+    devsim.set_edge_values(
+        device=device, region=region, name=SIGNED_EDGE_COUPLE, values=list(couples)
+    )
+    devsim.node_solution(device=device, region=region, name=SIGNED_NODE_VOLUME)
+    devsim.set_node_values(
+        device=device, region=region, name=SIGNED_NODE_VOLUME, values=list(volumes)
+    )
+
+
+def _install_signed_couples(devsim: Any, device: str, regions: Iterable[str]) -> None:
+    """Make DEVSIM assemble the device with signed couples and volumes.
+
+    Installs :func:`_install_region_couples` in every Region and points
+    the device's ``edge_couple_model`` and ``node_volume_model``
+    parameters at them. The parameters are set on the device alone, so
+    other DEVSIM devices in the process keep their own.
+    """
+    for region in regions:
+        _install_region_couples(devsim, device, region)
+    devsim.set_parameter(
+        device=device, name="edge_couple_model", value=SIGNED_EDGE_COUPLE
+    )
+    devsim.set_parameter(
+        device=device, name="node_volume_model", value=SIGNED_NODE_VOLUME
+    )
 
 
 def _unique_devsim_name(kind: str) -> str:
@@ -400,6 +493,11 @@ class Device:
         self.name = device
         _LIVE_DEVICES.add(device)
         try:
+            # DEVSIM's own couples misread obtuse triangles; see
+            # _install_region_couples.
+            _install_signed_couples(
+                devsim, device, [*layout.regions, *layout.insulators]
+            )
             bound = self._bind_insulator_interfaces(devsim, device)
             for region in layout.regions:
                 self._apply_doping(devsim, device, region)
