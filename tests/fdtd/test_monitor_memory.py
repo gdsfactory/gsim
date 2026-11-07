@@ -84,13 +84,13 @@ def test_plane_allocation_uses_two_cells_six_complex_fields_and_sample_slots():
     assert estimate["estimated_monitor_memory_bytes"] == (pixels * (192 + 48 * samples))
 
 
-def test_heatmap_frequencies_are_unioned_with_monitor_frequencies():
+def test_heatmap_union_keeps_explicit_duplicate_frequency_allocations():
     monitor = _plane(
         wavelengths=[1450, 1500, 1500], heatmap={"wavelengths": [1500, 1550]}
     )
     estimate = _estimate(_config(monitors=[monitor]))
-    assert estimate["monitors"][0]["frequency_count"] == 3
-    assert estimate["accumulator_bytes"] == 11 * 21 * 192 * 3
+    assert estimate["monitors"][0]["frequency_count"] == 4
+    assert estimate["accumulator_bytes"] == 11 * 21 * 192 * 4
 
 
 def test_fiber_profiles_add_four_complex_components_per_pixel_and_frequency():
@@ -120,7 +120,7 @@ def test_guided_ports_are_counted_without_explicit_monitors(count):
     entry = estimate["monitors"][0]
     assert entry["kind"] == "guided_port"
     assert entry["frequency_count"] == count
-    assert entry["reference_profile_bytes"] == entry["pixels_upper_bound"] * count * 64
+    assert entry["reference_profile_bytes"] == entry["pixels_upper_bound"] * count * 65
     assert entry["retained_port_mode_bytes"] > 0
     assert entry["accumulator_bytes"] == entry["pixels_upper_bound"] * count * 192
 

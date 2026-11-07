@@ -72,7 +72,8 @@ def _entry(
     # Planes retain two normal cells, all six complex128 field components.
     accumulators = pixels * 2 * 6 * 16 * frequency_count
     samples = pixels * 2 * 6 * 4 * _sample_slots(config, wavelengths)
-    profiles = pixels * 4 * 16 * frequency_count if reference else 0
+    profile_point_bytes = 4 * 16 + int(port_cache)
+    profiles = pixels * profile_point_bytes * frequency_count if reference else 0
     # Retained guided modes can include six complex fields, three real and
     # three complex permittivity arrays, and a guide mask. Reserve one extra
     # entry for the source mode when it does not share a sweep window/key.
@@ -108,7 +109,7 @@ def estimate_monitor_memory(
             if index != axis
         )
         # Heatmap-only frequencies still need complete field accumulators.
-        wavelengths = list(dict.fromkeys(monitor.wavelengths or sweep))
+        wavelengths = list(monitor.wavelengths or sweep)
         if monitor.heatmap is not None:
             for wavelength in monitor.heatmap.wavelengths:
                 if wavelength not in wavelengths:
