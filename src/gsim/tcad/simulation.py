@@ -500,7 +500,11 @@ class Simulation:
         contact = self._resolve_contact(contact)
         with devsim_output(verbose):
             points = [device.solve_point(bias, contact) for bias in values]
-        return BiasSweepResult(contact=contact, points=points)
+        return BiasSweepResult(
+            contact=contact,
+            points=points,
+            semiconductor_permittivity=self.materials.semiconductor_permittivity,
+        )
 
 
 __all__ = ["Simulation"]

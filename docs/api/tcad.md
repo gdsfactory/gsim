@@ -70,6 +70,7 @@ their unit.
 - `domain(...)`: `plane` (`"x=<um>"` or `"y=<um>"`); `window` and `window_z`, `(min, max)` clips of the domain in µm;
   the airbox `margin_x`, `margin_y`, `z_above`, `z_below` in µm.
 - `materials(...)`: `temperature_k` (300 K); `semiconductor`, the DEVSIM material of the doped Regions (`"Silicon"`);
+  `semiconductor_permittivity`, the static relative permittivity of every doped Region (11.1, DEVSIM's value);
   `mobility`, a `MobilityModel` (Masetti silicon); `insulators`, Region to static relative permittivity.
 - `doping`: the doping profiles, with `add(profile)`, `remove(profile)`, `clear()`, iteration and `len()`.
 - `contacts`: `add(name=, semiconductor=, electrode=)`, `remove(name)`, `sim.contacts[name]`, iteration.
@@ -149,10 +150,13 @@ comparison uses the solve's own silicon constants (below) for whatever the `PNJu
 
 ## Silicon constants
 
-The solve takes DEVSIM's silicon parameters, with one change: the intrinsic carrier density follows the temperature.
+The solve takes DEVSIM's silicon parameters, with two changes: the permittivity can be set, and the intrinsic carrier
+density follows the temperature.
 
-- **Permittivity:** static relative permittivity 11.1, DEVSIM's value
-  (`gsim.tcad.silicon.SILICON_RELATIVE_PERMITTIVITY`). The RF and optical stacks use 11.9 for silicon.
+- **Permittivity:** `materials.semiconductor_permittivity` sets the static relative permittivity of every doped Region.
+  It defaults to 11.1, DEVSIM's value (`gsim.tcad.silicon.SILICON_RELATIVE_PERMITTIVITY`), and does not reach the
+  insulators, which keep their own. A `BiasSweepResult` records the value it was solved with in
+  `semiconductor_permittivity`. The RF and optical stacks use 11.9 for silicon.
 - **Intrinsic density:** `n_i(T) = n_i(300 K) (T/300)^1.5 exp(E_g(300)/2kT_300 - E_g(T)/2kT)`, with Varshni's
   band gap and DEVSIM's `n_i(300 K) = 1e10` cm⁻³ (`gsim.tcad.silicon.intrinsic_density_cm3`). A 300 K solve is
   DEVSIM's own; away from 300 K the built-in voltage falls with temperature as it should.

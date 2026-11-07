@@ -170,6 +170,33 @@ class TestStaleMesh:
         sim._current_mesh()
 
 
+class TestSemiconductorPermittivity:
+    @staticmethod
+    def _permittivities(devsim):
+        return {
+            call["region"]: call["value"]
+            for call in devsim.called("set_parameter")
+            if call["name"] == "Permittivity"
+        }
+
+    def test_unset_is_exactly_devsims_silicon_value(self, sim, fake_devsim):
+        devsim, _sp = fake_devsim
+        sim.solve(0.0, contact="cathode")
+        # DEVSIM's own product: its eps_si is 11.1 and its eps_0 is 8.85e-14.
+        assert self._permittivities(devsim) == dict.fromkeys(DOPED, 11.1 * 8.85e-14)
+
+    def test_it_reaches_every_doped_region(self, sim, fake_devsim):
+        devsim, _sp = fake_devsim
+        sim.materials.semiconductor_permittivity = 11.7
+        sim.solve(0.0, contact="cathode")
+        assert self._permittivities(devsim) == dict.fromkeys(DOPED, 11.7 * 8.85e-14)
+
+    def test_a_sweep_records_what_it_was_solved_with(self, sim):
+        assert sim.sweep([0.0], contact="cathode").semiconductor_permittivity == 11.1
+        sim.materials.semiconductor_permittivity = 11.7
+        assert sim.sweep([0.0], contact="cathode").semiconductor_permittivity == 11.7
+
+
 class TestDeviceRebuild:
     def test_an_unchanged_configuration_keeps_its_device(self, sim, fake_devsim):
         devsim, sp = fake_devsim
@@ -189,6 +216,17 @@ class TestDeviceRebuild:
         assert {"device": first} in devsim.called("delete_device")
         temperatures = [args[2] for args in sp.called("SetSiliconParameters")]
         assert temperatures == [300.0] * len(DOPED) + [350.0] * len(DOPED)
+
+    def test_a_semiconductor_permittivity_change_rebuilds_the_device(
+        self, sim, fake_devsim
+    ):
+        devsim, _sp = fake_devsim
+        sim.solve(0.0, contact="cathode")
+        sim.materials.semiconductor_permittivity = 11.7
+        sim.solve(0.0, contact="cathode")
+
+        first, second = _created_devices(devsim)
+        assert first != second
 
     def test_a_doping_change_rebuilds_the_device(self, sim, fake_devsim):
         devsim, _sp = fake_devsim
