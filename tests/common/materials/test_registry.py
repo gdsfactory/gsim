@@ -3,7 +3,7 @@
 import pytest
 from pdk_schema import Provenance
 
-from gsim.common.materials import GSIM_MATERIAL_CARDS
+from gsim.common.materials import GSIM_MATERIAL_CARDS, resolve_material_snapshot
 
 
 def _provenance(material_name: str) -> Provenance:
@@ -73,3 +73,13 @@ def test_builtin_model_cards_link_primary_papers(
 def test_default_aliases_share_model_provenance(alias: str, named_model: str) -> None:
     """Default aliases should retain the named model's paper links."""
     assert _provenance(alias) == _provenance(named_model)
+
+
+@pytest.mark.parametrize("name", ["Air", "air"])
+@pytest.mark.parametrize("wavelength", [0.1, 1.55, 20])
+def test_ideal_air_has_unit_index_and_no_absorption(name, wavelength) -> None:
+    """The ideal air model has relative permittivity one throughout its band."""
+    snapshot = resolve_material_snapshot(name, wavelength, {})
+
+    assert snapshot.refractive_index == 1
+    assert snapshot.extinction_coefficient == 0

@@ -21,6 +21,7 @@ def _crop_warnings(caught):
 
 def _simulation(pdk, domain_kind="automatic"):
     simulation = fdtd.Simulation(pdk=pdk)
+    simulation.materials(background="SiO2")
     simulation.geometry("straight")
     simulation.source(port="o1", wavelength_span_um=0, num_wavelengths=1)
     if domain_kind == "explicit":

@@ -1,5 +1,6 @@
 """Built-in optical material cards and strict snapshot evaluation."""
 
+from gsim.common.materials.air import AIR
 from gsim.common.materials.lithium_niobate import (
     LINBO3_MGO5_GAYER,
     LINBO3_ZELMON,
@@ -26,6 +27,7 @@ from gsim.common.materials.snapshots import (
 )
 
 __all__ = [
+    "AIR",
     "GSIM_MATERIAL_CARDS",
     "LINBO3_MGO5_GAYER",
     "LINBO3_ZELMON",

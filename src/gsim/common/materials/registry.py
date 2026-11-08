@@ -6,6 +6,7 @@ from typing import Any, Literal
 import gdsfactory as gf
 from pdk_schema import MaterialCard
 
+from gsim.common.materials.air import AIR
 from gsim.common.materials.lithium_niobate import (
     LINBO3_MGO5_GAYER,
     LINBO3_ZELMON,
@@ -18,6 +19,8 @@ from gsim.common.materials.sio2_malitson import SIO2_MALITSON
 MaterialSource = Literal["project", "gsim"]
 
 GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
+    "Air": AIR,
+    "air": AIR.model_copy(update={"name": "air"}),
     "Si": SI_SALZBERG.model_copy(update={"name": "Si"}),
     "Si-Salzberg": SI_SALZBERG,
     "Si-Li-293K": SI_LI_293K,

@@ -36,6 +36,13 @@
 
 ## Built-in cards
 
+### Ideal air
+
+`Air` and its `air` alias provide a lossless, nondispersive approximation with
+refractive index 1 and extinction coefficient 0. This is an ideal background
+model, not a measured model of atmospheric conditions. A PDK card with the same
+name takes precedence.
+
 ### Silicon
 
 <!-- markdownlint-disable MD013 MD033 MD060 -->

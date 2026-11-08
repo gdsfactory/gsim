@@ -188,6 +188,31 @@ sim.domain(
 )
 ```
 
+## Background default in 0.10.0
+
+The 0.10.0 feature release changes the default simulation background from
+`"SiO2"` to `"Air"`, an ideal lossless, nondispersive material with refractive
+index 1. This intentional change does not target a 0.9.x patch release.
+
+Stack regions continue to use their own material cards and take priority over
+the background. The background fills space not occupied by those regions;
+it does not replace BOX, substrate, cladding, or patterned materials. A domain
+fully filled by stack regions retains those physical material assignments.
+
+Existing calls that omit a background can change behavior in uncovered space.
+Source and receiver references that inherit the background can also change.
+Automatic Z sizing can differ because it follows matching background stack
+levels when available. Explicit domain bounds remain in force.
+
+To preserve the former environment, add `sim.materials(background="SiO2")`,
+or retain `background_material="SiO2"` in the historical constructor API.
+Saved settings with an explicit background are unchanged; settings omitting it
+use the new default when loaded. Set `z_bounds` or `padding_z` explicitly if
+preserving an automatically chosen vertical extent matters. Re-exporting
+updates inputs and cache keys; previously generated inputs and results are
+unchanged. The existing FDTD notebooks already choose their backgrounds
+explicitly.
+
 ## Setup visualization
 
 `plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
