@@ -32,7 +32,9 @@ def embedded_simulation(fdtd_pdk_module):
         mesh_order=10,
     )
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
-    simulation.materials(overrides={"Si": 3.4, "cladding": 1.6, "SiO2": 1.2})
+    simulation.materials(
+        background="SiO2", overrides={"Si": 3.4, "cladding": 1.6, "SiO2": 1.2}
+    )
     simulation.domain(x_bounds=(0, 2), y_bounds=(-0.5, 0.5), z_bounds=(-0.5, 1.2))
     simulation.source(port="o1")
     simulation.geometry(
