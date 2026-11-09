@@ -146,6 +146,30 @@ def test_keyword_wins_over_a_deprecated_hint(tmp_path):
     assert config == expected
 
 
+# keyword, its off value, the deprecated hints key, and the hint's on value
+OFF_OPTIONS = [
+    ("impedance_boundaries", [], "_impedance_boundaries", IMPEDANCE),
+    ("metallic_boundaries", False, "_metallic_boundaries", True),
+    ("conductor_boundary", "conductivity", "_conductor_boundary", "pec"),
+    ("mode_postprocessing", {}, "_mode_postprocessing", POSTPROCESSING),
+]
+
+
+@pytest.mark.parametrize(
+    ("keyword", "off", "key", "on"),
+    OFF_OPTIONS,
+    ids=[option[0] for option in OFF_OPTIONS],
+)
+def test_explicit_off_keyword_wins_over_a_deprecated_hint(
+    tmp_path, keyword, off, key, on
+):
+    """A falsy or default keyword passed explicitly is not "not passed"."""
+    expected = _generate(tmp_path / "baseline")
+    with pytest.warns(DeprecationWarning, match=keyword):
+        config = _generate(tmp_path / "both", **{keyword: off}, hints={key: on})
+    assert config == expected
+
+
 def test_public_hints_are_merged_and_unknown_private_keys_dropped(tmp_path):
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)

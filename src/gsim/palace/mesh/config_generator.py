@@ -476,8 +476,8 @@ def generate_palace_config(
     absorbing_order: int = 2,
     *,
     impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
-    metallic_boundaries: bool = False,
-    conductor_boundary: Literal["conductivity", "pec"] = "conductivity",
+    metallic_boundaries: bool | None = None,
+    conductor_boundary: Literal["conductivity", "pec"] | None = None,
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
 ) -> Path:
@@ -500,11 +500,14 @@ def generate_palace_config(
         periodic_axis: Optional periodic axis identifier
         periodic_translation: Actual donor-to-receiver translation in mesh units
         hints: Additional entries merged into the top level of the JSON.
-            Private ``_``-prefixed keys for the options below are deprecated.
+            Private ``_``-prefixed keys for the options below are deprecated;
+            a keyword passed explicitly wins over its private key.
         impedance_boundaries: Impedance boundaries to add to the config
-        metallic_boundaries: Put a perfect conductor on the outer wall
+        metallic_boundaries: Put a perfect conductor on the outer wall.
+            ``None`` (the default) means ``False``.
         conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
-            surfaces perfect conductors instead of finite-conductivity ones
+            surfaces perfect conductors instead of finite-conductivity ones.
+            ``None`` (the default) means ``"conductivity"``.
         mode_postprocessing: A boundary-mode run's voltage and impedance paths,
             written as ``Boundaries.Postprocessing``
         cross_section_axis: Normal axis of a boundary-mode cross-section; the
@@ -525,16 +528,18 @@ def generate_palace_config(
         refinement_config = RefinementConfig()
 
     hints, deprecated = _split_hints(hints)
-    impedance_boundaries = impedance_boundaries or deprecated.get(
-        "impedance_boundaries"
-    )
-    metallic_boundaries = metallic_boundaries or bool(
-        deprecated.get("metallic_boundaries")
-    )
-    if conductor_boundary == "conductivity":
-        conductor_boundary = deprecated.get("conductor_boundary", conductor_boundary)
-    mode_postprocessing = mode_postprocessing or deprecated.get("mode_postprocessing")
-    cross_section_axis = cross_section_axis or deprecated.get("cross_section_axis")
+    # A keyword the caller passed wins over its deprecated hint, even a falsy
+    # one; ``None`` means the keyword was not passed.
+    if impedance_boundaries is None:
+        impedance_boundaries = deprecated.get("impedance_boundaries")
+    if metallic_boundaries is None:
+        metallic_boundaries = bool(deprecated.get("metallic_boundaries", False))
+    if conductor_boundary is None:
+        conductor_boundary = deprecated.get("conductor_boundary", "conductivity")
+    if mode_postprocessing is None:
+        mode_postprocessing = deprecated.get("mode_postprocessing")
+    if cross_section_axis is None:
+        cross_section_axis = deprecated.get("cross_section_axis")
 
     if simulation_type not in (
         "driven",
@@ -1378,8 +1383,8 @@ def write_config(
     absorbing_order: int = 2,
     *,
     impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
-    metallic_boundaries: bool = False,
-    conductor_boundary: Literal["conductivity", "pec"] = "conductivity",
+    metallic_boundaries: bool | None = None,
+    conductor_boundary: Literal["conductivity", "pec"] | None = None,
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
 ) -> Path:
@@ -1398,11 +1403,14 @@ def write_config(
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
         hints: Additional entries merged into the top level of the JSON.
-            Private ``_``-prefixed keys for the options below are deprecated.
+            Private ``_``-prefixed keys for the options below are deprecated;
+            a keyword passed explicitly wins over its private key.
         impedance_boundaries: Impedance boundaries to add to the config
-        metallic_boundaries: Put a perfect conductor on the outer wall
+        metallic_boundaries: Put a perfect conductor on the outer wall.
+            ``None`` (the default) means ``False``.
         conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
-            surfaces perfect conductors instead of finite-conductivity ones
+            surfaces perfect conductors instead of finite-conductivity ones.
+            ``None`` (the default) means ``"conductivity"``.
         mode_postprocessing: A boundary-mode run's voltage and impedance paths,
             written as ``Boundaries.Postprocessing``
         cross_section_axis: Normal axis of a boundary-mode cross-section; the
