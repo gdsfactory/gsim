@@ -1,5 +1,8 @@
 # Validate Palace result evidence
 
+This page is about checking the solver evidence of a run you made. How gsim results compare with analytic, measured or published
+references belongs on a separate benchmarks page, which is not published yet.
+
 [`validate_solution`][gsim.palace.validation.validate_solution] reports core solver convergence, optional error
 estimation, adaptive sampling, process exit and OOM evidence, mode checks, and input provenance independently. A zero
 exit code does not establish physical validity. The function reads supplied evidence and never changes tolerances or
