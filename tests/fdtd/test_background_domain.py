@@ -259,3 +259,45 @@ def test_merged_fiber_medium_samples_film_in_lateral_padding(tmp_path, blanket_p
     assert receiver["fiber_mode"]["refractive_index"] == pytest.approx(
         1.444023621703261
     )
+
+
+@pytest.mark.parametrize("angle", [-10, 0, 10])
+@pytest.mark.parametrize("reference", [0, 0.5, 1])
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_one_explicit_axis_keeps_automatic_layout_bounds(
+    tmp_path,
+    blanket_pdk,
+    angle,
+    reference,
+    axis,
+):
+    levels = blanket_pdk.PDK.layer_stack.layers
+    levels["core"].sidewall_angle = 0
+    for name in ("substrate", "box", "clad"):
+        levels[name].sidewall_angle = angle
+        levels[name].width_to_z = reference
+    bounds = (
+        {"x_bounds": (0, 2)}
+        if axis == "x"
+        else {
+            "padding_y": None,
+            "y_bounds": (-0.8, 1.2),
+        }
+    )
+    simulation = fdtd.Simulation(pdk=blanket_pdk)
+    simulation.domain(padding_y=(0.4, 0.7), z_bounds=(-1.5, 0.5), clip_geometry=True)
+    simulation.domain(**bounds)
+    simulation.source(port="o1")
+    simulation.geometry("straight", mesh_size_nm=700)
+    expected_low = [0, -650 if axis == "x" else -800, -1500]
+    expected_high = [2000, 950 if axis == "x" else 1200, 500]
+    for index in range(2):
+        artifacts = simulation.write(tmp_path / str(index))
+        mesh = meshio.read(artifacts.mesh_path)
+        assert mesh.points.min(axis=0) == pytest.approx(expected_low)
+        assert mesh.points.max(axis=0) == pytest.approx(expected_high)
+        for name, thickness in (("substrate", 0.5), ("box", 1), ("clad", 0.5)):
+            width = (expected_high[1] - expected_low[1]) / 1000
+            assert _group_volume(mesh, name) == pytest.approx(
+                2 * width * thickness * 1e9
+            )

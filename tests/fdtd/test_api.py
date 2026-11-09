@@ -13,6 +13,45 @@ from gsim import fdtd, gcloud
 
 
 @pytest.mark.parametrize(
+    ("background", "expected_name", "expected_index"),
+    [(None, "Air", 1.0), ("SiO2", "SiO2", 1.4440236217)],
+)
+@pytest.mark.parametrize("explicit_bounds", [False, True])
+def test_background_default_and_explicit_silica_export(
+    tmp_path,
+    fdtd_pdk_module,
+    background,
+    expected_name,
+    expected_index,
+    explicit_bounds,
+) -> None:
+    """Default space is air; explicit silica preserves the former environment."""
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    if background is not None:
+        simulation.materials(background=background)
+    if explicit_bounds:
+        simulation.domain(z_bounds=(-0.5, 0.8))
+    simulation.geometry("straight", mesh_size_nm=750)
+    simulation.source(port="o1")
+
+    artifacts = simulation.write(tmp_path)
+    document = json.loads(artifacts.config_path.read_text())
+
+    assert simulation.materials.background == expected_name
+    assert document["geometry"]["volumes"]["background"]["material"] == expected_name
+    assert document["background_refractive_index"] == pytest.approx(expected_index)
+    assert document["materials"][expected_name]["refractive_index"] == pytest.approx(
+        expected_index
+    )
+    bounds = document["grid"]["non_pml_bounds"]
+    assert (bounds["min"][2], bounds["max"][2]) == (
+        (-500, 800)
+        if explicit_bounds
+        else (-1000, 1220 if background is None else 1000)
+    )
+
+
+@pytest.mark.parametrize(
     ("mode", "expected"),
     [
         (

@@ -76,6 +76,7 @@ def fuse_polygons(
     simplify_tol: float = 1e-4,
     *,
     background_bounds: tuple[float, float, float, float] | None = None,
+    background_overhang_axes: tuple[bool, bool] = (True, True),
 ) -> AnyShapelyPolygon:
     """Extract and merge all polygons for a layer from a component.
 
@@ -93,6 +94,8 @@ def fuse_polygons(
         simplify_tol: tolerance for polygon simplification
         background_bounds: Optional XY bounds in micrometers for blanket films.
             Patterned masks are unchanged; background exclusion masks still apply.
+        background_overhang_axes: Add sidewall overhang only on resolved domain
+            axes. Automatic axes retain their layout reference until domain sizing.
 
     Returns:
         Merged Shapely Polygon or MultiPolygon
@@ -135,9 +138,15 @@ def fuse_polygons(
         # Keep artificial outer edges outside the domain at every Z section.
         # Exclusion-mask contours stay at their original reference position.
         overhang = max(0.0, -layer.width_to_z * slope, (1 - layer.width_to_z) * slope)
-        footprint = shapely.geometry.box(*background_bounds)
-        if overhang:
-            footprint = footprint.buffer(overhang, join_style=2)
+        x_overhang = overhang if background_overhang_axes[0] else 0.0
+        y_overhang = overhang if background_overhang_axes[1] else 0.0
+        xmin, ymin, xmax, ymax = background_bounds
+        footprint = shapely.geometry.box(
+            xmin - x_overhang,
+            ymin - y_overhang,
+            xmax + x_overhang,
+            ymax + y_overhang,
+        )
         geometry = footprint.difference(geometry)
     return geometry.simplify(simplify_tol, preserve_topology=False)
 

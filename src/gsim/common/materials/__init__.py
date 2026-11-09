@@ -1,11 +1,13 @@
 """Built-in optical material cards and strict snapshot evaluation."""
 
+from gsim.common.materials.air import AIR
 from gsim.common.materials.lithium_niobate import (
     LINBO3_MGO5_GAYER,
     LINBO3_ZELMON,
 )
 from gsim.common.materials.registry import (
     GSIM_MATERIAL_CARDS,
+    canonical_material_name,
     find_material_card,
     get_material_card,
     get_project_material_cards,
@@ -26,6 +28,7 @@ from gsim.common.materials.snapshots import (
 )
 
 __all__ = [
+    "AIR",
     "GSIM_MATERIAL_CARDS",
     "LINBO3_MGO5_GAYER",
     "LINBO3_ZELMON",
@@ -38,6 +41,7 @@ __all__ = [
     "MaterialResolutionError",
     "MaterialSnapshot",
     "WavelengthOutOfRangeError",
+    "canonical_material_name",
     "evaluate_material_card",
     "find_material_card",
     "get_material_card",

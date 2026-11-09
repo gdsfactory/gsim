@@ -77,13 +77,18 @@ class RuntimeConfigMixin:
         """Return canonical geometry supplied by the concrete simulation."""
         raise NotImplementedError
 
+    @property
+    def _background_material_name(self) -> str:
+        """Return the canonical background supplied by the concrete simulation."""
+        raise NotImplementedError
+
     def _background_bounds_nm(
         self,
     ) -> tuple[float, float, float, float, float, float]:
         """Return the resolved automatic or explicitly bounded domain."""
         return background_bounds_nm(
             self.resolved,
-            self.materials.background,
+            self._background_material_name,
             self.domain.padding,
             padding_x=self.domain.padding_x,
             padding_y=self.domain.padding_y,
@@ -218,7 +223,7 @@ class RuntimeConfigMixin:
         bounds = self._background_bounds_nm()
         background_index = (
             self.source.vertical_refractive_index
-            or material_snapshots[self.materials.background].refractive_index
+            or material_snapshots[self._background_material_name].refractive_index
         )
         outward_sign = 1 if self.source.vertical_axis == "+z" else -1
         aperture_z_nm = bounds[5] if outward_sign > 0 else bounds[2]
@@ -374,7 +379,7 @@ class RuntimeConfigMixin:
             focal_point=_scale_vector(source.focal_point_um, 1000),
             waist_radius=source.waist_radius_um * 1000,
             refractive_index=source.refractive_index
-            or material_snapshots[self.materials.background].refractive_index,
+            or material_snapshots[self._background_material_name].refractive_index,
         )
 
     def _plane_monitor_config(
@@ -425,7 +430,7 @@ class RuntimeConfigMixin:
             focal_point=_scale_vector(fiber_mode.focal_point_um, 1000),
             waist_radius=fiber_mode.waist_radius_um * 1000,
             refractive_index=fiber_mode.refractive_index
-            or material_snapshots[self.materials.background].refractive_index,
+            or material_snapshots[self._background_material_name].refractive_index,
         )
 
     def _config(
@@ -439,7 +444,7 @@ class RuntimeConfigMixin:
             return build_fdtd_config(
                 manifest,
                 material_snapshots,
-                background_material=self.materials.background,
+                background_material=self._background_material_name,
                 center_wavelength_nm=self.source.wavelength_um * 1000,
                 wavelength_halfspan_nm=self.source.wavelength_halfspan_um * 1000,
                 num_wavelengths=self.source.num_wavelengths,

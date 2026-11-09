@@ -184,6 +184,34 @@ def test_build_config_uses_authoritative_stack_and_materials() -> None:
     assert math.sqrt(si_eps[0]) == pytest.approx(3.4757, abs=1e-3)
 
 
+@pytest.mark.parametrize("air", ["Air", "air"])
+@pytest.mark.usefixtures("_auth_pdk_active")
+def test_air_spelling_preserves_automatic_mode_domain(air: str) -> None:
+    """Canonical gpdk air must be excluded from automatic non-air Z bounds."""
+    from gsim.common.stack.extractor import Layer
+
+    sim = _authoritative_sim(gf.get_active_pdk())
+    sim.build_config()
+    stack = sim.geometry.stack.model_copy(deep=True)
+    expected = sim._stack_material_extent(stack)
+    stack.layers["air_padding"] = Layer(
+        name="air_padding",
+        material=air,
+        gds_layer=(888, 0),
+        zmin=-100,
+        zmax=100,
+        thickness=200,
+        layer_type="dielectric",
+    )
+    stack.dielectrics.append(
+        {"name": "air_box", "material": air, "zmin": -100, "zmax": 100}
+    )
+    sim.geometry.stack = stack
+    sim.mode_solver.port = "o1"
+    assert sim._stack_material_extent() == expected
+    assert sim._resolve_mode_solver_z_window()[0][0] > -100
+
+
 @pytest.mark.usefixtures("_auth_pdk_active")
 def test_sim_config_records_pdk_provenance(tmp_path) -> None:
     pdk = gf.get_active_pdk()

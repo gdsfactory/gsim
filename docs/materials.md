@@ -36,6 +36,13 @@
 
 ## Built-in cards
 
+### Ideal air
+
+`Air` and its `air` alias provide a lossless, nondispersive approximation with
+refractive index 1 and extinction coefficient 0. This is an ideal background
+model, not a measured model of atmospheric conditions. A PDK card with the same
+name takes precedence.
+
 ### Silicon
 
 <!-- markdownlint-disable MD013 MD033 MD060 -->
@@ -85,6 +92,27 @@ print(snapshot.refractive_index)
 ```
 
 Lookup is case-sensitive. A project card with the same name replaces that fallback.
+PDKs can declare `material_aliases` (or module-level `MATERIAL_ALIASES`) mapping
+compatibility names to canonical card keys. These aliases also apply to layer
+materials and FDTD index overrides. No general case folding is performed;
+distinct project material names remain distinct. The built-in `air` alias
+resolves to `Air` unless an exact project card overrides it.
+At gsim's material boundary, alias targets can come from project cards, built-in
+fallbacks, or explicit FDTD overrides. Missing targets are reported when used.
+
+Meep mode setup preserves drawn `Air`/`air` voids, including inside silicon with
+an air background. These regions keep their declared Z extent instead of being
+discarded or extended into the lower margin. Undrawn Air declarations remain
+excluded from component cross-sections.
+Mode cells and sampling grids use the same non-air Z reference as the reported
+domain, so unused Air padding does not enlarge the actual solver cell.
+Mode geometry honors PDK `mesh_order`: lower values win overlaps, including Air
+voids. Equal priorities retain declaration order; unranked legacy entries keep
+their relative order and precede explicitly ranked regions.
+Explicit 1D Air slabs are retained even with an Air background, so declaration
+order can carve an unranked cutout from an overlapping solid.
+Slab mode treats each entry as a uniform band; component cross-section mode
+applies the layout masks.
 
 ## Analytic PDK cards
 

@@ -85,7 +85,9 @@ class ResolvedPassivePcell:
     """Canonical physical representation consumed by simulation backends.
 
     ``layout_bounds`` retains the unpadded XY footprint and resolved material
-    height when a backend extends blanket films over its domain.
+    height when a backend extends blanket films over its domain. Retain an
+    originating PDK module for material-card and alias lookup, while keeping
+    ``pdk`` as the authoritative inner PDK object.
     """
 
     component: Any
@@ -97,6 +99,7 @@ class ResolvedPassivePcell:
     ports: Mapping[str, ResolvedPort]
     bounds: Bounds3D
     wavelength_um: float
+    pdk_module: Any | None = None
     layout_bounds: Bounds3D | None = None
 
 

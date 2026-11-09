@@ -61,6 +61,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
 ) -> None:
     simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
+        background_material="SiO2",
         mesh_size_nm=750,
         domain={"padding": 0.25},
         pml_cells=16,
@@ -164,7 +165,7 @@ def test_enabled_dispersion_writes_dispersive_models(
         num_wavelengths=3,
         default_port="o1",
     )
-    simulation.materials(dispersion=True)
+    simulation.materials(background="SiO2", dispersion=True)
     simulation.geometry("straight", settings={"length": 2.0})
 
     artifacts = simulation.write(tmp_path)
