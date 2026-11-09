@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import warnings
+from collections.abc import Mapping
 from dataclasses import replace
 from math import isfinite
 from pathlib import Path
-from tempfile import TemporaryDirectory, mkdtemp
+from tempfile import mkdtemp
 from typing import Any, Self
 
 import gdsfactory as gf
@@ -43,8 +44,9 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
-from gsim.fdtd.runtime import RuntimeConfigMixin
-from gsim.fdtd.viz import Axis, ViewerMode
+from gsim.fdtd.monitor_bounds import monitor_region_nm
+from gsim.fdtd.monitor_names import resolve_monitor_name
+from gsim.fdtd.visualization import VisualizationMixin
 
 # Flat constructor arguments of the original API, as (concern, field).
 # wavelength_halfspan_um is translated separately: it doubles into a span.
@@ -124,7 +126,7 @@ def _constant_material_card(name: str, refractive_index: float) -> Any:
     )
 
 
-class Simulation(CloudJobMixin, RuntimeConfigMixin):
+class Simulation(CloudJobMixin, VisualizationMixin):
     """Configure, serialize, and run a GDSFactory FDTD simulation."""
 
     _cloud_job_type = "fdtd"
@@ -232,14 +234,22 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
         return self._job_id
 
     def add_monitors(
-        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+        self,
+        *,
+        xy: bool = True,
+        xy_name: str | None = None,
+        z_um: float | None = None,
+        margin_um: float = 0.75,
     ) -> Self:
-        """Add center-wavelength port intensity images and an optional XY overview.
+        """Add center-wavelength port intensity images and an optional XY field image.
 
         Args:
-            xy: Include the component-wide XY overview (default: True).
-            z_um: Overview height in micrometers. None uses the resolved geometry's
-                vertical midpoint. Ignored when xy is False.
+            xy: Include a component-wide XY field image (default: True).
+            xy_name: XY image name. Use field_xy for new code. None retains
+                overview_xy with a DeprecationWarning during the transition.
+                Ignored when xy is False.
+            z_um: XY image height in micrometers. None uses the resolved geometry's
+                vertical midpoint within any opted-in crop. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
                 active cross section, in micrometers (default: 0.75).
 
@@ -247,9 +257,11 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows follow the port width and owning PDK layer's
-            vertical bounds, plus margin_um, three Yee cells inward from each
-            port. Each plane records only the source center wavelength,
+            Optical port windows follow the port width and selected physical
+            bands' active bounds, plus margin_um, three Yee cells inward from
+            each port. Preview and output windows are cropped to the domain
+            without changing the requested settings.
+            Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
             raise ValueError before any planes are added. This method does not
@@ -269,7 +281,11 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
                 raise FDTDGeometryError(
                     f"Optical port {port.name!r} has no owning layer"
                 )
-            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            owners = [resolved.layers[key] for key in port.physical_layer_keys]
+            z_lower, z_upper = port.z_bounds or (
+                min(layer.z_bounds[0] for layer in owners),
+                max(layer.z_bounds[1] for layer in owners),
+            )
             width_um = port.width + 2 * margin_um
             height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
@@ -281,7 +297,7 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
                     center_um=(
                         port.center[0] - nx * offset_um,
                         port.center[1] - ny * offset_um,
-                        port.center[2],
+                        (z_lower + z_upper) / 2,
                     ),
                     size_um=(0, width_um, height_um)
                     if nx
@@ -296,11 +312,15 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             )
         if xy:
             if z_um is None:
-                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+                low, high = resolved.bounds[0][2], resolved.bounds[1][2]
+                if self.domain.clip_geometry and self.domain.z_bounds is not None:
+                    low = max(low, self.domain.z_bounds[0])
+                    high = min(high, self.domain.z_bounds[1])
+                z_um = (low + high) / 2
             component = resolved.component
             planes.append(
                 PlaneMonitor(
-                    name="overview_xy",
+                    name="overview_xy" if xy_name is None else xy_name,
                     center_um=(component.dx, component.dy, z_um),
                     size_um=(component.dxsize, component.dysize, 0),
                     normal="+z",
@@ -313,8 +333,24 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             )
         existing_names = {monitor.name for monitor in self.monitors}
         for plane in planes:
-            if plane.name in existing_names:
+            if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
+            existing_names.add(plane.name)
+        if self.domain.clip_geometry:
+            bounds = self._background_bounds_nm()
+            for plane in planes:
+                monitor_region_nm(plane, bounds, warn=False)
+        if xy and xy_name is None:
+            warnings.warn(
+                "The default XY monitor name 'overview_xy' is deprecated and "
+                "will change to 'field_xy' no earlier than 0.11.0 and only after "
+                "at least two feature releases and 12 months have passed since "
+                "the first released warning. "
+                "Pass xy_name='field_xy' to adopt the new name, or "
+                "xy_name='overview_xy' to retain the existing generated name.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         for plane in planes:
             self.monitors.add(plane)
         return self
@@ -332,6 +368,9 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
             port_layer_map=self.geometry.port_layer_map,
+            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
+            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
+            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
         )
         return self._resolved
 
@@ -405,6 +444,7 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
         config_path = directory / "config.json"
         material_snapshots = self._material_snapshots()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         manifest = generate_mesh(
             resolved,
             mesh_path,
@@ -418,6 +458,7 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
         config_path.write_text(
@@ -432,107 +473,6 @@ class Simulation(CloudJobMixin, RuntimeConfigMixin):
             manifest=manifest,
         )
         return self._last_artifacts
-
-    def _plot_viewer(
-        self,
-        *,
-        mode: ViewerMode,
-        axis: Axis = "z",
-        position_um: float | None = None,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Render the current or a temporary mesh with the FDTD viewer."""
-        from gsim.fdtd.viz import plot_mesh
-
-        if (
-            self._last_artifacts is not None
-            and self._last_artifacts.mesh_path.is_file()
-        ):
-            return plot_mesh(
-                self._last_artifacts.mesh_path,
-                mode=mode,
-                axis=axis,
-                position_um=position_um,
-                show_groups=show_groups,
-                hide_groups=hide_groups,
-                zoom_to_cursor=zoom_to_cursor,
-                cell_size_nm=self.solver.cell_size_nm,
-                pml_cells=self.domain.pml_cells,
-                height=height,
-            )
-
-        previous_artifacts = self._last_artifacts
-        with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
-            try:
-                artifacts = self.write(directory)
-                return plot_mesh(
-                    artifacts.mesh_path,
-                    mode=mode,
-                    axis=axis,
-                    position_um=position_um,
-                    show_groups=show_groups,
-                    hide_groups=hide_groups,
-                    zoom_to_cursor=zoom_to_cursor,
-                    cell_size_nm=self.solver.cell_size_nm,
-                    pml_cells=self.domain.pml_cells,
-                    height=height,
-                )
-            finally:
-                self._last_artifacts = previous_artifacts
-
-    def plot_3d(
-        self,
-        *,
-        show_mesh: bool = False,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
-        return self._plot_viewer(
-            mode="mesh" if show_mesh else "surface",
-            show_groups=show_groups,
-            hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
-        )
-
-    def plot_2d(
-        self,
-        *,
-        axis: Axis = "z",
-        position_um: float | None = None,
-        show_mesh: bool = False,
-        show_groups: Sequence[str] | None = None,
-        hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show a filled cross-section, optionally with intersected cell edges."""
-        position_um = self._default_slice_position(axis, position_um)
-        return self._plot_viewer(
-            mode="mesh_slice" if show_mesh else "slice",
-            axis=axis,
-            position_um=position_um,
-            show_groups=show_groups,
-            hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
-        )
-
-    def _default_slice_position(
-        self, axis: Axis, position_um: float | None
-    ) -> float | None:
-        """Prefer the configured geometry midpoint over the padded domain center."""
-        if position_um is not None or self._resolved is None:
-            return position_um
-        axis_index = {"x": 0, "y": 1, "z": 2}[axis]
-        lower, upper = self.resolved.bounds
-        return (lower[axis_index] + upper[axis_index]) / 2
 
 
 __all__ = ["Simulation"]

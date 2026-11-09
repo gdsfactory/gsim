@@ -306,7 +306,7 @@ def test_explicit_domain_bounds_must_contain_source(
         simulation.write(tmp_path)
 
 
-def test_explicit_domain_bounds_must_contain_monitor(
+def test_explicit_domain_bounds_crop_monitor_with_warning(
     tmp_path,
     fdtd_pdk_module,
 ) -> None:
@@ -326,8 +326,11 @@ def test_explicit_domain_bounds_must_contain_monitor(
         heatmap=fdtd.Heatmap(quantity="abs_e", wavelengths_um=[1.55]),
     )
 
-    with pytest.raises(FDTDConfigError, match=r"Monitor 'cross'.*z-extent"):
-        simulation.write(tmp_path)
+    with pytest.warns(UserWarning, match=r"Monitor 'cross' cropped.*z extent"):
+        artifacts = simulation.write(tmp_path)
+    monitor = json.loads(artifacts.config_path.read_text())["monitors"][0]
+    assert monitor["region_min"] == pytest.approx([0, 0, -400])
+    assert monitor["region_max"] == pytest.approx([2000, 0, 600])
 
 
 def test_coarse_transfer_mesh_preserves_ten_nm_cad_feature(
@@ -381,6 +384,7 @@ def test_vertical_port_becomes_fiber_monitor_not_material_port(
 
     assert document["excitation"]["type"] == "eigenmode"
     assert document["excitation"]["default_port"] == "o1"
+    assert "mode" not in document["excitation"]
     assert set(document["geometry"]["ports"]) == {"o1"}
     assert "port_o2" not in mesh.field_data
     assert document["monitors"][0]["name"] == "o2"

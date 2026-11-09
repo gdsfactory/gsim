@@ -24,6 +24,7 @@ from gsim.common.materials import (
 from gsim.common.materials._helpers import material_card, wavelength_validity
 from gsim.fdtd.config import (
     DispersionConfig,
+    ExcitationConfig,
     FDTDConfig,
     FiberModeConfig,
     GaussianBeamConfig,
@@ -172,6 +173,46 @@ def test_config_uses_manifest_tags_and_rejects_extra_fields() -> None:
     document["excitation"]["default_port"] = "missing"
     with pytest.raises(ValidationError, match="is not declared"):
         FDTDConfig.model_validate(document)
+
+
+@pytest.mark.parametrize("kind", ["te_like", "tm_like"])
+def test_config_builder_rejects_mode_axis_longitudinal_to_output(kind: str) -> None:
+    manifest = _manifest()
+    manifest.ports["o2"] = PortMeshGroup(
+        name="o2",
+        physical_name="port_o2",
+        physical_tag=24,
+        layer="core",
+        normal=(0, 1, 0),
+    )
+    snapshots = {
+        name: resolve_material_snapshot(name, 1.55, {}) for name in ("Si", "SiO2")
+    }
+    excitation = ExcitationConfig(
+        center_wavelength=1550,
+        wavelength_halfspan=50,
+        num_wavelengths=3,
+        default_port="o1",
+        mode={"kind": kind, "te_axis": "y"},
+    )
+
+    with pytest.raises(ValidationError, match=r"te_axis.*'y'.*'o2'"):
+        build_fdtd_config(
+            manifest,
+            snapshots,
+            background_material="SiO2",
+            center_wavelength_nm=1550,
+            wavelength_halfspan_nm=50,
+            num_wavelengths=3,
+            default_port="o1",
+            nanometers_per_cell=31.25,
+            pml_cells=16,
+            max_timesteps=None,
+            energy_decay_fraction=1e-6,
+            max_wall_seconds=3600,
+            excitation=excitation,
+            dispersion=True,
+        )
 
 
 def test_dispersive_cards_are_written_over_the_source_band() -> None:

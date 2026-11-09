@@ -13,13 +13,16 @@ from typing import Any
 import sympy as sp
 from pdk_schema import (
     AnalyticDispersion,
+    Drude,
     Index,
+    Lorentz,
     MaterialCard,
     ScalarValue,
     Sellmeier,
     TabulatedValue,
 )
 
+from gsim.common.materials.oscillators import oscillator_index
 from gsim.common.materials.registry import MaterialSource, find_material_card
 
 
@@ -262,6 +265,14 @@ def _evaluate_permittivity(
     _validate_wavelength(model, wavelength_um, card.name)
     if isinstance(model, AnalyticDispersion):
         return _evaluate_analytic_index(model, wavelength_um, card.name), 0.0
+    if isinstance(model, (Drude, Lorentz)):
+        try:
+            return oscillator_index(model, wavelength_um)
+        except (ArithmeticError, ValueError) as error:
+            raise MaterialModelError(
+                f"Cannot evaluate {model.kind} material {card.name!r} at "
+                f"{wavelength_um:g} um: {error}"
+            ) from error
     if isinstance(model, Sellmeier):
         wavelength_squared = wavelength_um**2
         index_squared = (

@@ -506,7 +506,6 @@ class TestModePaths:
             "line",
             voltage=[[-20.6, 0.25], [-19.4, 0.25]],
             current=[[-22.7, -0.1], [-20.5, -0.1], [-20.5, 0.6], [-22.7, 0.6]],
-            nsamples=200,
         )
         second = sim.add_impedance_path("gap", voltage=[[-19.8, 0.11], [-20.2, 0.11]])
 
@@ -514,7 +513,7 @@ class TestModePaths:
         post = sim.mode_postprocessing()
         assert [entry["Index"] for entry in post["Impedance"]] == [1, 2]
         assert post["Impedance"][0]["VoltagePath"] == [[-20.6, 0.25], [-19.4, 0.25]]
-        assert post["Impedance"][0]["NSamples"] == 200
+        assert "NSamples" not in post["Impedance"][0]
         assert len(post["Impedance"][0]["CurrentPath"]) == 4
         # A path without a loop asks for the voltage alone.
         assert "CurrentPath" not in post["Impedance"][1]
