@@ -128,7 +128,7 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     written inputs are byte-identical. It can be dropped once the server-side
     key includes the solver image version.
 
-    Palace reserves root-level ``metadata.json`` for SDK diagnostics. Exclude
+    Palace and FDTD reserve root-level ``metadata.json`` for SDK diagnostics. Exclude
     it from this result-cache key so new measurements do not rerun identical
     physics inputs. ``compute_dir_digest()`` still includes it by default for
     callers that need a digest of the complete input bundle.
@@ -150,7 +150,7 @@ def compute_input_hash(input_dir: str | Path, job_type: str) -> str:
     """
     from gsim import __version__
 
-    exclude = ("metadata.json",) if job_type.lower() == "palace" else ()
+    exclude = ("metadata.json",) if job_type.lower() in {"palace", "fdtd"} else ()
     digest = compute_dir_digest(input_dir, exclude=exclude)
     hasher = hashlib.sha256()
     hasher.update(digest.encode("ascii"))

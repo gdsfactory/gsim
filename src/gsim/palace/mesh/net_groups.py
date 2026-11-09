@@ -8,7 +8,8 @@ apart in the Palace config.
 When terminals select nets, ``generate_mesh`` runs these steps:
 
 1. before meshing, :func:`check_via_merging` makes sure that merging nearby vias
-   does not join the vias of two nets;
+   does not join the vias of two nets, and, with ``clip_merged_vias``, that no
+   clipped via volume lies nearer to the vias of another net than to its own;
 2. after meshing and before the file is written, :func:`split_groups_by_net`
    replaces each conductor, planar-conductor and via-boundary group with one
    group per net, named ``<old name>@<net name>``. A surface is assigned to the
@@ -39,6 +40,12 @@ _CONDUCTOR_TOLERANCE_UM = 0.05
 _VIA_TOLERANCE_MARGIN_UM = 0.06
 # a merged via polygon overlaps an original via when they share at least this area
 _MIN_OVERLAP_UM2 = 1e-9
+# um: spacing of the points tested along the outline of a clipped via volume, and
+# the most points per outline (the spacing grows for a long outline)
+_OUTLINE_STEP_UM = 0.02
+_MAX_OUTLINE_POINTS = 4000
+# um: a point is nearer to another net when it is closer to it by more than this
+_NEAREST_NET_SLACK_UM = 1e-9
 _HINT = (
     "Curve fitting (curve_fit_mode) and polygon decimation (decimate_tolerance) "
     'move edges; try curve_fit_mode="line" or no decimation'
@@ -72,11 +79,93 @@ def _polygon(
     )
 
 
+class _LayerVias:
+    """The drawn vias of each net on one via layer, with an index per net.
+
+    ``split_groups_by_net`` gives a via face to the net with the nearest drawn
+    via. Clipping can keep a lobe of the landing area that reaches towards the
+    vias of another net without covering them: it overlaps the vias of one net
+    only, but its faces would go to the wrong net, or fail late.
+    """
+
+    def __init__(
+        self, name: str, nets: Nets, by_net: dict[int, list[shapely.Polygon]]
+    ) -> None:
+        """Index the drawn vias of each net.
+
+        Args:
+            name: The via layer.
+            nets: The nets of the geometry.
+            by_net: Position of a net -> its drawn via polygons on the layer.
+        """
+        self.name = name
+        self.nets = nets
+        self.by_net = by_net
+        self.trees = {k: shapely.STRtree(shapes) for k, shapes in by_net.items()}
+
+    def _distances(self, k: int, points: Any) -> Any:
+        """Distance of each point to the nearest drawn via of net ``k``."""
+        _, distance = self.trees[k].query_nearest(
+            points, return_distance=True, all_matches=False
+        )
+        return distance
+
+    def check(
+        self, outline: shapely.Polygon, k: int, overlapped: list[shapely.Polygon]
+    ) -> None:
+        """Fail when a clipped via volume of net ``k`` lies nearer to another net.
+
+        Every point of the outline (sampled along it) must be at least as near
+        to the vias of net ``k`` as to the vias of every other net.
+
+        Args:
+            outline: The clipped via volume as seen from above.
+            k: Position of the one net whose vias it overlaps.
+            overlapped: The drawn vias of that net it overlaps.
+
+        Raises:
+            ValueError: If a point of the outline is nearer to another net.
+        """
+        if len(self.by_net) < 2:
+            return
+        if outline.difference(shapely.union_all(overlapped)).area <= _MIN_OVERLAP_UM2:
+            return  # the drawn cuts themselves; nothing was added
+        boundary = outline.boundary
+        step = max(_OUTLINE_STEP_UM, boundary.length / _MAX_OUTLINE_POINTS)
+        coordinates = shapely.get_coordinates(shapely.segmentize(boundary, step))
+        points = shapely.points(coordinates)
+        own = self._distances(k, points)
+        for j in sorted(self.by_net):
+            if j == k:
+                continue
+            other = self._distances(j, points)
+            excess = own - other
+            if excess.max() <= _NEAREST_NET_SLACK_UM:
+                continue
+            worst = int(np.argmax(excess))
+            x, y = coordinates[worst]
+            _, gaps = self.trees[j].query_nearest(
+                self.by_net[k], return_distance=True, all_matches=False
+            )
+            gap = float(gaps.min())
+            msg = (
+                f"Via layer '{self.name}': with clip_merged_vias the via volume "
+                f"of net {self.nets[k].name!r} reaches ({x:.4g}, {y:.4g}) um, "
+                f"which is {other[worst]:.3g} um from the vias of net "
+                f"{self.nets[j].name!r} but {own[worst]:.3g} um from its own, so "
+                "its faces cannot be assigned to a net. Set merge_via_distance "
+                f"below the gap between the vias of the two nets ({gap:.3g} um; "
+                "0 turns merging off)."
+            )
+            raise ValueError(msg)
+
+
 def check_via_merging(
     geometry: GeometryData,
     stack: LayerStack,
     nets: Nets,
     merge_via_distance: float,
+    clip_merged_vias: bool = False,
 ) -> None:
     """Fail when merging nearby vias would join the vias of two nets.
 
@@ -89,14 +178,24 @@ def check_via_merging(
         stack: The layer stack.
         nets: The nets of that geometry.
         merge_via_distance: The merge distance of the mesh, in um.
+        clip_merged_vias: Whether the mesh clips merged vias to the metal
+            above and below them. The check then looks at the clipped vias, as
+            ``add_metals`` meshes them, and also fails when a clipped via
+            volume lies nearer to the vias of another net than to its own.
 
     Raises:
-        ValueError: If a merged via polygon covers vias of more than one net.
+        ValueError: If a merged via polygon covers vias of more than one net,
+            or a clipped one lies nearer to another net than to its own.
     """
-    from gsim.palace.mesh.geometry import _merge_via_polygons
+    from gsim.palace.mesh.geometry import (
+        _merge_via_layer,
+        _polygons_by_gds_layer,
+        _via_landing_area,
+    )
 
     if merge_via_distance <= 0:
         return
+    polygons_by_gds = _polygons_by_gds_layer(geometry.polygons)
     for name, layer in stack.layers.items():
         if layer.layer_type != "via":
             continue
@@ -117,9 +216,23 @@ def check_via_merging(
             i: _polygon(xs, ys, holes)
             for i, (xs, ys, holes) in zip(indices, polys, strict=True)
         }
-        merged = _merge_via_polygons(
+        landing = (
+            _via_landing_area(polygons_by_gds, stack, name)
+            if clip_merged_vias
+            else None
+        )
+        layer_vias: _LayerVias | None = None
+        if clip_merged_vias:
+            by_net: dict[int, list[shapely.Polygon]] = {}
+            for i, original in originals.items():
+                if i in net_of_index:
+                    by_net.setdefault(net_of_index[i], []).append(original)
+            layer_vias = _LayerVias(name, nets, by_net)
+        merged = _merge_via_layer(
             [(list(xs), list(ys), holes) for xs, ys, holes in polys],
             merge_via_distance,
+            landing,
+            label=repr(name),
         )
         for xs, ys, holes in merged:
             outline = _polygon(xs, ys, holes)
@@ -131,6 +244,8 @@ def check_via_merging(
                 ):
                     shapes.setdefault(k, []).append(original)
             members = sorted(shapes)
+            if layer_vias is not None and len(members) == 1:
+                layer_vias.check(outline, members[0], shapes[members[0]])
             if len(members) < 2:
                 continue
             gap = min(

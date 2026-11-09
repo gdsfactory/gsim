@@ -8,6 +8,7 @@ import yaml
 from gdsfactory.technology import LayerLevel
 from gdsfactory.technology import LayerStack as GfLayerStack
 
+from gsim.common.stack import load_stack_yaml
 from gsim.common.stack.extractor import (
     Layer,
     LayerStack,
@@ -57,6 +58,20 @@ def test_layer_list_round_trips_to_yaml_without_losing_physical_dimensions(
     assert document["layers"]["metal"]["thickness"] == 0.5
     assert set(document["materials"]) == {"silicon", "SiO2", "aluminum"}
     assert set(stack.get_conductor_layers()) == {"metal"}
+
+
+@pytest.mark.parametrize("sidewall_angle", [-12.5, 0.0, 12.5])
+def test_stack_yaml_round_trip_preserves_sidewall_angle(
+    layers, tmp_path, sidewall_angle
+):
+    stack = LayerStack(pdk_name="test", layers={"metal": layers[2]})
+    stack.layers["metal"].sidewall_angle = sidewall_angle
+    path = tmp_path / "stack.yaml"
+    stack.to_yaml(path)
+
+    loaded_stack = load_stack_yaml(path)
+
+    assert loaded_stack.layers["metal"].sidewall_angle == sidewall_angle
 
 
 @pytest.mark.parametrize("duplicate", [False, True])

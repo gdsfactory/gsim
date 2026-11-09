@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import gdsfactory as gf
 import gmsh
 import meshio
 import numpy as np
@@ -12,7 +13,6 @@ import pytest
 
 from gsim import fdtd
 from gsim.fdtd.models import FDTDConfigError, FDTDGeometryError
-from gsim.fdtd.simulation import ArtifactSimulation
 
 
 def _physical_group_points(mesh: meshio.Mesh, name: str, cell_type: str) -> np.ndarray:
@@ -122,6 +122,36 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
     assert mesh_header[mesh_header.index("$MeshFormat") + 1] == "2.2 0 8"
 
 
+def test_write_resolves_virtual_port_layer_without_meshing_marker(
+    tmp_path, fdtd_pdk_module
+) -> None:
+    fdtd_pdk_module.PDK.activate()
+    component = gf.Component()
+    component.add_polygon(
+        [(0, -0.25), (2, -0.25), (2, 0.25), (0, 0.25)],
+        layer=(1, 0),
+    )
+    component.add_polygon(
+        [(0, -0.3), (2, -0.3), (2, 0.3), (0, 0.3)],
+        layer=(100, 0),
+    )
+    component.add_port(
+        name="o1", center=(0, 0), width=0.5, orientation=180, layer=(100, 0)
+    )
+    component.add_port(
+        name="o2", center=(2, 0), width=0.5, orientation=0, layer=(100, 0)
+    )
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    resolved = simulation.geometry(component, port_layer_map={(100, 0): "core"})
+    simulation.source(port="o1")
+
+    assert {port.layer_key for port in resolved.ports.values()} == {"core"}
+    assert simulation.geometry.port_layer_map == {(100, 0): "core"}
+    artifacts = simulation.write(tmp_path)
+    mesh = meshio.read(artifacts.mesh_path)
+    assert set(mesh.field_data) == {"background", "core", "port_o1", "port_o2"}
+
+
 def test_enabled_dispersion_writes_dispersive_models(
     tmp_path,
     fdtd_pdk_module,
@@ -178,10 +208,7 @@ def test_write_keeps_background_level_without_polygons(
     assert "buried_oxide" in artifacts.manifest.layers
 
 
-@pytest.mark.parametrize("simulation_class", [fdtd.Simulation, ArtifactSimulation])
-def test_write_uses_lf_line_endings(
-    tmp_path, fdtd_pdk_module, monkeypatch, simulation_class
-) -> None:
+def test_write_uses_lf_line_endings(tmp_path, fdtd_pdk_module, monkeypatch) -> None:
     """The cloud solver crashes on CRLF meshes, so Windows output must be LF."""
     gmsh_write = gmsh.write
 
@@ -193,7 +220,7 @@ def test_write_uses_lf_line_endings(
         mesh_path.write_bytes(content.replace(b"\n", b"\r\n"))
 
     monkeypatch.setattr(gmsh, "write", write_like_windows)
-    simulation = simulation_class(
+    simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
         mesh_size_nm=750,
         default_port="o1",
@@ -279,7 +306,7 @@ def test_explicit_domain_bounds_must_contain_source(
         simulation.write(tmp_path)
 
 
-def test_explicit_domain_bounds_must_contain_monitor(
+def test_explicit_domain_bounds_crop_monitor_with_warning(
     tmp_path,
     fdtd_pdk_module,
 ) -> None:
@@ -299,8 +326,11 @@ def test_explicit_domain_bounds_must_contain_monitor(
         heatmap=fdtd.Heatmap(quantity="abs_e", wavelengths_um=[1.55]),
     )
 
-    with pytest.raises(FDTDConfigError, match=r"Monitor 'cross'.*z-extent"):
-        simulation.write(tmp_path)
+    with pytest.warns(UserWarning, match=r"Monitor 'cross' cropped.*z extent"):
+        artifacts = simulation.write(tmp_path)
+    monitor = json.loads(artifacts.config_path.read_text())["monitors"][0]
+    assert monitor["region_min"] == pytest.approx([0, 0, -400])
+    assert monitor["region_max"] == pytest.approx([2000, 0, 600])
 
 
 def test_coarse_transfer_mesh_preserves_ten_nm_cad_feature(
@@ -354,6 +384,7 @@ def test_vertical_port_becomes_fiber_monitor_not_material_port(
 
     assert document["excitation"]["type"] == "eigenmode"
     assert document["excitation"]["default_port"] == "o1"
+    assert "mode" not in document["excitation"]
     assert set(document["geometry"]["ports"]) == {"o1"}
     assert "port_o2" not in mesh.field_data
     assert document["monitors"][0]["name"] == "o2"

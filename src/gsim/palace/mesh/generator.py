@@ -417,8 +417,12 @@ def _generate_native_boundarymode_groups(
 
     outer_parts = {tag for dim, tag in out_map[0] if dim == 2}
     layer_surfaces: dict[str, set[int]] = {}
+    # Pieces of each input rectangle, kept per entry (same order as
+    # ``layer_inputs``): ``layer_surfaces`` merges entries of one material.
+    entry_pieces: list[set[int]] = []
     for idx, (layer_name, _tag) in enumerate(layer_inputs, start=1):
         pieces = {tag for dim, tag in out_map[idx] if dim == 2}
+        entry_pieces.append(pieces)
         if pieces:
             layer_surfaces.setdefault(layer_name, set()).update(pieces)
 
@@ -509,6 +513,37 @@ def _generate_native_boundarymode_groups(
             claimed_pieces.update(unique)
         else:
             layer_surfaces.pop(layer_name, None)
+
+    # Step 3: background regions that overlap in z (e.g. a slab laid over part
+    # of the oxide) must not share pieces: a piece in two domain groups writes
+    # its triangles twice, and its edges end up in several interface groups and
+    # in ``absorbing``. Mirror the 3D rule (``build_entities`` order and the
+    # first-claim loop in ``run_boolean_pipeline``): the region listed first in
+    # the stack wins the overlap, the "air" background comes last.
+    #
+    # The claim runs per stack region, not per material: ``layer_inputs`` holds
+    # material names, and two regions of one material (an SiO2 box and an SiO2
+    # cladding) with another material listed between them must not be merged
+    # first, or the merged group would take an overlap that belongs to the
+    # region in between. Regions are merged into material groups afterwards.
+    bg_entries = [
+        (bg_name, entry_pieces[idx])
+        for idx, (bg_name, _tag) in enumerate(layer_inputs)
+        if _is_background_dielectric(bg_name)
+    ]
+    bg_entries.sort(key=lambda entry: entry[0] == "air")  # stable: stack order
+    claimed_bg: set[int] = set()
+    bg_owned: dict[str, set[int]] = {}
+    for bg_name, region_pieces in bg_entries:
+        # ``layer_surfaces`` already lost the patterned-dielectric pieces
+        unique = (region_pieces & layer_surfaces.get(bg_name, set())) - claimed_bg
+        claimed_bg |= unique
+        bg_owned.setdefault(bg_name, set()).update(unique)
+    for bg_name, owned in bg_owned.items():
+        if owned:
+            layer_surfaces[bg_name] = owned
+        else:
+            layer_surfaces.pop(bg_name, None)
 
     if metal_piece_tags:
         for layer_name, pieces in list(layer_surfaces.items()):
@@ -801,8 +836,12 @@ def _generate_native_boundarymode_groups(
             list(interface_specs or []), kind="Interface", key="interface_lines"
         )
 
+    # Only the meshed regions can carry the outer boundary. A conductor is a
+    # hole in the 2D mesh: the piece of the domain wall it covers is not an
+    # edge of any triangle, and a boundary element that is no edge of a
+    # triangle makes Palace crash (MFEM's GetBdrElementFace reads face -1).
     outer_curves: set[int] = set()
-    for stag in outer_parts:
+    for stag in sorted(outer_parts & vol_pg_surfaces):
         try:
             boundaries = gmsh.model.getBoundary(
                 [(2, stag)],
@@ -1226,6 +1265,7 @@ def generate_mesh(
     periodic_axis: str | None = None,
     symmetry_plane: SymmetryPlaneConfig | None = None,
     merge_via_distance: float = 2.0,
+    clip_merged_vias: bool = False,
     curve_fit_mode: Literal["line", "spline", "bspline"] = "line",
     curve_fit_layers: list[str] | None = None,
     curve_fit_tolerance_um: float = 0.0,
@@ -1241,6 +1281,7 @@ def generate_mesh(
     threads: int = 1,
     surface_threads: int = 1,
     split_conductors_by_net: bool = False,
+    absorbing_order: int = 2,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1284,7 +1325,17 @@ def generate_mesh(
         symmetry_plane: Optional PEC/PMC symmetry plane; only the kept half of
             the domain is meshed. Not supported with ``boundarymode`` or with
             a ``periodic_axis`` equal to the plane axis.
-        merge_via_distance: Max gap between vias to merge (um)
+        merge_via_distance: Max gap between vias to merge (um). Merging
+            fills the gaps between the vias, so a dense via array can
+            grow to several times its drawn area; a warning is logged
+            when the area grows by more than 5%. Pass 0 to keep every
+            via as drawn.
+        clip_merged_vias: Clip each merged via polygon to the overlap of the
+            conductor layers directly below and above its layer, so merging
+            adds no via area outside the metal (the drawn cuts are always
+            kept). Contacts on substrate or dielectric stay as drawn. A slab
+            that lies entirely between two continuous metals is not changed;
+            ``merge_via_distance=0`` is the way to mesh every cut there.
         curve_fit_mode: Patterned dielectric boundary mode: line/spline/bspline
         curve_fit_layers: Layer names where curve fitting is applied
         curve_fit_tolerance_um: Point merge tolerance before curve fitting
@@ -1308,6 +1359,7 @@ def generate_mesh(
             group per electrical net (``<name>@<net>``) and list the nets
             in ``groups["nets"]``. Needs ``write_config=False``, since the
             config needs the terminals. Ignored for boundary mode.
+        absorbing_order: Order (1 or 2) of the absorbing boundary condition
 
     Returns:
         MeshResult with paths and metadata
@@ -1364,7 +1416,13 @@ def generate_mesh(
             [p for p in component.ports if p.port_type == "electrical"],
         )
         logger.info("  Nets: %s", len(nets))
-        check_via_merging(geometry, stack, nets, merge_via_distance)
+        check_via_merging(
+            geometry,
+            stack,
+            nets,
+            merge_via_distance,
+            clip_merged_vias=clip_merged_vias,
+        )
 
     # The mesh must depend only on gsim's settings, not on the user's Gmsh options file
     gmsh.initialize(readConfigFiles=False)
@@ -1518,6 +1576,18 @@ def generate_mesh(
                 problem_type=simulation_type,
             )
 
+            # No element may be written twice: a line or triangle in two physical
+            # groups gives Palace a face with several boundary elements. Contact
+            # and interface lines are named after declared layer pairs and may
+            # reuse the interface curves on purpose.
+            gmsh_utils.check_unique_group_membership(
+                dims=(1, 2),
+                ignore_names=(
+                    *groups.get("contact_lines", {}),
+                    *groups.get("interface_lines", {}),
+                ),
+            )
+
             gmsh.option.setNumber("Mesh.Binary", 0)
             gmsh.option.setNumber("Mesh.SaveAll", 0)
             gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
@@ -1539,6 +1609,9 @@ def generate_mesh(
                     boundary_mode_config,
                     absorbing_boundary,
                     periodic_axis,
+                    absorbing_order=absorbing_order,
+                    # tensors are written in the 2D mesh frame (_to_section_frame)
+                    hints={"_cross_section_axis": cross_section.axis},
                 )
 
             return MeshResult(
@@ -1571,6 +1644,7 @@ def generate_mesh(
             curve_fit_min_points=curve_fit_min_points,
             curve_fit_corner_angle_deg=curve_fit_corner_angle_deg,
             symmetry_plane=symmetry_plane,
+            clip_merged_vias=clip_merged_vias,
         )
 
         # Add PEC blocks if configured
@@ -1593,6 +1667,9 @@ def generate_mesh(
             airbox_z_above=airbox_z_above,
             airbox_z_below=airbox_z_below,
             symmetry_plane=symmetry_plane,
+        )
+        logger.info(
+            "  Domain z-range: %.3f to %.3f um", domain_bounds[2], domain_bounds[5]
         )
         domain_bbox = (
             geometry.bbox[0] - margin_x,
@@ -1810,6 +1887,10 @@ def generate_mesh(
             problem_type=simulation_type,
         )
 
+        # No element may be written twice: a face in two physical groups gives
+        # Palace a face with several boundary elements.
+        gmsh_utils.check_unique_group_membership(dims=(2, 3))
+
         # Save mesh
         gmsh.option.setNumber("Mesh.Binary", 0)
         gmsh.option.setNumber("Mesh.SaveAll", 0)
@@ -1838,6 +1919,7 @@ def generate_mesh(
                 absorbing_boundary,
                 periodic_axis,
                 periodic_translation=periodic_translation,
+                absorbing_order=absorbing_order,
             )
 
     finally:

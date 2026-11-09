@@ -76,6 +76,7 @@ def test_cloud_lifecycle_preserves_inputs_and_reuses_cached_jobs(
             job_id,
             verbose="quiet",
             parent_dir=tmp_path,
+            poll_interval=5.0,
             estimated_runtime_seconds=gcloud.estimate_runtime_seconds(copied),
         )
     else:

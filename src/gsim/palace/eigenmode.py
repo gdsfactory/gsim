@@ -12,17 +12,14 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import Field
 
-from gsim.common import Geometry, LayerStack
-from gsim.palace.base import PalaceSimMixin
+from gsim.palace.base import _PalaceSimBase
 from gsim.palace.models import (
     CPWPortConfig,
     EigenmodeConfig,
     EigenmodeSolverConfig,
-    MaterialConfig,
     PortConfig,
-    RefinementConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
 )
@@ -31,7 +28,7 @@ from gsim.palace.models.solver import warn_legacy_solver_setting
 logger = logging.getLogger(__name__)
 
 
-class EigenmodeSim(PalaceSimMixin, BaseModel):
+class EigenmodeSim(_PalaceSimBase):
     """Eigenmode simulation for finding resonant frequencies.
 
     This class configures and runs eigenmode simulations to find
@@ -61,17 +58,10 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         solver: Grouped numerical and problem-specific solver configuration
     """
 
-    model_config = ConfigDict(
-        validate_assignment=True,
-        arbitrary_types_allowed=True,
-    )
     simulation_type: Literal["eigenmode"] = "eigenmode"
 
     terminals: None = None
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
-    # Composed objects (from common)
-    geometry: Geometry | None = None
-    stack: LayerStack | None = None
     absorbing_boundary: bool = False
 
     # Port configurations (eigenmode can have ports for Q-factor calculation)
@@ -79,22 +69,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
     cpw_ports: list[CPWPortConfig] = Field(default_factory=list)
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
 
-    # Material overrides and solver config
-    materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     solver: EigenmodeSolverConfig = Field(default_factory=EigenmodeSolverConfig)
-    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
-
-    # Stack configuration (stored as kwargs until resolved)
-    _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _pec_blocks: list = PrivateAttr(default_factory=list)
-    _symmetry_planes: list = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _impedance_boundaries: list = PrivateAttr(default_factory=list)
-
-    # Internal state
-    _output_dir: Path | None = PrivateAttr(default=None)
-    _configured_ports: bool = PrivateAttr(default=False)
 
     # Legacy solver settings
 
@@ -121,10 +96,11 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
         check_cache: bool = False,
+        poll_interval: float = 5.0,
     ) -> dict[str, Path] | str:
         """Run the eigenmode sim on GDSFactory+ cloud.
 
-        Thin wrapper over :meth:`PalaceSimMixin.run` that narrows the
+        Thin wrapper over :meth:`~gsim.common.cloud.CloudJobMixin.run` that narrows the
         return type: an eigenmode run returns a ``dict[str, Path]`` of
         output files keyed by name (e.g. ``"eig.csv"``), or the
         ``job_id`` string when ``wait=False``.
@@ -132,7 +108,11 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         from gsim.palace.results import SParams
 
         result = super().run(
-            parent_dir, verbose=verbose, wait=wait, check_cache=check_cache
+            parent_dir,
+            verbose=verbose,
+            wait=wait,
+            check_cache=check_cache,
+            poll_interval=poll_interval,
         )
         if isinstance(result, SParams):
             msg = (
@@ -151,7 +131,7 @@ class EigenmodeSim(PalaceSimMixin, BaseModel):
         *,
         num_modes: int = 10,
         target: float | None = None,
-        tolerance: float = 1e-6,
+        tolerance: float = 1e-9,
         save: int = 0,
         floquet: bool = False,
         phi_target: float = math.pi / 2,

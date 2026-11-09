@@ -10,10 +10,11 @@ import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
+from gsim.common.cloud import CloudJobMixin, submit
 from gsim.meep.models.api import (
     FDTD,
     Domain,
@@ -262,7 +263,7 @@ def _precompute_cross_section_geometry(
     )
 
 
-class Simulation(BaseModel):
+class Simulation(CloudJobMixin, BaseModel):
     """Declarative MEEP FDTD simulation container.
 
     Assigns typed physics objects, then calls ``write_config()`` to
@@ -325,6 +326,9 @@ class Simulation(BaseModel):
     # Private: kwargs captured from geometry.stack when it's a string/path
     _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
 
+    # Private: canonical stack resolved in pdk_authoritative mode.
+    _authoritative_resolved: Any | None = PrivateAttr(default=None)
+
     # Private: guards against double vertical-cropping when build_config()
     # is called more than once (e.g. plot_2d then run) on the same sim.
     _z_cropped: bool = PrivateAttr(default=False)
@@ -335,11 +339,7 @@ class Simulation(BaseModel):
     # Extra hints forwarded into the config JSON (not part of the schema).
     _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
 
-    # Cloud job state (set by upload/run)
-    _job_id: str | None = PrivateAttr(default=None)
-    _config_dir: Path | None = PrivateAttr(default=None)
-    _input_hash: str | None = PrivateAttr(default=None)
-    _estimated_runtime_seconds: float | None = PrivateAttr(default=None)
+    _cloud_job_type: ClassVar[str] = "meep"
 
     # PDK overlay (foundry-specific material values, loaded from YAML)
     _pdk_overlay: dict[str, Any] | None = PrivateAttr(default=None)
@@ -361,6 +361,86 @@ class Simulation(BaseModel):
         from gsim.common.stack.overlays import load_overlay
 
         self._pdk_overlay = load_overlay(path)
+
+    def set_stack(
+        self,
+        stack: Any | None = None,
+        *,
+        pdk_authoritative: bool = False,
+        pdk: Any | None = None,
+        dielectrics: list[dict[str, Any]] | None = None,
+        role_overrides: dict[str, str] | None = None,
+        use_pdk_overlay: bool = True,
+        yaml_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Configure the layer stack used by this simulation.
+
+        The default path keeps the legacy inferred-stack extractor.  With
+        ``pdk_authoritative=True`` the active (or explicit) PDK LayerStack is
+        used verbatim through :func:`gsim.common.pdk.resolve_layer_stack`:
+        every declared layer keeps its PDK z-extent/material/mesh_order, no
+        synthetic oxide or substrate is inserted, and unknown materials raise.
+
+        Args:
+            stack: Pre-built :class:`gsim.common.stack.LayerStack`.  When given,
+                it is used directly and the remaining keyword arguments are
+                ignored.
+            pdk_authoritative: Resolve the stack from the PDK LayerStack.
+            pdk: PDK object or module.  Defaults to the active PDK.
+            dielectrics: Explicit bulk dielectric regions, each with
+                ``name``/``material``/``zmin``/``zmax``.  Only valid with
+                ``pdk_authoritative=True``.
+            role_overrides: Explicit ``{layer_key: role}`` declarations.  Only
+                valid with ``pdk_authoritative=True``.
+            use_pdk_overlay: Apply the reviewed per-PDK overlay.  Only valid
+                with ``pdk_authoritative=True``.
+            yaml_path: Legacy custom YAML stack path.
+            **kwargs: Legacy ``get_stack`` options.
+
+        Returns:
+            The configured stack, or this simulation when resolution is lazy.
+        """
+        if stack is not None:
+            if pdk_authoritative or dielectrics or role_overrides or yaml_path:
+                raise ValueError(
+                    "set_stack(stack=...) cannot be combined with authoritative "
+                    "or legacy stack-building options."
+                )
+            self.geometry.stack = stack
+            self._stack_kwargs = {}
+            self._authoritative_resolved = None
+            return stack
+
+        if pdk_authoritative:
+            if yaml_path is not None:
+                raise ValueError(
+                    "set_stack(pdk_authoritative=True) cannot be combined with "
+                    "yaml_path."
+                )
+            if kwargs:
+                raise ValueError(
+                    "set_stack(pdk_authoritative=True) ignores legacy stack "
+                    f"options ({', '.join(sorted(kwargs))}); use explicit "
+                    "dielectrics=/role_overrides= instead."
+                )
+            self._stack_kwargs = {
+                "pdk_authoritative": True,
+                "pdk": pdk,
+                "dielectrics": dielectrics,
+                "role_overrides": role_overrides,
+                "use_pdk_overlay": use_pdk_overlay,
+            }
+        else:
+            if dielectrics or role_overrides:
+                raise ValueError(
+                    "dielectrics=/role_overrides= require pdk_authoritative=True."
+                )
+            self._stack_kwargs = {"yaml_path": yaml_path, **kwargs}
+
+        self.geometry.stack = None
+        self._authoritative_resolved = None
+        return self
 
     @field_validator("materials", mode="before")
     @classmethod
@@ -545,6 +625,22 @@ class Simulation(BaseModel):
     def _ensure_stack(self) -> None:
         """Lazily resolve the layer stack if not yet built."""
         if self.geometry.stack is not None:
+            return
+
+        if self._stack_kwargs.get("pdk_authoritative"):
+            from gsim.common.pdk import build_layer_stack, resolve_layer_stack
+
+            options = self._stack_kwargs
+            resolved = resolve_layer_stack(
+                self.geometry.component,
+                pdk=options.get("pdk"),
+                wavelength_um=self.source.wavelength,
+                dielectrics=options.get("dielectrics"),
+                role_overrides=options.get("role_overrides"),
+                use_pdk_overlay=bool(options.get("use_pdk_overlay", True)),
+            )
+            self._authoritative_resolved = resolved
+            self.geometry.stack = build_layer_stack(resolved, backend="meep")
             return
 
         from gsim.common.stack import get_stack
@@ -1091,21 +1187,12 @@ class Simulation(BaseModel):
         tmp = Path(tempfile.mkdtemp(prefix="meep_mode_solver_"))
         try:
             self.write_mode_solver_config(tmp)
-            input_hash = None
-            if check_cache:
-                input_hash, cached_job_id = gcloud.check_cache_for_dir(tmp, "meep")
-                if cached_job_id is not None:
-                    if verbose != "quiet":
-                        print(  # noqa: T201
-                            f"Cache hit: reusing job {cached_job_id}"
-                        )
-                    result = gcloud.wait_for_results(cached_job_id, verbose=verbose)
-                    self._enrich_mode_results(result)
-                    return result
-
-            job_id = gcloud.upload(tmp, "meep", verbose=False, input_hash=input_hash)
-            gcloud.start(job_id, verbose=verbose != "quiet")
-            result = gcloud.wait_for_results(job_id, verbose=verbose)
+            submission = submit(tmp, "meep", check_cache=check_cache, verbose=verbose)
+            result = gcloud.wait_for_results(
+                submission.job_id,
+                verbose=verbose,
+                estimated_runtime_seconds=submission.estimated_runtime_seconds,
+            )
             self._enrich_mode_results(result)
             return result
         finally:
@@ -1519,6 +1606,7 @@ class Simulation(BaseModel):
                     zmax=layer.zmax,
                     material=layer.material,
                     sidewall_angle=layer.sidewall_angle,
+                    mesh_order=layer.mesh_order,
                 )
             )
             used_materials.add(layer.material)
@@ -1679,6 +1767,23 @@ class Simulation(BaseModel):
                 meep_verbosity = 1
             else:
                 meep_verbosity = 2
+
+        if stack.simulation.get("pdk_authoritative"):
+            # Record the full PDK interpretation next to the resolved optical
+            # materials so a recorded run can be audited without replaying the
+            # PDK lookup.
+            self._hints.update(
+                {
+                    "pdk_authoritative": True,
+                    "pdk_name": stack.pdk_name,
+                    "pdk_overlay": stack.simulation.get("pdk_overlay"),
+                    "pdk_stack_hash": stack.simulation.get("stack_hash"),
+                    "pdk_provenance": stack.simulation.get("pdk_provenance"),
+                    "material_provenance": {
+                        name: data.model_dump() for name, data in material_data.items()
+                    },
+                }
+            )
 
         # Build SimConfig
         sim_config = SimConfig(
@@ -1913,96 +2018,12 @@ class Simulation(BaseModel):
     # -------------------------------------------------------------------------
 
     def _prepare_upload_dir(self) -> Path:
-        """Write the config files to a fresh temp directory for upload.
-
-        Returns:
-            Path to the temp directory, also recorded on ``_config_dir``.
-        """
+        """Write the config files to a fresh staging directory for upload."""
         import tempfile
 
         tmp = Path(tempfile.mkdtemp(prefix="meep_"))
         self.write_config(tmp)
-        self._config_dir = tmp
         return tmp
-
-    def upload(self, *, verbose: bool = True) -> str:
-        """Write config and upload to the cloud. Does NOT start execution.
-
-        Args:
-            verbose: Print progress messages.
-
-        Returns:
-            ``job_id`` string for use with :meth:`start`, :meth:`get_status`,
-            or :func:`gsim.wait_for_results`.
-        """
-        from gsim import gcloud
-        from gsim.hashing import compute_input_hash
-
-        tmp = self._prepare_upload_dir()
-        self._estimated_runtime_seconds = gcloud.estimate_runtime_seconds(tmp)
-        self._input_hash = compute_input_hash(tmp, "meep")
-        self._job_id = gcloud.upload(
-            tmp, "meep", verbose=verbose, input_hash=self._input_hash
-        )
-        return self._job_id
-
-    def start(self, *, verbose: bool = True) -> None:
-        """Start cloud execution for this sim's uploaded job.
-
-        Raises:
-            ValueError: If :meth:`upload` has not been called.
-        """
-        from gsim import gcloud
-
-        if self._job_id is None:
-            raise ValueError("Call upload() first")
-        gcloud.start(self._job_id, verbose=verbose)
-
-    def get_status(self) -> str:
-        """Get the current status of this sim's cloud job.
-
-        Returns:
-            Status string (``"created"``, ``"queued"``, ``"running"``,
-            ``"completed"``, ``"failed"``).
-
-        Raises:
-            ValueError: If no job has been submitted yet.
-        """
-        from gsim import gcloud
-
-        if self._job_id is None:
-            raise ValueError("No job submitted yet")
-        return gcloud.get_status(self._job_id)
-
-    def wait_for_results(
-        self,
-        *,
-        verbose: Literal["quiet", "status", "full"] = "status",
-        parent_dir: str | Path | None = None,
-    ) -> Any:
-        """Wait for this sim's cloud job, download and parse results.
-
-        Args:
-            verbose: ``"quiet"`` no output, ``"status"`` status line,
-                ``"full"`` stream solver logs.
-            parent_dir: Where to create the sim-data directory.
-
-        Returns:
-            Parsed result (typically ``SParameterResult``).
-
-        Raises:
-            ValueError: If no job has been submitted yet.
-        """
-        from gsim import gcloud
-
-        if self._job_id is None:
-            raise ValueError("No job submitted yet")
-        return gcloud.wait_for_results(
-            self._job_id,
-            verbose=verbose,
-            parent_dir=parent_dir,
-            estimated_runtime_seconds=getattr(self, "_estimated_runtime_seconds", None),
-        )
 
     # -------------------------------------------------------------------------
     # run
@@ -2015,6 +2036,7 @@ class Simulation(BaseModel):
         verbose: Literal["quiet", "status", "full"] = "status",
         wait: bool = True,
         check_cache: bool = False,
+        poll_interval: float = 5.0,
     ) -> Any:
         """Run MEEP simulation on the cloud.
 
@@ -2022,40 +2044,26 @@ class Simulation(BaseModel):
             parent_dir: Where to create the sim directory.
                 Defaults to the current working directory.
             verbose: ``"quiet"`` no output, ``"status"`` status line,
-                ``"full"`` stream solver logs.
+                ``"full"`` stream solver logs and raise MEEP's own verbosity.
             wait: If ``True`` (default), block until results are ready.
                 If ``False``, upload + start and return the ``job_id``.
             check_cache: If ``True``, look for a completed cloud job with
                 byte-identical inputs and reuse its results instead of
                 submitting. A lookup failure degrades to a normal submit.
+            poll_interval: Seconds between status polls while waiting.
 
         Returns:
             ``SParameterResult`` when ``wait=True``, or ``job_id`` string
             when ``wait=False``.
         """
-        from gsim import gcloud
-
         self._run_verbose = verbose
-        if check_cache:
-            tmp = self._prepare_upload_dir()
-            self._estimated_runtime_seconds = gcloud.estimate_runtime_seconds(tmp)
-            self._input_hash, cached_job_id = gcloud.check_cache_for_dir(tmp, "meep")
-            if cached_job_id is not None:
-                self._job_id = cached_job_id
-                if verbose != "quiet":
-                    print(f"Cache hit: reusing job {cached_job_id}")  # noqa: T201
-                if not wait:
-                    return self._job_id
-                return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
-            self._job_id = gcloud.upload(
-                tmp, "meep", verbose=False, input_hash=self._input_hash
-            )
-        else:
-            self.upload(verbose=False)
-        self.start(verbose=verbose != "quiet")
-        if not wait:
-            return self._job_id
-        return self.wait_for_results(verbose=verbose, parent_dir=parent_dir)
+        return super().run(
+            parent_dir,
+            verbose=verbose,
+            wait=wait,
+            check_cache=check_cache,
+            poll_interval=poll_interval,
+        )
 
     def run_local(
         self,
@@ -2098,7 +2106,10 @@ class Simulation(BaseModel):
         self._run_verbose = "quiet" if not verbose else "status"
         if output_dir is None:
             output_dir = Path(tempfile.mkdtemp(prefix="meep_local_"))
-        output_dir = Path(output_dir)
+        # ``run_local`` executes the runner with cwd=output_dir.  Resolve once
+        # so a relative output path does not turn the script argument into
+        # ``<output_dir>/<output_dir>/run_meep.py``.
+        output_dir = Path(output_dir).resolve()
         self.write_config(output_dir)
 
         script_path = output_dir / "run_meep.py"

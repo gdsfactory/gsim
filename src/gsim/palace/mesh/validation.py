@@ -525,9 +525,7 @@ def validate_mesh(sim) -> ValidationResult:
     errors: list[str] = []
     warnings_list: list[str] = []
 
-    mesh_result = getattr(sim, "_mesh_result", None) or getattr(
-        sim, "_last_mesh_result", None
-    )
+    mesh_result = getattr(sim, "_last_mesh_result", None)
     if mesh_result is None:
         errors.append("No mesh generated. Call mesh() first.")
         return ValidationResult(valid=False, errors=errors, warnings=warnings_list)

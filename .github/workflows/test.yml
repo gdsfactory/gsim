@@ -20,11 +20,17 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
     - name: Install UV
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        prune-cache: true
     - name: Create environment
       run: uv sync --dev --all-extras
     - name: Run tests
       run: uv run pytest
+    - name: Run RF calibration tests
+      env:
+        UV_PROJECT_ENVIRONMENT: .venv-rf-analysis
+      run: uv run --locked --no-default-groups --group rf-analysis pytest tests/palace/test_transmission_guide.py
   test_coverage:
     runs-on: ubuntu-latest
     permissions:
@@ -36,13 +42,20 @@ jobs:
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
     - name: Install UV
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        prune-cache: true
     - name: Install Just
       uses: taiki-e/install-action@just
     - name: Create environment
       run: uv sync --dev --all-extras
     - name: Run tests with coverage
       run: just cov
+    - name: Run RF calibration tests with coverage
+      env:
+        UV_PROJECT_ENVIRONMENT: .venv-rf-analysis
+      run: >-
+        uv run --locked --no-default-groups --group rf-analysis pytest tests/palace/test_transmission_guide.py --cov=gsim --cov-append --cov-report=term-missing:skip-covered --cov-report=xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v6
       with:

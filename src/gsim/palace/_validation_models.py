@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-CheckStatus = Literal["passed", "failed", "unknown", "skipped"]
+CheckStatus = Literal["passed", "failed", "unknown", "skipped", "warning"]
+"""Check outcome. ``warning`` marks a heuristic that found something suspicious
+without proving an error; it is not listed in ``SolutionReport.failures``."""
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,10 @@ class SolutionReport:
     A passed ``core`` means recognized convergence evidence with no recognized
     core failure. It does not establish mesh accuracy, complete log coverage,
     port identity, or convergence of unreported eigenpairs.
+
+    ``port_mode_checks`` holds the automatic wave-port mode continuity checks.
+    They are empty when no frequency-tagged port solve was observed, and they
+    only ever pass, warn or stay unknown; see ``warnings``.
     """
 
     core: SolutionCheck
@@ -94,6 +100,7 @@ class SolutionReport:
     mode_checks: tuple[SolutionCheck, ...]
     mode_samples: tuple[ModeSample, ...]
     provenance: SolutionProvenance
+    port_mode_checks: tuple[SolutionCheck, ...] = ()
 
     @property
     def failures(self) -> tuple[SolutionCheck, ...]:
@@ -108,3 +115,17 @@ class SolutionReport:
             *self.mode_checks,
         )
         return tuple(check for check in checks if check.status == "failed")
+
+    @property
+    def warnings(self) -> tuple[SolutionCheck, ...]:
+        """Return checks that found something suspicious but proved no error.
+
+        An empty tuple does not mean the port modes are right: check
+        ``port_mode_checks`` for ``unknown`` results.
+        """
+        checks = (
+            *self.port_mode_checks,
+            *self.mode_checks,
+            *(item.check for item in self.adaptive),
+        )
+        return tuple(check for check in checks if check.status == "warning")

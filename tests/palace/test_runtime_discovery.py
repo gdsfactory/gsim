@@ -61,6 +61,7 @@ def test_release_discovery(monkeypatch, assets, expected):
             {
                 "palacetoolkit_palace_cpu/bin/other": b"",
                 "palacetoolkit_palace_cpu/lib/library.so": b"",
+                "palacetoolkit_palace_cpu/share/openmpi/help.txt": b"MPI help",
             },
             "did not produce",
         ),
@@ -68,6 +69,14 @@ def test_release_discovery(monkeypatch, assets, expected):
             {
                 "palacetoolkit_palace_cpu/bin/palace": b"launcher",
                 "palacetoolkit_palace_cpu/lib/library.so": b"library",
+            },
+            "missing expected",
+        ),
+        (
+            {
+                "palacetoolkit_palace_cpu/bin/palace": b"launcher",
+                "palacetoolkit_palace_cpu/lib/library.so": b"library",
+                "palacetoolkit_palace_cpu/share/openmpi/help.txt": b"MPI help",
             },
             None,
         ),
@@ -102,6 +111,24 @@ def test_downloaded_runtime_layout(
         assert runtime._cached_binary() == binary
         if os.name != "nt":
             assert binary.stat().st_mode & 0o111 == 0o111
+
+
+def test_cached_runtime_without_share_is_not_resolved(tmp_path, monkeypatch):
+    monkeypatch.setenv("PALACETOOLKIT_RUNTIME_DIR", str(tmp_path))
+    prefix = runtime._cached_runtime_prefix()
+    (prefix / "bin").mkdir(parents=True)
+    (prefix / "lib").mkdir()
+    launcher = prefix / "bin" / "palace"
+    launcher.write_text("launcher")
+    launcher.chmod(0o755)
+    monkeypatch.setattr(runtime, "_palace_cpu_available", lambda: False)
+    monkeypatch.setattr(runtime, "_palace_toolkit_available", lambda: False)
+
+    assert runtime._cached_binary() is None
+    assert (
+        runtime.resolve_palace_binary(prefer_bundled=True, download_if_missing=False)
+        is None
+    )
 
 
 @pytest.mark.parametrize(

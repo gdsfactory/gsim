@@ -6,9 +6,9 @@ actually talk to the solver call :func:`require_devsim`.
 
 DEVSIM loads its BLAS/LAPACK library once, while its first import
 initialises, from the libraries ``DEVSIM_MATH_LIBS`` names. Unless the user
-has set that variable, the first import goes through ``devsim-openblas``
-(part of the ``tcad`` extra), which points DEVSIM at the OpenBLAS that
-``scipy-openblas32`` ships, so no system BLAS/LAPACK or Intel MKL is needed.
+has set that variable, the first import is pointed at the OpenBLAS that
+``scipy-openblas32`` (part of the ``tcad`` extra) ships, so no system
+BLAS/LAPACK or Intel MKL is needed.
 
 DEVSIM reports through Python's ``sys.stdout`` (its import banner, every
 Newton iteration, mesh statistics); :func:`devsim_output` silences it
@@ -22,6 +22,7 @@ import io
 import os
 import sys
 from collections.abc import Generator
+from pathlib import Path
 from types import ModuleType
 
 from gsim.common.optional import require_module
@@ -29,31 +30,41 @@ from gsim.common.optional import require_module
 _INSTALL_HINT = (
     "DEVSIM is required for the charge-transport solve but is not "
     "installed. Install the optional extra: pip install 'gsim[tcad]' "
-    "(or: pip install devsim devsim-openblas)."
+    "(or: pip install 'devsim>=2.11.1' scipy-openblas32)."
 )
 
 _MATH_LIBS_HINT = (
     "DEVSIM is installed but could not load a BLAS/LAPACK library. Install "
-    "devsim-openblas, which pip install 'gsim[tcad]' includes, or set "
-    "DEVSIM_MATH_LIBS to a BLAS/LAPACK library. DEVSIM cannot initialise twice "
-    "in one process, so restart Python afterwards."
+    "DEVSIM >= 2.11.1 and scipy-openblas32, which pip install 'gsim[tcad]' "
+    "includes, or set DEVSIM_MATH_LIBS to a BLAS/LAPACK library. DEVSIM cannot "
+    "initialise twice in one process, so restart Python afterwards."
 )
+
+_SHARED_LIBRARY_SUFFIX = {"win32": ".dll", "darwin": ".dylib"}.get(sys.platform, ".so")
 
 
 def _select_math_libraries() -> None:
-    """Point DEVSIM at devsim-openblas's OpenBLAS before its first import.
+    """Point DEVSIM at scipy-openblas32's OpenBLAS before its first import.
 
     Leaves DEVSIM's own discovery alone when DEVSIM is already imported,
     when the user chose a library through ``DEVSIM_MATH_LIBS``, or when
-    devsim-openblas is not installed.
+    scipy-openblas32 is not installed.
     """
     if "devsim" in sys.modules or os.environ.get("DEVSIM_MATH_LIBS"):
         return
     try:
-        import devsim_openblas
+        import scipy_openblas32
     except ImportError:
         return
-    devsim_openblas.configure()
+    lib_dir = Path(scipy_openblas32.get_lib_dir())
+    libraries = sorted(lib_dir.glob(f"libscipy_openblas*{_SHARED_LIBRARY_SUFFIX}"))
+    if not libraries:
+        return
+    os.environ["DEVSIM_MATH_LIBS"] = str(libraries[0])
+    # scipy-openblas32 exports dgetrf_ as scipy_dgetrf_; DEVSIM >= 2.11.1
+    # looks each routine up as prefix + name + suffix (devsim/devsim#167).
+    os.environ["DEVSIM_BLAS_PREFIX"] = "scipy_"
+    os.environ["DEVSIM_BLAS_SUFFIX"] = "_"
 
 
 def _import_devsim(name: str) -> ModuleType:

@@ -29,6 +29,19 @@ def test_polygon_round_trip_preserves_units_and_holes(with_hole):
     assert restored.area == pytest.approx(14 if with_hole else 15)
 
 
+@pytest.mark.parametrize("dbu", [0.001, 0.01, 0.0005])
+def test_polygon_conversion_uses_supplied_layout_units(dbu):
+    polygon = kdb.DPolygon(kdb.DBox(-2, -1, 3, 2))
+    polygon.insert_hole(kdb.DBox(0, 0, 1, 1))
+    integer_polygon = polygon.to_itype(dbu)
+
+    converted = polygon_utils.klayout_to_shapely(integer_polygon, dbu=dbu)
+    assert converted.bounds == pytest.approx((-2, -1, 3, 2))
+    assert converted.area == pytest.approx(14)
+    assert len(converted.interiors) == 1
+    assert polygon_utils.shapely_to_klayout(converted, dbu=dbu) == integer_polygon
+
+
 @pytest.mark.parametrize(
     "shape",
     [
@@ -78,12 +91,14 @@ def test_simplification_returns_independent_copy_on_failure(monkeypatch, failure
     assert original is not None
     if failure == "conversion":
 
-        def fail_conversion(_polygon):
+        def fail_conversion(_polygon, **_kwargs):
             raise ValueError("cannot convert polygon")
 
         monkeypatch.setattr(polygon_utils, "klayout_to_shapely", fail_conversion)
     else:
-        monkeypatch.setattr(polygon_utils, "shapely_to_klayout", lambda _shape: None)
+        monkeypatch.setattr(
+            polygon_utils, "shapely_to_klayout", lambda _shape, **_kwargs: None
+        )
 
     restored = polygon_utils.simplify_polygon(original)
 

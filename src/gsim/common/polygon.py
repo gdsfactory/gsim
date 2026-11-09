@@ -70,7 +70,8 @@ def fuse_polygons(
     Evaluates the layer with :func:`layer_level_region`, which handles
     DerivedLayer boolean operations and background levels. Converts the
     resulting KLayout polygons to Shapely, including holes, then merges and
-    simplifies.
+    simplifies. Corner contacts are split into separate polygons so their
+    contours form valid Shapely rings.
 
     Args:
         component: gdsfactory Component
@@ -82,7 +83,9 @@ def fuse_polygons(
     Returns:
         Merged Shapely Polygon or MultiPolygon
     """
-    layer_region = layer_level_region(component, layer)
+    layer_region = layer_level_region(component, layer).dup()
+    # KLayout's default merge can produce self-touching rings, invalid in GEOS.
+    layer_region.min_coherence = True
 
     shapely_polygons = []
     for klayout_polygon in layer_region.each_merged():

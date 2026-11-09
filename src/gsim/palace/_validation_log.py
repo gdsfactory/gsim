@@ -17,6 +17,13 @@ _SUCCESS = re.compile(
     r"(?:solver|eigensolve|Quasi-Newton) converged(?: in | \()", re.IGNORECASE
 )
 _ZERO_PCG = re.compile(r"^PCG solver did NOT converge in 0 iterations$")
+# AMR loop markers printed by Palace basesolver.cpp.
+_AMR_MARKER = re.compile(
+    r"Adaptive mesh refinement \(AMR\) iteration"
+    r"|Proceeding with solve/estimate iteration"
+    r"|Completed \d+ iterations? of adaptive mesh refinement"
+)
+_FIELD_CORRECTION = re.compile(r"field.*correction|correcting.*field", re.IGNORECASE)
 _UNIT_RESIDUAL = re.compile(
     rf"^Linear solver did not converge, norm\(Ax-b\)/norm\(b\) = ({_NUMBER})(?: |$)"
 )
@@ -38,7 +45,7 @@ def solver_checks(
         [],
         [],
     )
-    estimating = offline = correction = False
+    estimating = estimating_until_amr = offline = correction = False
     skip_indices: set[int] = set()
     for index, line in enumerate(lines):
         if index in skip_indices:
@@ -47,9 +54,20 @@ def solver_checks(
             offline = True
         if "online phase" in line.lower():
             offline = False
-        if "Updating solution error estimates" in line:
+        # Eigenmode and boundary-mode postprocessing interleaves estimator solves
+        # with PETSc object views, so only an AMR marker ends that section. A
+        # field correction inside it is core for the rest of the section.
+        if "Computing solution error estimates" in line:
+            estimating = estimating_until_amr = True
+            correction = False
+        elif estimating_until_amr:
+            if _AMR_MARKER.search(line):
+                estimating = estimating_until_amr = False
+            elif _FIELD_CORRECTION.search(line):
+                estimating, correction = False, True
+        elif "Updating solution error estimates" in line:
             estimating, correction = True, False
-        elif re.search(r"field.*correction|correcting.*field", line, re.IGNORECASE):
+        elif _FIELD_CORRECTION.search(line):
             estimating, correction = False, True
         elif re.search(
             r"\b(?:GMRES|FGMRES|eigensolve|eigenvalue)\b", line, re.IGNORECASE

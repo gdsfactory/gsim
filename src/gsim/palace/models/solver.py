@@ -38,12 +38,22 @@ def warn_legacy_solver_setting(
     )
 
 
+# Palace's error estimator keys in its read order, written last in Solver.Linear.
+_ESTIMATOR_KEYS = ("EstimatorTol", "EstimatorMaxIts", "EstimatorMG")
+
+
 class LinearSolverConfig(BaseModel):
     """Linear solve controls, shared by all Palace simulation types.
 
     ``tolerance`` is the relative residual tolerance of each linear solve.
     Eigenvalue convergence is configured separately under ``solver.eigenmode``.
     Direct backends are more robust but can use more memory than iterative solves.
+
+    The ``estimator_*`` fields control the error estimator, Palace's AMR
+    indicator, not the adaptive frequency sweep tolerance. None, the default,
+    lets gsim choose by AMR state: a cheap setting when AMR is off and Palace's
+    default when it is on. Assign None to return to automatic. Settings passed
+    through the deprecated ``NumericalConfig`` always use automatic.
     """
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid")
@@ -55,10 +65,49 @@ class LinearSolverConfig(BaseModel):
         default=400, ge=1, description="Maximum Krylov solver iterations."
     )
     solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] = Field(
-        default="Default", description="Linear solver backend; Default auto-selects."
+        default="MUMPS", description="Linear solver backend; Default auto-selects."
     )
     preconditioner: Literal["Default", "AMS", "BoomerAMG"] = Field(
         default="Default", description="Preconditioner used with the Default backend."
+    )
+    mg_max_levels: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum multigrid levels; 1 uses a full-system solve.",
+    )
+    pc_mat_real: bool = Field(
+        default=False,
+        description="Use a real approximation for the preconditioner matrix.",
+    )
+    complex_coarse_solve: bool = Field(
+        default=True,
+        description="Use a complex coarse solve for complex-valued problems.",
+    )
+    estimator_tolerance: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Relative tolerance of the error estimator (the AMR indicator), not "
+            "the adaptive sweep tolerance. None chooses by AMR state; assign "
+            "None to return to automatic."
+        ),
+    )
+    estimator_max_iterations: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Error estimator (AMR indicator) iterations, not an adaptive sweep "
+            "setting; 0 skips its solve. None chooses by AMR state; assign None "
+            "to return to automatic."
+        ),
+    )
+    estimator_mg: bool | None = Field(
+        default=None,
+        description=(
+            "Use multigrid for the error estimator (the AMR indicator), not the "
+            "adaptive sweep. None chooses by AMR state; assign None to return "
+            "to automatic."
+        ),
     )
 
     def to_palace_config(self) -> dict[str, Any]:
@@ -68,21 +117,38 @@ class LinearSolverConfig(BaseModel):
             "KSPType": "GMRES",
             "Tol": self.tolerance,
             "MaxIts": self.max_iterations,
+            "MGMaxLevels": self.mg_max_levels,
+            "PCMatReal": self.pc_mat_real,
+            "ComplexCoarseSolve": self.complex_coarse_solve,
         }
-        if self.solver_type == "MUMPS":
-            config.update(
-                MaxIts=1,
-                MGMaxLevels=1,
-                EstimatorMaxIts=0,
-                EstimatorTol=1e-6,
-                DivFreeTol=1e-6,
-                DivFreeMaxIts=0,
-                PCMatReal=False,
-                ComplexCoarseSolve=True,
-            )
         if self.solver_type == "Default" and self.preconditioner != "Default":
             config["Type"] = self.preconditioner
+        # Unset keys are resolved when the config is written.
+        estimator = (
+            self.estimator_tolerance,
+            self.estimator_max_iterations,
+            self.estimator_mg,
+        )
+        config.update(
+            {
+                key: value
+                for key, value in zip(_ESTIMATOR_KEYS, estimator, strict=True)
+                if value is not None
+            }
+        )
         return config
+
+
+# Settings once accepted flat on NumericalConfig; newer linear fields are not.
+_LEGACY_FLAT_LINEAR_FIELDS = (
+    "tolerance",
+    "max_iterations",
+    "solver_type",
+    "preconditioner",
+    "mg_max_levels",
+    "pc_mat_real",
+    "complex_coarse_solve",
+)
 
 
 class SolverConfig(BaseModel):
@@ -115,7 +181,7 @@ class SolverConfig(BaseModel):
         values = values.copy()
         flat = {
             name: values.pop(name)
-            for name in LinearSolverConfig.model_fields
+            for name in _LEGACY_FLAT_LINEAR_FIELDS
             if name in values
         }
         if flat:
@@ -223,7 +289,32 @@ class DrivenSolverConfig(SolverConfig):
 class EigenmodeSolverConfig(SolverConfig):
     """Common and eigenvalue settings for EigenmodeSim."""
 
+    linear: LinearSolverConfig = Field(
+        default_factory=lambda: LinearSolverConfig(tolerance=1e-9)
+    )
     eigenmode: EigenmodeConfig = Field(default_factory=EigenmodeConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_eigenmode_linear_tolerance(cls, values: Any) -> Any:
+        """Use the eigenmode tolerance unless the caller supplies an override."""
+        if isinstance(values, SolverConfig) and not isinstance(values, cls):
+            # Preserve nested assignments and whether tolerance was explicit.
+            values = {**values.model_dump(), "linear": values.linear}
+        elif isinstance(values, BaseModel) and not isinstance(values, cls):
+            values = values.model_dump(exclude_unset=True)
+        if isinstance(values, dict) and "tolerance" not in values:
+            linear = values.get("linear", {})
+            if isinstance(linear, LinearSolverConfig):
+                if "tolerance" not in linear.model_fields_set:
+                    return {
+                        **values,
+                        "linear": linear.model_copy(update={"tolerance": 1e-9}),
+                    }
+                return values
+            if isinstance(linear, dict):
+                return {**values, "linear": {"tolerance": 1e-9, **linear}}
+        return values
 
 
 class ElectrostaticSolverConfig(SolverConfig):

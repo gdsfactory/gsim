@@ -163,7 +163,7 @@ def build_selector_context(
 
             import meshio
 
-            mio = meshio.read("palace.msh")
+            mio = meshio.read("palace.msh", file_format="gmsh")
             pg_map = {name: tag for name, (tag, _dim) in mio.field_data.items()}
 
     Returns:
@@ -484,7 +484,7 @@ def load_field_context(
     vol = load_fields(source, excitation=excitation, cycle=cycle, boundary=False)
     bnd = load_fields(source, excitation=excitation, cycle=cycle, boundary=True)
 
-    mio = meshio.read(str(msh_path))
+    mio = meshio.read(str(msh_path), file_format="gmsh")
     pg_map = {name: tag for name, (tag, _dim) in mio.field_data.items()}
 
     ctx = build_selector_context(config_path, pg_map)

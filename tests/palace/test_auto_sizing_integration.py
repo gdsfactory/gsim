@@ -262,6 +262,53 @@ def test_under_resolution_warning_fires(caplog):
     assert "auto_size=True" in warnings[0].getMessage()
 
 
+@pytest.mark.parametrize(
+    ("preset", "size", "auto_size", "cells_per_feature", "expected_size", "warn"),
+    [
+        ("coarse", 8.0, False, 2, 8.0, True),
+        ("coarse", 1.0, False, 2, 1.0, False),
+        ("fine", None, False, 2, 2.0, True),
+        ("fine", 8.0, False, 2, 8.0, True),
+        ("coarse", 8.0, True, 2, 8.0, True),
+        ("coarse", None, True, 2, 1.0, False),
+        ("coarse", 1.0, False, 4, 1.0, True),
+        ("coarse", 0.5, False, 4, 0.5, False),
+    ],
+)
+def test_resolution_diagnostics_use_effective_size(
+    caplog, preset, size, auto_size, cells_per_feature, expected_size, warn
+):
+    sim = _make_sim(_small_feature_component(width=2.0), _conductor_stack())
+    with caplog.at_level(logging.WARNING, logger="gsim.palace.base"):
+        config = sim._build_mesh_config(
+            preset=preset,
+            refined_mesh_size=size,
+            max_mesh_size=None,
+            margin=None,
+            airbox_margin=None,
+            fmax=None,
+            planar_conductors=None,
+            show_gui=False,
+            auto_size=auto_size,
+            cells_per_feature=cells_per_feature,
+        )
+    assert config.refined_mesh_size == expected_size
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "Small conductor feature" in record.getMessage()
+    ]
+    if warn:
+        assert len(warnings) == 1
+        assert f"refined_mesh_size={expected_size:.3f} um" in warnings[0]
+        assert f"<= {2 / cells_per_feature:.3f} um" in warnings[0]
+        if size is not None:
+            assert "Reduce refined_mesh_size" in warnings[0]
+            assert "preserves an explicit size" in warnings[0]
+    else:
+        assert not warnings
+
+
 def test_under_resolution_warning_silenced_by_auto_size(caplog):
     """With ``auto_size=True`` we don't emit the under-resolution warning."""
     sim = _make_sim(_small_feature_component(width=1.0), _conductor_stack())
@@ -289,8 +336,8 @@ def test_under_resolution_warning_silenced_by_auto_size(caplog):
 
 
 def test_no_warning_when_feature_is_large_enough(caplog):
-    """Feature >= refined_mesh_size/2 does not trigger the warning."""
-    # 10 um feature vs preset 5 (threshold = 2.5). 10 >> 2.5 so no warning.
+    """Two cells across a feature satisfy the default heuristic."""
+    # 10 um feature vs preset 5 gives exactly two cells across the feature.
     sim = _make_sim(_small_feature_component(width=10.0), _conductor_stack())
     with caplog.at_level(logging.WARNING, logger="gsim.palace.base"):
         sim._build_mesh_config(

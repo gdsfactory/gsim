@@ -7,13 +7,17 @@ the kept half and applies a PEC or PMC boundary on the cut.
 sim.add_symmetry_plane(axis="y", position=0.0, kind="pmc", keep="positive")
 ```
 
-| Argument          | Meaning                                                           |
-| ----------------- | ----------------------------------------------------------------- |
-| `axis`            | `"x"` or `"y"`: the axis normal to the plane (`"z"` is rejected)  |
-| `position`        | Plane position in um, on the 1 nm grid                            |
-| `kind`            | `"pmc"` (even / common mode) or `"pec"` (odd / differential mode) |
-| `keep`            | Side that is simulated: `"positive"` or `"negative"`              |
-| `verify_symmetry` | Check that the layout is mirror-symmetric (default `True`)        |
+| Argument          | Meaning                                                            |
+| ----------------- | ------------------------------------------------------------------ |
+| `axis`            | `"x"` or `"y"`: the axis normal to the plane (`"z"` is rejected)   |
+| `position`        | Plane position in um, aligned to the owning layout's database grid |
+| `kind`            | `"pmc"` (even / common mode) or `"pec"` (odd / differential mode)  |
+| `keep`            | Side that is simulated: `"positive"` or `"negative"`               |
+| `verify_symmetry` | Check that the layout is mirror-symmetric (default `True`)         |
+
+Positions are checked against the owning layout's database unit during geometry extraction, including when
+`verify_symmetry=False`. An off-grid position raises rather than snapping silently: for example, `position=50.005` um is
+invalid for `dbu=0.01` um, while a 0.0005 um layout can represent sub-nanometer plane positions.
 
 ## Limits (v1)
 

@@ -13,6 +13,7 @@ import pytest
 
 from gsim.palace import BoundaryModeSim, DrivenSim
 from gsim.palace.base import _recommend_parallel
+from gsim.palace.runtime import PalaceRuntime
 
 
 def _mesh_result(elements: int, tetrahedra: int = 0, bbox: dict | None = None):
@@ -25,7 +26,7 @@ def _mesh_result(elements: int, tetrahedra: int = 0, bbox: dict | None = None):
         stats["tetrahedra"] = tetrahedra
     if bbox is not None:
         stats["bbox"] = bbox
-    return SimpleNamespace(mesh_stats=stats, groups={})
+    return SimpleNamespace(mesh_stats=stats, groups={}, model_name="palace")
 
 
 def _setup_sim(sim, output_dir: Path) -> None:
@@ -368,8 +369,10 @@ def test_run_local_uses_bundled_resolver_before_path_fallback(monkeypatch, tmp_p
     bundled = tmp_path / "bundled-palace"
     bundled.write_text("#!/bin/sh\nexit 0\n")
     bundled.chmod(0o755)
-    monkeypatch.setattr("gsim.palace.runtime.resolve_palace_binary", lambda: bundled)
-    monkeypatch.setattr("gsim.palace.runtime.resolve_palace_library_dir", lambda: None)
+    monkeypatch.setattr(
+        "gsim.palace.runtime.resolve_palace_runtime",
+        lambda: PalaceRuntime(bundled, "palace-toolkit-cpu"),
+    )
     captured = {}
 
     def run(cmd, **kwargs):
@@ -749,3 +752,55 @@ def test_run_local_failure_keeps_only_the_output_tail(monkeypatch, tmp_path):
     assert "line 300" in lines
     assert "line 499" in lines
     assert "line 299" not in lines
+
+
+@pytest.mark.parametrize("sim_class", [DrivenSim, BoundaryModeSim])
+def test_run_local_follows_the_model_name_mesh_was_given(
+    monkeypatch, tmp_path, sim_class
+):
+    """``mesh(model_name="foo")`` writes ``foo.msh`` and ``output/foo``."""
+    output_dir = tmp_path / "sim"
+    output_dir.mkdir()
+    (output_dir / "config.json").write_text("{}")
+    (output_dir / "foo.msh").write_text("mesh")
+    sim = sim_class()
+    sim.set_output_dir(output_dir)
+    sim._last_mesh_result = SimpleNamespace(mesh_stats={}, groups={}, model_name="foo")
+    _setup_local_palace(monkeypatch, tmp_path)
+    monkeypatch.delenv("PALACE_SIF", raising=False)
+    monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+
+    def run(_cmd, **kwargs):
+        tables = kwargs["cwd"] / "output" / "foo"
+        tables.mkdir(parents=True)
+        (tables / "notes.txt").write_text("done")
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr("subprocess.run", run)
+    result = sim.run_local(num_processes=1, verbose=False)
+
+    assert result.files == {"notes.txt": output_dir / "output" / "foo" / "notes.txt"}
+    if isinstance(sim, BoundaryModeSim):
+        assert sim.run_dir == output_dir / "output" / "foo"
+
+
+@pytest.mark.parametrize("model_name", ["", ".", "..", "../up", "sub/dir", "a\\b"])
+def test_mesh_rejects_a_model_name_that_is_not_a_plain_name(tmp_path, model_name):
+    """A model name that is a path would point ``output/<name>`` elsewhere."""
+    sim = DrivenSim()
+    sim.set_output_dir(tmp_path)
+    with pytest.raises(ValueError, match="plain file name"):
+        sim.mesh(model_name=model_name)
+
+
+def test_a_boundary_mode_run_never_clears_the_sim_dir(tmp_path):
+    """Even a hand-set ``..`` model name cannot make the run clear the sim dir."""
+    output_dir = tmp_path / "sim"
+    _setup_sim(BoundaryModeSim(), output_dir)
+    sim = BoundaryModeSim()
+    sim.set_output_dir(output_dir)
+    sim._last_mesh_result = SimpleNamespace(mesh_stats={}, groups={}, model_name="..")
+    with pytest.raises(ValueError, match="plain file name"):
+        sim.run_local(verbose=False)
+    assert (output_dir / "config.json").is_file()
+    assert (output_dir / "palace.msh").is_file()

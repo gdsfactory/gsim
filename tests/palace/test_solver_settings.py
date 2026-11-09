@@ -139,7 +139,7 @@ def test_simulation_defaults_are_independent():
     second = pa.EigenmodeSim()
     first.solver.linear.tolerance = 1e-8
     first.solver.eigenmode.target = 4e9
-    assert second.solver.linear.tolerance == 1e-6
+    assert second.solver.linear.tolerance == 1e-9
     assert second.solver.eigenmode.target is None
 
 
@@ -180,8 +180,11 @@ def test_numerical_serialization_retains_old_flat_format():
         "device": "CPU",
         "tolerance": 1e-8,
         "max_iterations": 400,
-        "solver_type": "Default",
+        "solver_type": "MUMPS",
         "preconditioner": "Default",
+        "mg_max_levels": 100,
+        "pc_mat_real": False,
+        "complex_coarse_solve": True,
     }
     assert numerical.model_dump(include={"order", "tolerance"}) == {
         "order": 3,
@@ -193,6 +196,9 @@ def test_numerical_serialization_retains_old_flat_format():
         "max_iterations",
         "solver_type",
         "preconditioner",
+        "mg_max_levels",
+        "pc_mat_real",
+        "complex_coarse_solve",
         "device",
     ]
     with pytest.warns(DeprecationWarning, match="numerical constructor.*solver"):
@@ -208,17 +214,59 @@ def test_palace_solver_serialization_preserves_cache_inputs():
     """Equivalent settings must keep the original config bytes for cache hits."""
     expected = (
         '{"Linear": {"Type": "AMS", "KSPType": "GMRES", "Tol": 1e-08, '
-        '"MaxIts": 123}, "Order": 3, "Device": "CPU"}'
+        '"MaxIts": 123, "MGMaxLevels": 100, "PCMatReal": false, '
+        '"ComplexCoarseSolve": true}, "Order": 3, "Device": "CPU"}'
     )
     solver = pa.SolverConfig(
         order=3,
         linear=pa.LinearSolverConfig(
-            tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+            tolerance=1e-8,
+            max_iterations=123,
+            solver_type="Default",
+            preconditioner="AMS",
         ),
     )
     with pytest.warns(DeprecationWarning, match="NumericalConfig.*SolverConfig"):
         numerical = pa.NumericalConfig(
-            order=3, tolerance=1e-8, max_iterations=123, preconditioner="AMS"
+            order=3,
+            tolerance=1e-8,
+            max_iterations=123,
+            solver_type="Default",
+            preconditioner="AMS",
         )
     assert json.dumps(solver.to_solver_config()) == expected
     assert json.dumps(numerical.to_solver_config()) == expected
+
+
+def test_estimator_settings_are_not_legacy_flat_keywords():
+    legacy = {
+        "tolerance": 1e-8,
+        "max_iterations": 17,
+        "solver_type": "Default",
+        "preconditioner": "AMS",
+        "mg_max_levels": 1,
+        "pc_mat_real": True,
+        "complex_coarse_solve": False,
+    }
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        with pytest.raises(ValidationError, match="extra_forbidden"):
+            pa.SolverConfig.model_validate({"estimator_tolerance": 1e-2})
+    with pytest.warns(DeprecationWarning, match="Flat linear solver settings"):
+        solver = pa.SolverConfig.model_validate(legacy)
+    assert solver.linear == pa.LinearSolverConfig(**legacy)
+
+
+@pytest.mark.parametrize("sim_class", [pa.DrivenSim, pa.EigenmodeSim])
+def test_set_solver_sets_and_resets_estimator_settings(sim_class):
+    sim = sim_class()
+    sim.set_solver(
+        estimator_tolerance=1e-3, estimator_max_iterations=0, estimator_mg=True
+    )
+    assert sim.solver.linear.estimator_tolerance == 1e-3
+    assert sim.solver.linear.estimator_max_iterations == 0
+    assert sim.solver.linear.estimator_mg is True
+    sim.set_solver()
+    assert sim.solver.linear.estimator_tolerance is None
+    assert sim.solver.linear.estimator_max_iterations is None
+    assert sim.solver.linear.estimator_mg is None

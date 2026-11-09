@@ -236,7 +236,7 @@ def _plot_wireframe(
     mode: RenderMode = "auto",
 ) -> None:
     """Wireframe renderer — one colour per matched group."""
-    mio = meshio.read(msh_path)
+    mio = meshio.read(msh_path, file_format="gmsh")
     group_map: dict[int, str] = {tag: name for name, (tag, _) in mio.field_data.items()}
 
     mesh = cast(pv.DataSet, pv.read(msh_path))  # ty: ignore[redundant-cast]
@@ -367,7 +367,7 @@ def _plot_solid(
     mode: RenderMode = "auto",
 ) -> None:
     """Solid renderer — coloured surfaces per physical group."""
-    mio = meshio.read(msh_path)
+    mio = meshio.read(msh_path, file_format="gmsh")
     tag_to_name: dict[int, str] = {
         tag: name for name, (tag, _) in mio.field_data.items()
     }
@@ -1248,6 +1248,7 @@ def plot_topview(
                     norm=norm,
                     vmin=plot_vmin,
                     vmax=plot_vmax,
+                    rasterized=True,
                 )
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
                 ax.set_title(title)
@@ -1303,6 +1304,7 @@ def plot_topview(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
     ax.set_title(title)
@@ -1499,6 +1501,7 @@ def plot_cross_section(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
 
     if quiver:

@@ -13,6 +13,7 @@ from gsim.palace.mesh.symmetry import (
     classify_interval,
     clip_polygon,
     mirror_region,
+    plane_position_dbu,
 )
 from gsim.palace.models.symmetry import SymmetryPlaneConfig
 
@@ -97,7 +98,7 @@ def test_clip_polygon_with_hole_across_plane():
     region = kdb.Region(outer) - kdb.Region(_rect(-2, -2, 2, 2))
     (polygon,) = list(region.each())
 
-    (clipped,) = clip_polygon(polygon, _plane())
+    (clipped,) = clip_polygon(polygon, _plane(), dbu=0.001)
 
     assert clipped.bbox() == kdb.Box(-10000, 0, 10000, 10000)
     assert clipped.holes() == 0  # the hole is cut open at the plane
@@ -109,7 +110,7 @@ def test_clip_polygon_keeps_hole_on_kept_side():
     region = kdb.Region(_rect(-10, -10, 10, 10)) - kdb.Region(_rect(-2, 3, 2, 6))
     (polygon,) = list(region.each())
 
-    (clipped,) = clip_polygon(polygon, _plane())
+    (clipped,) = clip_polygon(polygon, _plane(), dbu=0.001)
 
     assert clipped.holes() == 1
 
@@ -118,14 +119,16 @@ def test_clip_polygon_negative_side_and_removed():
     """``keep`` selects the side, and a polygon on the other side vanishes."""
     poly = _rect(0, 1, 5, 4)
 
-    assert clip_polygon(poly, _plane(keep="negative")) == []
-    (kept,) = clip_polygon(poly, _plane(keep="positive"))
+    assert clip_polygon(poly, _plane(keep="negative"), dbu=0.001) == []
+    (kept,) = clip_polygon(poly, _plane(keep="positive"), dbu=0.001)
     assert kept.bbox() == poly.bbox()
 
 
 def test_clip_polygon_x_axis_and_offset():
     """Clipping works along x at a non-zero position."""
-    (clipped,) = clip_polygon(_rect(0, 0, 10, 4), _plane(axis="x", position=3.0))
+    (clipped,) = clip_polygon(
+        _rect(0, 0, 10, 4), _plane(axis="x", position=3.0), dbu=0.001
+    )
 
     assert clipped.bbox() == kdb.Box(3000, 0, 10000, 4000)
 
@@ -134,12 +137,12 @@ def test_mirror_region_y_and_x():
     """Mirroring maps a rectangle onto its image about the plane."""
     region = kdb.Region(_rect(0, 1, 4, 3))
 
-    assert mirror_region(region, _plane(position=0.5)).bbox() == kdb.Box(
+    assert mirror_region(region, _plane(position=0.5), dbu=0.001).bbox() == kdb.Box(
         0, -2000, 4000, 0
     )
-    assert mirror_region(region, _plane(axis="x", position=1.0)).bbox() == kdb.Box(
-        -2000, 1000, 2000, 3000
-    )
+    assert mirror_region(
+        region, _plane(axis="x", position=1.0), dbu=0.001
+    ).bbox() == kdb.Box(-2000, 1000, 2000, 3000)
 
 
 def _gsgsg(offset=0.0):
@@ -161,32 +164,55 @@ def _gssg():
 
 def test_mirror_check_passes_on_symmetric_layouts():
     """GSSG and GSGSG layouts are symmetric about y=0."""
-    assert asymmetric_layers({"gssg": _gssg(), "gsgsg": _gsgsg()}, _plane()) == []
+    assert (
+        asymmetric_layers({"gssg": _gssg(), "gsgsg": _gsgsg()}, _plane(), dbu=0.001)
+        == []
+    )
 
 
 def test_mirror_check_flags_shifted_strip():
     """Shifting one half of the layout breaks the symmetry."""
     layers = {"ok": _gssg(), "bad": _gsgsg(offset=1.0)}
 
-    assert asymmetric_layers(layers, _plane()) == ["bad"]
+    assert asymmetric_layers(layers, _plane(), dbu=0.001) == ["bad"]
 
 
 def test_mirror_check_flags_one_sided_layer():
     """A layer with content on one side only is asymmetric."""
     layers = {"half": kdb.Region([_rect(0, 3, 100, 10), _rect(0, 20, 100, 30)])}
 
-    assert asymmetric_layers(layers, _plane()) == ["half"]
+    assert asymmetric_layers(layers, _plane(), dbu=0.001) == ["half"]
 
 
 def test_mirror_check_flags_one_sided_extra_feature():
     """An extra feature on one side of an otherwise symmetric layer is flagged."""
     region = _gssg() + kdb.Region(_rect(0, 40, 100, 50))
 
-    assert asymmetric_layers({"m": region}, _plane()) == ["m"]
+    assert asymmetric_layers({"m": region}, _plane(), dbu=0.001) == ["m"]
 
 
 def test_mirror_check_tolerates_one_database_unit():
     """A one nm difference is below the check's tolerance."""
     region = kdb.Region(_rect(0, -10, 100, 10)) + kdb.Region(_rect(0, 10, 100, 10.001))
 
-    assert asymmetric_layers({"m": region}, _plane()) == []
+    assert asymmetric_layers({"m": region}, _plane(), dbu=0.001) == []
+
+
+@pytest.mark.parametrize("dbu", [0.0, -0.001, float("inf"), float("nan")])
+def test_plane_coordinate_rejects_invalid_database_units(dbu):
+    """Grid validation requires finite positive layout units."""
+    with pytest.raises(ValueError, match="finite and positive"):
+        plane_position_dbu(_plane(), dbu=dbu)
+
+
+@pytest.mark.parametrize("position", [50.005, -50.005])
+def test_mirroring_rejects_off_grid_plane(position):
+    """The raw polygon helper must not snap an unrepresentable plane."""
+    region = kdb.Region(kdb.Box(-10000, -10000, 10000, 10000))
+    with pytest.raises(ValueError, match=r"layout.*grid"):
+        mirror_region(region, _plane(position=position), dbu=0.01)
+
+
+def test_plane_coordinate_tolerates_float_noise():
+    """Representable positions survive harmless division noise."""
+    assert plane_position_dbu(_plane(position=0.1 + 0.2), dbu=0.01) == 30

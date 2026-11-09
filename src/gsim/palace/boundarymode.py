@@ -30,22 +30,18 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     ValidationInfo,
     field_validator,
 )
 
-from gsim.common import Geometry, LayerStack
-from gsim.palace.base import PalaceSimMixin
+from gsim.palace._path_sampling import warn_legacy_path_sampling
+from gsim.palace.base import _PalaceSimBase
 from gsim.palace.models import (
     BoundaryModeConfig,
     BoundaryModeSolverConfig,
     ContactSpec,
     CrossSectionPlaneConfig,
     InterfaceSpec,
-    MaterialConfig,
-    MeshConfig,
-    RefinementConfig,
 )
 from gsim.palace.models.results import ValidationResult
 from gsim.palace.models.solver import warn_legacy_solver_setting
@@ -58,7 +54,8 @@ if TYPE_CHECKING:
 __all__ = ["BoundaryModeSim", "ModePath"]
 
 #: Where a local Palace run writes its tables, under the simulation's
-#: output directory.
+#: output directory, for the default model name; :attr:`BoundaryModeSim.run_dir`
+#: follows the name ``mesh()`` was given.
 RUN_SUBDIR = Path("output") / "palace"
 
 
@@ -82,7 +79,8 @@ class ModePath(BaseModel):
             law it encloses the displacement current of the gap as well
             as the conduction current of the metal, and a wider loop
             reads less current. ``None`` asks for the voltage alone.
-        nsamples: Quadrature order of each line integral.
+        nsamples: Deprecated, ignored sample count. Explicit values warn;
+            this compatibility field is excluded from saved settings.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -90,7 +88,14 @@ class ModePath(BaseModel):
     name: str = Field(min_length=1)
     voltage_path: list[list[float]] = Field(min_length=2)
     current_path: list[list[float]] | None = Field(default=None, min_length=3)
-    nsamples: int = Field(default=100, ge=1)
+    nsamples: int = Field(default=100, ge=1, exclude=True)
+
+    @field_validator("nsamples")
+    @classmethod
+    def _warn_legacy_sampling(cls, value: int) -> int:
+        """Keep old constructor inputs and assignments working with a warning."""
+        warn_legacy_path_sampling(value)
+        return value
 
     @field_validator("voltage_path", "current_path")
     @classmethod
@@ -131,7 +136,7 @@ class ModePath(BaseModel):
         return cleaned
 
 
-class BoundaryModeSim(PalaceSimMixin, BaseModel):
+class BoundaryModeSim(_PalaceSimBase):
     """Boundary mode simulation for 2D waveguide cross-section analysis.
 
     This class configures Palace ``BoundaryMode`` simulations used to compute
@@ -140,16 +145,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     is declared as a :class:`ModePath` through :meth:`add_impedance_path`.
     """
 
-    model_config = ConfigDict(
-        validate_assignment=True,
-        arbitrary_types_allowed=True,
-    )
-
     simulation_type: Literal["boundarymode"] = "boundarymode"
-
-    # Composed objects
-    geometry: Geometry | None = None
-    stack: LayerStack | None = None
 
     # Boundary mode config
     cross_section: CrossSectionPlaneConfig | None = None
@@ -159,34 +155,21 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
     #: first under index 1, the second under 2, and so on.
     mode_paths: list[ModePath] = Field(default_factory=list)
 
-    # Unused in boundary mode (kept for mixin compatibility)
-
-    # Mesh and solver config
-    mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
-    materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
-    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     absorbing_boundary: bool = False
     #: Put a perfect-conductor condition on the outer wall of the meshed
     #: domain, making the mode solve a shielded one. Off, Palace's own
     #: default for an unconditioned outer boundary applies, which is PMC.
     metallic_boundaries: bool = False
-
-    # Stack configuration (stored as kwargs until resolved)
-    _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _pec_blocks: list = PrivateAttr(default_factory=list)
-    _symmetry_planes: list = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _impedance_boundaries: list = PrivateAttr(default_factory=list)
-    _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
-
-    # Internal state
-    _output_dir: Path | None = PrivateAttr(default=None)
-    _last_mesh_result: Any = PrivateAttr(default=None)
-    _last_ports: list = PrivateAttr(default_factory=list)
-
-    # Cloud job state
-    _job_id: str | None = PrivateAttr(default=None)
+    #: What the finite-conductivity conductor surfaces of the 2D mesh are in
+    #: the eigenproblem. ``"conductivity"`` (default) keeps them as Palace's
+    #: Robin surface-impedance condition, so the modes are lossy and their
+    #: ``n_eff`` is complex and frequency dependent. ``"pec"`` writes the same
+    #: attributes under ``Boundaries.PEC`` instead, which is what the 3D wave-port
+    #: eigenproblem does with them (``waveport_boundary="pec"``): use it for the
+    #: modes that are to be compared with, or put into the gauge of, Palace's port
+    #: modes. Nothing else of the configuration changes.
+    conductor_boundary: Literal["conductivity", "pec"] = "conductivity"
 
     @property
     def boundary_mode(self) -> BoundaryModeConfig:
@@ -308,7 +291,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         *,
         voltage: list[list[float]],
         current: list[list[float]] | None = None,
-        nsamples: int = 100,
+        nsamples: int | None = None,
     ) -> int:
         """Declare a voltage path and current loop Palace evaluates a Mode on.
 
@@ -330,7 +313,8 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
                 conductor agrees with the field-based power-current
                 impedance. :func:`gsim.palace.line_impedance.line_impedance_paths`
                 places one from the electrode layout.
-            nsamples: Quadrature order of each line integral.
+            nsamples: Deprecated and ignored; supplying a count emits
+                ``DeprecationWarning``. Omit it to let Palace integrate the path.
 
         Returns:
             The 1-based index Palace reports this path under.
@@ -338,9 +322,8 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         Raises:
             ValueError: When a path repeats a point, which Palace aborts on.
         """
-        path = ModePath(
-            name=name, voltage_path=voltage, current_path=current, nsamples=nsamples
-        )
+        warn_legacy_path_sampling(nsamples)
+        path = ModePath(name=name, voltage_path=voltage, current_path=current)
         paths = list(self.mode_paths)
         for index, existing in enumerate(paths):
             if existing.name == name:
@@ -356,6 +339,8 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
 
         Each path yields an ``Impedance`` entry (``mode-Z.csv``) and a
         ``Voltage`` entry (``mode-V.csv``) under the same index.
+        Palace integrates coordinate paths element by element and controls the
+        integration rule. No sample-count setting is emitted.
 
         Returns:
             The block, empty when no path is declared.
@@ -366,18 +351,15 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
             entry: dict[str, object] = {
                 "Index": index,
                 "VoltagePath": [list(point) for point in path.voltage_path],
-                "NSamples": path.nsamples,
             }
             if path.current_path is not None:
                 entry["CurrentPath"] = [list(point) for point in path.current_path]
             impedance_entries.append(entry)
-            voltage_entries.append(
-                {
-                    "Index": index,
-                    "VoltagePath": [list(point) for point in path.voltage_path],
-                    "NSamples": path.nsamples,
-                }
-            )
+            voltage_entry: dict[str, object] = {
+                "Index": index,
+                "VoltagePath": [list(point) for point in path.voltage_path],
+            }
+            voltage_entries.append(voltage_entry)
         result: dict[str, list[dict[str, object]]] = {}
         if impedance_entries:
             result["Impedance"] = impedance_entries
@@ -410,6 +392,10 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         """A wave port is a 3D excitation; refused here."""
         raise self._no_ports("wave ports")
 
+    def add_multimode_wave_port(self, *_args: Any, **_kwargs: Any) -> None:
+        """A multimode wave port is a 3D excitation; refused here."""
+        raise self._no_ports("wave ports")
+
     def add_terminal(self, *_args: Any, **_kwargs: Any) -> None:
         """A terminal belongs to an electrostatic solve; refused here."""
         raise self._no_ports("terminals")
@@ -436,7 +422,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         """
         import meshio
 
-        points = meshio.read(str(self.mesh_path)).points
+        points = meshio.read(str(self.mesh_path), file_format="gmsh").points
         h = points[:, 0]
         v = points[:, 1]
         return ((float(h.min()), float(h.max())), (float(v.min()), float(v.max())))
@@ -448,9 +434,7 @@ class BoundaryModeSim(PalaceSimMixin, BaseModel):
         Raises:
             ValueError: When no output directory is set.
         """
-        if self._output_dir is None:
-            raise ValueError("Output directory not set. Call set_output_dir() first.")
-        return Path(self._output_dir) / RUN_SUBDIR
+        return self._postpro_dir()
 
     @property
     def last_run_files(self) -> dict[str, Path]:

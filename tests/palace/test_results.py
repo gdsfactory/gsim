@@ -663,7 +663,7 @@ class TestLoadFieldContext:
         )
         import meshio as _real_meshio
 
-        monkeypatch.setattr(_real_meshio, "read", lambda _: fake_mesh)
+        monkeypatch.setattr(_real_meshio, "read", lambda _path, **_kwargs: fake_mesh)
 
         # Fake load_fields returning distinct volume/boundary meshes
         fake_vol = SimpleNamespace(n_points=100, n_cells=10, _kind="vol")

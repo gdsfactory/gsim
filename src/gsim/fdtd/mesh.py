@@ -86,6 +86,53 @@ def _add_physical_group(dimension: int, tags: list[int], name: str) -> int:
     return physical_tag
 
 
+def _clip_layer_to_background(
+    kernel: Any,
+    volume_tags: list[int],
+    background_tag: int,
+    bounds: tuple[float, float, float, float, float, float],
+    *,
+    allow_empty: bool = False,
+) -> list[int]:
+    """Trim sidewall overhangs to the physical domain before assigning groups.
+
+    Disconnected polygons need not own a guided port, so port-conditioned
+    contours alone cannot enforce domain containment. Intersect the finished
+    solids instead, preserving the taper everywhere inside the domain.
+    """
+    bounded_tags = []
+    for tag in volume_tags:
+        solid_bounds = kernel.getBoundingBox(3, tag)
+        if all(
+            solid_bounds[axis] >= bounds[axis]
+            and solid_bounds[axis + 3] <= bounds[axis + 3]
+            for axis in range(3)
+        ):
+            bounded_tags.append(tag)
+            continue
+        # Reusing the domain solid can share partially coincident faces with
+        # cropped fills, producing an invalid overlapping boundary mesh.
+        clipping_tool = kernel.copy([(3, background_tag)])
+        entities, _ = kernel.intersect(
+            [(3, tag)], clipping_tool, removeObject=True, removeTool=True
+        )
+        clipped_tags = [tag for dimension, tag in entities if dimension == 3]
+        if not clipped_tags and not allow_empty:
+            raise FDTDGeometryError(
+                "A material volume has no solid intersection with the FDTD domain."
+            )
+        bounded_tags.extend(clipped_tags)
+    return bounded_tags
+
+
+def _nonempty_layer_volumes(tags: dict[str, list[int]]) -> dict[str, list[int]]:
+    """Omit cropped islands and require an intersecting material volume."""
+    nonempty = {name: volumes for name, volumes in tags.items() if volumes}
+    if not nonempty:
+        raise FDTDGeometryError("The explicit domain contains no material geometry.")
+    return nonempty
+
+
 def _port_surface_tags(
     port: Any,
     volume_tags: list[int],
@@ -261,6 +308,7 @@ def generate_mesh(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
+    clip_geometry: bool = False,
 ) -> MeshManifest:
     """Generate an exact-boundary transfer mesh with coarse volume tetrahedra."""
     if mesh_size_nm <= 0:
@@ -284,6 +332,7 @@ def generate_mesh(
         x_bounds=x_bounds,
         y_bounds=y_bounds,
         z_bounds=z_bounds,
+        clip_geometry=clip_geometry,
     )
     initialized_here = not bool(gmsh.isInitialized())
     caller_option_values = {} if initialized_here else _snapshot_gmsh_options()
@@ -314,12 +363,28 @@ def generate_mesh(
             name: add_layer_volumes(
                 kernel,
                 layer,
-                [port for port in guided_ports.values() if port.layer_key == name],
+                [
+                    port
+                    for port in guided_ports.values()
+                    if name in port.physical_layer_keys
+                ],
                 geometry_tolerance_nm=geometry_tolerance_nm,
             )
             for name, layer in resolved.layers.items()
         }
+        layer_volume_tags = {
+            name: _clip_layer_to_background(
+                kernel,
+                tags,
+                background_tag,
+                background_bounds,
+                allow_empty=clip_geometry,
+            )
+            for name, tags in layer_volume_tags.items()
+        }
         kernel.synchronize()
+
+        layer_volume_tags = _nonempty_layer_volumes(layer_volume_tags)
 
         background_physical_tag = _add_physical_group(3, [background_tag], "background")
         priorities = _priority_by_mesh_order(resolved.layers)
@@ -338,7 +403,11 @@ def generate_mesh(
             layer_key = _guided_layer_key(port)
             surface_tags = _port_surface_tags(
                 port,
-                layer_volume_tags[layer_key],
+                [
+                    tag
+                    for key in port.physical_layer_keys
+                    for tag in layer_volume_tags[key]
+                ],
                 claimed_surfaces,
             )
             physical_name = f"port_{name}"

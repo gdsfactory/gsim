@@ -1,12 +1,13 @@
 """Pure helpers for symmetry planes (no Gmsh).
 
-All lengths are in um unless a name says ``_nm``. The plane is described by a
-:class:`~gsim.palace.models.symmetry.SymmetryPlaneConfig`.
+Lengths are in um; KLayout region helpers also accept the owning layout's dbu.
+The plane is described by a :class:`~gsim.palace.models.symmetry.SymmetryPlaneConfig`.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Literal
 
 import klayout.db as kdb
@@ -89,16 +90,28 @@ def check_plane_inside_domain(
         )
 
 
-def _to_nm(value_um: float) -> int:
-    """Convert um to integer database units (nm)."""
-    return round(value_um * 1000.0)
+def plane_position_dbu(plane: SymmetryPlaneConfig, *, dbu: float) -> int:
+    """Convert a plane position to layout units, rejecting off-grid positions."""
+    if not math.isfinite(dbu) or dbu <= 0:
+        raise ValueError("Layout database unit must be finite and positive")
+    scaled_position = plane.position / dbu
+    coordinate = round(scaled_position)
+    if not math.isclose(scaled_position, coordinate, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError(
+            f"Symmetry plane position {plane.position:g} um is not on the layout's "
+            f"{dbu:g} um grid"
+        )
+    return coordinate
 
 
 def _half_box(
-    bbox: kdb.Box, plane: SymmetryPlaneConfig, side: Literal["kept", "removed"]
+    bbox: kdb.Box,
+    plane: SymmetryPlaneConfig,
+    side: Literal["kept", "removed"],
+    dbu: float,
 ) -> kdb.Box:
     """Box covering one side of the plane, spanning ``bbox`` plus one unit."""
-    pos = _to_nm(plane.position)
+    pos = plane_position_dbu(plane, dbu=dbu)
     positive = (side == "kept") == (plane.keep == "positive")
     if plane.axis == "x":
         lo, hi = (pos, bbox.right + 1) if positive else (bbox.left - 1, pos)
@@ -107,36 +120,45 @@ def _half_box(
     return kdb.Box(bbox.left - 1, lo, bbox.right + 1, hi)
 
 
-def clip_region(region: kdb.Region, plane: SymmetryPlaneConfig) -> kdb.Region:
+def clip_region(
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float
+) -> kdb.Region:
     """Keep the part of a region on the kept side of the plane."""
     if region.is_empty():
         return kdb.Region()
-    box = _half_box(region.bbox(), plane, "kept")
+    box = _half_box(region.bbox(), plane, "kept", dbu)
     if box.empty():
         return kdb.Region()
     # merged() turns the keyhole cuts left by boolean ops back into real holes
     return (region & kdb.Region(box)).merged()
 
 
-def clip_polygon(polygon: kdb.Polygon, plane: SymmetryPlaneConfig) -> list[kdb.Polygon]:
+def clip_polygon(
+    polygon: kdb.Polygon, plane: SymmetryPlaneConfig, *, dbu: float
+) -> list[kdb.Polygon]:
     """Clip one polygon (holes included) to the kept side of the plane.
 
     Clipping a single polygon can split it into several pieces, or remove it
     entirely (empty list).
     """
-    return list(clip_region(kdb.Region(polygon), plane).each())
+    return list(clip_region(kdb.Region(polygon), plane, dbu=dbu).each())
 
 
-def mirror_region(region: kdb.Region, plane: SymmetryPlaneConfig) -> kdb.Region:
+def mirror_region(
+    region: kdb.Region, plane: SymmetryPlaneConfig, *, dbu: float
+) -> kdb.Region:
     """Mirror a region about the plane."""
-    shift = 2 * _to_nm(plane.position)
+    shift = 2 * plane_position_dbu(plane, dbu=dbu)
     if plane.axis == "y":
         return region.transformed(kdb.Trans.M0).moved(0, shift)
     return region.transformed(kdb.Trans.M90).moved(shift, 0)
 
 
 def asymmetric_layers(
-    regions: Mapping[object, kdb.Region], plane: SymmetryPlaneConfig
+    regions: Mapping[object, kdb.Region],
+    plane: SymmetryPlaneConfig,
+    *,
+    dbu: float,
 ) -> list[object]:
     """Return the keys of layers that are not mirror-symmetric about the plane.
 
@@ -147,7 +169,7 @@ def asymmetric_layers(
     for key, region in regions.items():
         if region.is_empty():
             continue
-        diff = (region ^ mirror_region(region, plane)).sized(-1)
+        diff = (region ^ mirror_region(region, plane, dbu=dbu)).sized(-1)
         if not diff.is_empty():
             bad.append(key)
     return bad

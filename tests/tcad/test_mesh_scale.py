@@ -56,3 +56,18 @@ def test_rejects_nonpositive_scale(tmp_path):
     _write_toy_msh(src)
     with pytest.raises(ValueError, match="scale"):
         write_scaled_msh(src, tmp_path / "dst.msh", scale=0.0)
+
+
+def test_reading_the_mesh_prints_nothing(tmp_path, capsys):
+    """A .msh read goes straight to the gmsh reader, not through ansys first.
+
+    meshio guesses a .msh file's format by trying the ansys reader before
+    the gmsh one, and prints the ansys reader's empty error: a blank line
+    in a notebook's output for every mesh read.
+    """
+    src = tmp_path / "src.msh"
+    _write_toy_msh(src)
+
+    write_scaled_msh(src, tmp_path / "dst.msh", scale=UM_TO_CM)
+
+    assert capsys.readouterr().out == ""

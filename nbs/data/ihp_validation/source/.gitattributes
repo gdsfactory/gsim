@@ -1,0 +1,3 @@
+# Preserve pinned Touchstone bytes, including source line endings and spacing.
+*.s1p -text -diff
+*.s2p -text -diff

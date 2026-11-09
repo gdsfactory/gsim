@@ -24,6 +24,18 @@ class MeshConfig(BaseModel):
         fmax: Maximum frequency for mesh sizing (Hz)
         boundary_conditions: List of boundary conditions for each face
         planar_conductors: Treat conductors as 2D PEC surfaces instead of volumes
+        merge_via_distance: Vias of one layer closer than this (um) are merged
+            into one volume. Merging fills the gaps between the vias, so an
+            array of small cuts becomes a solid slab with several times the
+            drawn area (a 2 x 10 array of 0.4 um cuts at 1.5 um pitch grows
+            8.25 times). A warning is logged when a via layer grows by more
+            than 5%. 0 keeps every via as drawn.
+        clip_merged_vias: Clip each merged via polygon to the overlap of the
+            conductor layers directly below and above it, so merging adds no
+            via area outside the metal. The drawn cuts are always kept, and
+            contacts with no metal on one side stay as drawn. A slab that lies
+            entirely between two continuous metals is left unchanged; only
+            ``merge_via_distance=0`` keeps its cuts.
         refinement_boxes: Boxes of a native-2D cross-section mesh held to an
             element size, each ``(h_min, h_max, z_min, z_max, size)`` in um.
             Refinement lines size the elements on them only, and the size
@@ -62,6 +74,7 @@ class MeshConfig(BaseModel):
     boundary_conditions: list[str] | None = None
     planar_conductors: bool = False
     merge_via_distance: float = Field(default=2.0, ge=0)
+    clip_merged_vias: bool = False
     curve_fit_mode: Literal["line", "spline", "bspline"] = "line"
     curve_fit_layers: list[str] = Field(default_factory=lambda: ["core", "core2"])
     curve_fit_tolerance_um: float = Field(default=0.0, ge=0)

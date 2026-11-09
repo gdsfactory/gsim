@@ -1,0 +1,24 @@
+GMRES solver converged in 38 iterations (avg. reduction factor: 8.141e-01)
+2 NLEPS (nconv=0, restart=0) residual norm 9.568559e-07
+Eigenvalue 0, Quasi-Newton converged in 2 iterations (-4.397e-02+1.994e+00i).
+Computing solution error estimates and performing postprocessing
+EPS Object: 1 MPI process
+  type: krylovschur
+    50% of basis vectors kept after restart
+    using the locking variant
+  problem type: hermitian eigenvalue problem
+     m,        Re{f} (GHz),        Im{f} (GHz),                  Q,      Error (Bkwd.),       Error (Abs.)
+     1,      +1.056864e+02,      +2.331068e+00,      +2.267461e+01,      +4.339161e-11,      +9.568559e-07
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 1.109e+00)!
+
+PCG solver did NOT converge in 0 iterations
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 1.000e+00 (norm(b) = 5.765e-01)!
+
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 1.000e+00, global unknowns = 80514

@@ -1,5 +1,6 @@
 """Exercise cloud retries and log pagination at the SDK boundary."""
 
+import re
 from datetime import timedelta
 from unittest.mock import Mock
 
@@ -74,6 +75,7 @@ def test_polling_retries_transient_errors_and_preserves_other_failures(
 @pytest.mark.parametrize("mode", ["pipe", "tty", "jupyter"])
 def test_multi_job_progress_keeps_finished_elapsed_time(monkeypatch, capsys, mode):
     monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
     monkeypatch.setattr(gcloud.time, "monotonic", lambda: 200)
     cleared = Mock()
     monkeypatch.setattr("IPython.display.clear_output", cleared)
@@ -90,10 +92,128 @@ def test_multi_job_progress_keeps_finished_elapsed_time(monkeypatch, capsys, mod
     )
     output = capsys.readouterr().out
     assert all(
-        value in output for value in ["Waiting for 2 jobs", "50%", "100%", "1m 05s"]
+        value in output
+        for value in [
+            "Waiting for 2 jobs",
+            "Job in progress...",
+            "Job failed",
+            "1m 05s",
+        ]
     )
+    assert "%" not in output
     assert ("\033[3A" in output) == (mode == "tty")
     assert cleared.call_count == (mode == "jupyter")
+
+
+@pytest.mark.parametrize("mode", ["pipe", "tty", "jupyter"])
+@pytest.mark.parametrize("estimate", [None, 240.0])
+def test_mixed_job_descriptions_align_elapsed_columns(
+    monkeypatch, capsys, mode, estimate
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    monkeypatch.setattr("IPython.display.clear_output", Mock())
+    jobs = {
+        status: FakeJob(job_name=f"meep-{status}", status=status)
+        for status in ("created", "queued", "running", "completed", "failed")
+    }
+    jobs["queued"].job_name = "meep-job-with-a-name-longer-than-thirty-characters"
+    gcloud._print_status_table(
+        jobs, dict.fromkeys(jobs, 0.0), final=True, estimated_runtime_seconds=estimate
+    )
+
+    output = re.sub(r"\033\[[0-9]*[AK]", "", capsys.readouterr().out)
+    rows = [line for line in output.splitlines() if "elapsed" in line]
+    assert len(rows) == len(jobs)
+    assert len({row.index("elapsed") for row in rows}) == 1
+
+
+@pytest.mark.parametrize("job_count", [1, 2])
+@pytest.mark.parametrize("terminal", ["completed", "failed"])
+def test_tty_redraw_erases_shorter_terminal_rows(
+    monkeypatch, capsys, job_count, terminal
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=200))
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    jobs = {
+        f"job-{i}": FakeJob(job_name="meep-" + "long-name-" * 5, status="running")
+        for i in range(job_count)
+    }
+    starts = dict.fromkeys(jobs, 0.0)
+    lines = gcloud._print_status_table(jobs, starts, estimated_runtime_seconds=240)
+    previous = capsys.readouterr().out
+    for job in jobs.values():
+        job.status = terminal
+    gcloud._print_status_table(jobs, starts, prev_lines=lines, final=True)
+    redraw = capsys.readouterr().out
+
+    # Every row is erased before writing, including rows longer than 80 columns.
+    assert len(previous.splitlines()[-1]) > 80
+    if job_count == 1:
+        assert "\033[1A" not in redraw
+    else:
+        assert redraw.startswith(f"\033[{lines}A")
+        redraw = redraw.removeprefix(f"\033[{lines}A")
+    rows = redraw.split("\n")[:-1]
+    assert len(rows) == lines
+    assert all(row.startswith("\r\033[2K") for row in rows)
+    assert redraw.count(f"Job {terminal}") == job_count
+    assert "ETA" not in redraw
+
+
+@pytest.mark.parametrize("job_count", [1, 2])
+@pytest.mark.parametrize("columns", [1, 3, 20, 80, 98, 100, 101, 200])
+def test_tty_rows_fit_terminal_width_across_redraw_and_resize(
+    monkeypatch, capsys, job_count, columns
+):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: "tty")
+    terminal_size = Mock(columns=columns)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: terminal_size)
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    jobs = {
+        f"job-{i}": FakeJob(job_name=f"meep-{i}", status="running")
+        for i in range(job_count)
+    }
+    starts = dict.fromkeys(jobs, 0.0)
+    lines = gcloud._print_status_table(jobs, starts, estimated_runtime_seconds=240)
+    initial = capsys.readouterr().out
+    expected_lines = 1 if job_count == 1 else job_count + 1
+    assert lines == expected_lines
+
+    def visible_rows(output):
+        return re.sub(r"\033\[[0-9]*[AK]", "", output).replace("\r", "").split("\n")
+
+    assert all(len(row) < columns for row in visible_rows(initial))
+    if columns == 98 and job_count == 2:
+        assert initial.count("...") >= job_count
+
+    terminal_size.columns = max(1, columns - 7)
+    for job in jobs.values():
+        job.status = "completed"
+    assert (
+        gcloud._print_status_table(jobs, starts, prev_lines=lines, final=True) == lines
+    )
+    redraw = capsys.readouterr().out
+    assert all(len(row) < terminal_size.columns for row in visible_rows(redraw))
+    if job_count > 1:
+        assert redraw.startswith(f"\033[{expected_lines}A")
+
+
+@pytest.mark.parametrize("mode", ["pipe", "jupyter"])
+def test_non_tty_output_is_not_shortened(monkeypatch, capsys, mode):
+    monkeypatch.setattr(gcloud, "_output_mode", lambda: mode)
+    monkeypatch.setattr(gcloud.shutil, "get_terminal_size", lambda: Mock(columns=1))
+    monkeypatch.setattr(gcloud.time, "monotonic", lambda: 120)
+    monkeypatch.setattr("IPython.display.clear_output", Mock())
+    job = FakeJob(job_name="meep-" + "long-name-" * 5, status="running")
+    gcloud._print_status_table(
+        {"job-1": job}, {"job-1": 0.0}, final=True, estimated_runtime_seconds=240
+    )
+    output = capsys.readouterr().out
+    assert job.job_name in output
+    assert "Job in progress... ETA 2m 00s  elapsed 2m 00s" in output
 
 
 @pytest.mark.parametrize("finished", [False, True])
@@ -142,4 +262,48 @@ def test_upload_explains_denied_access_and_preserves_server_errors(
 def test_log_outages_keep_the_resume_cursor(monkeypatch, available):
     provider = Mock(side_effect=RuntimeError("logs unavailable")) if available else None
     monkeypatch.setattr(gcloud, "_get_job_logs_callable", lambda: provider)
-    assert gcloud._fetch_logs("job-1", "resume-here") == ([], "resume-here")
+    position = gcloud._LogPosition("resume-here", seen=3)
+    assert gcloud._fetch_logs("job-1", position) == ([], position, False)
+
+
+def test_full_logs_print_each_line_once_and_return_after_completion(
+    monkeypatch, tmp_path, capsys
+):
+    # The server pages by cursor and omits next_cursor on the last page, which
+    # keeps growing while the job runs (gdsfactory/gsim#425).
+    store: list[str] = []
+
+    def get_logs(_job_id, cursor=None, limit=50):
+        start = int(cursor or 0)
+        end = start + limit
+        return {
+            "items": [{"message": msg} for msg in store[start:end]],
+            "page_info": {"next_cursor": str(end)} if end < len(store) else {},
+        }
+
+    def get_job(_job_id):
+        status = "running" if len(store) < 7 else "completed"
+        store.extend(f"line {len(store)}" for _ in range(2))
+        return FakeJob(status=status)
+
+    output = tmp_path / "solver.log"
+    output.write_text("result")
+    monkeypatch.setattr(gcloud.sim, "get_job", get_job)
+    monkeypatch.setattr(
+        gcloud.sim, "download_results", Mock(return_value={"log": output})
+    )
+    monkeypatch.setattr(
+        gcloud, "_get_job_logs_callable", lambda: Mock(side_effect=get_logs)
+    )
+    monkeypatch.setattr(gcloud.time, "sleep", lambda _seconds: None)
+    real_fetch = gcloud._fetch_logs
+    monkeypatch.setattr(
+        gcloud,
+        "_fetch_logs",
+        lambda job_id, position: real_fetch(job_id, position, limit=3),
+    )
+
+    gcloud.wait_for_results("job-1", verbose="full", parent_dir=tmp_path)
+
+    printed = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    assert [line for line in printed if line.startswith("line ")] == store

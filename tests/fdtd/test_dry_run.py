@@ -109,3 +109,24 @@ def test_dry_run_cache_hit_still_validates_backend(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="zero timesteps"):
         simulation.run(dry_run=True, check_cache=True, verbose="quiet")
+
+
+def test_dry_run_failed_upload_retains_shared_staging_cleanup(monkeypatch):
+    simulation = fdtd.Simulation()
+    staging = []
+
+    def write(directory, *, dry_run=False):
+        assert dry_run is True
+        staging.append(directory)
+        (directory / "config.json").write_text("{}")
+
+    def upload(*_args, **_kwargs):
+        raise RuntimeError("upload unavailable")
+
+    monkeypatch.setattr(simulation, "write", write)
+    monkeypatch.setattr(gcloud, "estimate_runtime_seconds", lambda *_args: 0)
+    monkeypatch.setattr(gcloud, "upload", upload)
+    with pytest.raises(RuntimeError, match="upload unavailable"):
+        simulation.upload(dry_run=True, verbose=False)
+    assert len(staging) == 1
+    assert not staging[0].exists()

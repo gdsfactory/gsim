@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import os
 import sys
 from types import SimpleNamespace
 
@@ -45,53 +46,77 @@ def test_tcad_extra_declared_in_packaging():
     assert "tcad" in extras
     tcad = [req for req in requires if "extra == " in req and "tcad" in req]
     assert any(req.startswith("devsim>") for req in tcad)
-    assert any(req.startswith("devsim-openblas") for req in tcad)
+    assert any(req.startswith("scipy-openblas32") for req in tcad)
+
+
+_MATH_ENV = ("DEVSIM_MATH_LIBS", "DEVSIM_BLAS_PREFIX", "DEVSIM_BLAS_SUFFIX")
 
 
 @pytest.fixture
-def fresh_devsim(monkeypatch):
+def fresh_devsim(monkeypatch, tmp_path):
     """A process where DEVSIM has not been imported and no library is chosen.
 
-    Returns the list ``devsim_openblas.configure`` appends to when called.
+    scipy-openblas32 is replaced by one whose library sits in *tmp_path*;
+    returns that library's path.
     """
+    from gsim.tcad import runtime
+
     monkeypatch.delitem(sys.modules, "devsim", raising=False)
-    monkeypatch.delenv("DEVSIM_MATH_LIBS", raising=False)
-    configured: list[bool] = []
-    fake = SimpleNamespace(configure=lambda: configured.append(True))
-    monkeypatch.setitem(sys.modules, "devsim_openblas", fake)
-    return configured
+    # _select_math_libraries writes os.environ itself, which monkeypatch.delenv
+    # does not undo for a variable that was unset: give it a throwaway copy.
+    environ = {k: v for k, v in os.environ.items() if k not in _MATH_ENV}
+    monkeypatch.setattr(os, "environ", environ)
+    library = tmp_path / f"libscipy_openblas{runtime._SHARED_LIBRARY_SUFFIX}"
+    library.touch()
+    fake = SimpleNamespace(get_lib_dir=lambda: str(tmp_path))
+    monkeypatch.setitem(sys.modules, "scipy_openblas32", fake)
+    return library
 
 
-def test_first_import_is_pointed_at_devsim_openblas(fresh_devsim):
+def test_first_import_is_pointed_at_scipy_openblas32(fresh_devsim):
     from gsim.tcad.runtime import _select_math_libraries
 
     _select_math_libraries()
-    assert fresh_devsim == [True]
+    assert os.environ["DEVSIM_MATH_LIBS"] == str(fresh_devsim)
+    assert os.environ["DEVSIM_BLAS_PREFIX"] == "scipy_"
+    assert os.environ["DEVSIM_BLAS_SUFFIX"] == "_"
 
 
-def test_a_chosen_math_library_is_left_alone(fresh_devsim, monkeypatch):
+@pytest.mark.usefixtures("fresh_devsim")
+def test_a_chosen_math_library_is_left_alone(monkeypatch):
     from gsim.tcad.runtime import _select_math_libraries
 
     monkeypatch.setenv("DEVSIM_MATH_LIBS", "libmkl_rt.so")
     _select_math_libraries()
-    assert fresh_devsim == []
+    assert os.environ["DEVSIM_MATH_LIBS"] == "libmkl_rt.so"
+    assert "DEVSIM_BLAS_PREFIX" not in os.environ
 
 
-def test_an_imported_devsim_is_left_alone(fresh_devsim, monkeypatch):
+@pytest.mark.usefixtures("fresh_devsim")
+def test_an_imported_devsim_is_left_alone(monkeypatch):
     """DEVSIM has read DEVSIM_MATH_LIBS already; setting it now changes nothing."""
     from gsim.tcad.runtime import _select_math_libraries
 
     monkeypatch.setitem(sys.modules, "devsim", SimpleNamespace())
     _select_math_libraries()
-    assert fresh_devsim == []
+    assert not any(name in os.environ for name in _MATH_ENV)
 
 
-def test_without_devsim_openblas_devsim_finds_its_own(fresh_devsim, monkeypatch):
+@pytest.mark.usefixtures("fresh_devsim")
+def test_without_scipy_openblas32_devsim_finds_its_own(monkeypatch):
     from gsim.tcad.runtime import _select_math_libraries
 
-    monkeypatch.setitem(sys.modules, "devsim_openblas", None)
+    monkeypatch.setitem(sys.modules, "scipy_openblas32", None)
     _select_math_libraries()
-    assert fresh_devsim == []
+    assert not any(name in os.environ for name in _MATH_ENV)
+
+
+def test_a_scipy_openblas32_without_its_library_is_skipped(fresh_devsim):
+    from gsim.tcad.runtime import _select_math_libraries
+
+    fresh_devsim.unlink()
+    _select_math_libraries()
+    assert not any(name in os.environ for name in _MATH_ENV)
 
 
 def test_devsim_without_math_libraries_names_the_remedy(monkeypatch):
@@ -103,7 +128,7 @@ def test_devsim_without_math_libraries_names_the_remedy(monkeypatch):
 
     monkeypatch.setattr(runtime, "_select_math_libraries", lambda: None)
     monkeypatch.setattr(runtime, "require_module", _initialiser_fails)
-    with pytest.raises(ImportError, match="devsim-openblas") as info:
+    with pytest.raises(ImportError, match="scipy-openblas32") as info:
         runtime.require_devsim()
     assert "DEVSIM_MATH_LIBS" in str(info.value)
     assert isinstance(info.value.__cause__, RuntimeError)

@@ -30,6 +30,7 @@ def background_bounds_nm(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
+    clip_geometry: bool = False,
 ) -> tuple[float, float, float, float, float, float]:
     """Size the physical domain, keeping automatic guided-port alignment.
 
@@ -104,7 +105,9 @@ def background_bounds_nm(
                 f"domain.{axis_name}_bounds lower bound must be smaller than "
                 "its upper bound."
             )
-        if requested_lower > lower[axis] or requested_upper < upper[axis]:
+        if not clip_geometry and (
+            requested_lower > lower[axis] or requested_upper < upper[axis]
+        ):
             raise FDTDGeometryError(
                 f"domain.{axis_name}_bounds {requested_bounds} must contain "
                 f"the geometry bounds ({lower[axis]}, {upper[axis]})."

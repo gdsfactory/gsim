@@ -46,6 +46,98 @@ grid used by the FDTD solver and defaults to 60 nm. Source sweeps default to 101
 wavelengths. Guided-port monitors are implicit; one port source returns one
 S-matrix column.
 
+### Virtual port layers
+
+When a guided port uses a virtual routing marker, gsim can find its physical
+core through the PDK cross-section. Pass a cross-section to `add_port()` to
+retain its complete section description on the port:
+
+```python
+import gdsfactory as gf
+
+routing = gf.cross_section.cross_section(
+    width=0.5,
+    layer=(100, 0),  # Virtual port marker.
+    sections=(gf.cross_section.Section(width=0.5, layer=(1, 0)),),
+)
+waveguide.add_port(
+    name="o1", center=(0, 0), orientation=180, cross_section=routing
+)
+sim.geometry(component=waveguide)
+```
+
+Here the physical core is drawn on `(1, 0)` and must already have a
+material-bearing entry in the PDK LayerStack. The marker is not extruded.
+gsim reads gdsfactory's saved cross-section snapshot or the port's named
+`cross_section` metadata. Without either, it checks default-instantiable
+factories in `PDK.cross_sections`. Only visible sections with the same width
+and offset as the primary marker section identify the core; wider cladding
+and offset sections do not. The actual resolved geometry at each port decides
+which vertical bands are present, so a local etch can give two ports different
+heights. Material identity is supplied by the LayerStack.
+
+An inferred core must form one abutting, non-overlapping group of a single
+material. Equivalent registry aliases are accepted; multiple different cores
+or incompatible bands raise `UnsupportedPortError` instead of selecting one.
+Unmapped vertical optical ports retain their free-space semantics.
+
+Use `port_layer_map` when a cross-section does not describe an unambiguous core,
+or to select particular physical bands explicitly:
+
+```python
+sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
+```
+
+The marker layer is not added to the mesh. The mapped physical entry supplies
+the port's material and vertical position, and must contain the port location.
+Explicit maps take precedence, followed by existing direct physical-layer
+matches. Cross-section inference is a fallback when direct matching fails.
+When an unmapped port matches abutting vertical bands of the same material, its
+mesh surface includes those bands and its center uses their combined height.
+Overlapping entries are not joined; candidates are considered in mesh-priority
+order. The saved port `layer` is the primary material and priority reference;
+the port's mesh physical group defines its complete cross-section.
+An explicit single-entry mapping keeps the port limited to that entry.
+
+For a core represented by several physical bands, select their LayerStack keys
+as a tuple:
+
+```python
+sim.geometry(component=waveguide, port_layer_map={(100, 0): ("lower", "upper")})
+```
+
+All selected bands must have resolved geometry at the port location, use the
+same material, and abut without overlaps or gaps. Empty selections, duplicate
+keys, and incompatible bands raise `UnsupportedPortError`. The first key stays
+the primary material/priority reference; the mesh covers the complete selected
+height. Existing string mappings retain their single-band behavior.
+
+### Bounded PDK stacks
+
+Keep the PDK's LayerStack unchanged and opt into clipping when the simulation
+uses only a smaller physical window:
+
+```python
+sim = fdtd.Simulation(pdk=pdk)
+sim.domain(z_bounds=(-0.5, 1.0), clip_geometry=True)
+sim.geometry(component=waveguide)
+```
+
+Set the bounds before resolving geometry. Films wholly outside the vertical
+window and footprints outside the XY window are omitted before their materials
+are required. Sidewall overhangs are retained conservatively. This includes
+films with negative thickness; boundary-only contact has no material volume.
+Intersecting layers keep their original sidewall profiles and are clipped by
+the mesher; the PDK object is not modified. Missing materials inside the window
+still raise an error. With the default `clip_geometry=False`, explicit bounds
+must continue to contain the resolved geometry.
+
+Port centers and diagnostic windows follow the clipped active bands. Automatic
+diagnostic planes, including their cladding margins, are intersected with the
+physical domain when previewed or written. The requested monitor windows remain
+available if the domain is enlarged; the original LayerStack extrusion and
+sidewall fields are retained.
+
 Linear PDK sidewall angles are represented as continuous ruled solids between
 their exact bottom and top contours. If polygon offsetting changes component,
 hole, or edge topology, meshing safely falls back to vertical slices bounded by
@@ -55,6 +147,12 @@ Use `write(path)` to generate `mesh.msh` and `config.json` without submitting.
 The original flat constructor keywords remain accepted for compatibility.
 
 ## Material dispersion
+
+MaterialCards attached to the PDK object or exported by its module are discovered
+automatically and take precedence over built-in cards. Schema Lorentz and Drude
+models are evaluated using their angular frequencies in rad/s and the passive
+`n+ik` convention. Their loss and wavelength dependence follow the same solver
+rules as other cards below.
 
 By default, each material reaches the solver as its index at the source
 wavelength. A broadband run therefore uses that one index at every wavelength.
@@ -128,29 +226,83 @@ sim.domain(
 
 ## Setup visualization
 
-FDTD setup views use the ported GDSFactory FDTD Three.js viewer and do not depend on
-PyVista. All physical groups are shown by default. Smaller material groups are
-listed first, followed by the largest volumetric group and then the ports.
+`plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
+Materials are colored by their real refractive index at the source center
+wavelength, with a colorbar, physical-domain boundary, hatched PML regions, and source
+and monitor annotations where they intersect the slice. The plot uses the FDTD
+transfer mesh, including sidewalls and material priorities. All physical groups
+are shown by default; `show_groups` and `hide_groups` select physical group names.
+
+```python
+ax = sim.plot_2d_static()                               # XY at geometry midpoint
+ax = sim.plot_2d_static(axis="z", position_um=0.11)      # XY at z = 0.11 µm
+ax = sim.plot_2d_static(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
+ax.figure.savefig("cross_section.png", dpi=200, bbox_inches="tight")
+```
+
+The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
+subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
+`aspect="auto"` to fill the axes, or `figsize=(8, 4)` to set the figure size.
+An omitted `position_um` uses the geometry midpoint along the requested axis.
+The current geometry and material settings are resolved for every call. A
+temporary mesh is generated; the plot does not require selecting a source port
+or writing run artifacts. A selected source port must exist, and sources and
+monitors must fit any explicit domain bounds, as required by `write()`. The PML
+thickness uses the same per-axis alignment as the metadata estimate: z PML is
+rounded up to a multiple of 16 cells (for example, 20 becomes 32). Guard cells
+are not drawn as PML. Mesh edges describe the tetrahedral transfer mesh,
+rather than the solver's Yee grid.
+
+The interactive setup views use the GDSFactory FDTD Three.js viewer and do not
+depend on PyVista. Smaller material groups are listed first, followed by the
+largest volumetric group and then the ports.
 
 ```python
 sim.plot_3d()                                   # solid interactive geometry
 sim.plot_3d(show_mesh=True)                     # add Gmsh surface edges
 sim.plot_3d(zoom_to_cursor=False)               # zoom toward the view center
-sim.plot_2d(axis="z", position_um=0.11)         # filled cross-section
-sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # add cell edges
+sim.plot_2d_interactive(axis="z", position_um=0.11)  # movable cross-section
+viewer = sim.plot_2d_interactive(show_mesh=True)     # add transfer-mesh edges
+viewer.save("mesh.html")
 ```
 
-Omit `position_um` to start at the geometry midpoint. The 2D viewer includes a
-slider that moves the plane through the mesh. Both methods return a standalone
-`MeshViewer`. Set `show_mesh=True` when element edges are useful, or use
-`viewer.save("mesh.html")` to share the visualization outside a notebook.
+The interactive 2D viewer includes a slider that moves the plane through the
+mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
+Each call resolves the current settings and generates a temporary mesh, so edits
+to geometry, meshing, background material, and domain settings appear immediately.
+Previously written simulation artifacts are preserved.
+The 3D viewer uses each PDK stack entry's `info["opacity"]` and layer-view
+visibility by default, including hidden parent groups. If several layer views
+refer to the same GDS layer, it is initially visible when any of those views
+and its enclosing groups are visible, regardless of view order. Stack `info["visible"]`
+overrides layer-view visibility. The derived layer view is preferred, with the
+source layer view as a fallback. Only stack entries with resolved geometry have
+their display metadata applied and validated. A zero opacity starts a layer hidden;
+enabling it in the viewer's layer list makes it fully opaque (`opacity=1.0`),
+which can obscure enclosed layers. Explicit `show_groups`
+and `hide_groups` override these initial visibility defaults; `hide_groups`
+takes precedence. Entries without display metadata retain the viewer defaults.
 Zooming moves toward the pointer by default; set `zoom_to_cursor=False` to zoom
 toward the view center instead. The same choice is available in the viewer's
 **Zoom toward** controls.
 
 The viewer also summarizes the physical domain, estimated Yee-grid dimensions
-and total cell count (including PML). These values are estimates; the solver
+and total cell count (including PML). Grid counts use the same Python calculation
+as `metadata.json`, preserving its rounding and per-axis alignment. These values are estimates; the solver
 backend is authoritative when it constructs the final grid.
+
+### 2D plotting APIs and compatibility (0.9.0)
+
+Use `plot_2d_static()` for a Matplotlib `Axes` and export it with
+`ax.figure.savefig(...)`. Use `plot_2d_interactive()` for an HTML `MeshViewer`
+with `.html` and `.save()`.
+
+The original `plot_2d()` remains an alias for the interactive viewer, accepts
+all original keywords including `height` and `zoom_to_cursor`, and still returns
+`MeshViewer`. Starting with 0.9.0 it emits a `DeprecationWarning` directing callers
+to the explicit methods. The alias will remain for at least two feature releases
+and roughly 12 months after the first released warning. This change does not
+switch its default behavior or remove the old API.
 
 ## Sources
 
@@ -158,6 +310,21 @@ backend is authoritative when it constructs the final grid.
 artifacts can be written or a job can run. A guided PDK port maps to an
 eigenmode source. Selecting a `vertical_te` or `vertical_tm` PDK port instead
 derives a Gaussian beam and fiber monitor from the port metadata.
+
+To excite a specific guided mode, set its one-based `mode_order`:
+
+```python
+sim.source(port="o1", mode={"kind": "mode_order", "mode_order": 2})
+```
+
+The selector is also available as `fdtd.ModeSelection`. `te_like` and `tm_like`
+select the first candidate with the requested polarization; those selectors
+require a transverse `te_axis` and can set `num_candidate_modes` and
+`min_polarization_fraction`. With no selector, the fundamental mode is used.
+The implicit guided-port monitors use the same selection as the source.
+`te_axis` is a global coordinate axis and must be transverse to every guided
+port. Components with both x-normal and y-normal ports, such as a 90-degree
+bend, require `te_axis="z"`. Vertical fiber monitors do not use this selector.
 
 Replace `sim.source` to use another physical source:
 
@@ -187,29 +354,78 @@ For notebook diagnostics, add center-wavelength field intensity images with one
 call after configuring geometry, source and solver:
 
 ```python
-sim.add_monitors()               # Optical port images and an XY overview.
-sim.add_monitors(xy=False)       # Alternative: optical port images only.
-sim.add_monitors(z_um=0.11)      # Alternative: set the XY height in micrometers.
-sim.add_monitors(margin_um=1.0)  # Alternative: more cladding around each port.
+sim.add_monitors(xy_name="field_xy")                # Optical port images and an XY field image.
+sim.add_monitors(xy=False)                          # Alternative: optical port images only.
+sim.add_monitors(xy_name="field_xy", z_um=0.11)      # Alternative: set the XY height in micrometers.
+sim.add_monitors(xy_name="field_xy", margin_um=1.0)  # Alternative: more cladding around each port.
 ```
 
 These are alternative calls, not a sequence: monitor names must be unique.
 `xy=True` is the default; `z_um=None` chooses the resolved geometry's vertical
-midpoint and is ignored when `xy=False`. Each optical port's plane follows its
-own width and its owning PDK layer's vertical bounds, including negative layer
-thickness. `margin_um=0.75` adds that much cladding on each side of the cross
-section; set it to zero for only the active region or increase it for wider field
+midpoint within any opted-in crop and is ignored when `xy=False`. Each optical
+port's plane follows its
+own width and its selected physical bands' active vertical bounds, including
+negative layer thickness and any opted-in geometry crop. `margin_um=0.75` adds
+that much cladding on each side of the cross section; set it to zero for only
+the active region or increase it for wider field
 tails. This is a geometric window, not an automatically mode-converged aperture.
-The plane is three grid cells inward along its normal; the XY overview spans the component's
-bounding box. All these planes use the source center wavelength, record intensity
+The plane is three grid cells inward along its normal. Port images are named
+`port_<port_name>` (for example, `port_o1`); the `field_xy` image spans the component's
+bounding box at a constant Z height. All these planes use the source center wavelength, record intensity
 without flux, and leave implicit guided-port responses unchanged. They show the
 driven field, not independent source eigenmode profiles. Existing custom monitors
 are preserved, and name collisions fail before adding any of these planes.
 Changing geometry/source/solver later requires recreating the diagnostic planes.
-This helper only configures monitors; it does not mesh or submit a job. Explicit
-domain bounds still need to contain the requested planes. Dimensional suffixes
+This helper only configures monitors; it does not mesh or submit a job. Dimensional suffixes
 follow the existing `center_um`/`position_um` conventions; the domain's `padding`
 rename is specific to its directional-padding API.
+
+During `write()` or `run()`, every explicitly configured plane monitor is
+intersected with the physical, non-PML domain, whether the domain is automatic
+or explicitly bounded. This applies to XY, YZ, and XZ planes, including port
+images and custom heatmap, flux, and fiber-overlap monitors. Each cropped
+monitor emits one `UserWarning` identifying its name and the original and cropped
+extent on every changed axis, in micrometers. Flux and fiber-overlap warnings
+also note that the measurement aperture changes. The physical domain and the
+requested `sim.monitors` settings remain unchanged; the submitted `config.json`
+contains the cropped bounds, and results report the actual sampled extents.
+`plot_2d_static()` shows the same cropped monitor windows and warnings.
+
+A plane whose normal position is outside the physical domain, whose window is
+disjoint from it, or whose cropping collapses a requested nonzero extent raises
+`FDTDConfigError` before meshing or submission. Planes on the domain boundary
+and already contained zero-width line or point probes retain their existing
+behavior. Sources are never cropped.
+
+### Field-monitor migration (0.9.0 onward)
+
+Starting in 0.9.0, use `sim.add_monitors(xy_name="field_xy")` to choose the clearer
+name for the device-wide intensity image. Existing `sim.add_monitors()` calls
+still generate `overview_xy`, preserving monitor iteration, serialized settings,
+`config.json`, raw result keys, and cache inputs for contained planes. Omitting
+`xy_name` when `xy=True` emits a `DeprecationWarning` announcing the new name.
+The default will remain `overview_xy` for at least two feature releases and
+roughly 12 months after the first released warning. The default change targets
+0.11.0 or a later feature release, whichever first satisfies both conditions. Set
+`xy_name="overview_xy"` explicitly to retain the old generated name indefinitely.
+`xy_name` is ignored when `xy=False`, which does not issue a naming warning.
+
+When opting into `field_xy`, update monitor-name comparisons and code reading
+raw configuration or solver JSON to use that name. Existing
+`sim.monitors["overview_xy"]`, `sim.monitors.remove("overview_xy")`, and
+`result.monitors["overview_xy"]` lookups remain supported as compatibility aliases;
+`field_xy` lookups also work on saved results using `overview_xy`. Exact names
+take precedence if both names were explicitly configured. Iteration and
+serialization retain the stored name without duplicate images. The old lookup
+name remains supported, with no removal planned.
+
+Earlier versions checked monitor containment only on explicitly bounded axes:
+partially outside monitors either failed locally or reached the solver and
+could fail there. The 0.9.0 behavior crops overlapping windows with a warning
+and rejects unusable planes locally, avoiding wasted cloud setup. To retain a
+requested measurement aperture, enlarge the physical domain where allowed by
+guided-port constraints; otherwise reduce the window or move the plane into
+the domain. Rewriting artifacts applies these checks to existing configurations.
 
 Additional plane monitors can independently record flux, scalar heatmaps, and
 Gaussian fiber overlap:
@@ -242,6 +458,36 @@ sim.source(
 
 Monitor names are unique. Use `add()`, `remove()`, and `clear()` to manage the
 collection. A plane's size must be zero along its normal.
+
+### Fiber reference medium
+
+When `FiberMode.refractive_index` is omitted, the exporter determines the real
+index at the source center wavelength from the material covering the receiver's
+cropped aperture. It checks the exported tetrahedral mesh, including sidewalls,
+holes, overlapping material priorities, and both sides of the plane. A receiver
+outside stack volumes uses the simulation background. Different materials with
+the same real index can share a reference medium.
+
+Set `FiberMode(refractive_index=...)` to choose the reference medium explicitly.
+For an implicit receiver derived from a vertical port, use
+`sim.source(vertical_refractive_index=...)`. The selected vertical port's Gaussian
+beam and its receiver use the same index. Explicit `GaussianBeamSource` settings
+retain their existing behavior.
+
+An aperture spanning different indices, lying on an interface, or lacking a
+usable area cannot determine one homogeneous Gaussian reference. The exporter
+warns and retains the background index for compatibility; set the relevant
+explicit index to define the intended reference.
+
+This numerical correctness fix targets the next patch release after 0.9.0.
+Previously, an omitted fiber index always used the global background, even for
+a receiver embedded in a different stack material. Such setups can produce
+different coupling values after this fix, while their material assignments stay
+unchanged. To preserve the previous reference, supply the background's index
+explicitly through `FiberMode.refractive_index` or
+`PortSource.vertical_refractive_index`. Re-exporting updates solver inputs and
+their cache keys; existing downloaded results are unchanged. The simulation
+background default is unchanged by this fix.
 
 ## Results
 
@@ -279,6 +525,78 @@ Simulation setup views remain separate from these result plots: `sim.plot_*()`
 inspects the submitted geometry and mesh, while `result.plot*()` displays solver
 output.
 
+### Export to SAX and Touchstone
+
+One run excites one port, so it measures one column of the S-matrix. Run a source at each port and combine the results
+with [`s_matrix`][gsim.fdtd.s_matrix]. SAX is not a gsim dependency and is installed separately with `pip install sax`;
+`s_matrix` and `write_touchstone` do not need it.
+
+```python
+import sax
+
+result_o1 = sim.run(check_cache=True)
+sim.source(port="o2", wavelength_um=1.55, wavelength_span_um=0.1, num_wavelengths=101)
+result_o2 = sim.run(check_cache=True)
+
+matrix = fdtd.s_matrix([result_o1, result_o2])
+
+model = matrix.sax_model()
+circuit, _ = sax.circuit(
+    netlist={
+        "instances": {"arm": "dut", "delay": "straight"},
+        "connections": {"arm,o2": "delay,in0"},
+        "ports": {"in": "arm,o1", "out": "delay,out0"},
+    },
+    models={"dut": model, "straight": sax.models.straight},
+)
+transmission = circuit(wl=1.55)["in", "out"]
+
+matrix.write_touchstone("device")  # device.s2p
+```
+
+With fewer runs than ports, [`s_matrix`][gsim.fdtd.s_matrix] raises and lists the entries no run measured. SAX reads an
+absent entry as zero, so you state each assumption explicitly:
+
+```python
+matrix = fdtd.s_matrix(
+    result_o1,
+    assume_reciprocal=True,  # S(o1,o2) copied from the measured S(o2,o1)
+    assume_unmeasured_zero=True,  # what is left, here S(o2,o2), set to zero
+)
+matrix.measured  # False for every assumed entry
+```
+
+Runs must share their ports and wavelengths. Samples below the source noise floor are dropped, with a warning. This
+often affects a band-edge sample, which narrows the band the model accepts.
+
+The model takes `wl` in micrometers and covers the simulated band only: a wavelength outside it raises. It interpolates
+magnitude and unwrapped phase, and unwrapping needs phase to change by less than pi between wavelengths, which means a
+wavelength step below λ²/(2·n_g·L). Stay below 3/4 of that step, about 2.6 nm for 100 µm at n_g = 3.4 and 1.55 µm:
+[`s_matrix`][gsim.fdtd.s_matrix] warns from 3/4 pi, for each measured entry with at least a tenth of the strongest peak.
+It cannot catch every undersampled grid, because a delay can alias to a smaller one with small steps, so choose the step
+from the longest path in your device. The model computes with numpy, so it works in `sax.circuit` but cannot be traced by `jax.jit`.
+
+The two exports use different conventions:
+
+| Where | Entry for transmission from `o1` to `o2` | Time convention |
+| --- | --- | --- |
+| `result.s_parameters`, `matrix.s`, Touchstone | `S(o2,o1)` (receive, source) | exp(+jωt), phase falls with length |
+| `sax_model()` | `("o1", "o2")` (in, out) | exp(-iωt), phase rises with length, as `sax.models.straight` |
+
+`sax.parsers.parse_touchstone` keeps the phase sign of the file and reads `s[i, j]` as (in, out), so a file written here
+does not compose correctly with SAX's photonic models that way. Use `sax_model()` to reach SAX.
+
+**Time convention of the solver.** gsim takes the solver's values as exp(+jωt). The solver does not state this, so it was
+checked on a real run of a 10 µm silicon straight waveguide: phase falls with frequency at every sample, with a delay of
+139 fs against 137 fs from the group index of a separate mode solver. That is one device, so
+[`s_matrix`][gsim.fdtd.s_matrix] still warns if the strongest transmission has a
+negative group delay. Real anomalous dispersion, such as inside a ring notch, can also trigger this warning. A
+transmission whose phase does not move across the band gives no sign to judge. On a grid too
+coarse to unwrap phase, this check can stay silent even when the sign is wrong, so silence is not proof.
+
+Phases are referenced where the solver's port monitors sit, and gsim does not de-embed them. The `z0` argument of
+`write_touchstone` only fills the file header, because the S-parameters are normalized per mode.
+
 ## API reference
 
 - [`Simulation`][gsim.fdtd.Simulation]
@@ -288,3 +606,4 @@ output.
 - [`GaussianBeamSource`][gsim.fdtd.GaussianBeamSource]
 - [`PlaneMonitor`][gsim.fdtd.PlaneMonitor]
 - [`FDTDResult`][gsim.fdtd.FDTDResult]
+- [`s_matrix`][gsim.fdtd.s_matrix]

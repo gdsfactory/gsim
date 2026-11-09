@@ -11,16 +11,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import Field, PrivateAttr
 
-from gsim.common import Geometry, LayerStack
-from gsim.palace.base import PalaceSimMixin
+from gsim.palace.base import _PalaceSimBase
 from gsim.palace.capacitance import CapacitanceMatrices, load_capacitance
 from gsim.palace.models import (
     ElectrostaticConfig,
     ElectrostaticSolverConfig,
-    MaterialConfig,
-    RefinementConfig,
     TerminalConfig,
     WavePortConfig,
 )
@@ -33,7 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ElectrostaticSim(PalaceSimMixin, BaseModel):
+class ElectrostaticSim(_PalaceSimBase):
     """Electrostatic simulation for capacitance matrix extraction.
 
     This class configures and runs electrostatic simulations to extract
@@ -63,19 +60,12 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
         solver: Grouped numerical and problem-specific solver configuration
     """
 
-    model_config = ConfigDict(
-        validate_assignment=True,
-        arbitrary_types_allowed=True,
-    )
     simulation_type: Literal["electrostatic"] = "electrostatic"
 
     ports: None = None
     cpw_ports: None = None
     two_terminal_ports: None = None
     wave_ports: list[WavePortConfig] = Field(default_factory=list)
-    # Composed objects (from common)
-    geometry: Geometry | None = None
-    stack: LayerStack | None = None
 
     # Terminal configurations (no ports in electrostatic)
     terminals: list[TerminalConfig] = Field(default_factory=list)
@@ -84,21 +74,9 @@ class ElectrostaticSim(PalaceSimMixin, BaseModel):
 
     absorbing_boundary: bool = False
 
-    # Material overrides and solver config
-    materials: dict[str, MaterialConfig] = Field(default_factory=dict)
     solver: ElectrostaticSolverConfig = Field(default_factory=ElectrostaticSolverConfig)
-    refinement: RefinementConfig = Field(default_factory=RefinementConfig)
-
-    # Stack configuration (stored as kwargs until resolved)
-    _stack_kwargs: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _pec_blocks: list = PrivateAttr(default_factory=list)
-    _symmetry_planes: list = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _impedance_boundaries: list = PrivateAttr(default_factory=list)
 
     # Internal state
-    _output_dir: Path | None = PrivateAttr(default=None)
     _configured_terminals: bool = PrivateAttr(default=False)
     # Terminals resolved to nets by the last write_config (net mode only)
     _resolved_terminals: list[Any] | None = PrivateAttr(default=None)

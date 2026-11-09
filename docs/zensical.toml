@@ -4,6 +4,7 @@ nav = [
   { "Home" = "index.md" },
   { "Photonic FDTD" = [
     { "MMI Quickstart" = "nbs/fdtd_mmi_gpdk.md" },
+    { "3D Grating Coupler" = "nbs/fdtd_focusing_grating_coupler_gpdk.md" },
     { "Directional Coupler" = "nbs/fdtd_directional_coupler.md" },
     { "Waveguide Crossing" = "nbs/fdtd_waveguide_crossing.md" },
     { "Broadband Directional Coupler" = "nbs/fdtd_broadband_directional_coupler.md" },
@@ -19,7 +20,8 @@ nav = [
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },
-    { "QPDK Resonator" = "nbs/palace_qpdk_resonator.md" },
+    { "CPW Resonator" = "nbs/palace_qpdk_resonator.md" },
+    { "Qubit Chip (QPDK)" = "nbs/palace_qpdk_filled_qubit_test_chip.md" },
     { "Inductor" = "nbs/palace_inductor.md" },
     { "Inductor Port Comparison" = "nbs/palace_inductor_port_comparison.md" },
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
@@ -29,9 +31,13 @@ nav = [
     { "EMX Process Files" = "emx_proc_import.md" },
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
+    { "Differential Interconnect, Crosstalk and TDR" = "nbs/palace_signal_integrity.md" },
     { "Terminal (multi-pin) Wave Ports" = "terminal_wave_ports.md" },
+    { "Terminal Wave Ports in Palace" = "nbs/palace_terminal_waveport.md" },
+    { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },
     { "Palace Result Validation" = "palace-validation.md" },
-    { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" }
+    { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" },
+    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" }
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Guides" = [
@@ -50,6 +56,11 @@ site_url = "https://gdsfactory.com/gsim"
 repo_url = "https://gdsfactory.com/"
 repo_name = "gdsfactory.com"
 copyright = "Copyright &copy; 2025 GDSFactory"
+# Render the \(...\) / \[...\] spans that pymdownx.arithmatex emits.
+extra_javascript = [
+  "javascripts/mathjax.js",
+  "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"
+]
 
 [project.plugins.search]
 
@@ -115,6 +126,7 @@ summary = true
 [project.theme]
 name = "material"
 custom_dir = "overrides"
+favicon = "assets/img/gsim-icon.png"
 features = ["content.action.copy"]
 
 [[project.theme.palette]]

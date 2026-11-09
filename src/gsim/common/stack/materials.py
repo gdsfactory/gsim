@@ -1117,6 +1117,26 @@ MATERIAL_ALIASES: dict[str, str] = {
     "ge": "germanium",
     "tfln": "linbo3",
     "lithium_niobate": "linbo3",
+    # IHP SG13G2 >= 2.0 prefixes its process materials with the PDK name and
+    # the alloy (e.g. ``alcu_sg13g2_metal1``).  Resolve those tokens to the
+    # same bulk properties as their unprefixed counterparts so the stack
+    # resolver stays strict without rejecting the PDK's own vocabulary.
+    "sg13g2_cont": "tungsten",
+    "sg13g2_vmim": "tungsten",
+    "sg13g2_mim": "TiN",
+    "alcu_sg13g2_metal1": "aluminum",
+    "alcu_sg13g2_metal2": "aluminum",
+    "alcu_sg13g2_metal3": "aluminum",
+    "alcu_sg13g2_metal4": "aluminum",
+    "alcu_sg13g2_metal5": "aluminum",
+    "alcu_sg13g2_topmetal1": "aluminum",
+    "alcu_sg13g2_topmetal2": "aluminum",
+    "tungsten_sg13g2_via1": "tungsten",
+    "tungsten_sg13g2_via2": "tungsten",
+    "tungsten_sg13g2_via3": "tungsten",
+    "tungsten_sg13g2_via4": "tungsten",
+    "tungsten_sg13g2_topvia1": "tungsten",
+    "tungsten_sg13g2_topvia2": "tungsten",
 }
 
 

@@ -73,7 +73,10 @@ def test_missing_local_inputs(tmp_path, monkeypatch, missing):
 
 @pytest.mark.parametrize("verbose", [False, True])
 @pytest.mark.parametrize("prior", ["", "/existing"])
-def test_bundled_runtime_receives_libraries(tmp_path, monkeypatch, verbose, prior):
+@pytest.mark.parametrize("bundled", [True, False])
+def test_only_a_bundled_runtime_receives_its_libraries(
+    tmp_path, monkeypatch, verbose, prior, bundled
+):
     sim = DrivenSim()
     _setup_sim(sim, tmp_path / "simulation")
     binary = tmp_path / "palace"
@@ -86,11 +89,12 @@ def test_bundled_runtime_receives_libraries(tmp_path, monkeypatch, verbose, prio
     monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
     monkeypatch.delenv("PALACE_SIF", raising=False)
     monkeypatch.setattr(base, "_count_physical_cpus", lambda: 2)
-    monkeypatch.setattr(runtime, "resolve_palace_binary", lambda: binary)
-    monkeypatch.setattr(runtime, "resolve_palace_library_dir", lambda: library)
-    monkeypatch.setattr(runtime, "_palace_cpu_available", lambda: False)
-    monkeypatch.setattr(runtime, "_palace_toolkit_available", lambda: False)
-    monkeypatch.setattr(runtime, "_cached_binary", lambda: binary)
+    found = (
+        runtime.PalaceRuntime(binary, "gsim cached runtime", library)
+        if bundled
+        else runtime.PalaceRuntime(binary, "PALACE_BIN")
+    )
+    monkeypatch.setattr(runtime, "resolve_palace_runtime", lambda: found)
     process = Mock()
     process.stdout = io.StringIO("Palace finished\n\n")
     process.wait.return_value = 0
@@ -102,7 +106,6 @@ def test_bundled_runtime_receives_libraries(tmp_path, monkeypatch, verbose, prio
     monkeypatch.setattr(subprocess, "run", run)
     sim.run_local(use_apptainer=False, verbose=verbose)
     invocation = popen.call_args if verbose else run.call_args
-    assert invocation.kwargs["env"]["LD_LIBRARY_PATH"] == str(library) + (
-        f":{prior}" if prior else ""
-    )
+    expected = str(library) + (f":{prior}" if prior else "") if bundled else prior
+    assert invocation.kwargs["env"]["LD_LIBRARY_PATH"] == expected
     assert invocation.args[0][0] == str(binary)

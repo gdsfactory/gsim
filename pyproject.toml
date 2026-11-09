@@ -1,6 +1,6 @@
 [project]
 name = "gsim"
-version = "0.7.0"
+version = "0.9.0"
 description = "Electromagnetic simulation for photonics and electronics, powered by GDSFactory."
 readme = "README.md"
 requires-python = "~=3.12.0"
@@ -15,25 +15,41 @@ dependencies = [
   "gdsfactory>=9,<10",
   "gdsfactoryplus>=1.8.20,<3",
   "gmsh",
+  "httpx>=0.28.0",
   "meshio>=5.0.0",
   "nbformat>=4.2.0",
   "nest_asyncio2",
   "pdk-schema[sympy]~=0.3.0",
   "plotly",
   "pyvista>=0.43.0",
+  # Touchstone I/O and network conversions (gsim.common.circuit).
+  "scikit-rf>=1.0",
   "trame",
   "trame-vtk",
   "trame-vuetify",
+  # `cadquery-ocp` below 7.9 bundles its own VTK bindings, which shadow the
+  # `vtk` distribution pyvista reads: `import gsim` then dies on "VTK version
+  # must be 9.3.1 or greater", and the mixed VTK segfaults on macOS. 7.9 pins
+  # `vtk==9.6.2`, so resolving vtk any higher falls back to the bundled one.
+  # cadquery arrives through femwell -> meshwell -> cadquery, so this bites
+  # wherever the femwell extra is installed.
+  "vtk<9.7",
 ]
 
 [project.optional-dependencies]
-# DEVSIM charge-transport backend (gsim.tcad). devsim-openblas gives DEVSIM
-# the OpenBLAS from scipy-openblas32: DEVSIM cannot use that wheel's
-# scipy_-prefixed symbols directly (devsim/devsim#167), and without it a plain
-# pip install has no BLAS/LAPACK DEVSIM can load on macOS or Windows.
+# femwell/skfem mode-solving adapter (gsim.femwell).
+femwell = [
+  "femwell>=0.1.11",
+  "scikit-fem>=8.0.0",
+]
+# DEVSIM charge-transport backend (gsim.tcad). scipy-openblas32 gives DEVSIM
+# a BLAS/LAPACK on Linux, Windows and macOS: without it a plain pip install has
+# none DEVSIM can load on macOS or Windows. DEVSIM reads its scipy_-prefixed
+# symbols from 2.11.1 on (devsim/devsim#167), whose only macOS wheel is for
+# macOS 15+ on Apple silicon, so the extra does not install on macOS 14.
 tcad = [
-  "devsim>=2.6.0",
-  "devsim-openblas>=0.1.0",
+  "devsim>=2.11.1",
+  "scipy-openblas32",
 ]
 # Interactive 3-D visualization (PyVista + trame server rendering) with the
 # extra packages needed for reliable headless and notebook use.
@@ -80,17 +96,22 @@ lint = [
 ]
 palace-inductor = [
   "circulax==0.2.3",
-  "ihp-gdsfactory==0.2.8",
+  "ihp-gdsfactory==2.0.1",
   "klujax==0.5.0",
 ]
+rf-analysis = [
+  "pandas",
+  "pytest>=8.3.0",
+  "pytest-cov>=6.0.0",
+  "scikit-rf>=2.1",
+]
 test = [
-  "ihp-gdsfactory>=0.2.8",
+  "ihp-gdsfactory>=2.0.1",
   "pytest>=8.3.0",
   "pytest-cov>=6.0.0",
   "pytest-randomly>=3.16.0",
   "pytest-regressions>=2.5.0",
   "pytest-xdist>=3.6.0",
-  "scikit-rf>=2.1",
 ]
 
 [build-system]
@@ -158,6 +179,22 @@ module = "tests.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
+module = "meshio"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "scipy.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "femwell.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "skfem.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
 module = "gmsh"
 
 [[tool.mypy.overrides]]
@@ -179,6 +216,10 @@ module = "palacetoolkit_palace_cpu"
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
 module = "palacetoolkit_palace_cpu.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "skrf.*"
 
 [tool.pylsp-mypy]
 enabled = true
@@ -271,6 +312,9 @@ select = ["ALL"]
   "SLF001",  # private-member-access
   "T201",  # print
 ]
+"samples/*.py" = [
+  "T201",  # print (samples are runnable demonstrations)
+]
 "scripts/*.py" = [
   "ANN",  # flake8-annotations
   "ARG001",  # unused-function-argument
@@ -325,3 +369,12 @@ unresolved-import = "ignore"
 
 [tool.ty.src]
 include = ["src"]
+
+[tool.uv]
+# KLayout 0.30.13 has no Windows wheels; its source build needs unavailable headers.
+constraint-dependencies = ["klayout!=0.30.13; sys_platform == 'win32'"]
+# IHP's SAX dependency requires scikit-rf<2; the calibration guide needs >=2.1.
+conflicts = [
+  [{ group = "test" }, { group = "rf-analysis" }],
+  [{ group = "palace-inductor" }, { group = "rf-analysis" }],
+]

@@ -569,10 +569,10 @@ def test_the_ihp_mim_capacitor_has_two_electrodes_named_by_its_ports() -> None:
     nets, _ = _ihp_nets("cmim")
     by_name = {net.name: net for net in nets}
     assert sorted(by_name) == ["MINUS", "PLUS"]
-    # bottom plate is Metal5 alone; top plate is TopMetal1 with all its vmim vias
+    # IHP 2 includes the MIM top plate connected to TopMetal1 through vmim vias.
     assert by_name["MINUS"].layers == ("metal5",)
-    assert by_name["PLUS"].layers == ("topmetal1", "vmim")
-    assert len(by_name["PLUS"].members) == 1 + 36
+    assert by_name["PLUS"].layers == ("mim", "topmetal1", "vmim")
+    assert len(by_name["PLUS"].members) == 2 + 36
     assert nets.unmatched_ports == ()
 
 

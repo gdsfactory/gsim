@@ -28,14 +28,30 @@ from gsim.palace._validation_models import (
     SolutionProvenance,
     SolutionReport,
 )
+from gsim.palace._validation_port_modes import (
+    CONTINUITY_RTOL,
+    FACE_MODE_RTOL,
+    MAX_EVIDENCE,
+    MIN_DISTINCT_FREQUENCIES,
+    NEIGHBOUR_COUNT,
+    PORT_AGREEMENT_RTOL,
+    check_port_mode_continuity,
+)
 
 __all__ = [
+    "CONTINUITY_RTOL",
+    "FACE_MODE_RTOL",
+    "MAX_EVIDENCE",
+    "MIN_DISTINCT_FREQUENCIES",
+    "NEIGHBOUR_COUNT",
+    "PORT_AGREEMENT_RTOL",
     "AdaptiveCheck",
     "ModeExpectation",
     "ModeSample",
     "SolutionCheck",
     "SolutionProvenance",
     "SolutionReport",
+    "check_port_mode_continuity",
     "validate_solution",
 ]
 
@@ -170,6 +186,8 @@ def validate_solution(
     metadata: Mapping[str, object] | None = None,
     input_files: Mapping[str, str | Path] | None = None,
     expected_input_sha256: Mapping[str, str] | None = None,
+    ports_share_cross_section: bool = False,
+    port_faces: Mapping[int, str] | None = None,
 ) -> SolutionReport:
     """Build a report from a Palace log and optional independent evidence.
 
@@ -178,7 +196,8 @@ def validate_solution(
         estimator_disabled: Set only when the actual config has
             ``Solver.Linear.EstimatorMaxIts=0``. An exact zero-iteration PCG
             and unit-residual warning pair is skipped only in an estimator
-            section or the adaptive offline phase, never a field correction.
+            section (including eigenmode and boundary-mode postprocessing)
+            or the adaptive offline phase, never a field correction.
         expected_excitations: Excitation IDs required to have adaptive outcomes.
             A missing or truncated outcome is unknown, not converged.
         mode_expectations: Optional mode IDs, complex wave numbers, and parity
@@ -192,10 +211,23 @@ def validate_solution(
         input_files: Logical input names mapped to current local files to hash.
             Missing, unreadable and directory entries are unknown with a reason.
         expected_input_sha256: Optional independently recorded input manifest.
+        ports_share_cross_section: Set only when every wave port has the same
+            cross-section (width, stack and orientation up to a flip). Ports
+            solved at the same frequency must then also agree on ``n_eff``
+            (``port_mode_ports`` check). The log does not record the port
+            geometry, so gsim cannot infer this; the default skips the
+            port-to-port comparison.
+        port_faces: For multimode wave ports, the face (gsim port name)
+            of each Palace port index, from the ``port_modes.json`` sidecar.
+            Adds the ``port_mode_faces`` check: the modes of one face must
+            be distinct in ``n_eff`` and ranked by decreasing ``n_eff``.
 
     Returns:
         Independent checks and raw mode samples. Even an empty ``failures``
-        tuple does not establish that unknown or omitted checks passed.
+        tuple does not establish that unknown or omitted checks passed. Driven
+        wave-port solves are also checked for continuity of the selected mode
+        over frequency; see ``SolutionReport.port_mode_checks`` and
+        ``SolutionReport.warnings``.
     """
     lines = clean_lines(log)
     core, estimator = solver_checks(lines, estimator_disabled=estimator_disabled)
@@ -225,4 +257,7 @@ def validate_solution(
         ),
         mode_samples=samples,
         provenance=_provenance(metadata, input_files, expected_input_sha256),
+        port_mode_checks=check_port_mode_continuity(
+            samples, compare_ports=ports_share_cross_section, faces=port_faces
+        ),
     )

@@ -87,8 +87,8 @@ def portless_component():
 class TestDrivenSimWorkflow:
     """End-to-end DrivenSim: configure -> validate -> mesh -> write_config."""
 
-    @classmethod
     @pytest.fixture(scope="class")
+    @classmethod
     def driven_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh a DrivenSim with CPW ports."""
         tmp_path = tmp_path_factory.mktemp("driven")
@@ -161,6 +161,24 @@ class TestDrivenSimWorkflow:
         assert len(boundaries["LumpedPort"]) == 2
         assert "Absorbing" in boundaries
 
+    def test_absorbing_order_written_to_config(self, driven_sim):
+        config_path = Path(driven_sim._output_dir) / "config.json"
+        driven_sim.write_config()
+        absorbing = json.loads(config_path.read_text())["Boundaries"]["Absorbing"]
+        assert absorbing["Order"] == 2
+
+        driven_sim.absorbing_order = 1
+        try:
+            driven_sim.write_config()
+            absorbing = json.loads(config_path.read_text())["Boundaries"]["Absorbing"]
+            assert absorbing["Order"] == 1
+        finally:
+            driven_sim.absorbing_order = 2
+
+    def test_absorbing_order_rejects_unsupported_order(self):
+        with pytest.raises(ValueError, match="absorbing_order"):
+            DrivenSim(absorbing_order=3)
+
     def test_validate_mesh_passes(self, driven_sim):
         result = driven_sim.validate_mesh()
         assert result.valid, f"Mesh validation failed: {result}"
@@ -186,8 +204,8 @@ class TestDrivenSimWorkflow:
 class TestDrivenSimInplanePorts:
     """DrivenSim with single-element inplane lumped ports."""
 
-    @classmethod
     @pytest.fixture(scope="class")
+    @classmethod
     def inplane_sim(cls, tmp_path_factory, cpw_component):
         """Create and mesh a DrivenSim with inplane lumped ports."""
         tmp_path = tmp_path_factory.mktemp("inplane")
@@ -361,8 +379,8 @@ def test_driven_excited_port_separate_resistance_is_reported(
 class TestEigenmodeSimWorkflow:
     """End-to-end EigenmodeSim: configure -> mesh -> write_config."""
 
-    @classmethod
     @pytest.fixture(scope="class")
+    @classmethod
     def eigenmode_sim(cls, tmp_path_factory, portless_component):
         """Create and mesh an EigenmodeSim."""
         tmp_path = tmp_path_factory.mktemp("eigenmode")
@@ -460,8 +478,8 @@ class TestEigenmodeSimWorkflow:
 class TestElectrostaticSimWorkflow:
     """End-to-end ElectrostaticSim: configure -> mesh -> write_config."""
 
-    @classmethod
     @pytest.fixture(scope="class")
+    @classmethod
     def electrostatic_sim(cls, tmp_path_factory, portless_component):
         """Create and mesh an ElectrostaticSim with terminals."""
         tmp_path = tmp_path_factory.mktemp("electrostatic")
@@ -600,8 +618,8 @@ class TestValidationErrors:
 class TestMaterialOverrides:
     """Test material override configuration flows through to config."""
 
-    @classmethod
     @pytest.fixture(scope="class")
+    @classmethod
     def material_sim(cls, tmp_path_factory, cpw_component):
         """Create a DrivenSim with material overrides."""
         tmp_path = tmp_path_factory.mktemp("materials")
@@ -659,6 +677,7 @@ class TestNumericalConfig:
         sim.solver.linear.tolerance = 2e-7
         sim.solver.linear.max_iterations = 777
         sim.solver.linear.preconditioner = "AMS"
+        sim.solver.linear.solver_type = "Default"
 
         sim.mesh(preset="coarse")
         sim.solver.driven.num_points = 11
@@ -729,11 +748,10 @@ class TestNumericalConfig:
         assert linear["Type"] == "MUMPS"
         assert linear["KSPType"] == "GMRES"
         assert linear["Tol"] == 1e-8
-        assert linear["MaxIts"] == 1
-        assert linear["MGMaxLevels"] == 1
-        assert linear["EstimatorMaxIts"] == 0
-        assert linear["EstimatorTol"] == 1e-6
-        assert linear["DivFreeTol"] == 1e-6
-        assert linear["DivFreeMaxIts"] == 0
+        assert linear["MaxIts"] == 400
+        assert linear["MGMaxLevels"] == 100
+        assert linear["EstimatorTol"] == 1e-2
+        assert "EstimatorMaxIts" not in linear
+        assert "DivFreeMaxIts" not in linear
         assert linear["PCMatReal"] is False
         assert linear["ComplexCoarseSolve"] is True
