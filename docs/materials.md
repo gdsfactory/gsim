@@ -97,6 +97,13 @@ compatibility names to canonical card keys. These aliases also apply to layer
 materials and FDTD index overrides. No general case folding is performed;
 distinct project material names remain distinct. The built-in `air` alias
 resolves to `Air` unless an exact project card overrides it.
+At gsim's material boundary, alias targets can come from project cards, built-in
+fallbacks, or explicit FDTD overrides. Missing targets are reported when used.
+
+Meep mode setup preserves drawn `Air`/`air` voids, including inside silicon with
+an air background. These regions keep their declared Z extent instead of being
+discarded or extended into the lower margin. Undrawn Air declarations remain
+excluded from component cross-sections.
 
 ## Analytic PDK cards
 

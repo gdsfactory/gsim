@@ -80,11 +80,10 @@ def get_project_material_cards(pdk: Any | None = None) -> Mapping[str, MaterialC
     expanded = dict(cards)
     for alias in aliases:
         target = canonical_material_name(alias, module)
-        if target not in cards:
-            raise ValueError(
-                f"Material alias {alias!r} targets missing card {target!r}"
-            )
-        expanded[alias] = cards[target]
+        # Missing project targets can be supplied by a built-in fallback or a
+        # later explicit override. Validate them when the material is used.
+        if target in cards:
+            expanded[alias] = cards[target]
     return expanded
 
 
@@ -98,6 +97,8 @@ def find_material_card(
         if project_material_cards is None
         else project_material_cards
     )
+    if project_material_cards is None:
+        material_name = canonical_material_name(material_name)
     if material_name in cards:
         return cards[material_name], "project"
     if material_name == "air" and "Air" in cards:

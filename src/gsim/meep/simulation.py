@@ -158,9 +158,8 @@ def _precompute_cross_section_geometry(
 
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and (
-            background_material in {"air", "Air"}
-            or not _layer_has_any_polygon(component, layer)
+        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+            component, layer
         ):
             continue
         if material_data and layer.material not in material_data:
@@ -213,6 +212,8 @@ def _precompute_cross_section_geometry(
                     )
                 )
 
+            if ld["material"] in {"Air", "air"}:
+                continue
             bottom_free = _subtract_intervals((h0, h1), below_intervals)
             for bh0, bh1 in bottom_free:
                 bh_center = (bh0 + bh1) / 2.0
@@ -243,7 +244,7 @@ def _precompute_cross_section_geometry(
         z_size = z_hi - z_lo
         if z_size <= 0:
             continue
-        if abs(diel["zmin"] - z_min) < 1e-12:
+        if diel["material"] not in {"Air", "air"} and abs(diel["zmin"] - z_min) < 1e-12:
             z_lo = -z_span / 2.0
         z_size = z_hi - z_lo
         block_z_center = (z_lo + z_hi) / 2.0

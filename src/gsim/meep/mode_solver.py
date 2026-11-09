@@ -195,7 +195,7 @@ def _build_slab_xz_cell(
             continue
         z_lo = layer.zmin - z_center
         z_hi = z_lo + z_size
-        if abs(layer.zmin - z_min) < 1e-12:
+        if layer.material not in {"Air", "air"} and abs(layer.zmin - z_min) < 1e-12:
             z_lo = -z_span / 2.0
         z_size = z_hi - z_lo
         block_center_z = (z_lo + z_hi) / 2.0
@@ -315,9 +315,8 @@ def _build_component_xz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and (
-            background_material in {"air", "Air"}
-            or not _layer_has_any_polygon(component, layer)
+        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+            component, layer
         ):
             continue
         mat_data = materials.get(layer.material)
@@ -382,6 +381,8 @@ def _build_component_xz_cell(
                     )
                     geometry.append(block)
 
+            if ld["layer"].material in {"Air", "air"}:
+                continue
             bottom_free = _subtract_intervals((x0, x1), below_intervals)
             for bx0, bx1 in bottom_free:
                 bx_center = (bx0 + bx1) / 2.0
@@ -478,9 +479,8 @@ def _build_component_yz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and (
-            background_material in {"air", "Air"}
-            or not _layer_has_any_polygon(component, layer)
+        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+            component, layer
         ):
             continue
         mat_data = materials.get(layer.material)
@@ -545,6 +545,8 @@ def _build_component_yz_cell(
                     )
                     geometry.append(block)
 
+            if ld["layer"].material in {"Air", "air"}:
+                continue
             bottom_free = _subtract_intervals((y0, y1), below_intervals)
             for by0, by1 in bottom_free:
                 by_center = (by0 + by1) / 2.0
@@ -1177,8 +1179,6 @@ def refractive_index_profile(
     import numpy as np
 
     used_materials: set[str] = {layer.material for layer in stack.layers.values()}
-    if background_material in {"air", "Air"}:
-        used_materials.difference_update({"air", "Air"})
     if background_material not in {"air", "Air"}:
         used_materials.add(background_material)
     material_data = _resolve_materials_cached(
@@ -1274,12 +1274,12 @@ def refractive_index_profile(
     nz = len(z_grid)
     n_profile = np.full((nz, nh), n_bg)
     set_by_layer = np.zeros((nz, nh), dtype=bool)
+    bounded_air = np.zeros((nz, nh), dtype=bool)
 
     layer_h_masks: dict[tuple, np.ndarray] = {}
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and (
-            background_material in {"air", "Air"}
-            or not _layer_has_any_polygon(component, layer)
+        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+            component, layer
         ):
             continue
         gds_layer = getattr(layer, "gds_layer", None)
@@ -1294,9 +1294,8 @@ def refractive_index_profile(
         layer_h_masks[gds_layer] = mask
 
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and (
-            background_material in {"air", "Air"}
-            or not _layer_has_any_polygon(component, layer)
+        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+            component, layer
         ):
             continue
         mat = material_data.get(layer.material)
@@ -1338,9 +1337,15 @@ def refractive_index_profile(
                 combined, np.sqrt(eps), n_profile[np.ix_(z_idx, np.arange(nh_local))]
             )
             set_by_layer[np.ix_(z_idx, np.arange(nh_local))] |= combined
+            bounded_air[np.ix_(z_idx, np.arange(nh_local))] = np.where(
+                combined,
+                layer.material in {"Air", "air"},
+                bounded_air[np.ix_(z_idx, np.arange(nh_local))],
+            )
         else:
             n_profile[np.ix_(z_mask, h_mask)] = np.sqrt(eps)
             set_by_layer[np.ix_(z_mask, h_mask)] = True
+            bounded_air[np.ix_(z_mask, h_mask)] = layer.material in {"Air", "air"}
 
     for ih in range(nh):
         col = n_profile[:, ih]
@@ -1348,7 +1353,7 @@ def refractive_index_profile(
         if not col_set.any():
             continue
         first_set = int(np.where(col_set)[0][0])
-        if first_set > 0:
+        if first_set > 0 and not bounded_air[first_set, ih]:
             fill_mask = ~col_set[:first_set]
             col[:first_set][fill_mask] = col[first_set]
 

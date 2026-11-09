@@ -80,3 +80,20 @@ def test_domain_keeps_distinct_module_card_names(fdtd_pdk_module):
         simulation.materials(background=background)
         simulation.geometry("straight")
         assert simulation._background_bounds_nm()[2::3] == pytest.approx(expected)
+
+
+def test_layer_alias_can_use_builtin_fallback(aliased_pdk):
+    del aliased_pdk.MATERIAL_CARDS["Si"]
+    simulation = fdtd.Simulation(pdk=aliased_pdk)
+    simulation.geometry("straight")
+    assert simulation.resolved.materials["Si"].source == "gsim"
+
+
+@pytest.mark.parametrize("name", ["Custom", "legacy_si"])
+def test_layer_alias_can_target_an_override_only_material(aliased_pdk, name):
+    aliased_pdk.MATERIAL_ALIASES["legacy_si"] = "Custom"
+    simulation = fdtd.Simulation(pdk=aliased_pdk)
+    simulation.materials(overrides={name: 3.4})
+    simulation.geometry("straight")
+    snapshot = simulation.resolved.materials["Custom"]
+    assert snapshot.refractive_index == pytest.approx(3.4)

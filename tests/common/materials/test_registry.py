@@ -116,3 +116,18 @@ def test_distinct_project_material_case_is_preserved() -> None:
     assert canonical_material_name("air", pdk) == "air"
     assert get_material_card("air", pdk.material_cards) is other
     assert get_material_card("air", {"Air": air}) is air
+
+
+def test_alias_can_use_a_builtin_fallback(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import gdsfactory as gf
+
+    from gsim.common.materials import find_material_card, get_project_material_cards
+
+    pdk = SimpleNamespace(material_cards={}, material_aliases={"legacy_si": "Si"})
+    monkeypatch.setattr(gf, "get_active_pdk", lambda: pdk)
+    assert get_project_material_cards() == {}
+    card, source = find_material_card("legacy_si")
+    assert card is GSIM_MATERIAL_CARDS["Si"]
+    assert source == "gsim"

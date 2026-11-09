@@ -2022,7 +2022,10 @@ def build_slab_cell(config):
         medium = _make_medium(mat_data)
         z_lo = entry["zmin"] - z_center
         z_hi = entry["zmax"] - z_center
-        if abs(entry["zmin"] - z_min) < 1e-12:
+        if (
+            entry["material"] not in {"Air", "air"}
+            and abs(entry["zmin"] - z_min) < 1e-12
+        ):
             z_lo = -z_span / 2.0
         z_size = z_hi - z_lo
         if z_size <= 0:
