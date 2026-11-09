@@ -303,7 +303,7 @@ def test_vertical_port_is_drawn_at_runtime_aperture(fdtd_pdk_module):
     labels = {text.get_text() for text in ax.texts}
     assert {"Monitor o1", "Source o2"} <= labels
     source_line = next(line for line in ax.lines if line.get_label() == "Source o2")
-    np.testing.assert_allclose(np.asarray(source_line.get_ydata()), [1, 1])
+    np.testing.assert_allclose(np.asarray(source_line.get_ydata()), [1.22, 1.22])
     np.testing.assert_allclose(np.asarray(source_line.get_xdata()), [0.5, 1.5])
     filtered = simulation.plot_2d_static(
         axis="y", position_um=0, hide_groups=["port_o2"]

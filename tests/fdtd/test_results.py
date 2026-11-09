@@ -33,7 +33,7 @@ def _result_document(source_type: str = "eigenmode") -> dict[str, Any]:
                 "plane_position_nm": 500,
                 "u_extent_nm": [-1000, 1000],
                 "v_extent_nm": [-500, 500],
-                "shape": [2, 3],
+                "shape": [3, 2],  # Plane counts are (u, v); arrays below are (v, u).
                 "wavelength_nm": [1500, 1550, 1600],
                 "flux": [0.1, 0.2, 0.3],
                 "heatmaps": [

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from math import isfinite
 
+from gsim.common.materials import canonical_material_name
 from gsim.common.pdk import ResolvedPassivePcell
 from gsim.fdtd.mesh_geometry import UM_TO_NM
 from gsim.fdtd.models import FDTDGeometryError
@@ -38,7 +39,8 @@ def background_bounds_nm(
     sizing follows the PDK background stack when present. Padding is in um;
     the returned lower/upper coordinates are in nm.
     """
-    lower, upper = resolved.bounds
+    # Expanding blanket films must not apply automatic padding a second time.
+    lower, upper = resolved.layout_bounds or resolved.bounds
     guided_ports = [port for port in resolved.ports.values() if not port.is_vertical]
     port_axes = {
         next(index for index, value in enumerate(port.normal) if value)
@@ -77,8 +79,19 @@ def background_bounds_nm(
     ]
     if padding_z is None and z_bounds is None:
         background_z_bounds = []
-        for level in resolved.layer_stack.layers.values():
-            if level.material != background_material or level.thickness == 0:
+        material_context = (
+            resolved.pdk_module if resolved.pdk_module is not None else resolved.pdk
+        )
+        background = canonical_material_name(background_material, material_context)
+        for key, level in resolved.layer_stack.layers.items():
+            if (
+                canonical_material_name(level.material, material_context) != background
+                or level.thickness == 0
+            ):
+                continue
+            # Air is already the fill material. An unused undercut declaration
+            # must not expand the physical domain simply because it is named Air.
+            if background == "Air" and key not in resolved.layers:
                 continue
             z_start = float(level.zmin)
             z_end = float(level.zmin + level.thickness)

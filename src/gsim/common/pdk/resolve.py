@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from math import isfinite, radians, tan
 from typing import Any
 
@@ -12,6 +13,7 @@ from shapely import box
 
 from gsim.common.materials import (
     MaterialResolutionError,
+    canonical_material_name,
     get_project_material_cards,
     resolve_material_snapshot,
 )
@@ -97,12 +99,9 @@ def _resolve_project_cards(
     pdk_or_module: Any | None,
 ) -> Mapping[str, MaterialCard]:
     """Return cards from a PDK object, module, or the active project."""
-    attached_cards = getattr(pdk, "material_cards", None)
-    if attached_cards is not None:
-        return attached_cards
-    if pdk_or_module is not None:
-        return get_project_material_cards(pdk_or_module)
-    return get_project_material_cards(pdk)
+    return get_project_material_cards(
+        pdk_or_module if pdk_or_module is not None else pdk
+    )
 
 
 def _inside_xy_window(geometry: Any, level: Any, x_bounds: Any, y_bounds: Any) -> bool:
@@ -148,6 +147,15 @@ def _resolved_layers(
             layer_level,
             round_tol=6,
             simplify_tol=0.0,
+            background_bounds=(
+                x_bounds[0] if x_bounds else derived_component.dxmin,
+                y_bounds[0] if y_bounds else derived_component.dymin,
+                x_bounds[1] if x_bounds else derived_component.dxmax,
+                y_bounds[1] if y_bounds else derived_component.dymax,
+            )
+            if x_bounds is not None or y_bounds is not None
+            else None,
+            background_overhang_axes=(x_bounds is not None, y_bounds is not None),
         )
         if geometry.is_empty or not _inside_xy_window(
             geometry, layer_level, x_bounds, y_bounds
@@ -234,7 +242,8 @@ def resolve_passive_pcell(
     Existing direct matches and explicit selections keep their precedence.
 
     Optional axis bounds omit external films and footprints before material
-    lookup. Intersecting layers retain their original extrusion profiles; the
+    lookup. Blanket films fill the requested XY bounds, retaining their exclusion
+    masks. Intersecting layers retain their original extrusion profiles; the
     backend clips their solids. Contiguous bands of the same material at an
     unmapped port contribute to its complete cross-section.
     """
@@ -253,6 +262,16 @@ def resolve_passive_pcell(
         resolved_component, layer_stack, z_bounds, x_bounds, y_bounds
     )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
+    layers = {
+        key: replace(
+            layer,
+            material=canonical_material_name(
+                layer.material,
+                pdk_or_module if pdk_or_module is not None else pdk_object,
+            ),
+        )
+        for key, layer in layers.items()
+    }
     materials = {}
     for material_name in dict.fromkeys(layer.material for layer in layers.values()):
         try:
@@ -284,6 +303,7 @@ def resolve_passive_pcell(
         ports=ports,
         bounds=_bounds(layers),
         wavelength_um=float(wavelength_um),
+        pdk_module=pdk_or_module if pdk_or_module is not pdk_object else None,
     )
 
 

@@ -15,6 +15,8 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.common.cloud import CloudJobMixin, submit
+from gsim.meep.layer_order import order_by_mesh_order
+from gsim.meep.mode_bounds import cell_extent, is_ideal_air, material_extent
 from gsim.meep.models.api import (
     FDTD,
     Domain,
@@ -73,7 +75,7 @@ def _precompute_cross_section_geometry(
     pml_thickness: float = 0.0,
     resolution: float = 32,
     material_data: dict[str, Any] | None = None,
-    background_material: str = "air",  # noqa: ARG001
+    background_material: str = "air",  # noqa: ARG001 - explicit regions are background-independent
 ) -> Any:
     """Pre-compute 2D cross-section cell geometry for cloud serialization.
 
@@ -136,8 +138,7 @@ def _precompute_cross_section_geometry(
     else:
         raise ValueError("Either port or position must be specified")
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack, component, material_data)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -157,8 +158,10 @@ def _precompute_cross_section_geometry(
     blocks: list[Any] = []
 
     layer_data: list[dict] = []
-    for layer in stack.layers.values():
-        if layer.material == "air":
+    for layer in order_by_mesh_order(stack.layers.values()):
+        if is_ideal_air(layer.material, material_data) and not _layer_has_any_polygon(
+            component, layer
+        ):
             continue
         if material_data and layer.material not in material_data:
             continue
@@ -179,6 +182,7 @@ def _precompute_cross_section_geometry(
                 "z_hi": layer.zmax - z_center,
                 "intervals": intervals,
                 "material": layer.material,
+                "mesh_order": getattr(layer, "mesh_order", None),
             }
         )
 
@@ -207,9 +211,12 @@ def _precompute_cross_section_geometry(
                         z_center=block_z_center,
                         z_size=block_z_size,
                         material=ld["material"],
+                        mesh_order=ld["mesh_order"],
                     )
                 )
 
+            if is_ideal_air(ld["material"], material_data):
+                continue
             bottom_free = _subtract_intervals((h0, h1), below_intervals)
             for bh0, bh1 in bottom_free:
                 bh_center = (bh0 + bh1) / 2.0
@@ -228,19 +235,23 @@ def _precompute_cross_section_geometry(
                         z_center=(ext_z_lo + ext_z_hi) / 2.0,
                         z_size=ext_z_size,
                         material=ld["material"],
+                        mesh_order=ld["mesh_order"],
                     )
                 )
 
     # Add dielectric slabs (uniform horizontal layers)
     for diel in stack.dielectrics:
-        if diel["material"] == "air":
+        if material_data and diel["material"] not in material_data:
             continue
         z_lo = diel["zmin"] - z_center
         z_hi = diel["zmax"] - z_center
         z_size = z_hi - z_lo
         if z_size <= 0:
             continue
-        if abs(diel["zmin"] - z_min) < 1e-12:
+        if (
+            not is_ideal_air(diel["material"], material_data)
+            and abs(diel["zmin"] - z_min) < 1e-12
+        ):
             z_lo = -z_span / 2.0
         z_size = z_hi - z_lo
         block_z_center = (z_lo + z_hi) / 2.0
@@ -251,12 +262,13 @@ def _precompute_cross_section_geometry(
                 z_center=block_z_center,
                 z_size=z_size,
                 material=diel["material"],
+                mesh_order=diel.get("mesh_order"),
             )
         )
 
     return CrossSectionGeometry(
         plane="yz" if _use_yz else "xz",
-        blocks=blocks,
+        blocks=order_by_mesh_order(blocks),
         cell_horizontal_span=horizontal_span,
         cell_z_span=z_span,
         z_center=z_center,
@@ -660,7 +672,7 @@ class Simulation(CloudJobMixin, BaseModel):
     def _stack_material_extent(
         self, stack: Any | None = None
     ) -> tuple[float, float] | None:
-        """Return (zmin, zmax) spanning all non-air layers and dielectrics.
+        """Return (zmin, zmax) spanning the modeled layers and dielectrics.
 
         This is the reference used by auto z-crop and by the fiber-aware
         margin expansion: it preserves the full fabricated stack (BOX,
@@ -670,19 +682,33 @@ class Simulation(CloudJobMixin, BaseModel):
         stack = stack if stack is not None else self.geometry.stack
         if stack is None:
             return None
-        zmins: list[float] = []
-        zmaxs: list[float] = []
-        for layer in stack.layers.values():
-            if layer.material != "air":
-                zmins.append(layer.zmin)
-                zmaxs.append(layer.zmax)
-        for diel in stack.dielectrics:
-            if diel.get("material") != "air":
-                zmins.append(diel["zmin"])
-                zmaxs.append(diel["zmax"])
-        if not zmins:
-            return None
-        return min(zmins), max(zmaxs)
+        return material_extent(
+            stack, self.geometry.component, self._air_material_data(stack)
+        )
+
+    def _air_material_data(self, stack: Any) -> dict[str, Any]:
+        """Resolve Air overrides before deciding whether a region is padding."""
+        from gsim.meep.materials import resolve_materials
+
+        if stack is None:
+            return {}
+        names = {layer.material for layer in stack.layers.values()}
+        names.update(dielectric["material"] for dielectric in stack.dielectrics)
+        names &= {"Air", "air"}
+        if not names:
+            return {}
+        return resolve_materials(
+            names,
+            overrides={
+                name: material
+                for name, material in self._material_overrides().items()
+                if name in {"Air", "air"}
+            },
+            wavelength_um=self.mode_solver.wavelengths[0]
+            if self.mode_solver.wavelengths
+            else self.source.wavelength,
+            overlay=self._pdk_overlay,
+        )
 
     def _resolve_xy_background_material(self, component: Any, stack: Any) -> str:
         """Resolve the blanket medium represented by a collapsed XY Z cut."""
@@ -707,8 +733,7 @@ class Simulation(CloudJobMixin, BaseModel):
         containing_dielectrics = [
             dielectric
             for dielectric in stack.dielectrics
-            if dielectric.get("material") != "air"
-            and float(dielectric["zmin"]) <= cut_z <= float(dielectric["zmax"])
+            if float(dielectric["zmin"]) <= cut_z <= float(dielectric["zmax"])
         ]
         if not containing_dielectrics:
             return "air"
@@ -724,9 +749,18 @@ class Simulation(CloudJobMixin, BaseModel):
         self,
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Resolve mode-solver bounds and equivalent internal margins."""
-        extent = self._stack_material_extent()
+        component = self.geometry.component
+        if self.mode_solver.where == "slab" or (
+            self.mode_solver.where == "auto"
+            and self.mode_solver.port is None
+            and self.mode_solver.position is None
+        ):
+            component = None
+        extent = material_extent(
+            self.geometry.stack, component, self._air_material_data(self.geometry.stack)
+        )
         if extent is None:
-            raise ValueError("Could not resolve a non-air Z extent for mode solving.")
+            raise ValueError("Could not resolve a modeled Z extent for mode solving.")
         stack_low, stack_high = extent
 
         if self.domain.z_bounds != "auto":
@@ -1136,11 +1170,12 @@ class Simulation(CloudJobMixin, BaseModel):
 
         # Collect material names from stack layers and dielectrics.
         used_materials: set[str] = set()
-        for layer in stack.layers.values():
+        for layer in order_by_mesh_order(stack.layers.values()):
             used_materials.add(layer.material)
         for diel in stack.dielectrics:
             used_materials.add(diel["material"])
 
+        used_materials.add(self.mode_solver.background_material)
         material_data = resolve_materials(
             used_materials,
             overrides=self._material_overrides(),
@@ -1313,7 +1348,14 @@ class Simulation(CloudJobMixin, BaseModel):
             else None
         )
         field_z_grid = (
-            mode_z_grid(stack, n_field_z, z_margin, pml_thickness)
+            mode_z_grid(
+                stack,
+                n_field_z,
+                z_margin,
+                pml_thickness,
+                component=component if where_effective == "cross_section" else None,
+                materials=_materials,
+            )
             if n_field_z > 0
             else None
         )
@@ -1333,6 +1375,8 @@ class Simulation(CloudJobMixin, BaseModel):
                     eigensolver_tol=ms.eigensolver_tol,
                     field_z_grid=field_z_grid,
                     background_material=background_material,
+                    overrides=self._material_overrides(),
+                    overlay=self._pdk_overlay,
                 )
                 results.extend(sweep_results.values())
             elif len(ms.wavelengths) == 1 and len(band_nums) > 1:
@@ -1347,6 +1391,8 @@ class Simulation(CloudJobMixin, BaseModel):
                     eigensolver_tol=ms.eigensolver_tol,
                     field_z_grid=field_z_grid,
                     background_material=background_material,
+                    overrides=self._material_overrides(),
+                    overlay=self._pdk_overlay,
                 )
                 results.extend(band_results.values())
             else:
@@ -1363,6 +1409,8 @@ class Simulation(CloudJobMixin, BaseModel):
                             eigensolver_tol=ms.eigensolver_tol,
                             field_z_grid=field_z_grid,
                             background_material=background_material,
+                            overrides=self._material_overrides(),
+                            overlay=self._pdk_overlay,
                         )
                         results.append(mode_result)
         else:
@@ -1386,6 +1434,8 @@ class Simulation(CloudJobMixin, BaseModel):
                         field_y_grid=field_y_grid,
                         field_z_grid=field_z_grid,
                         background_material=background_material,
+                        overrides=self._material_overrides(),
+                        overlay=self._pdk_overlay,
                     )
                     results.append(mode_result)
 
@@ -1988,6 +2038,18 @@ class Simulation(CloudJobMixin, BaseModel):
                 background_material=ms.background_material,
             )
 
+        layer_mesh_orders = {
+            layer.name: layer.mesh_order
+            for layer in stack.layers.values()
+            if layer.mesh_order is not None
+        }
+        layer_mesh_orders.update(
+            {
+                diel["name"]: diel["mesh_order"]
+                for diel in stack.dielectrics
+                if diel.get("mesh_order") is not None
+            }
+        )
         config = ModeSolverConfig(
             wavelengths=ms.wavelengths,
             bands=bands,
@@ -1999,6 +2061,7 @@ class Simulation(CloudJobMixin, BaseModel):
             eigensolver_tol=ms.eigensolver_tol,
             n_field_z=ms.n_field_z,
             layer_stack=dielectrics,
+            layer_mesh_orders=layer_mesh_orders,
             materials=material_data,
             cross_section_geometry=cross_section_geometry,
             n_field_x=n_field_x,

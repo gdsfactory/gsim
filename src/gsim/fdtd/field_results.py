@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 _COMPONENTS = {"ex", "ey", "ez", "hx", "hy", "hz"}
+_DFT_CONVENTION = "exp(-i*omega*t)"
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ def parse_complex_fields(
         for size in plane_shape
     ):
         raise ValueError("Complex-field shape must contain two positive dimensions")
-    # The plane reports (u, v); NumPy sidecars and their metadata use (v, u).
+    # Plane dimensions are (u, v); array rows/columns and field shape are (v, u).
     shape = (plane_shape[1], plane_shape[0])
     coordinates = (
         None if coordinate_data is None else _coordinates(coordinate_data, shape)
@@ -150,6 +151,11 @@ def parse_complex_fields(
         raise ValueError("Complex fields require actual field_coordinates metadata")
     fields = []
     for entry in entries:
+        if entry.get("dft_convention") != _DFT_CONVENTION:
+            raise ValueError(
+                "Complex fields must declare dft_convention="
+                f"{_DFT_CONVENTION!r}; unsupported or missing DFT convention"
+            )
         raw_component = entry["component"]
         if not isinstance(raw_component, str):
             raise TypeError("Complex-field component must be a string")

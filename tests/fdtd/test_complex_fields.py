@@ -89,7 +89,6 @@ def test_fields_only_monitor_writes_solver_request_and_preserves_default_hash(
 def _write_fields(tmp_path: Path):
     document = _result_document()
     monitor = document["plane_monitors"]["top"]
-    monitor["shape"] = [3, 2]  # Plane metadata is (u, v), arrays are (v, u).
     monitor["field_coordinates"] = {
         "u": [-980, 20, 1020],
         "v": [-480, 520],
@@ -100,7 +99,7 @@ def _write_fields(tmp_path: Path):
     }
     # An analytic unit-amplitude plane phasor verifies phase sign and axis order.
     x, y = np.meshgrid(np.array([-0.98, 0.02, 1.02]), np.array([-0.48, 0.52]))
-    expected = np.exp(1j * (0.4 * x + 0.3 * y))
+    expected = np.exp(-1j * (0.4 * x + 0.3 * y))
     np.save(tmp_path / "ey_0_real.npy", expected.real)
     np.save(tmp_path / "ey_0_imag.npy", expected.imag)
     monitor["fields"] = [
@@ -179,6 +178,19 @@ def test_legacy_results_do_not_require_complex_field_metadata(tmp_path):
     monitor = fdtd.FDTDResult.from_file(path).monitors["top"]
     assert monitor.fields == []
     assert monitor.field_coordinates is None
+
+
+@pytest.mark.parametrize("convention", [None, "", "unknown", "exp(+i*omega*t)"])
+def test_unsupported_or_missing_dft_convention_is_rejected(tmp_path, convention):
+    path, document, _ = _write_fields(tmp_path)
+    entry = document["plane_monitors"]["top"]["fields"][0]
+    if convention is None:
+        entry.pop("dft_convention")
+    else:
+        entry["dft_convention"] = convention
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="dft_convention"):
+        fdtd.FDTDResult.from_file(path)
 
 
 def test_nearby_field_wavelengths_keep_distinct_sidecars(tmp_path):

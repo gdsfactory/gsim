@@ -61,6 +61,7 @@ def test_write_uses_project_material_then_fallback_and_valid_mesh(
 ) -> None:
     simulation = fdtd.Simulation(
         pdk=fdtd_pdk_module,
+        background_material="SiO2",
         mesh_size_nm=750,
         domain={"padding": 0.25},
         pml_cells=16,
@@ -164,7 +165,7 @@ def test_enabled_dispersion_writes_dispersive_models(
         num_wavelengths=3,
         default_port="o1",
     )
-    simulation.materials(dispersion=True)
+    simulation.materials(background="SiO2", dispersion=True)
     simulation.geometry("straight", settings={"length": 2.0})
 
     artifacts = simulation.write(tmp_path)
@@ -199,7 +200,10 @@ def test_write_keeps_background_level_without_polygons(
     )
     resolved = simulation.geometry("straight", settings={"length": 2.0})
 
-    assert resolved.layers["buried_oxide"].geometry.area == pytest.approx(2.0 * 0.5)
+    assert resolved.layers["buried_oxide"].geometry.area == pytest.approx(2.0 * 1.0)
+    assert resolved.layers["buried_oxide"].geometry.bounds == pytest.approx(
+        (0, -0.5, 2, 0.5)
+    )
 
     artifacts = simulation.write(tmp_path)
     mesh = meshio.read(artifacts.mesh_path)

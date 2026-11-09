@@ -132,6 +132,18 @@ the mesher; the PDK object is not modified. Missing materials inside the window
 still raise an error. With the default `clip_geometry=False`, explicit bounds
 must continue to contain the resolved geometry.
 
+Levels marked `background=True` fill the physical simulation domain in XY,
+including lateral padding, without requiring a drawn source polygon. Their
+`background_exclude_layers` masks still remove material. Patterned levels follow
+their masks. Every blanket film intersecting the chosen z interval is retained
+and clipped to that interval; films wholly outside it are omitted. Preview and
+written Gmsh geometry use the same domain. Automatic padding is applied once,
+and neither the component nor the PDK stack is modified.
+
+Display metadata such as `info.visible=False` only changes initial viewer
+visibility. Hidden films remain in the simulation and can be enabled for
+inspection.
+
 Port centers and diagnostic windows follow the clipped active bands. Automatic
 diagnostic planes, including their cladding margins, are intersected with the
 physical domain when previewed or written. The requested monitor windows remain
@@ -224,6 +236,41 @@ sim.domain(
 )
 ```
 
+## Background default in 0.10.0
+
+The 0.10.0 feature release changes the default simulation background from
+`"SiO2"` to `"Air"`, an ideal lossless, nondispersive material with refractive
+index 1. This intentional change does not target a 0.9.x patch release.
+
+Stack regions continue to use their own material cards and take priority over
+the background. The background fills space not occupied by those regions;
+it does not replace BOX, substrate, cladding, or patterned materials. A domain
+fully filled by stack regions retains those physical material assignments.
+
+Existing calls that omit a background can change behavior in uncovered space.
+Source and receiver references that inherit the background can also change.
+Automatic Z sizing can differ because it follows matching background stack
+levels when available. Unused Air declarations (such as an undrawn undercut)
+do not enlarge the automatic domain. `Air` and its built-in `air` alias use
+the same bounds. Explicit domain bounds remain in force.
+
+For example, a bare gpdk silicon component with no drawn oxide simulates silicon
+in air when the background is omitted, once its material names resolve.
+GDSFactory 9.x uses the lowercase `si` name; with those releases, supply
+`sim.materials(overrides={"si": 3.47})` when the PDK has no card for it.
+Declaring oxide in the LayerStack does
+not create oxide geometry. Select `background="SiO2"` to fill otherwise
+unoccupied space with oxide.
+
+To preserve the former environment, add `sim.materials(background="SiO2")`,
+or retain `background_material="SiO2"` in the historical constructor API.
+Saved settings with an explicit background are unchanged; settings omitting it
+use the new default when loaded. Set `z_bounds` or `padding_z` explicitly if
+preserving an automatically chosen vertical extent matters. Re-exporting
+updates inputs and cache keys; previously generated inputs and results are
+unchanged. The existing FDTD notebooks already choose their backgrounds
+explicitly.
+
 ## Setup visualization
 
 `plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
@@ -271,12 +318,25 @@ mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
 Each call resolves the current settings and generates a temporary mesh, so edits
 to geometry, meshing, background material, and domain settings appear immediately.
 Previously written simulation artifacts are preserved.
-The 3D viewer uses each PDK stack entry's `info["opacity"]` and layer-view
+The 3D viewer uses PDK layer-view fill colors, falling back to frame colors when
+the fill is absent. Stack `info["color"]` overrides the layer-view color. Colors
+can be CSS color strings; their alpha channel does not change surface opacity.
+An exactly named layer view matching the stack key, or its declared name,
+is preferred over a physical-layer lookup. Otherwise the derived layer view
+is preferred, with the source layer view as a fallback. A drawing layer reused
+by background films of distinct materials does not supply an individual film
+color: those films use explicit stack/named colors or the fallback palette.
+Visibility and opacity still follow their existing PDK defaults.
+For duplicate colored views of a GDS layer, the first effectively visible view
+is preferred, then the first colored view. Missing colors retain the viewer's
+fallback palette, including its port and largest-group colors. These display
+choices do not change the mesh or solver configuration.
+
+The viewer also uses each PDK stack entry's `info["opacity"]` and layer-view
 visibility by default, including hidden parent groups. If several layer views
 refer to the same GDS layer, it is initially visible when any of those views
 and its enclosing groups are visible, regardless of view order. Stack `info["visible"]`
-overrides layer-view visibility. The derived layer view is preferred, with the
-source layer view as a fallback. Only stack entries with resolved geometry have
+overrides layer-view visibility. Only stack entries with resolved geometry have
 their display metadata applied and validated. A zero opacity starts a layer hidden;
 enabling it in the viewer's layer list makes it fully opaque (`opacity=1.0`),
 which can obscure enclosed layers. Explicit `show_groups`
@@ -526,12 +586,33 @@ when loaded. Actual sample coordinates and the snapped normal position are
 available through `monitor.field_coordinates` or `sample.coordinates`, in
 micrometers. They can differ from the requested monitor bounds and position.
 
+The plane's `monitor.shape` is `(n_u, n_v)`. Complex-field and heatmap arrays
+are `(n_v, n_u)`: rows follow `v_um`, columns follow `u_um`. For example, a
+plane with three U samples and two V samples reports `(3, 2)` and loads
+arrays of shape `(2, 3)`.
+
 Loading preserves the exported complex values without source normalization,
 noise masking, or phase corrections. `sample.metadata` retains the backend's
 normalization, DFT convention, phase reference, colocation, field-unit system,
 solver time unit, and boundary-interpolation metadata. Raw DFT fields are not
 incident-power-normalized fields or fiber coupling efficiencies. Quantitative
 overlap postprocessing requires consistent normalization and sampling.
+
+`dft_convention="exp(-i*omega*t)"` describes the Fourier **integration kernel**:
+the solver accumulates `sum(field(t) * exp(-i*omega*t) * sample_dt)`.
+The corresponding phasor has time dependence **exp(+iωt)**, so a forward
+wave's phase decreases along its propagation direction. This agrees with
+`result.s_parameters`; the loader does not conjugate either result. Electric
+and magnetic fields use their actual Yee sample times before spatial colocation.
+Missing or unsupported DFT conventions are rejected; legacy results without
+complex-field entries remain supported.
+
+A [recorded straight-waveguide run](https://github.com/gdsfactory/gsim/tree/main/tests/fdtd/data/plane_fields)
+checks both conventions on real output. Its `(25, 32)` arrays retain the forward
+phase decrease, and the independent `0.5 * Re(E × conj(H))` integral agrees with
+the native plane flux within 1.2%. Exact equality is not expected because the
+exported fields are colocated while the native flux retains transverse Yee
+staggering. The sample includes the result JSON and paired arrays.
 
 Selecting fewer components or wavelengths reduces the saved field payload.
 Existing result files without complex fields continue to load normally.

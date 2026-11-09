@@ -100,7 +100,7 @@ class Materials(_FiniteModel):
     the deployed GDSFactory FDTD solver does not accept those yet.
     """
 
-    background: str = Field(default="SiO2", min_length=1)
+    background: str = Field(default="Air", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)
     dispersion: bool = False
 
