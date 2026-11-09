@@ -185,12 +185,6 @@ def _build_slab_xz_cell(
 
     geometry: list[object] = []
     for layer in order_by_mesh_order(stack.layers.values()):
-        if (
-            layer.material in {"air", "Air"}
-            and background_material in {"air", "Air"}
-            and getattr(layer, "mesh_order", None) is None
-        ):
-            continue
         mat_data = materials.get(layer.material)
         if mat_data is None:
             continue
@@ -1209,12 +1203,6 @@ def refractive_index_profile(
             )
         n_profile = np.full_like(z_grid, n_bg)
         for layer in order_by_mesh_order(stack.layers.values()):
-            if (
-                layer.material in {"air", "Air"}
-                and background_material in {"air", "Air"}
-                and getattr(layer, "mesh_order", None) is None
-            ):
-                continue
             mat = material_data.get(layer.material)
             if mat is None or mat.epsilon_diag is None:
                 continue
@@ -1886,12 +1874,6 @@ def solve_slab_wavelength_sweep(
     # Layer geometric descriptors (wavelength-independent)
     _layer_specs: list[dict] = []
     for layer in order_by_mesh_order(stack.layers.values()):
-        if (
-            layer.material in {"air", "Air"}
-            and background_material in {"air", "Air"}
-            and getattr(layer, "mesh_order", None) is None
-        ):
-            continue
         z_size = layer.zmax - layer.zmin
         if z_size <= 0:
             continue

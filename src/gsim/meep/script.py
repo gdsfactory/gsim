@@ -2032,15 +2032,6 @@ def build_slab_cell(config):
 
     geometry = []
     for entry in _order_mode_entries(layer_stack, config.get("layer_mesh_orders")):
-        mesh_order = entry.get("mesh_order")
-        if mesh_order is None:
-            mesh_order = config.get("layer_mesh_orders", {}).get(entry.get("name"))
-        if (
-            entry["material"] in {"air", "Air"}
-            and bg_mat in {"air", "Air"}
-            and mesh_order is None
-        ):
-            continue
         mat_data = materials.get(entry["material"])
         if mat_data is None:
             continue

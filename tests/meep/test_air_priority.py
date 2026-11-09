@@ -168,3 +168,141 @@ def test_unranked_and_equal_priority_keep_legacy_input_order():
         "rank1",
         "rank2",
     ]
+
+
+@pytest.mark.parametrize("air", ["Air", "air"])
+@pytest.mark.parametrize("void_last", [False, True])
+def test_unranked_slab_air_cutouts_follow_declaration_order(
+    tmp_path, backend, monkeypatch, air, void_last
+):
+    core = Layer(
+        name="core",
+        material="Si",
+        gds_layer=(1, 0),
+        zmin=0,
+        zmax=1,
+        thickness=1,
+        layer_type="dielectric",
+    )
+    void = Layer(
+        name="void",
+        material=air,
+        gds_layer=(2, 0),
+        zmin=0.3,
+        zmax=0.7,
+        thickness=0.4,
+        layer_type="dielectric",
+    )
+    layers = [core, void] if void_last else [void, core]
+    stack = LayerStack(layers={layer.name: layer for layer in layers})
+    setup = Simulation(mode_solver=ModeSolver(where="slab", wavelengths=[1.55]))
+    setup.geometry.stack = stack
+    directory = setup.write_mode_solver_config(tmp_path)
+    payload = json.loads((directory / "mode_solver_config.json").read_text())
+    materials = {
+        name: MaterialData.model_validate(data)
+        for name, data in payload["materials"].items()
+    }
+    local, _ = mode_solver._build_slab_xz_cell(
+        stack, materials, resolution=32, background_material="Air"
+    )
+    silicon_epsilon = materials["Si"].epsilon_diag
+    assert isinstance(silicon_epsilon, list)
+    expected_epsilon = 1 if void_last else silicon_epsilon[0]
+    assert local.geometry[-1].material.epsilon == pytest.approx(expected_epsilon)
+    profile = mode_solver.refractive_index_profile(
+        stack, 1.55, z_grid=np.array([0.1, 0.5, 0.9]), background_material="Air"
+    )
+    assert profile[1] ** 2 == pytest.approx(expected_epsilon)
+    assert np.all(profile[[0, 2]] > 3)
+
+    tree = ast.parse(_MEEP_MODE_SOLVER_TEMPLATE)
+    names = {"_order_mode_entries", "_mode_stack_z_extent", "build_slab_cell"}
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    namespace: dict[str, Any] = {
+        "mp": backend,
+        "_make_medium": lambda material: backend.Medium(
+            epsilon=material["epsilon_diag"][0]
+        ),
+    }
+    exec(  # noqa: S102 - execute trusted runner-template functions
+        compile(ast.Module(body=functions, type_ignores=[]), "slab-cutout", "exec"),
+        namespace,
+    )
+    cloud, _ = namespace["build_slab_cell"](payload)
+    assert cloud.geometry[-1].material.epsilon == pytest.approx(expected_epsilon)
+
+    def capture_result(simulation, _cell_size, _wavelength, **_kwargs):
+        assert simulation.geometry[-1].material.epsilon == pytest.approx(
+            expected_epsilon
+        )
+        return object()
+
+    monkeypatch.setattr(mode_solver, "_compute_eigenmode", capture_result)
+    monkeypatch.setattr(mode_solver, "_validate_mode", lambda *args, **kwargs: None)
+    result = mode_solver.solve_slab_wavelength_sweep(
+        stack, [1.55], background_material="Air"
+    )
+    assert len(result) == 1
+
+
+@pytest.mark.parametrize("air", ["Air", "air"])
+def test_uniform_air_cutout_is_retained_in_cross_section_and_xy_background(
+    backend, air
+):
+    component = gf.c.straight(length=2, width=2)
+    core = Layer(
+        name="core",
+        material="Si",
+        gds_layer=(1, 0),
+        zmin=0,
+        zmax=1,
+        thickness=1,
+        layer_type="dielectric",
+    )
+    stack = LayerStack(
+        layers={"core": core},
+        dielectrics=[{"name": "air_cutout", "material": air, "zmin": 0.3, "zmax": 0.7}],
+    )
+    geometry = _precompute_cross_section_geometry(
+        component, stack, port="o1", y_span=2, z_margin=0.5, background_material="Air"
+    )
+    cutout = geometry.blocks[-1]
+    assert cutout.material == air
+    assert cutout.z_center - cutout.z_size / 2 == pytest.approx(-0.2)
+    assert cutout.z_center + cutout.z_size / 2 == pytest.approx(0.2)
+    setup = Simulation()
+    setup.solver(mode="2d", z_cut=0.5)
+    assert setup._resolve_xy_background_material(component, stack) == air
+
+    tree = ast.parse(_MEEP_MODE_SOLVER_TEMPLATE)
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_order_mode_entries", "build_cross_section_cell"}
+    ]
+    namespace: dict[str, Any] = {
+        "mp": backend,
+        "_make_medium": lambda material: backend.Medium(
+            epsilon=material["epsilon_diag"][0]
+        ),
+    }
+    exec(  # noqa: S102 - execute trusted runner-template functions
+        compile(ast.Module(body=functions, type_ignores=[]), "uniform-cutout", "exec"),
+        namespace,
+    )
+    native, _, _ = namespace["build_cross_section_cell"](
+        {
+            "cross_section_geometry": geometry.model_dump(),
+            "materials": {
+                "Si": {"epsilon_diag": [12, 12, 12]},
+                air: {"epsilon_diag": [1, 1, 1]},
+            },
+        }
+    )
+    assert native.geometry[-1].material.epsilon == 1

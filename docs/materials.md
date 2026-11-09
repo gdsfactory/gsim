@@ -109,6 +109,10 @@ domain, so unused Air padding does not enlarge the actual solver cell.
 Mode geometry honors PDK `mesh_order`: lower values win overlaps, including Air
 voids. Equal priorities retain declaration order; unranked legacy entries keep
 their relative order and precede explicitly ranked regions.
+Explicit 1D Air slabs are retained even with an Air background, so declaration
+order can carve an unranked cutout from an overlapping solid.
+Slab mode treats each entry as a uniform band; component cross-section mode
+applies the layout masks.
 
 ## Analytic PDK cards
 
