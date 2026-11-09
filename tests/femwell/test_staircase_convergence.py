@@ -103,7 +103,11 @@ def _element_epsilon(mesh_path, dn_of_y) -> np.ndarray:
 
 
 def _solve(mesh_path, eps) -> complex:
-    modes = solve_modes(mesh_path, epsilon=eps, wavelength_um=WL_UM, num_modes=1)
+    # Only the materials vary between solves on one mesh, so the element
+    # order cancels out of the comparison; order 1 keeps the five solves cheap.
+    modes = solve_modes(
+        mesh_path, epsilon=eps, wavelength_um=WL_UM, num_modes=1, order=1
+    )
     return complex(modes[0].n_eff)
 
 
