@@ -117,3 +117,16 @@ def test_exact_card_collision_keeps_its_geometry_and_override(aliased_pdk, overr
     snapshots = simulation._material_snapshots()
     assert snapshots["air"].refractive_index == pytest.approx(override or 1.2)
     assert snapshots["Air"].refractive_index == 1
+
+
+@pytest.mark.parametrize("background", ["Air", "air"])
+def test_merged_vertical_source_override_uses_canonical_background(
+    tmp_path, fdtd_pdk_module, background
+):
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.materials(background=background)
+    simulation.geometry("vertical_coupler", mesh_size_nm=750)
+    simulation.source(port="o2", vertical_refractive_index=1.33)
+    document = json.loads(simulation.write(tmp_path).config_path.read_text())
+    assert document["excitation"]["gaussian_beam"]["refractive_index"] == 1.33
+    assert document["monitors"][0]["fiber_mode"]["refractive_index"] == 1.33

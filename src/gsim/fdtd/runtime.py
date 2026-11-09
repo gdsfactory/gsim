@@ -221,9 +221,10 @@ class RuntimeConfigMixin:
                 "Explicit monitor names cannot shadow vertical ports."
             )
         bounds = self._background_bounds_nm()
-        background_index = material_snapshots[
-            self._background_material_name
-        ].refractive_index
+        background_index = (
+            self.source.vertical_refractive_index
+            or material_snapshots[self._background_material_name].refractive_index
+        )
         outward_sign = 1 if self.source.vertical_axis == "+z" else -1
         aperture_z_nm = bounds[5] if outward_sign > 0 else bounds[2]
         device_z_nm = self.resolved.bounds[1 if outward_sign > 0 else 0][2] * 1000

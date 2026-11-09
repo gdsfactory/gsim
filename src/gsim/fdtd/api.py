@@ -185,6 +185,7 @@ class PortSource(Source):
     vertical_axis: Literal["+z", "-z"] = "+z"
     vertical_aperture_width_um: float | None = Field(default=None, gt=0)
     vertical_waist_radius_um: float | None = Field(default=None, gt=0)
+    vertical_refractive_index: float | None = Field(default=None, gt=0)
     vertical_monitor_heatmap: Heatmap | None = None
 
 
@@ -234,7 +235,12 @@ SourceType = PortSource | DipoleSource | LineCurrentSource | GaussianBeamSource
 
 
 class FiberMode(_FiniteModel):
-    """Analytic Gaussian fiber profile for overlap projection."""
+    """Analytic Gaussian fiber profile for overlap projection.
+
+    An omitted index is inferred from the exported material at the receiver
+    plane. Mixed media or an interface retain the background with a warning.
+    An explicit index always takes precedence.
+    """
 
     propagation_direction: Vector3
     e_polarization: Vector3
