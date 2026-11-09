@@ -423,6 +423,36 @@ sim.source(
 Monitor names are unique. Use `add()`, `remove()`, and `clear()` to manage the
 collection. A plane's size must be zero along its normal.
 
+### Fiber reference medium
+
+When `FiberMode.refractive_index` is omitted, the exporter determines the real
+index at the source center wavelength from the material covering the receiver's
+cropped aperture. It checks the exported tetrahedral mesh, including sidewalls,
+holes, overlapping material priorities, and both sides of the plane. A receiver
+outside stack volumes uses the simulation background. Different materials with
+the same real index can share a reference medium.
+
+Set `FiberMode(refractive_index=...)` to choose the reference medium explicitly.
+For an implicit receiver derived from a vertical port, use
+`sim.source(vertical_refractive_index=...)`. The selected vertical port's Gaussian
+beam and its receiver use the same index. Explicit `GaussianBeamSource` settings
+retain their existing behavior.
+
+An aperture spanning different indices, lying on an interface, or lacking a
+usable area cannot determine one homogeneous Gaussian reference. The exporter
+warns and retains the background index for compatibility; set the relevant
+explicit index to define the intended reference.
+
+This numerical correctness fix targets the next patch release after 0.9.0.
+Previously, an omitted fiber index always used the global background, even for
+a receiver embedded in a different stack material. Such setups can produce
+different coupling values after this fix, while their material assignments stay
+unchanged. To preserve the previous reference, supply the background's index
+explicitly through `FiberMode.refractive_index` or
+`PortSource.vertical_refractive_index`. Re-exporting updates solver inputs and
+their cache keys; existing downloaded results are unchanged. The simulation
+background default is unchanged by this fix.
+
 ## Results
 
 ```python
