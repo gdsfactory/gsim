@@ -108,6 +108,9 @@ class TestDeviceSetup:
         meshed_sim._setup_device("pn")
 
         [create] = devsim.called("create_gmsh_mesh")
+        # The two Contacts meet at the Junction, each keeping its own node:
+        # neither ends on a node of another Region, so the mesh is loaded
+        # as it is.
         assert create["file"] == str(meshed_sim._current_mesh().devsim_mesh_path)
 
         regions = {c["region"] for c in devsim.called("add_gmsh_region")}

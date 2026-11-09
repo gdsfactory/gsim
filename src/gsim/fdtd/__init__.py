@@ -23,6 +23,7 @@ from gsim.fdtd.models import (
     FDTDArtifactError,
     FDTDConfigError,
     FDTDGeometryError,
+    GeometryClippingWarning,
     MeshManifest,
     SimulationArtifacts,
 )
@@ -69,6 +70,7 @@ __all__ = [
     "Fields",
     "GaussianBeamSource",
     "Geometry",
+    "GeometryClippingWarning",
     "Heatmap",
     "HeatmapResult",
     "LineCurrentSource",

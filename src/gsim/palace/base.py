@@ -196,7 +196,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         _airbox_config: dict[str, Any]
         _pec_blocks: list
         _symmetry_planes: list[SymmetryPlaneConfig]
-        _hints: dict[str, Any]
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
         _configured_ports: bool
         _last_mesh_result: Any
@@ -2453,6 +2452,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             return False, True, True
         return True, False, False
 
+    def _config_options(self) -> dict[str, Any]:
+        """Keyword arguments only this problem type gives the config generator."""
+        return {}
+
     def write_config(
         self,
         *,
@@ -2503,10 +2506,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
-        # Thread impedance boundary configs through hints
-        hints = dict(self._hints)
-        if self._impedance_boundaries:
-            hints["_impedance_boundaries"] = self._impedance_boundaries
         absorbing, metallic, pec_default = self._outer_wall()
         # The automatic PEC default (pec_default) is a convenience: it only
         # applies where the mesh has an outer-boundary group to carry it. An
@@ -2516,8 +2515,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         has_outer = boundary_groups.get("absorbing") is not None
         if pec_default and not has_outer:
             metallic = False
-        if metallic:
-            hints["_metallic_boundaries"] = True
         if pec_default and not self._pec_default_noted:
             self._pec_default_noted = True
             if has_outer:
@@ -2533,22 +2530,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     "outer wall has nothing to attach to and no outer-wall "
                     "entry is written."
                 )
-        if getattr(self, "conductor_boundary", "conductivity") == "pec":
-            hints["_conductor_boundary"] = "pec"
-
-        # BoundaryMode voltage/impedance postprocessing paths. They do not
-        # affect the 2D eigenproblem; the boundary-mode sim declares them.
-        mode_postprocessing = getattr(self, "mode_postprocessing", None)
-        if mode_postprocessing is not None:
-            postprocessing = mode_postprocessing()
-            if postprocessing:
-                hints["_mode_postprocessing"] = postprocessing
-
-        # The 2D mesh of a cross-section has its own axes; the config
-        # generator writes material tensors in them (_to_section_frame).
-        cross_section = getattr(self, "cross_section", None)
-        if self.simulation_type == "boundarymode" and cross_section is not None:
-            hints["_cross_section_axis"] = cross_section.axis
 
         config_path = gen_write_config(
             mesh_result=self._last_mesh_result,
@@ -2562,10 +2543,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=absorbing,
             absorbing_order=self.absorbing_order,
-            hints=hints,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
+            impedance_boundaries=self._impedance_boundaries,
+            metallic_boundaries=metallic,
+            **self._config_options(),
         )
 
         # Validate mesh and config unless this is a photonic workflow.
@@ -3241,7 +3224,6 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
     _pec_blocks: list = PrivateAttr(default_factory=list)
     _symmetry_planes: list[SymmetryPlaneConfig] = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
     _impedance_boundaries: list[ImpedanceBoundaryConfig] = PrivateAttr(
         default_factory=list
     )

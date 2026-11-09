@@ -187,7 +187,7 @@ class TestConductivityEntries:
             tmp_path,
             "boundarymode",
             _groups(native_2d=True),
-            hints={"_conductor_boundary": "pec"},
+            conductor_boundary="pec",
         )
         assert "Conductivity" not in config["Boundaries"]
         assert "Crack" not in json.dumps(config)

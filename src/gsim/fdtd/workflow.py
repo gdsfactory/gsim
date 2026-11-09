@@ -178,6 +178,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         self.solver = Solver.model_validate(solver_data)
         self.geometry.bind(self._resolve_geometry)
         self._resolved: ResolvedPassivePcell | None = None
+        self._clipping_warning_key: tuple[Any, ...] | None = None
         self._last_artifacts: SimulationArtifacts | None = None
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -378,6 +379,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             wavelength_um=self.source.wavelength_um,
             domain=self.domain,
             background_material=self.materials.background,
+        )
+        from gsim.fdtd.geometry_clipping import warn_geometry_clipping
+
+        self._clipping_warning_key = warn_geometry_clipping(
+            self._resolved, self.geometry, self.domain, self._clipping_warning_key
         )
         return self._resolved
 

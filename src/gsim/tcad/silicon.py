@@ -2,11 +2,12 @@
 
 DEVSIM's ``simple_physics`` sets the static relative permittivity and the
 intrinsic carrier density of silicon as two constants, whatever the
-temperature. The device keeps its permittivity and replaces its intrinsic
-density with :func:`intrinsic_density_cm3`, which follows the band gap
-with temperature and equals DEVSIM's value at 300 K. The depletion-model
-comparison (:func:`gsim.tcad.compare_capacitance`) reads the same values,
-so the two sides of it describe the same silicon.
+temperature. The device takes its permittivity from
+``Materials.semiconductor_permittivity``, by default DEVSIM's, and replaces
+its intrinsic density with :func:`intrinsic_density_cm3`, which follows the
+band gap with temperature and equals DEVSIM's value at 300 K. The
+depletion-model comparison (:func:`gsim.tcad.compare_capacitance`) reads the
+same values, so the two sides of it describe the same silicon.
 
 References:
     Y. P. Varshni, "Temperature dependence of the energy gap in
@@ -23,7 +24,8 @@ import math
 from scipy.constants import Boltzmann, elementary_charge
 
 #: Static relative permittivity of silicon in DEVSIM's ``simple_physics``.
-#: The RF and optical stacks use 11.9; the charge solve keeps DEVSIM's own.
+#: The default of ``Materials.semiconductor_permittivity``. The RF and optical
+#: stacks use 11.9.
 SILICON_RELATIVE_PERMITTIVITY: float = 11.1
 
 #: Intrinsic carrier density of silicon at 300 K in DEVSIM's

@@ -1611,7 +1611,7 @@ def generate_mesh(
                     periodic_axis,
                     absorbing_order=absorbing_order,
                     # tensors are written in the 2D mesh frame (_to_section_frame)
-                    hints={"_cross_section_axis": cross_section.axis},
+                    cross_section_axis=cross_section.axis,
                 )
 
             return MeshResult(
