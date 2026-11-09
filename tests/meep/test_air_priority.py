@@ -93,6 +93,7 @@ def test_mesh_order_controls_overlapping_voids(
         and node.name
         in {
             "_order_mode_entries",
+            "_is_ideal_air",
             "_mode_stack_z_extent",
             "build_cross_section_cell",
             "build_slab_cell",
@@ -217,7 +218,12 @@ def test_unranked_slab_air_cutouts_follow_declaration_order(
     assert np.all(profile[[0, 2]] > 3)
 
     tree = ast.parse(_MEEP_MODE_SOLVER_TEMPLATE)
-    names = {"_order_mode_entries", "_mode_stack_z_extent", "build_slab_cell"}
+    names = {
+        "_order_mode_entries",
+        "_is_ideal_air",
+        "_mode_stack_z_extent",
+        "build_slab_cell",
+    }
     functions = [
         node
         for node in tree.body

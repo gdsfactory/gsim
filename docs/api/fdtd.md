@@ -243,7 +243,10 @@ do not enlarge the automatic domain. `Air` and its built-in `air` alias use
 the same bounds. Explicit domain bounds remain in force.
 
 For example, a bare gpdk silicon component with no drawn oxide simulates silicon
-in air when the background is omitted. Declaring oxide in the LayerStack does
+in air when the background is omitted, once its material names resolve.
+GDSFactory 9.x uses the lowercase `si` name; with those releases, supply
+`sim.materials(overrides={"si": 3.47})` when the PDK has no card for it.
+Declaring oxide in the LayerStack does
 not create oxide geometry. Select `background="SiO2"` to fill otherwise
 unoccupied space with oxide.
 

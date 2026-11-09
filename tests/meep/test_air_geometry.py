@@ -371,7 +371,12 @@ def test_mode_window_contains_modeled_air(
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
         and node.name
-        in {"_mode_stack_z_extent", "_order_mode_entries", "build_slab_cell"}
+        in {
+            "_is_ideal_air",
+            "_mode_stack_z_extent",
+            "_order_mode_entries",
+            "build_slab_cell",
+        }
     ]
     namespace = {
         "mp": fake_mode_solver._import_meep(),

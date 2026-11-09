@@ -1994,12 +1994,29 @@ def _order_mode_entries(entries, mesh_orders=None):
     return sorted(entries, key=priority, reverse=True)
 
 
+def _is_ideal_air(name, materials=None):
+    \"\"\"Identify unit-index Air, retaining custom responses with the same name.\"\"\"
+    if name not in {"Air", "air"}:
+        return False
+    material = (materials or {}).get(name)
+    if material is None:
+        return True
+    data = material if isinstance(material, dict) else getattr(material, "__dict__", {})
+    return (
+        data.get("epsilon_diag") in (None, [1, 1, 1])
+        and data.get("mu_diag") in (None, [1, 1, 1])
+        and not any(data.get("epsilon_offdiag") or [])
+        and not data.get("D_conductivity")
+        and not any(data.get("D_conductivity_diag") or [])
+        and not data.get("epsilon_susceptibilities")
+    )
+
 def _mode_stack_z_extent(config):
     entries = list(config["layer_stack"]) + list(config.get("dielectrics", []))
     active = [
         entry for entry in entries
         if not (
-            entry["material"] in {"Air", "air"}
+            _is_ideal_air(entry["material"], config.get("materials"))
             and entry.get("name") in {"air_box", "air_box_bottom"}
         )
     ] or entries
@@ -2044,7 +2061,7 @@ def build_slab_cell(config):
         z_lo = entry["zmin"] - z_center
         z_hi = entry["zmax"] - z_center
         if (
-            entry["material"] not in {"Air", "air"}
+            not _is_ideal_air(entry["material"], materials)
             and abs(entry["zmin"] - z_min) < 1e-12
         ):
             z_lo = -z_span / 2.0

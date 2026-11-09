@@ -15,7 +15,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from gsim.meep.layer_order import order_by_mesh_order
-from gsim.meep.mode_bounds import cell_extent
+from gsim.meep.mode_bounds import cell_extent, is_ideal_air
 from gsim.meep.models.results import ModeResult
 
 if TYPE_CHECKING:
@@ -58,6 +58,8 @@ def _resolve_materials_cached(
     """:func:`resolve_materials` with a process-local LRU cache."""
     from gsim.meep.materials import resolve_materials
 
+    if overrides or overlay:
+        return resolve_materials(used_materials, overrides, wavelength_um, overlay)
     key = (frozenset(used_materials), wavelength_um)
     cached = _MATERIAL_CACHE.get(key)
     if cached is not None:
@@ -163,7 +165,7 @@ def _build_slab_xz_cell(
     """
     mp = _import_meep()
 
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, materials=materials)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -194,7 +196,10 @@ def _build_slab_xz_cell(
             continue
         z_lo = layer.zmin - z_center
         z_hi = z_lo + z_size
-        if layer.material not in {"Air", "air"} and abs(layer.zmin - z_min) < 1e-12:
+        if (
+            not is_ideal_air(layer.material, materials)
+            and abs(layer.zmin - z_min) < 1e-12
+        ):
             z_lo = -z_span / 2.0
         z_size = z_hi - z_lo
         block_center_z = (z_lo + z_hi) / 2.0
@@ -294,7 +299,7 @@ def _build_component_xz_cell(
     """
     mp = _import_meep()
 
-    z_min, z_max = cell_extent(stack, component)
+    z_min, z_max = cell_extent(stack, component, materials)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -313,7 +318,7 @@ def _build_component_xz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in order_by_mesh_order(stack.layers.values()):
-        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+        if is_ideal_air(layer.material, materials) and not _layer_has_any_polygon(
             component, layer
         ):
             continue
@@ -379,7 +384,7 @@ def _build_component_xz_cell(
                     )
                     geometry.append(block)
 
-            if ld["layer"].material in {"Air", "air"}:
+            if is_ideal_air(ld["layer"].material, materials):
                 continue
             bottom_free = _subtract_intervals((x0, x1), below_intervals)
             for bx0, bx1 in bottom_free:
@@ -457,7 +462,7 @@ def _build_component_yz_cell(
     """
     mp = _import_meep()
 
-    z_min, z_max = cell_extent(stack, component)
+    z_min, z_max = cell_extent(stack, component, materials)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -476,7 +481,7 @@ def _build_component_yz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in order_by_mesh_order(stack.layers.values()):
-        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+        if is_ideal_air(layer.material, materials) and not _layer_has_any_polygon(
             component, layer
         ):
             continue
@@ -542,7 +547,7 @@ def _build_component_yz_cell(
                     )
                     geometry.append(block)
 
-            if ld["layer"].material in {"Air", "air"}:
+            if is_ideal_air(ld["layer"].material, materials):
                 continue
             bottom_free = _subtract_intervals((y0, y1), below_intervals)
             for by0, by1 in bottom_free:
@@ -1024,6 +1029,7 @@ def mode_z_grid(
     pml_thickness: float = 0.0,
     *,
     component: Any | None = None,
+    materials: dict[str, MaterialData] | None = None,
 ) -> np.ndarray:
     """Compute Z-axis coordinates in absolute frame matching layer ``zmin``/``zmax``.
 
@@ -1050,7 +1056,7 @@ def mode_z_grid(
     """
     import numpy as np
 
-    z_min, z_max = cell_extent(stack, component)
+    z_min, z_max = cell_extent(stack, component, materials)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1121,6 +1127,8 @@ def refractive_index_profile(
     component: Component | None = None,
     port: str | None = None,
     background_material: str = "air",
+    overrides: dict | None = None,
+    overlay: dict | None = None,
 ) -> np.ndarray:
     """Compute piecewise-constant refractive index at a wavelength.
 
@@ -1172,6 +1180,9 @@ def refractive_index_profile(
         port: Port name in *component*.  Auto-derives the slice coordinate
             and cross-section plane.
 
+        overrides: Explicit material properties, taking priority over the PDK.
+        overlay: PDK material definitions, taking priority over built-in models.
+
     Returns:
         ``np.ndarray`` — 1D ``(nz,)`` or 2D ``(nz, ny)`` / ``(nz, nx)``.
     """
@@ -1182,7 +1193,8 @@ def refractive_index_profile(
         used_materials.add(background_material)
     material_data = _resolve_materials_cached(
         used_materials,
-        overrides={},
+        overrides=overrides,
+        overlay=overlay,
         wavelength_um=wavelength,
     )
     bg_mat = material_data.get(background_material)
@@ -1270,7 +1282,7 @@ def refractive_index_profile(
 
     layer_h_masks: dict[tuple, np.ndarray] = {}
     for layer in order_by_mesh_order(stack.layers.values()):
-        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+        if is_ideal_air(layer.material, material_data) and not _layer_has_any_polygon(
             component, layer
         ):
             continue
@@ -1286,7 +1298,7 @@ def refractive_index_profile(
         layer_h_masks[gds_layer] = mask
 
     for layer in order_by_mesh_order(stack.layers.values()):
-        if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
+        if is_ideal_air(layer.material, material_data) and not _layer_has_any_polygon(
             component, layer
         ):
             continue
@@ -1304,7 +1316,7 @@ def refractive_index_profile(
         h_mask = layer_h_masks.get(gds_layer)
         if h_mask is None:
             continue
-        if layer.material not in {"Air", "air"}:
+        if not is_ideal_air(layer.material, material_data):
             below_mask = np.zeros(nh, dtype=bool)
             for other in stack.layers.values():
                 if other is layer or other.zmax > layer.zmin + 1e-12:
@@ -1360,6 +1372,8 @@ def solve_slab_mode(
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
     background_material: str = "air",
+    overrides: dict | None = None,
+    overlay: dict | None = None,
 ) -> ModeResult:
     """Solve for the 1D slab mode of a uniform layer stack.
 
@@ -1390,6 +1404,9 @@ def solve_slab_mode(
             When ``None`` (default) no field extraction is performed
             and ``result.fields`` is empty.
 
+        overrides: Explicit material properties, taking priority over the PDK.
+        overlay: PDK material definitions, taking priority over built-in models.
+
     Returns:
         :class:`ModeResult` with effective index, field profiles (if
         ``field_z_grid`` provided), and group index.
@@ -1410,7 +1427,8 @@ def solve_slab_mode(
 
     material_data = _resolve_materials_cached(
         used_materials,
-        overrides={},
+        overrides=overrides,
+        overlay=overlay,
         wavelength_um=wavelength,
     )
 
@@ -1430,7 +1448,7 @@ def solve_slab_mode(
     if field_z_grid is not None:
         field_x_grid = np.array([0.0])
         # Compute z_cell_center same way as _build_slab_xz_cell
-        z_min, z_max = cell_extent(stack)
+        z_min, z_max = cell_extent(stack, materials=material_data)
         if isinstance(z_margin, (tuple, list)):
             zm_bottom, zm_top = z_margin
         else:
@@ -1480,6 +1498,8 @@ def solve_cross_section_mode(
     field_y_grid: np.ndarray | None = None,
     field_z_grid: np.ndarray | None = None,
     background_material: str = "air",
+    overrides: dict | None = None,
+    overlay: dict | None = None,
 ) -> ModeResult:
     """Solve for the eigenmode of a 2D waveguide cross-section.
 
@@ -1537,6 +1557,9 @@ def solve_cross_section_mode(
         background_material: Material name for the MEEP default medium
             (fills space not covered by any layer). Default ``"air"``
             (epsilon=1.0).
+
+        overrides: Explicit material properties, taking priority over the PDK.
+        overlay: PDK material definitions, taking priority over built-in models.
 
     Returns:
         :class:`ModeResult` with effective index, field profiles (if
@@ -1625,7 +1648,8 @@ def solve_cross_section_mode(
 
     material_data = _resolve_materials_cached(
         used_materials,
-        overrides={},
+        overrides=overrides,
+        overlay=overlay,
         wavelength_um=wavelength,
     )
 
@@ -1656,7 +1680,7 @@ def solve_cross_section_mode(
     sim.init_sim()
 
     # Convert field_z_grid from absolute to MEEP frame
-    z_min, z_max = cell_extent(stack, component)
+    z_min, z_max = cell_extent(stack, component, material_data)
     if isinstance(z_margin, (tuple, list)):
         zm_bottom, zm_top = z_margin
     else:
@@ -1709,6 +1733,8 @@ def solve_slab_modes(
     background_material: str = "air",
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
+    overrides: dict | None = None,
+    overlay: dict | None = None,
 ) -> dict[int, ModeResult]:
     """Solve multiple slab mode bands with a single simulation setup.
 
@@ -1726,6 +1752,9 @@ def solve_slab_modes(
         eigensolver_tol: MPB convergence tolerance (default 1e-6).
         field_z_grid: 1D array of *z* coordinates for field sampling.
             ``None`` skips extraction for all bands.
+
+        overrides: Explicit material properties, taking priority over the PDK.
+        overlay: PDK material definitions, taking priority over built-in models.
 
     Returns:
         Dict mapping ``band_num`` to :class:`ModeResult`. Bands that fail
@@ -1750,7 +1779,8 @@ def solve_slab_modes(
 
     material_data = _resolve_materials_cached(
         used_materials,
-        overrides={},
+        overrides=overrides,
+        overlay=overlay,
         wavelength_um=wavelength,
     )
 
@@ -1769,7 +1799,7 @@ def solve_slab_modes(
     field_z_grid_meep: np.ndarray | None = None
     if field_z_grid is not None:
         field_x_grid = np.array([0.0])
-        z_min, z_max = cell_extent(stack)
+        z_min, z_max = cell_extent(stack, materials=material_data)
         if isinstance(z_margin, (tuple, list)):
             zm_bottom, zm_top = z_margin
         else:
@@ -1822,6 +1852,8 @@ def solve_slab_wavelength_sweep(
     eigensolver_tol: float = 1e-6,
     field_z_grid: np.ndarray | None = None,
     background_material: str = "air",
+    overrides: dict | None = None,
+    overlay: dict | None = None,
 ) -> dict[float, ModeResult]:
     """Solve slab mode at multiple wavelengths reusing cell geometry.
 
@@ -1845,6 +1877,9 @@ def solve_slab_wavelength_sweep(
         field_z_grid: 1D array of *z* coordinates for field sampling.
             ``None`` skips field extraction for all wavelengths.
 
+        overrides: Explicit material properties, taking priority over the PDK.
+        overlay: PDK material definitions, taking priority over built-in models.
+
     Returns:
         Dict mapping wavelength to :class:`ModeResult`.
     """
@@ -1858,8 +1893,20 @@ def solve_slab_wavelength_sweep(
     if stack is None:
         raise ValueError("stack must be a LayerStack, got None")
 
+    if not wavelengths:
+        return {}
+
+    used_materials = {layer.material for layer in stack.layers.values()}
+    used_materials.update(diel["material"] for diel in stack.dielectrics)
+    material_data = _resolve_materials_cached(
+        used_materials,
+        overrides=overrides,
+        overlay=overlay,
+        wavelength_um=wavelengths[0],
+    )
+
     # --- pre-compute geometry meta-data (wavelength-independent) ---
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, materials=material_data)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1905,7 +1952,8 @@ def solve_slab_wavelength_sweep(
     for wl in wavelengths:
         material_data = _resolve_materials_cached(
             used_materials,
-            overrides={},
+            overrides=overrides,
+            overlay=overlay,
             wavelength_um=wl,
         )
 
