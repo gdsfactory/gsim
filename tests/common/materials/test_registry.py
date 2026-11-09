@@ -131,3 +131,24 @@ def test_alias_can_use_a_builtin_fallback(monkeypatch) -> None:
     card, source = find_material_card("legacy_si")
     assert card is GSIM_MATERIAL_CARDS["Si"]
     assert source == "gsim"
+
+
+def test_exact_project_card_overrides_conflicting_alias() -> None:
+    from types import SimpleNamespace
+
+    from gsim.common.materials import (
+        canonical_material_name,
+        get_project_material_cards,
+    )
+
+    air = GSIM_MATERIAL_CARDS["Air"]
+    custom = air.model_copy(update={"name": "air", "info": {"distinct": True}})
+    pdk = SimpleNamespace(
+        material_cards={"Air": air, "air": custom},
+        material_aliases={"air": "Air", "ambient": "air"},
+    )
+    assert canonical_material_name("air", pdk) == "air"
+    assert canonical_material_name("ambient", pdk) == "air"
+    cards = get_project_material_cards(pdk)
+    assert cards["air"] is custom
+    assert cards["ambient"] is custom

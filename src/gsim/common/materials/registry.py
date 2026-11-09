@@ -30,13 +30,13 @@ def _project_materials(pdk: Any | None) -> tuple[Any, Mapping[str, MaterialCard]
 def canonical_material_name(material_name: str, pdk: Any | None = None) -> str:
     """Resolve declared PDK aliases and the built-in air alias, without case folding.
 
-    An exact project card takes precedence over a built-in alias. Distinct
+    An exact project card takes precedence over aliases. Distinct
     project names such as ``Air`` and ``air`` therefore remain distinct.
     """
     module, cards = _project_materials(pdk)
     aliases = get_project_material_aliases(module)
     seen = set()
-    while material_name in aliases:
+    while material_name not in cards and material_name in aliases:
         if material_name in seen:
             raise ValueError(f"Material alias cycle at {material_name!r}")
         seen.add(material_name)
@@ -73,9 +73,15 @@ GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
 }
 
 
-def get_project_material_cards(pdk: Any | None = None) -> Mapping[str, MaterialCard]:
-    """Return cards attached to a PDK object or PDK module."""
+def get_project_material_cards(
+    pdk: Any | None = None,
+    *,
+    include_aliases: bool = True,
+) -> Mapping[str, MaterialCard]:
+    """Return project cards, optionally including expanded compatibility names."""
     module, cards = _project_materials(pdk)
+    if not include_aliases:
+        return cards
     aliases = get_project_material_aliases(module)
     expanded = dict(cards)
     for alias in aliases:

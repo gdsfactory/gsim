@@ -97,3 +97,23 @@ def test_layer_alias_can_target_an_override_only_material(aliased_pdk, name):
     simulation.geometry("straight")
     snapshot = simulation.resolved.materials["Custom"]
     assert snapshot.refractive_index == pytest.approx(3.4)
+
+
+@pytest.mark.parametrize("override", [None, 1.3])
+def test_exact_card_collision_keeps_its_geometry_and_override(aliased_pdk, override):
+    from pdk_schema import Index, ScalarValue
+
+    custom = GSIM_MATERIAL_CARDS["Air"].model_copy(deep=True, update={"name": "air"})
+    assert custom.optical is not None
+    assert isinstance(custom.optical.permittivity, Index)
+    custom.optical.permittivity.n = ScalarValue(value=1.2, unit="")
+    aliased_pdk.MATERIAL_CARDS["air"] = custom
+    aliased_pdk.PDK.layer_stack.layers["core"].material = "air"
+    simulation = fdtd.Simulation(pdk=aliased_pdk)
+    if override is not None:
+        simulation.materials(overrides={"air": override})
+    simulation.geometry("straight")
+    assert simulation.resolved.layers["core"].material == "air"
+    snapshots = simulation._material_snapshots()
+    assert snapshots["air"].refractive_index == pytest.approx(override or 1.2)
+    assert snapshots["Air"].refractive_index == 1

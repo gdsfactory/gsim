@@ -391,7 +391,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             if self.pdk is None
             else getattr(self.pdk, "PDK", self.pdk)
         )
-        cards = dict(get_project_material_cards(self.pdk))
+        cards = dict(get_project_material_cards(self.pdk, include_aliases=False))
         cards.update(
             {
                 name: _constant_material_card(name, material.refractive_index)
