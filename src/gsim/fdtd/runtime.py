@@ -91,6 +91,7 @@ class RuntimeConfigMixin:
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
 
     def _validate_explicit_domain_contents(self) -> None:
@@ -222,6 +223,7 @@ class RuntimeConfigMixin:
         outward_sign = 1 if self.source.vertical_axis == "+z" else -1
         aperture_z_nm = bounds[5] if outward_sign > 0 else bounds[2]
         device_z_nm = self.resolved.bounds[1 if outward_sign > 0 else 0][2] * 1000
+        device_z_nm = min(max(device_z_nm, bounds[2]), bounds[5])
         monitor_heatmap = self.source.vertical_monitor_heatmap
         heatmap_config = (
             HeatmapConfig(

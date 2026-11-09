@@ -345,6 +345,10 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
+    clip_geometry: bool = Field(
+        default=False,
+        description="Deprecated: opt in to clipping material to explicit bounds.",
+    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
@@ -361,22 +365,10 @@ class Domain(_FiniteModel):
     @model_validator(mode="before")
     @classmethod
     def accept_legacy_clipping(cls, value: Any) -> Any:
-        """Load old calls and saved domains without exporting the obsolete flag."""
+        """Warn about the switch while retaining both values and saved settings."""
         if isinstance(value, Mapping) and "clip_geometry" in value:
             warn_legacy_clipping()
-            return {key: item for key, item in value.items() if key != "clip_geometry"}
         return value
-
-    @property
-    def clip_geometry(self) -> bool:
-        """Retain deprecated attribute reads during the API transition."""
-        warn_legacy_clipping()
-        return True
-
-    @clip_geometry.setter
-    def clip_geometry(self, _value: bool) -> None:
-        """Accept legacy assignments; explicit bounds always imply trimming."""
-        warn_legacy_clipping()
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod
@@ -417,6 +409,8 @@ class Domain(_FiniteModel):
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Keep failed assignments of competing axis controls atomic."""
+        if name == "clip_geometry":
+            warn_legacy_clipping()
         if name in {
             "padding_x",
             "padding_y",

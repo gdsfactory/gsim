@@ -378,9 +378,7 @@ def generate_mesh(
                 tags,
                 background_tag,
                 background_bounds,
-                allow_empty=any(
-                    bounds is not None for bounds in (x_bounds, y_bounds, z_bounds)
-                ),
+                allow_empty=bool(clip_geometry),
             )
             for name, tags in layer_volume_tags.items()
         }

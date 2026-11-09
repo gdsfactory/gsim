@@ -78,7 +78,7 @@ def native_stack():
 def _simulation(native_stack):
     module, component = native_stack
     simulation = fdtd.Simulation(pdk=module)
-    simulation.domain(z_bounds=(-0.2, 0.7))
+    simulation.domain(z_bounds=(-0.2, 0.7), clip_geometry=True)
     simulation.materials(background="Oxide")
     simulation.geometry(component, mesh_size_nm=700)
     simulation.source(port="o1", wavelength_um=1)
@@ -218,7 +218,9 @@ def test_crop_omits_disconnected_islands_and_external_materials(tmp_path, native
         layer=(5, 0), zmin=0.1, thickness=0.1, material="Unmodeled"
     )
     simulation = fdtd.Simulation(pdk=module)
-    simulation.domain(x_bounds=(0, 2), y_bounds=(-0.3, 0.3), z_bounds=(-0.2, 0.7))
+    simulation.domain(
+        x_bounds=(0, 2), y_bounds=(-0.3, 0.3), z_bounds=(-0.2, 0.7), clip_geometry=True
+    )
     simulation.materials(background="Oxide")
     simulation.source(port="o1")
     simulation.geometry(component, mesh_size_nm=700)
@@ -246,7 +248,9 @@ def test_sidewall_overhang_can_enter_window_from_external_footprint(
         width_to_z=1,
     )
     simulation = fdtd.Simulation(pdk=module)
-    simulation.domain(x_bounds=(0, 2), y_bounds=(-0.3, 0.3), z_bounds=(-0.2, 0.7))
+    simulation.domain(
+        x_bounds=(0, 2), y_bounds=(-0.3, 0.3), z_bounds=(-0.2, 0.7), clip_geometry=True
+    )
     simulation.materials(background="Oxide")
     simulation.source(port="o1")
     simulation.geometry(component, mesh_size_nm=700)

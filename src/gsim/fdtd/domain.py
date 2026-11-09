@@ -15,11 +15,10 @@ Padding = float | tuple[float, float]
 def warn_legacy_clipping() -> None:
     """Explain the replacement for the legacy clipping switch."""
     warnings.warn(
-        "clip_geometry is deprecated and ignored: explicit x_bounds, y_bounds, "
-        "or z_bounds now trim material geometry automatically. Omit "
-        "clip_geometry; enlarge the bounds if clipping is unwanted. The "
-        "compatibility alias will remain for at least two feature releases "
-        "and 12 months after the first released warning.",
+        "clip_geometry is deprecated. Its default remains False in 0.10.0: "
+        "explicit bounds must contain the geometry unless clip_geometry=True. "
+        "Automatic clipping from explicit bounds is planned for a later feature "
+        "release after this warning has shipped; keep the switch until then.",
         DeprecationWarning,
         stacklevel=3,
     )
@@ -120,6 +119,13 @@ def background_bounds_nm(
             raise FDTDGeometryError(
                 f"domain.{axis_name}_bounds lower bound must be smaller than "
                 "its upper bound."
+            )
+        if not clip_geometry and (
+            requested_lower > lower[axis] or requested_upper < upper[axis]
+        ):
+            raise FDTDGeometryError(
+                f"domain.{axis_name}_bounds {requested_bounds} must contain "
+                f"the geometry bounds ({lower[axis]}, {upper[axis]})."
             )
         final_bounds[axis] = requested_lower
         final_bounds[axis + 3] = requested_upper

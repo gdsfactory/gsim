@@ -33,7 +33,7 @@ def band_stack(fdtd_pdk_module):
 def _simulation(band_stack, **bounds):
     module, component = band_stack
     simulation = fdtd.Simulation(pdk=module)
-    simulation.domain(**bounds)
+    simulation.domain(clip_geometry=True, **bounds)
     simulation.source(port="o1")
     simulation.geometry(component, mesh_size_nm=700)
     return simulation

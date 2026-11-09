@@ -115,11 +115,11 @@ height. Existing string mappings retain their single-band behavior.
 ### Bounded PDK stacks
 
 Keep the PDK's LayerStack unchanged and specify the physical window directly.
-Explicit bounds automatically trim material geometry:
+Opt in to trimming material geometry with `clip_geometry=True`:
 
 ```python
 sim = fdtd.Simulation(pdk=pdk)
-sim.domain(z_bounds=(-0.5, 1.0))
+sim.domain(z_bounds=(-0.5, 1.0), clip_geometry=True)
 sim.geometry(component=waveguide)
 ```
 
@@ -137,21 +137,16 @@ warn. Source containment and guided-port face checks still apply.
 
 #### Migration for 0.10.0
 
-Previously, bounds smaller than the geometry required `clip_geometry=True`;
-the default `False` rejected them. Starting with the 0.10.0 feature release,
-specifying bounds expresses the clipping intent, so the extra switch is
-unnecessary. Remove `clip_geometry` from calls and saved domain settings.
-To retain all geometry, omit explicit bounds or enlarge them; do not rely on
-`clip_geometry=False` to reject a cropped window.
+`clip_geometry` is deprecated starting with 0.10.0, but remains functional
+through that release. Its default remains `False`: explicit bounds must
+contain the geometry unless `clip_geometry=True` is supplied. Both values
+remain in saved domain settings and the JSON schema. Explicit calls and
+assignments emit a `DeprecationWarning`.
 
-Old keyword calls, attribute access, and saved domain dictionaries remain
-accepted with a `DeprecationWarning`; either boolean value is ignored.
-The compatibility alias will remain for at least two feature releases and
-12 months after its first released warning. Newly exported domain settings
-and the JSON schema omit the flag. Cloud cache lookup uses generated input
-files; removing the legacy flag alone does not change those inputs. Changing
+Automatic clipping and removal of the switch are deferred to a later feature
+release, after this warning has shipped. Until then, keep the flag wherever
+clipping is required. Cloud cache lookup uses generated input files; changing
 the physical window can change the mesh, configuration, and cache identity.
-This intentional behavior change belongs in 0.10.0, not a 0.9.x patch release.
 
 Port centers and diagnostic windows follow the clipped active bands. Automatic
 diagnostic planes, including their cladding margins, are intersected with the
@@ -230,8 +225,9 @@ argument have been removed; configure `sim.domain(padding=...)` instead.
 
 Optional `x_bounds`, `y_bounds`, and `z_bounds` tuples set the non-PML physical
 domain in micrometers. Omitted axes remain automatically sized from the
-component, PDK stack, and padding. Explicit bounds trim material geometry and
-must contain sources; guided ports must remain on a domain face. Plane monitor
+component, PDK stack, and padding. With `clip_geometry=True`, explicit bounds
+trim material geometry and must contain sources; guided ports must remain on
+a domain face. Plane monitor
 windows are intersected with the domain and warn if cropped. The backend
 adds PML outside these bounds. The resulting box is written to `config.json` as
 `grid.non_pml_bounds`, in nanometers.
@@ -243,6 +239,7 @@ sim.domain(
     x_bounds=(0.0, 35.0),
     y_bounds=(-12.0, 12.0),
     z_bounds=(-1.0, 1.55),
+    clip_geometry=True,
 )
 ```
 

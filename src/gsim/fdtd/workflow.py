@@ -377,9 +377,9 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
             port_layer_map=self.geometry.port_layer_map,
-            z_bounds=self.domain.z_bounds,
-            x_bounds=self.domain.x_bounds,
-            y_bounds=self.domain.y_bounds,
+            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
+            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
+            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
         )
         from gsim.fdtd.geometry_clipping import warn_geometry_clipping
 
@@ -472,6 +472,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
         resolve_fiber_media(
