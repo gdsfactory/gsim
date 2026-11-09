@@ -2,6 +2,7 @@
 
 import json
 
+import gdsfactory as gf
 import meshio
 import numpy as np
 import pytest
@@ -10,6 +11,18 @@ from gdsfactory.technology import LayerLevel
 from gsim import fdtd
 from gsim.common.pdk import resolve_passive_pcell
 from gsim.fdtd.domain import background_bounds_nm
+
+
+@pytest.fixture(autouse=True)
+def active_test_pdk(fdtd_pdk_module):
+    """Activate this test's PDK and restore the previous process state."""
+    try:
+        previous_pdk = gf.get_active_pdk()
+    except ValueError:
+        previous_pdk = gf.gpdk.PDK
+    fdtd_pdk_module.PDK.activate(force=True)
+    yield
+    previous_pdk.activate(force=True)
 
 
 @pytest.fixture
