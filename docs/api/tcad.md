@@ -20,6 +20,35 @@ It brings `devsim` and `scipy-openblas32`, which gives DEVSIM a BLAS/LAPACK libr
 macOS it needs macOS 15 or later on Apple silicon, the only macOS wheel DEVSIM ships. `import gsim.tcad` works without
 DEVSIM; `solve()` and `sweep()` raise an error naming the extra.
 
+### BLAS/LAPACK library
+
+DEVSIM loads its BLAS/LAPACK library once, while it is first imported, from the file named by the `DEVSIM_MATH_LIBS`
+environment variable. You normally set nothing. Before gsim first imports DEVSIM it sets three variables, so DEVSIM uses the
+OpenBLAS that `scipy-openblas32` ships:
+
+- `DEVSIM_MATH_LIBS`: the first `libscipy_openblas*` shared library in the folder that `scipy_openblas32.get_lib_dir()`
+  returns (`.dll` on Windows, `.dylib` on macOS, `.so` otherwise).
+- `DEVSIM_BLAS_PREFIX`: `scipy_`.
+- `DEVSIM_BLAS_SUFFIX`: `_`.
+
+The prefix and suffix are there because `scipy-openblas32` exports its routines under prefixed names, such as `scipy_dgetrf_`.
+DEVSIM 2.11.1 and later looks each routine up as prefix + name + suffix.
+
+gsim leaves all three variables alone in these cases:
+
+- DEVSIM is already imported in the process, for example by your own `import devsim`.
+- `DEVSIM_MATH_LIBS` is already set. gsim then sets neither the prefix nor the suffix, so those two are yours to set when your
+  library exports prefixed or suffixed names.
+- `scipy-openblas32` is not installed, or its folder holds no `libscipy_openblas*` library. DEVSIM then runs its own
+  library discovery.
+
+If DEVSIM cannot find a BLAS/LAPACK library, gsim raises an `ImportError` that names these remedies. DEVSIM cannot initialise
+twice in one process, so restart Python (or the notebook kernel) after you change any of these variables.
+
+On Windows 11 with DEVSIM 2.11.2, a fresh process with only `DEVSIM_MATH_LIBS` set to scipy-openblas32's
+`libscipy_openblas.dll` also worked. If DEVSIM fails to initialise after you set `DEVSIM_MATH_LIBS` by hand, set
+`DEVSIM_BLAS_PREFIX=scipy_` and `DEVSIM_BLAS_SUFFIX=_` as well, the values gsim uses for this library.
+
 ## Configure and solve
 
 The simulation is set up by physical concern, like [`gsim.fdtd.Simulation`][gsim.fdtd.Simulation]:
