@@ -204,9 +204,10 @@ def test_air_spelling_preserves_automatic_mode_domain(air: str) -> None:
         layer_type="dielectric",
     )
     stack.dielectrics.append(
-        {"name": "air_padding", "material": air, "zmin": -100, "zmax": 100}
+        {"name": "air_box", "material": air, "zmin": -100, "zmax": 100}
     )
     sim.geometry.stack = stack
+    sim.mode_solver.port = "o1"
     assert sim._stack_material_extent() == expected
     assert sim._resolve_mode_solver_z_window()[0][0] > -100
 

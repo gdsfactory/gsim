@@ -1996,8 +1996,13 @@ def _order_mode_entries(entries, mesh_orders=None):
 
 def _mode_stack_z_extent(config):
     entries = list(config["layer_stack"]) + list(config.get("dielectrics", []))
-    solid = [entry for entry in entries if entry["material"] not in {"Air", "air"}]
-    active = solid or entries
+    active = [
+        entry for entry in entries
+        if not (
+            entry["material"] in {"Air", "air"}
+            and entry.get("name") in {"air_box", "air_box_bottom"}
+        )
+    ] or entries
     return (
         min(entry["zmin"] for entry in active),
         max(entry["zmax"] for entry in active),

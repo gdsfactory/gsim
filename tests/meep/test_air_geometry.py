@@ -190,15 +190,12 @@ def test_patterned_void_is_preserved_inside_silicon_with_air_background(air):
 
 @pytest.mark.parametrize("air", ["Air", "air"])
 @pytest.mark.parametrize("bounds", ["auto", (-1.5, 1.5)])
-def test_actual_mode_cells_and_grids_honor_reported_domain(
+def test_actual_cross_section_cells_and_grids_honor_reported_domain(
     fake_mode_solver, air, bounds
 ):
-    import ast
-
     from gsim.common.stack import LayerStack
     from gsim.meep import Simulation
     from gsim.meep.models.api import Domain
-    from gsim.meep.script import _MEEP_MODE_SOLVER_TEMPLATE
 
     component = gf.c.straight(length=2)
     stack = LayerStack(
@@ -226,6 +223,8 @@ def test_actual_mode_cells_and_grids_honor_reported_domain(
     )
     setup = Simulation(domain=Domain(z_bounds=bounds))
     setup.geometry.stack = stack
+    setup.geometry.component = component
+    setup.mode_solver.port = "o1"
     window, margins = setup._resolve_mode_solver_z_window()
     expected = (-1, 0.7) if bounds == "auto" else bounds
     assert window == pytest.approx(expected)
@@ -247,30 +246,125 @@ def test_actual_mode_cells_and_grids_honor_reported_domain(
         z_margin=margins,
         pml_thickness=0.2,
     )
-    for plane in ("slab", "xz", "yz"):
+    for plane in ("xz", "yz"):
         builder = getattr(
             fake_mode_solver,
-            "_build_slab_xz_cell"
-            if plane == "slab"
-            else f"_build_component_{plane}_cell",
+            f"_build_component_{plane}_cell",
         )
-        kwargs = (
-            {}
-            if plane == "slab"
-            else {
-                "component": component,
-                "x_span" if plane == "xz" else "y_span": 2,
-                "y_cut" if plane == "xz" else "x_cut": 0 if plane == "xz" else 1,
-            }
-        )
+        kwargs = {
+            "component": component,
+            "x_span" if plane == "xz" else "y_span": 2,
+            "y_cut" if plane == "xz" else "x_cut": 0 if plane == "xz" else 1,
+        }
         _, size = builder(**common, **kwargs)
         assert size.z == pytest.approx(expected_span)
-    grid = fake_mode_solver.mode_z_grid(stack, 20, z_margin=margins, pml_thickness=0.2)
+    grid = fake_mode_solver.mode_z_grid(
+        stack, 20, z_margin=margins, pml_thickness=0.2, component=component
+    )
     half_step = expected_span / 40
     assert grid[0] == pytest.approx(expected[0] - 0.2 + half_step)
     assert grid[-1] == pytest.approx(expected[1] + 0.2 - half_step)
 
-    # Execute the generated cloud builder against the same numeric reference.
+
+@pytest.mark.parametrize("air", ["Air", "air"])
+@pytest.mark.parametrize("air_only", [False, True])
+@pytest.mark.parametrize("where", ["cross_section", "slab"])
+@pytest.mark.parametrize("uniform", [False, True])
+def test_mode_window_contains_modeled_air(
+    fake_mode_solver, air, air_only, where, uniform
+):
+    import ast
+
+    from gsim.common.stack import LayerStack
+    from gsim.meep import Simulation
+    from gsim.meep.script import _MEEP_MODE_SOLVER_TEMPLATE
+
+    component = gf.c.straight(length=2).copy()
+    component.add_polygon([(0, -0.1), (2, -0.1), (2, 0.1), (0, 0.1)], layer=(2, 0))
+    void = Layer(
+        name="void",
+        material=air,
+        gds_layer=(2, 0),
+        zmin=0,
+        zmax=2,
+        thickness=2,
+        layer_type="dielectric",
+    )
+    layers = {} if uniform else {"void": void}
+    if not air_only:
+        layers["core"] = void.model_copy(
+            update={
+                "name": "core",
+                "material": "Si",
+                "gds_layer": (1, 0),
+                "zmax": 0.2,
+                "thickness": 0.2,
+            }
+        )
+    stack = LayerStack(
+        layers=layers,
+        dielectrics=[{"name": "void", "material": air, "zmin": 0, "zmax": 2}]
+        if uniform
+        else [],
+    )
+    setup = Simulation()
+    setup.geometry(component=component, stack=stack)
+    setup.mode_solver(
+        where=where,
+        port="o1" if where == "cross_section" else None,
+        background_material="SiO2",
+    )
+    window, margins = setup._resolve_mode_solver_z_window()
+    assert window == pytest.approx((-0.5, 2.5))
+    setup.domain.z_bounds = (-0.5, 1.5)
+    with pytest.raises(ValueError, match="must contain"):
+        setup._resolve_mode_solver_z_window()
+
+    common = dict(
+        stack=stack,
+        materials={"Si": object(), air: object()},
+        resolution=100,
+        z_margin=margins,
+        pml_thickness=0.2,
+    )
+    if where == "cross_section":
+        geometry = _precompute_cross_section_geometry(
+            component,
+            stack,
+            port="o1",
+            y_span=2,
+            z_margin=margins,
+            pml_thickness=0.2,
+            resolution=100,
+        )
+        assert geometry.cell_z_span == pytest.approx(3.4)
+        for block in geometry.blocks:
+            if block.material == air:
+                assert (
+                    abs(block.z_center) + block.z_size / 2 <= geometry.cell_z_span / 2
+                )
+        for plane in ("xz", "yz"):
+            builder = getattr(fake_mode_solver, f"_build_component_{plane}_cell")
+            _, size = builder(
+                **common,
+                component=component,
+                **{
+                    "x_span" if plane == "xz" else "y_span": 2,
+                    "y_cut" if plane == "xz" else "x_cut": 0 if plane == "xz" else 1,
+                },
+            )
+            assert size.z == pytest.approx(3.4)
+        grid_component = component
+    else:
+        _, size = fake_mode_solver._build_slab_xz_cell(**common)
+        assert size.z == pytest.approx(3.4)
+        grid_component = None
+    grid = fake_mode_solver.mode_z_grid(
+        stack, 20, z_margin=margins, pml_thickness=0.2, component=grid_component
+    )
+    assert grid[[0, -1]] == pytest.approx([-0.7 + 3.4 / 40, 2.7 - 3.4 / 40])
+
+    # Execute the generated slab builder against the same numeric reference.
     tree = ast.parse(_MEEP_MODE_SOLVER_TEMPLATE)
     functions = [
         node
@@ -299,4 +393,4 @@ def test_actual_mode_cells_and_grids_honor_reported_domain(
         "resolution": 100,
     }
     _, cloud_size = namespace["build_slab_cell"](payload)
-    assert cloud_size.z == pytest.approx(expected_span)
+    assert cloud_size.z == pytest.approx(3.4)

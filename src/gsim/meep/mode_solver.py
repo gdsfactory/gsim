@@ -294,7 +294,7 @@ def _build_component_xz_cell(
     """
     mp = _import_meep()
 
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, component)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -457,7 +457,7 @@ def _build_component_yz_cell(
     """
     mp = _import_meep()
 
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, component)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1022,6 +1022,8 @@ def mode_z_grid(
     n_points: int,
     z_margin: float | tuple[float, float] = 0.0,
     pml_thickness: float = 0.0,
+    *,
+    component: Any | None = None,
 ) -> np.ndarray:
     """Compute Z-axis coordinates in absolute frame matching layer ``zmin``/``zmax``.
 
@@ -1041,13 +1043,14 @@ def mode_z_grid(
             When set, extends the span by ``pml_thickness`` on each side
             to match the MEEP cell including PML boundaries.
             Must match the ``pml_thickness`` passed to the solver.
+        component: Layout used for cross-section solving. Omit for a slab.
 
     Returns:
         ``np.ndarray`` of *z* coordinates in µm (absolute frame).
     """
     import numpy as np
 
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, component)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1653,7 +1656,7 @@ def solve_cross_section_mode(
     sim.init_sim()
 
     # Convert field_z_grid from absolute to MEEP frame
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, component)
     if isinstance(z_margin, (tuple, list)):
         zm_bottom, zm_top = z_margin
     else:

@@ -138,7 +138,7 @@ def _precompute_cross_section_geometry(
     else:
         raise ValueError("Either port or position must be specified")
 
-    z_min, z_max = cell_extent(stack)
+    z_min, z_max = cell_extent(stack, component)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -669,7 +669,7 @@ class Simulation(CloudJobMixin, BaseModel):
     def _stack_material_extent(
         self, stack: Any | None = None
     ) -> tuple[float, float] | None:
-        """Return (zmin, zmax) spanning all non-air layers and dielectrics.
+        """Return (zmin, zmax) spanning the modeled layers and dielectrics.
 
         This is the reference used by auto z-crop and by the fiber-aware
         margin expansion: it preserves the full fabricated stack (BOX,
@@ -679,7 +679,7 @@ class Simulation(CloudJobMixin, BaseModel):
         stack = stack if stack is not None else self.geometry.stack
         if stack is None:
             return None
-        return material_extent(stack)
+        return material_extent(stack, self.geometry.component)
 
     def _resolve_xy_background_material(self, component: Any, stack: Any) -> str:
         """Resolve the blanket medium represented by a collapsed XY Z cut."""
@@ -720,9 +720,16 @@ class Simulation(CloudJobMixin, BaseModel):
         self,
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Resolve mode-solver bounds and equivalent internal margins."""
-        extent = self._stack_material_extent()
+        component = self.geometry.component
+        if self.mode_solver.where == "slab" or (
+            self.mode_solver.where == "auto"
+            and self.mode_solver.port is None
+            and self.mode_solver.position is None
+        ):
+            component = None
+        extent = material_extent(self.geometry.stack, component)
         if extent is None:
-            raise ValueError("Could not resolve a non-air Z extent for mode solving.")
+            raise ValueError("Could not resolve a modeled Z extent for mode solving.")
         stack_low, stack_high = extent
 
         if self.domain.z_bounds != "auto":
@@ -1309,7 +1316,13 @@ class Simulation(CloudJobMixin, BaseModel):
             else None
         )
         field_z_grid = (
-            mode_z_grid(stack, n_field_z, z_margin, pml_thickness)
+            mode_z_grid(
+                stack,
+                n_field_z,
+                z_margin,
+                pml_thickness,
+                component=component if where_effective == "cross_section" else None,
+            )
             if n_field_z > 0
             else None
         )
