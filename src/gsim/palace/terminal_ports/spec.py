@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from gsim.common.modes import Conductor, Extent
+from gsim.palace._path_sampling import warn_legacy_path_sampling
 from gsim.palace.line_impedance import PATH_CLEARANCE_FRACTION
 
 if TYPE_CHECKING:
@@ -321,7 +322,7 @@ def declare_terminal_paths(
     spec: TerminalPortSpec,
     domain: Extent,
     *,
-    nsamples: int = 100,
+    nsamples: int | None = None,
     clearance_fraction: float = PATH_CLEARANCE_FRACTION,
 ) -> list[int]:
     """Register every terminal's voltage path on a boundary-mode solve.
@@ -334,7 +335,8 @@ def declare_terminal_paths(
         sim: The boundary-mode simulation about to be solved.
         spec: The port's conductors.
         domain: The meshed domain (um), as for :func:`terminal_paths`.
-        nsamples: Quadrature order of each line integral in Palace.
+        nsamples: Deprecated and ignored; supplying a count emits one
+            ``DeprecationWarning``. Omit it to let Palace integrate the paths.
         clearance_fraction: Inset of the path ends, as for :func:`terminal_paths`.
 
     Returns:
@@ -342,12 +344,12 @@ def declare_terminal_paths(
         A path named ``"{port}:{terminal}"`` that was declared before is
         replaced and keeps its index.
     """
+    warn_legacy_path_sampling(nsamples)
     paths = terminal_paths(spec, domain, clearance_fraction=clearance_fraction)
     return [
         sim.add_impedance_path(
             f"{spec.name}:{name}",
             voltage=[[h, v] for h, v in points],
-            nsamples=nsamples,
         )
         for name, points in paths.items()
     ]

@@ -6,13 +6,20 @@ import contextlib
 import csv
 import json
 import logging
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from gsim.common.s_matrix import SMatrix, SMatrixRun, assemble_s_matrix
+
 logger = logging.getLogger(__name__)
+
+# The runner's CSV keeps 6 decimals of magnitude and 4 of phase in degrees.
+_REPEATED_SAMPLE_ATOL = 1e-5
 
 
 class SParameterResult(BaseModel):
@@ -365,6 +372,184 @@ class SParameterResult(BaseModel):
             ),
         )
         return fig
+
+
+def s_matrix(
+    results: SParameterResult | Sequence[SParameterResult],
+    *,
+    port_names: Sequence[str] | None = None,
+    assume_reciprocal: bool = False,
+    assume_unmeasured_zero: bool = False,
+) -> SMatrix:
+    """Build an S-matrix from one result per excited port.
+
+    One Meep run fills one S-matrix column, the entries ``S<receive><source>`` of
+    its source port, so a matrix needs a run per port or an explicit assumption for
+    what no run measured. Meep's values are in time convention exp(-iwt) and are
+    conjugated here to gsim's exp(+jwt).
+
+    Meep's monitors sit inward from each port centre, by ``source_port_offset`` at
+    non-source ports and by ``source_port_offset + distance_source_to_monitors`` at
+    the source port. So in a matrix merged from several runs, the diagonal and
+    off-diagonal entries are referenced to different planes: a reflection's phase
+    differs by ``2 * beta * distance_source_to_monitors``, with ``beta`` the mode's
+    propagation constant, from what the transmission entries received at that port
+    imply. gsim cannot correct this from the result file, which holds neither the
+    offsets nor the mode index. Transmission phases are consistent between runs when
+    the ports share one ``beta``, but do not rely on reflection phases in circuits
+    sensitive to them, such as resonators. A matrix merged from several runs therefore
+    gets a WARNING, which names each nonzero measured reflection and each entry copied
+    by reciprocity. One run gives each port a single plane, so it does not warn.
+
+    Samples that repeat a wavelength, from ``wavelength_span=0`` or a span finer than
+    the CSV's 6 decimals, become one if their values agree. Meep's entry names cannot
+    be read from 10 ports up, because ``S111`` may be port 1 from 11 or port 11 from 1,
+    so such results are refused.
+
+    Args:
+        results: One result or a sequence, all with the same ports and wavelengths.
+        port_names: Names for the ports by 1-based index, covering at least the
+            highest index in the results. Ports default to ``port_1``, ``port_2``
+            and so on up to that index, as ``SParameterResult.port_names`` has them.
+        assume_reciprocal: Copy a missing S(a,b) from a measured S(b,a).
+        assume_unmeasured_zero: Set entries that are still missing to zero.
+
+    Returns:
+        The matrix, with ``sax_model()`` and ``write_touchstone()``. ``measured`` is
+        False for every entry filled by an assumption.
+
+    Raises:
+        ValueError: If there are no results; a result has no S-parameters (a preview
+            run); an entry is not named ``S<receive><source>`` with both digits
+            nonzero, which includes the ``S<i>0`` of a fiber source and any entry of a
+            device with 10 or more ports; ``port_names`` misses an index; samples
+            repeat a wavelength with different values; port sets or wavelength grids
+            differ; an entry appears twice; every sample is invalid; or an entry is
+            missing and neither flag fills it.
+    """
+    runs = [results] if isinstance(results, SParameterResult) else results
+    matrix = assemble_s_matrix(
+        [
+            _s_matrix_run(result, f"Meep result {number}", port_names)
+            for number, result in enumerate(runs, start=1)
+        ],
+        assume_reciprocal=assume_reciprocal,
+        assume_unmeasured_zero=assume_unmeasured_zero,
+    )
+    _warn_if_reference_planes_differ(matrix, assume_reciprocal=assume_reciprocal)
+    return matrix
+
+
+def _warn_if_reference_planes_differ(
+    matrix: SMatrix, *, assume_reciprocal: bool
+) -> None:
+    """Warn when a merged matrix holds entries referenced to different port planes.
+
+    Each run moves the monitor of its own source port further inward, so a port's
+    plane differs between the runs that source it and those that receive at it. The
+    shifts cancel in S(a,b) against S(b,a) only when both ports share one beta, which a
+    result file cannot show, so every merged matrix warns unless it holds no phase at
+    all. One run has one plane per port, which also makes its reciprocal copies exact.
+    """
+    measured = matrix.measured
+    if np.count_nonzero(measured.any(axis=0)) < 2 or not np.any(matrix.s[:, measured]):
+        return
+    reflections = [
+        f"S({port},{port})"
+        for i, port in enumerate(matrix.ports)
+        if measured[i, i] and np.any(matrix.s[:, i, i])
+    ]
+    copies = [
+        f"S({receive},{source})"
+        for i, receive in enumerate(matrix.ports)
+        for j, source in enumerate(matrix.ports)
+        if assume_reciprocal and measured[j, i] and not measured[i, j]
+    ]
+    logger.warning(
+        "Meep results merged from several runs mix port reference planes, because the "
+        "source-port monitor sits distance_source_to_monitors further inward. "
+        "Transmission phases agree between runs only if the ports share one "
+        "propagation constant, which the results cannot show.%s Magnitudes are "
+        "unaffected. Do not rely on these phases in resonator-like circuits.",
+        f" Phases of {', '.join(reflections + copies)} do not fit the other entries."
+        if reflections or copies
+        else "",
+    )
+
+
+def _s_matrix_run(
+    result: SParameterResult, label: str, port_names: Sequence[str] | None
+) -> SMatrixRun:
+    """Describe one result for assembly, converting exp(-iwt) to exp(+jwt)."""
+    indices = {name: _entry_indices(name, label) for name in result.s_params}
+    highest = max((max(pair) for pair in indices.values()), default=0)
+    if port_names is None:
+        ports = [f"port_{index}" for index in range(1, highest + 1)]
+    elif len(port_names) < highest:
+        raise ValueError(
+            f"{label} measures port {highest}, but port_names has only "
+            f"{len(port_names)} names: {list(port_names)}."
+        )
+    else:
+        ports = list(port_names)
+    wavelength_um = np.asarray(result.wavelengths, dtype=float)
+    entries = {
+        (ports[receive - 1], ports[source - 1]): np.conj(
+            np.asarray(result.s_params[name], dtype=complex)
+        )
+        for name, (receive, source) in indices.items()
+    }
+    wavelength_um, entries = _collapse_repeated_samples(wavelength_um, entries, label)
+    return SMatrixRun(
+        label=label,
+        wavelength_um=wavelength_um,
+        ports=ports,
+        entries=entries,
+        valid=np.ones(wavelength_um.size, dtype=bool),
+    )
+
+
+def _collapse_repeated_samples(
+    wavelength_um: np.ndarray,
+    entries: dict[tuple[str, str], np.ndarray],
+    label: str,
+) -> tuple[np.ndarray, dict[tuple[str, str], np.ndarray]]:
+    """Reduce each repeated wavelength to one sample, refusing repeats that disagree."""
+    unique_um, first, group = np.unique(
+        wavelength_um, return_index=True, return_inverse=True
+    )
+    if unique_um.size == wavelength_um.size:
+        return wavelength_um, entries
+    for values in entries.values():
+        differs = np.abs(values - values[first][group]) > _REPEATED_SAMPLE_ATOL
+        if differs.any():
+            raise ValueError(
+                f"{label} repeats wavelength {wavelength_um[differs][0]} um with "
+                "different values, so its samples cannot be reduced to one. Use a "
+                "wider wavelength span or fewer frequencies."
+            )
+    return unique_um, {key: values[first] for key, values in entries.items()}
+
+
+def _entry_indices(name: str, label: str) -> tuple[int, int]:
+    """Return the 1-based ``(receive, source)`` port indices of an entry name."""
+    if re.fullmatch(r"S[0-9]{3,}", name):
+        raise ValueError(
+            f"{label}: cannot read {name!r} as S<receive><source>. Meep's entry names "
+            "are ambiguous from 10 ports up, so export supports at most 9 ports."
+        )
+    match = re.fullmatch(r"S([0-9])([0-9])", name)
+    if match and match[2] == "0":
+        raise ValueError(
+            f"{label}: {name} comes from a fiber source. It is normalised to launched "
+            "flux, so it is not a column of a modal S-matrix."
+        )
+    if match is None or match[1] == "0":
+        raise ValueError(
+            f"{label}: cannot read {name!r} as S<receive><source> with 1-based port "
+            "digits."
+        )
+    return int(match[1]), int(match[2])
 
 
 class ModeResult(BaseModel):
@@ -802,6 +987,8 @@ class ModeResult(BaseModel):
         for i, comp in enumerate(comps):
             ax_i = axes[i]
             data = self._apply_norm(self.fields[comp], norm)
+            # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+            kwargs.setdefault("rasterized", True)
             im = ax_i.pcolormesh(
                 h_grid,
                 z,
@@ -820,6 +1007,7 @@ class ModeResult(BaseModel):
                     cmap="Greys",
                     alpha=0.25,
                     shading="auto",
+                    rasterized=True,
                 )
             if geometry:
                 self._draw_geometry_overlay_2d(ax_i, **(geom_kwargs or {}))
@@ -1186,6 +1374,8 @@ class ModeResult(BaseModel):
         else:
             fig, ax = plt.subplots(figsize=figsize)
 
+        # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+        kwargs.setdefault("rasterized", True)
         im = ax.pcolormesh(
             h_grid,
             self.z_grid,

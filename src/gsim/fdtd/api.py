@@ -17,6 +17,8 @@ from pydantic import (
 
 from gsim.common.config import MutableModel as _MutableModel
 from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.mode_selection import ModeSelection
+from gsim.fdtd.monitor_names import resolve_monitor_name
 
 Vector3 = tuple[float, float, float]
 Axis = Literal["x", "y", "z"]
@@ -42,7 +44,9 @@ class Geometry(BaseModel):
 
     component: Any | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
-    port_layer_map: dict[tuple[int, int], str] = Field(default_factory=dict)
+    port_layer_map: dict[tuple[int, int], str | tuple[str, ...]] = Field(
+        default_factory=dict
+    )
     mesh_size_nm: float = Field(default=1000.0, gt=0)
     geometry_tolerance_nm: float = Field(default=10.0, gt=0, le=30.0)
     _resolver: Any = PrivateAttr(default=None)
@@ -56,7 +60,7 @@ class Geometry(BaseModel):
         component: Any | None = None,
         *,
         settings: Mapping[str, Any] | None = None,
-        port_layer_map: Mapping[tuple[int, int], str] | None = None,
+        port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]] | None = None,
         mesh_size_nm: float | None = None,
         geometry_tolerance_nm: float | None = None,
     ) -> Any:
@@ -177,6 +181,7 @@ class PortSource(Source):
 
     type: Literal["port"] = "port"
     port: str | None = Field(default=None, min_length=1)
+    mode: ModeSelection | None = None
     vertical_axis: Literal["+z", "-z"] = "+z"
     vertical_aperture_width_um: float | None = Field(default=None, gt=0)
     vertical_waist_radius_um: float | None = Field(default=None, gt=0)
@@ -292,7 +297,7 @@ class Monitors:
 
     def remove(self, name: str) -> PlaneMonitor:
         """Remove and return one named plane monitor."""
-        return self._items.pop(name)
+        return self._items.pop(resolve_monitor_name(name, self._items))
 
     def clear(self) -> None:
         """Remove all explicitly configured plane monitors."""
@@ -300,7 +305,7 @@ class Monitors:
 
     def __getitem__(self, name: str) -> PlaneMonitor:
         """Return one monitor by name."""
-        return self._items[name]
+        return self._items[resolve_monitor_name(name, self._items)]
 
     def __iter__(self) -> Iterator[PlaneMonitor]:
         """Iterate over monitors in insertion order."""
@@ -334,6 +339,13 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
+    clip_geometry: bool = Field(
+        default=False,
+        description=(
+            "Clip material geometry to explicit bounds and skip stack films "
+            "outside the vertical window."
+        ),
+    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
@@ -419,6 +431,7 @@ __all__ = [
     "LineCurrentSource",
     "Material",
     "Materials",
+    "ModeSelection",
     "Monitors",
     "PlaneMonitor",
     "PortSource",

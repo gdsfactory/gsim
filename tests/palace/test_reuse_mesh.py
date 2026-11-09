@@ -1405,7 +1405,7 @@ def test_wave_port_modes_can_change_on_a_reused_mesh(
 def test_default_driven_receiver_writes_an_absorbing_boundary(
     meshed_eigen, fake_gmsh, tmp_path
 ) -> None:
-    """absorbing_boundary is not copied: DrivenSim's default True applies."""
+    """absorbing_boundary is not copied: DrivenSim's unset default absorbs."""
     fake_gmsh.allowed = False
     receiver = DrivenSim()
     receiver.set_output_dir(tmp_path / "driven")
@@ -1416,7 +1416,7 @@ def test_default_driven_receiver_writes_an_absorbing_boundary(
     config = json.loads(receiver.write_config(validate_mesh=False).read_text())
 
     assert meshed_eigen.absorbing_boundary is False
-    assert receiver.absorbing_boundary is True
+    assert receiver.absorbing_boundary is None
     outer = meshed_eigen.mesh_groups["boundary_surfaces"]["absorbing"]["phys_group"]
     assert config["Boundaries"]["Absorbing"]["Attributes"] == [outer]
     assert _excitations(config) == [1, False]
@@ -1782,13 +1782,21 @@ def _boundaries(sim) -> dict:
     return json.loads(path.read_text())["Boundaries"]
 
 
-@pytest.mark.parametrize("receiver_cls", [DrivenSim, EigenmodeSim])
+@pytest.mark.parametrize(
+    ("receiver_cls", "absorbing"),
+    [(DrivenSim, True), (DrivenSim, None), (EigenmodeSim, True)],
+    ids=["driven", "driven-unset", "eigenmode"],
+)
 def test_absorbing_receiver_of_a_periodic_mesh_is_refused_at_write_config(
-    receiver_cls, periodic_eigen, make_sim, tmp_path
+    receiver_cls, absorbing, periodic_eigen, make_sim, tmp_path
 ) -> None:
-    """The periodic faces left the absorbing group; only Floquet conditions them."""
+    """The periodic faces left the absorbing group; only Floquet conditions them.
+
+    A driven sim's unset absorbing_boundary absorbs when there are no wave
+    ports.
+    """
     receiver = make_sim(receiver_cls, tmp_path / "receiver")
-    receiver.absorbing_boundary = True
+    receiver.absorbing_boundary = absorbing
     receiver.reuse_mesh(periodic_eigen)
 
     with pytest.raises(ValueError, match=r"periodic_axis='x'.*absorbing_boundary"):

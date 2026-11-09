@@ -285,6 +285,7 @@ def _multimode_entries(
     first_free_index: int,
     wave_ports: list[dict[str, object]],
     ports: list[PalacePort],
+    stack: LayerStack | None = None,
 ) -> list[PortModeEntry]:
     """Add the observation entries of the multimode wave ports to ``wave_ports``.
 
@@ -300,6 +301,10 @@ def _multimode_entries(
         first_free_index: The first index after all ports.
         wave_ports: The ``WavePort`` entries so far; extended in place.
         ports: Every port of the simulation.
+        stack: The layer stack. With it, ports at one centre and
+            orientation are on one face only where their generated faces
+            overlap, so ports on layers that do not overlap in z are
+            separate faces. Without it the centre and orientation decide.
 
     Returns:
         The map from Palace index to (port, mode, active), in index order.
@@ -309,12 +314,18 @@ def _multimode_entries(
     """
     if not multimode:
         return []
-    faces = [
-        (p.name, (float(p.center[0]), float(p.center[1])), float(p.orientation))
-        for p in ports
-        if p.port_type == PortType.WAVEPORT
-    ]
-    if pairs := same_face_pairs(faces):
+    if stack is None:
+        faces = [
+            (p.name, (float(p.center[0]), float(p.center[1])), float(p.orientation))
+            for p in ports
+            if p.port_type == PortType.WAVEPORT
+        ]
+        pairs = same_face_pairs(faces)
+    else:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        pairs = same_surface_pairs(ports, stack)
+    if pairs:
         first, second = pairs[0]
         raise ValueError(
             f"Wave ports {first!r} and {second!r} are on the same face. A "
@@ -694,6 +705,13 @@ def generate_palace_config(
     conductors: list[dict[str, object]] = []
     conductor_attrs: list[int] = []
 
+    # Palace >= 0.19 reads an interior Conductivity boundary as a thin film
+    # unless it is cracked. A 3D conductor is meshed as a shell with the
+    # dielectric inside, so its boundary is interior and "Crack" keeps it a
+    # thick conductor. A native 2D conductor is a hole in the mesh, so its
+    # boundary is exterior and takes no key.
+    crack_conductors = simulation_type in ("driven", "eigenmode")
+
     for name, info in groups["conductor_surfaces"].items():
         # Extract layer name from "layer_xy" / "layer_z" (3D) or use
         # the raw key directly for native 2D conductor boundaries.
@@ -701,13 +719,14 @@ def generate_palace_config(
         layer = stack.layers.get(layer_name)
         if layer:
             mat_props = stack_materials.get(layer.material, {})
-            conductors.append(
-                {
-                    "Attributes": [info["phys_group"]],
-                    "Conductivity": mat_props.get("conductivity", 5.8e7),
-                    "Thickness": layer.zmax - layer.zmin,
-                }
-            )
+            conductor: dict[str, object] = {
+                "Attributes": [info["phys_group"]],
+                "Conductivity": mat_props.get("conductivity", 5.8e7),
+                "Thickness": layer.zmax - layer.zmin,
+            }
+            if crack_conductors:
+                conductor["Crack"] = True
+            conductors.append(conductor)
             conductor_attrs.append(info["phys_group"])
 
     # Handle PEC surfaces (planar conductors + PEC blocks)
@@ -935,7 +954,7 @@ def generate_palace_config(
 
         # The other modes of a multimode port: entries on the same face, after
         # every port, so the active entry keeps the lowest index of its face.
-        mode_rows = _multimode_entries(multimode, port_idx, wave_ports, ports)
+        mode_rows = _multimode_entries(multimode, port_idx, wave_ports, ports, stack)
 
         boundaries: dict[str, Any] = {
             "Conductivity": conductors,

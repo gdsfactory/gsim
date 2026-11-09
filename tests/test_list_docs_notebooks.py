@@ -36,6 +36,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
     "nbs/palace_cpw_deembedding.ipynb",
+    "nbs/palace_signal_integrity.ipynb",
     "nbs/palace_terminal_waveport.ipynb",
     "nbs/palace_terminal_waveport_gssg.ipynb",
     "nbs/tcad_pn_junction.ipynb",

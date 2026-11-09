@@ -10,6 +10,7 @@ from gsim.fdtd.api import (
     LineCurrentSource,
     Material,
     Materials,
+    ModeSelection,
     Monitors,
     PlaneMonitor,
     PortSource,
@@ -36,6 +37,7 @@ from gsim.fdtd.results import (
     PlaneMonitorResult,
     PortOutputResults,
     SParameterResults,
+    s_matrix,
 )
 from gsim.fdtd.viz import MeshViewer
 from gsim.fdtd.workflow import Simulation
@@ -69,6 +71,7 @@ __all__ = [
     "Materials",
     "MeshManifest",
     "MeshViewer",
+    "ModeSelection",
     "MonitorResults",
     "Monitors",
     "PlaneMonitor",
@@ -81,4 +84,5 @@ __all__ = [
     "Solver",
     "fiber_coupling_efficiency",
     "gaussian_coupling_efficiency",
+    "s_matrix",
 ]

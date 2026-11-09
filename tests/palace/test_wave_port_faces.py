@@ -22,7 +22,10 @@ import gmsh
 import pytest
 
 from gsim.palace import DrivenSim
-from gsim.palace.mesh.config_generator import _multimode_entries
+from gsim.palace.mesh.config_generator import (
+    _multimode_entries,
+    generate_palace_config,
+)
 from gsim.palace.mesh.geometry import (
     UNBOUNDED_DOMAIN,
     add_ports,
@@ -350,3 +353,262 @@ class TestMeshedPorts:
         assert sorted(e["Index"] for e in entries) == [1, 2, 3, 4, 5, 6]
         attributes = {tuple(e["Attributes"]) for e in entries}
         assert len(attributes) == 3  # one surface per face
+
+
+def _port(name: str, layer: str, **kwargs) -> PalacePort:
+    """A wave port at one centre and orientation, whatever its layer."""
+    return _wave(name, x=100.0, angle=0.0, layer=layer, **kwargs)
+
+
+def _generate(tmp_path: Path, ports: list[PalacePort], stack) -> dict:
+    stack.materials = {"aluminum": {"conductivity": 3.77e7}}
+    groups = {
+        "volumes": {"airbox": {"phys_group": 1}},
+        "conductor_surfaces": {
+            "m1_xy": {"phys_group": 4},
+            "m1_z": {"phys_group": 5},
+        },
+        "pec_surfaces": {},
+        "port_surfaces": {"P1": {"phys_group": 6}, "P2": {"phys_group": 7}},
+        "boundary_surfaces": {"absorbing": {"phys_group": [8, 12]}},
+    }
+    config_path = generate_palace_config(
+        groups=groups,
+        ports=ports,
+        port_info=[],
+        stack=stack,
+        output_path=tmp_path,
+        model_name="palace",
+        fmax=100e9,
+        simulation_type="driven",
+        absorbing_boundary=True,
+        hints=None,
+    )
+    return json.loads(config_path.read_text())["Boundaries"]["WavePort"]
+
+
+class TestStackedPortsOnDifferentLayers:
+    """One centre and orientation, but separate layers: separate surfaces.
+
+    ``same_face_pairs`` only sees the centre and the orientation. The mesher
+    sizes each face with the z extent of its layer, so ports on layers that do
+    not overlap in z are two surfaces and are not a conflict.
+    """
+
+    def test_the_config_takes_stacked_ports_when_one_is_multimode(
+        self, tmp_path, port_stack
+    ) -> None:
+        ports = [_port("lo", "m1", modes=(1, 2)), _port("hi", "m2")]
+        entries = _generate(tmp_path, ports, port_stack)
+        assert [
+            (e["Index"], e["Attributes"], e.get("Active", True)) for e in entries
+        ] == [(1, [6], True), (2, [7], True), (3, [6], False)]
+
+    def test_the_config_takes_stacked_ports_when_both_are_multimode(
+        self, tmp_path, port_stack
+    ) -> None:
+        ports = [_port("lo", "m1", modes=(1, 2)), _port("hi", "m2", modes=(1, 2))]
+        entries = _generate(tmp_path, ports, port_stack)
+        assert [(e["Index"], e["Attributes"]) for e in entries] == [
+            (1, [6]),
+            (2, [7]),
+            (3, [6]),
+            (4, [7]),
+        ]
+        assert [e.get("Active", True) for e in entries] == [True, True, False, False]
+
+    def test_the_config_still_refuses_two_ports_on_one_layer(
+        self, tmp_path, port_stack
+    ) -> None:
+        ports = [_port("a", "m1", modes=(1, 2)), _port("b", "m1")]
+        with pytest.raises(ValueError, match="'a' and 'b' are on the same face"):
+            _generate(tmp_path, ports, port_stack)
+
+    def test_the_config_still_refuses_faces_that_overlap_in_z(
+        self, tmp_path, port_stack
+    ) -> None:
+        # m1 spans z 1..2 and m2 spans z 3..5; 1.5 of margin takes m1 into m2
+        ports = [_port("lo", "m1", modes=(1, 2), z_margin=1.5), _port("hi", "m2")]
+        with pytest.raises(ValueError, match="'lo' and 'hi' are on the same face"):
+            _generate(tmp_path, ports, port_stack)
+
+    def test_a_max_size_port_covers_the_other_layer(self, tmp_path, port_stack) -> None:
+        ports = [_port("lo", "m1", modes=(1, 2), max_size=True), _port("hi", "m2")]
+        with pytest.raises(ValueError, match="same face"):
+            _generate(tmp_path, ports, port_stack)
+
+    def test_without_a_stack_the_centre_and_orientation_decide(
+        self, port_stack
+    ) -> None:
+        a = _port("lo", "m1", modes=(1, 2))
+        b = _port("hi", "m2")
+        entries = [{"Index": 1, "Mode": 1}]
+        with pytest.raises(ValueError, match="same face"):
+            _multimode_entries([(1, a, 6)], 3, entries, [a, b])
+        rows = _multimode_entries([(1, a, 6)], 3, entries, [a, b], port_stack)
+        assert [(row.port, row.mode, row.active) for row in rows] == [
+            ("lo", 1, True),
+            ("lo", 2, False),
+        ]
+
+
+class TestSameSurfacePairs:
+    def test_stacked_ports_are_two_surfaces(self, port_stack) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_port("lo", "m1"), _port("hi", "m2")]
+        assert same_face_pairs([(p.name, p.center, p.orientation) for p in ports])
+        assert same_surface_pairs(ports, port_stack) == []
+
+    def test_one_layer_is_one_surface(self, port_stack) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_port("a", "m1"), _port("b", "m1")]
+        assert same_surface_pairs(ports, port_stack) == [("a", "b")]
+
+    def test_opposite_orientations_on_one_layer_are_one_surface(
+        self, port_stack
+    ) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_wave("a", x=10.0, angle=0.0), _wave("b", x=10.0, angle=180.0)]
+        assert same_surface_pairs(ports, port_stack) == [("a", "b")]
+
+    def test_margins_that_meet_across_layers_make_one_surface(self, port_stack) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_port("lo", "m1", z_margin=1.5), _port("hi", "m2")]
+        assert same_surface_pairs(ports, port_stack) == [("lo", "hi")]
+
+    def test_another_centre_is_never_the_same_surface(self, port_stack) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_wave("a", y=0.0, max_size=True), _wave("b", y=20.0, max_size=True)]
+        assert same_surface_pairs(ports, port_stack) == []
+
+    def test_a_port_the_mesher_cannot_size_keeps_the_face_rule(
+        self, port_stack
+    ) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        ports = [_port("a", "m1"), _port("b", "absent")]
+        assert same_surface_pairs(ports, port_stack) == [("a", "b")]
+
+    def test_other_port_types_are_left_out(self, port_stack) -> None:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        lumped = PalacePort(name="l", layer="m1", center=(100.0, 0.0), width=10.0)
+        assert same_surface_pairs([_port("a", "m1"), lumped], port_stack) == []
+
+
+def _layered_sim(
+    first: str,
+    second: str,
+    *,
+    first_modes: tuple[int, ...] = (),
+    second_modes: tuple[int, ...] = (),
+    **first_options,
+) -> DrivenSim:
+    """Ports ``lo`` and ``hi`` at one centre and orientation, on two layers."""
+    sim = DrivenSim()
+    sim.set_geometry(_component(("lo", 10.0, 0.0, 0.0), ("hi", 10.0, 0.0, 0.0)))
+    for name, layer, modes, options in (
+        ("lo", first, first_modes, first_options),
+        ("hi", second, second_modes, {}),
+    ):
+        if modes:
+            sim.add_multimode_wave_port(name, layer=layer, modes=modes, **options)
+        else:
+            sim.add_wave_port(name, layer=layer, **options)
+    return sim
+
+
+class TestValidateStackedPorts:
+    """The generic stack has metal1 at z 1.1..1.8 and metal2 at z 2.3..3.0."""
+
+    @pytest.mark.parametrize(
+        ("first_modes", "second_modes"),
+        [((1, 2), ()), ((), (1, 2)), ((1, 2), (1, 2))],
+        ids=["lower", "upper", "both"],
+    )
+    def test_stacked_ports_are_accepted_when_one_is_multimode(
+        self, first_modes, second_modes
+    ) -> None:
+        sim = _layered_sim(
+            "metal1", "metal2", first_modes=first_modes, second_modes=second_modes
+        )
+        result = sim.validate_config()
+        assert not any("same face" in e or "overlapping" in e for e in result.errors)
+        assert result.valid, result.errors
+
+    def test_stacked_single_mode_ports_are_unchanged(self) -> None:
+        assert _layered_sim("metal1", "metal2").validate_config().valid
+
+    def test_two_multimode_ports_on_one_layer_are_still_one_face(self) -> None:
+        sim = _layered_sim("metal1", "metal1", first_modes=(1, 2), second_modes=(1, 2))
+        errors = sim.validate_config().errors
+        assert (
+            len([e for e in errors if "'lo' and 'hi' are on the same face" in e]) == 1
+        )
+        assert not any("overlapping" in e for e in errors)
+
+    def test_a_z_margin_that_reaches_the_other_layer_is_one_face(self) -> None:
+        # z_margin 0.6 takes metal1 to z 0.5..2.4, which reaches into metal2
+        sim = _layered_sim("metal1", "metal2", first_modes=(1, 2), z_margin=0.6)
+        errors = sim.validate_config().errors
+        assert any("'lo' and 'hi' are on the same face" in e for e in errors)
+        assert not any("overlapping" in e for e in errors)
+
+    def test_a_z_margin_that_stays_clear_is_two_faces(self) -> None:
+        # z_margin 0.4 takes metal1 to z 0.7..2.2, short of metal2 at 2.3
+        sim = _layered_sim("metal1", "metal2", first_modes=(1, 2), z_margin=0.4)
+        result = sim.validate_config()
+        assert result.valid, result.errors
+
+    def test_single_mode_ports_whose_faces_overlap_are_still_refused(self) -> None:
+        sim = _layered_sim("metal1", "metal2", z_margin=0.6)
+        errors = sim.validate_config().errors
+        assert len([e for e in errors if "overlapping faces" in e]) == 1
+        assert not any("same face" in e for e in errors)
+
+    def test_validating_leaves_the_stack_unresolved(self) -> None:
+        sim = _layered_sim("metal1", "metal2", first_modes=(1, 2))
+        assert sim.stack is None
+        sim.validate_config()
+        assert sim.stack is None
+
+
+class TestMeshedStackedPorts:
+    def test_stacked_ports_each_get_a_surface_and_an_entry(self, tmp_path) -> None:
+        """The same x, y and orientation on metal1 and metal2, one multimode."""
+        gf.gpdk.PDK.activate()
+        component = gf.Component()
+        component.add_polygon(
+            [(-20, -61), (20, -61), (20, 61), (-20, 61)], layer=gf.gpdk.LAYER.M1
+        )
+        for name in ("lo", "hi"):
+            component.add_port(
+                name=name,
+                center=(-40, 0),
+                width=10,
+                orientation=180,
+                port_type="electrical",
+                layer=gf.gpdk.LAYER.M1,
+            )
+        sim = DrivenSim()
+        sim.set_geometry(component)
+        sim.add_multimode_wave_port("lo", layer="metal1", modes=(1, 2))
+        sim.add_wave_port("hi", layer="metal2")
+        sim.set_output_dir(str(tmp_path / "palace-sim"))
+        sim.set_stack(substrate_thickness=2.0)
+        sim.set_airbox(margin_x=30.0, margin_y=20.0, z_above=40.0, z_below=10.0)
+        sim.set_driven(fmin=1e9, fmax=50e9, num_points=3)
+        sim.mesh(preset="coarse")
+        groups = sim._last_mesh_result.groups
+        assert sorted(groups["port_surfaces"]) == ["P1", "P2"]
+        config_path = sim.write_config(validate_mesh=False)
+        entries = json.loads(Path(config_path).read_text())["Boundaries"]["WavePort"]
+        assert sorted(e["Index"] for e in entries) == [1, 2, 3]
+        by_index = {e["Index"]: tuple(e["Attributes"]) for e in entries}
+        assert by_index[1] == by_index[3]  # the extra mode sits on port lo's face
+        assert by_index[1] != by_index[2]  # port hi has a surface of its own

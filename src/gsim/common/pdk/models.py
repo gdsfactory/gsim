@@ -54,7 +54,7 @@ class ResolvedLayer:
 
 @dataclass(frozen=True)
 class ResolvedPort:
-    """An axis-aligned component port mapped to a physical layer."""
+    """An axis-aligned port with its active, optionally clipped vertical bounds."""
 
     name: str
     center: tuple[float, float, float]
@@ -64,6 +64,13 @@ class ResolvedPort:
     port_type: str
     layer_key: str | None
     material: str | None
+    layer_keys: tuple[str, ...] = ()
+    z_bounds: tuple[float, float] | None = None
+
+    @property
+    def physical_layer_keys(self) -> tuple[str, ...]:
+        """Return all owning bands, retaining the original single-layer API."""
+        return self.layer_keys or ((self.layer_key,) if self.layer_key else ())
 
     @property
     def is_vertical(self) -> bool:
