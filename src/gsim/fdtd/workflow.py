@@ -13,7 +13,6 @@ from typing import Any, Self
 import gdsfactory as gf
 from pdk_schema import Index, ScalarValue
 
-from gsim.common.cloud import CloudJobMixin
 from gsim.common.materials import (
     MaterialResolutionError,
     MaterialSnapshot,
@@ -37,6 +36,7 @@ from gsim.fdtd.api import (
     Solver,
     SourceType,
 )
+from gsim.fdtd.cloud import CloudWorkflowMixin
 from gsim.fdtd.fiber_medium import resolve_fiber_media
 from gsim.fdtd.mesh import generate_mesh
 from gsim.fdtd.metadata import write_metadata
@@ -127,7 +127,7 @@ def _constant_material_card(name: str, refractive_index: float) -> Any:
     )
 
 
-class Simulation(CloudJobMixin, VisualizationMixin):
+class Simulation(CloudWorkflowMixin, VisualizationMixin):
     """Configure, serialize, and run a GDSFactory FDTD simulation."""
 
     _cloud_job_type = "fdtd"
@@ -429,12 +429,14 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         return snapshots
 
     def _prepare_upload_dir(self) -> Path:
-        """Write the cloud artifacts to a fresh staging directory."""
+        """Write the selected run mode using the shared cloud lifecycle."""
         directory = Path(mkdtemp(prefix="fdtd_"))
-        self.write(directory)
+        self.write(directory, dry_run=self._dry_run)
         return directory
 
-    def write(self, output_dir: str | Path) -> SimulationArtifacts:
+    def write(
+        self, output_dir: str | Path, *, dry_run: bool = False
+    ) -> SimulationArtifacts:
         """Write ``mesh.msh`` and ``config.json`` for cloud execution."""
         resolved = self._resolve_geometry()
         if isinstance(self.source, PortSource):
@@ -462,6 +464,12 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
+        config.run.dry_run = dry_run
+        if dry_run:
+            # Bound work on older cloud images that ignore run.dry_run. Their
+            # results are rejected by wait_for_results(), never used as previews.
+            config.run.max_timesteps = 1
+
         resolve_fiber_media(
             config,
             mesh_path,
@@ -470,6 +478,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             monitors=self.monitors,
             source=self.source,
         )
+
         config_path.write_text(
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",
