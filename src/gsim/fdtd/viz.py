@@ -71,7 +71,7 @@ def plot_mesh(
     The mesh is embedded in the returned HTML, so the source ``.msh`` file is
     no longer needed once this function returns. Three.js is loaded from the
     same public CDN used by the original GDSFactory FDTD viewer.
-    ``group_styles`` supplies optional initial visibility and surface opacity
+    ``group_styles`` supplies optional color, initial visibility and surface opacity
     by physical-group name. Explicit show/hide selections override visibility.
     ``grid_shape`` supplies metadata's grid dimensions when available. Otherwise
     grid counts are computed in Python from the mesh's original nanometer bounds.
