@@ -399,8 +399,11 @@ def test_prebuilt_authoritative_stack_without_regions_warns(
     with caplog.at_level(logging.WARNING, logger="gsim.meep.simulation"):
         sim.build_config()
 
-    assert len(_air_only_warnings(caplog)) == 1
-    assert sim.validate_config().warnings == _air_only_warnings(caplog)
+    (warning,) = _air_only_warnings(caplog)
+    # set_stack(stack=..., dielectrics=...) raises, so do not advise it.
+    assert "Pass dielectrics=[...] to set_stack()" not in warning
+    assert "stack's dielectrics list" in warning
+    assert sim.validate_config().warnings == [warning]
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
@@ -476,19 +479,6 @@ def test_validate_config_clears_air_only_warning_when_set_stack_adds_a_region() 
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
-def test_validate_config_clears_air_only_warning_when_stack_is_assigned() -> None:
-    from gsim.common.stack import get_stack
-
-    sim = _simulation(gf.get_active_pdk())
-    sim.build_config()
-    assert len(sim.validate_config().warnings) == 1
-
-    sim.geometry.stack = get_stack()
-
-    assert sim.validate_config().warnings == []
-
-
-@pytest.mark.usefixtures("_auth_pdk_active")
 def test_validate_config_keeps_air_only_warning_after_z_crop() -> None:
     sim = _simulation(gf.get_active_pdk())
     sim.domain.z_bounds = (-1.0, 1.0)
@@ -497,21 +487,6 @@ def test_validate_config_keeps_air_only_warning_after_z_crop() -> None:
     sim.build_config()
 
     assert len(sim.validate_config().warnings) == 1
-
-
-@pytest.mark.usefixtures("_auth_pdk_active")
-def test_validate_config_clears_air_only_warning_when_region_is_added_in_place() -> (
-    None
-):
-    sim = _simulation(gf.get_active_pdk())
-    sim.build_config()
-    assert len(sim.validate_config().warnings) == 1
-
-    sim.geometry.stack.dielectrics.append(
-        {"name": "box", "material": "SiO2", "zmin": -2.0, "zmax": 0.0}
-    )
-
-    assert sim.validate_config().warnings == []
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")
@@ -572,7 +547,10 @@ def test_build_config_warns_when_a_crop_removes_every_region(
         result = sim.build_config()
 
     assert result.config.dielectrics == []
-    assert len(_air_only_warnings(caplog)) == 1
+    (warning,) = _air_only_warnings(caplog)
+    assert "domain.z_bounds removed all of them" in warning
+    assert "Pass dielectrics" not in warning
+    assert sim.validate_config().warnings == [warning]
 
 
 @pytest.mark.usefixtures("_auth_pdk_active")

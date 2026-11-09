@@ -33,8 +33,20 @@ _FIBER_FLUX_OFFSET = 0.3
 _AIR_ONLY_STACK_WARNING = (
     "PDK-authoritative stack has no bulk dielectric region; the FDTD background "
     "outside drawn polygons is air, and PDK levels without polygons (such as "
-    "wafer-level box or cladding) add no FDTD material. Pass dielectrics=[...] to "
-    "set_stack() to model them, or an explicit air region if air is intended."
+    "wafer-level box or cladding) add no FDTD material. {advice}"
+)
+_AIR_ONLY_ADVICE_SET_STACK = (
+    "Pass dielectrics=[...] to set_stack() to model them, or an explicit air "
+    "region if air is intended."
+)
+_AIR_ONLY_ADVICE_PREBUILT = (
+    "Add regions to the stack's dielectrics list, or call "
+    "set_stack(pdk_authoritative=True, dielectrics=[...]) instead of passing a "
+    "prebuilt stack. An explicit air region declares that air is intended."
+)
+_AIR_ONLY_ADVICE_CROPPED = (
+    "The stack declares dielectric regions, but domain.z_bounds removed all of "
+    "them. Expand domain.z_bounds to keep them."
 )
 
 
@@ -394,8 +406,10 @@ class Simulation(CloudJobMixin, BaseModel):
         so a PDK with no reviewed overlay leaves drawn features in air unless
         ``dielectrics`` declares the bulk regions.  :meth:`build_config` logs a
         warning for such a stack; an explicit air region declares that air is
-        intended and silences it.  Mode solves fill levels without polygons
-        across the cell, so this does not apply to them.
+        intended and silences it.  The check only looks for at least one
+        region: a stack with only a box region does not warn, even though
+        everything above that region is air.  Mode solves fill levels without
+        polygons across the cell, so this does not apply to them.
 
         Args:
             stack: Pre-built :class:`gsim.common.stack.LayerStack`.  When given,
@@ -608,7 +622,7 @@ class Simulation(CloudJobMixin, BaseModel):
                 "No stack configured. Will use active PDK with defaults."
             )
         if self._has_air_only_stack():
-            warnings_list.append(_AIR_ONLY_STACK_WARNING)
+            warnings_list.append(self._air_only_stack_warning())
 
         # The active stopping mode is information, not a problem
         info: list[str] = []
@@ -649,6 +663,22 @@ class Simulation(CloudJobMixin, BaseModel):
         if stack is None:
             return False
         return bool(stack.simulation.get("pdk_authoritative")) and not stack.dielectrics
+
+    def _air_only_stack_warning(self) -> str:
+        """Return the air-only warning with advice that fits how the stack was set."""
+        stack = self.geometry.stack
+        if (
+            self._z_cropped
+            and stack is self._last_cropped_stack
+            and self._z_crop_source_stack is not None
+            and self._z_crop_source_stack.dielectrics
+        ):
+            advice = _AIR_ONLY_ADVICE_CROPPED
+        elif self._stack_kwargs.get("pdk_authoritative"):
+            advice = _AIR_ONLY_ADVICE_SET_STACK
+        else:
+            advice = _AIR_ONLY_ADVICE_PREBUILT
+        return _AIR_ONLY_STACK_WARNING.format(advice=advice)
 
     def _ensure_stack(self) -> None:
         """Lazily resolve the layer stack if not yet built."""
@@ -1526,7 +1556,7 @@ class Simulation(CloudJobMixin, BaseModel):
         # Here, not in _ensure_stack: mode solves share that path but fill levels
         # without polygons, and a crop can remove the last region.
         if self._has_air_only_stack() and not self._air_only_warned:
-            logger.warning(_AIR_ONLY_STACK_WARNING)
+            logger.warning(self._air_only_stack_warning())
             self._air_only_warned = True
 
         import gdsfactory as gf
