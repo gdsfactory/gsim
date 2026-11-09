@@ -179,11 +179,15 @@ class VisualizationMixin(RuntimeConfigMixin):
         zoom_to_cursor: bool = True,
         height: int = 600,
     ) -> Any:
-        """Show 3D geometry with PDK opacity and initial visibility defaults.
+        """Show 3D geometry with PDK color, opacity and visibility defaults.
 
-        Stack info.opacity controls surface opacity; info.visible overrides
-        layer-view visibility. Zero opacity starts a layer hidden and becomes
-        fully opaque when enabled in the viewer. Explicit show_groups and
+        Stack info.color overrides layer-view fill color (or frame color when
+        fill is absent). Derived-layer colors take precedence over source-layer
+        colors. Missing colors retain the viewer palette. Color alpha does not
+        change opacity. Stack info.opacity controls surface opacity;
+        info.visible overrides layer-view visibility. Zero opacity starts a
+        layer hidden and becomes fully opaque when enabled in the viewer.
+        Explicit show_groups and
         hide_groups take precedence over PDK visibility, with hide_groups
         taking priority.
         """

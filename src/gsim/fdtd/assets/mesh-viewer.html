@@ -727,6 +727,8 @@
       }
 
       function colorFor(mesh, group) {
+        const color = groupStyle(mesh, group).color;
+        if (color !== undefined) return new THREE.Color(color);
         if (isPortGroup(mesh, group)) return new THREE.Color(0xf4f7fb);
         if (group === currentLargestGroup)
           return new THREE.Color(largestGroupColor);

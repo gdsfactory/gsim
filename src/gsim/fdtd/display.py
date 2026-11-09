@@ -6,13 +6,16 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import TYPE_CHECKING, Any, TypedDict
 
+from pydantic_extra_types.color import Color
+
 if TYPE_CHECKING:
     from gsim.common.pdk import ResolvedPassivePcell
 
 
 class GroupStyle(TypedDict, total=False):
-    """Initial visibility and surface opacity of a physical group."""
+    """Initial color, visibility and surface opacity of a physical group."""
 
+    color: str
     opacity: float
     visible: bool
 
@@ -60,11 +63,51 @@ def _visibility_by_layer(
     return visibility
 
 
+def _color_hex(value: Any, name: str) -> str:
+    """Normalize a PDK/CSS color to RGB without changing surface opacity."""
+    try:
+        source = value.as_hex() if hasattr(value, "as_hex") else value
+        channels = Color(source).as_rgb_tuple(alpha=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Group {name!r} color must be a valid CSS color") from error
+    return "#" + "".join(f"{int(channel):02x}" for channel in channels)
+
+
+def _colors_by_layer(
+    views: Mapping[str, Any], parent_visible: bool = True, *, layers: Any = None
+) -> dict[tuple[int, int], tuple[bool, Any]]:
+    """Prefer the first visible colored view, then the first colored view."""
+    colors: dict[tuple[int, int], tuple[bool, Any]] = {}
+
+    def record(layer: tuple[int, int], visible: bool, color: Any) -> None:
+        """Retain view order unless a visible view replaces a hidden one."""
+        if layer not in colors or (visible and not colors[layer][0]):
+            colors[layer] = visible, color
+
+    for name, view in views.items():
+        visible = parent_visible and getattr(view, "visible", True)
+        layer = _layer_tuple(getattr(view, "layer", None))
+        if layer is None:
+            layer = _layer_tuple(getattr(layers, name, None))
+        color = getattr(view, "fill_color", None)
+        if color is None:
+            color = getattr(view, "frame_color", None)
+        if layer is not None and color is not None:
+            record(layer, visible, color)
+        for child_layer, (child_visible, child_color) in _colors_by_layer(
+            getattr(view, "group_members", {}), visible, layers=layers
+        ).items():
+            record(child_layer, child_visible, child_color)
+    return colors
+
+
 def normalize_group_styles(styles: Mapping[str, GroupStyle]) -> dict[str, GroupStyle]:
     """Validate display metadata and make zero-opacity groups toggleable."""
     normalized = {}
     for name, style in styles.items():
         result: GroupStyle = {}
+        if "color" in style:
+            result["color"] = _color_hex(style["color"], name)
         if "visible" in style:
             visible = style["visible"]
             if not isinstance(visible, bool):
@@ -92,6 +135,7 @@ def normalize_group_styles(styles: Mapping[str, GroupStyle]) -> dict[str, GroupS
 def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, GroupStyle]:
     """Map native stack and layer-view metadata to mesh physical-group names.
 
+    Stack info.color overrides the matched layer view's fill/frame color.
     Stack info.opacity supplies numeric opacity. Stack info.visible overrides
     the layer view's effective visibility. Derived layers use their derived
     GDS layer view where present. Only layers with resolved geometry are styled
@@ -112,6 +156,10 @@ def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, Group
         getattr(pdk_views, "layer_views", {}),
         layers=getattr(pdk_views, "layers", None),
     )
+    colors = _colors_by_layer(
+        getattr(pdk_views, "layer_views", {}),
+        layers=getattr(pdk_views, "layers", None),
+    )
     styles: dict[str, GroupStyle] = {}
     for name, level in stack.layers.items():
         if name not in resolved.layers:
@@ -122,7 +170,14 @@ def layer_group_styles(resolved: ResolvedPassivePcell | None) -> dict[str, Group
             if layer is not None and layer in visibility:
                 style["visible"] = visibility[layer]
                 break
+        for declared_layer in (level.derived_layer, level.layer):
+            layer = _layer_tuple(declared_layer, pdk, component)
+            if layer is not None and layer in colors:
+                style["color"] = colors[layer][1]
+                break
         info = level.info
+        if info.get("color") is not None:
+            style["color"] = info["color"]
         if info.get("visible") is not None:
             style["visible"] = info["visible"]
         if info.get("opacity") is not None:
