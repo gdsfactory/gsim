@@ -46,8 +46,43 @@ grid used by the FDTD solver and defaults to 60 nm. Source sweeps default to 101
 wavelengths. Guided-port monitors are implicit; one port source returns one
 S-matrix column.
 
-If a PDK uses a virtual routing layer for optical ports, map that GDS layer to
-the physical LayerStack entry that owns the guided core:
+### Virtual port layers
+
+When a guided port uses a virtual routing marker, gsim can find its physical
+core through the PDK cross-section. Pass a cross-section to `add_port()` to
+retain its complete section description on the port:
+
+```python
+import gdsfactory as gf
+
+routing = gf.cross_section.cross_section(
+    width=0.5,
+    layer=(100, 0),  # Virtual port marker.
+    sections=(gf.cross_section.Section(width=0.5, layer=(1, 0)),),
+)
+waveguide.add_port(
+    name="o1", center=(0, 0), orientation=180, cross_section=routing
+)
+sim.geometry(component=waveguide)
+```
+
+Here the physical core is drawn on `(1, 0)` and must already have a
+material-bearing entry in the PDK LayerStack. The marker is not extruded.
+gsim reads gdsfactory's saved cross-section snapshot or the port's named
+`cross_section` metadata. Without either, it checks default-instantiable
+factories in `PDK.cross_sections`. Only visible sections with the same width
+and offset as the primary marker section identify the core; wider cladding
+and offset sections do not. The actual resolved geometry at each port decides
+which vertical bands are present, so a local etch can give two ports different
+heights. Material identity is supplied by the LayerStack.
+
+An inferred core must form one abutting, non-overlapping group of a single
+material. Equivalent registry aliases are accepted; multiple different cores
+or incompatible bands raise `UnsupportedPortError` instead of selecting one.
+Unmapped vertical optical ports retain their free-space semantics.
+
+Use `port_layer_map` when a cross-section does not describe an unambiguous core,
+or to select particular physical bands explicitly:
 
 ```python
 sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
@@ -55,7 +90,8 @@ sim.geometry(component=waveguide, port_layer_map={(100, 0): "core"})
 
 The marker layer is not added to the mesh. The mapped physical entry supplies
 the port's material and vertical position, and must contain the port location.
-Unmapped ports still need to match resolved LayerStack geometry directly.
+Explicit maps take precedence, followed by existing direct physical-layer
+matches. Cross-section inference is a fallback when direct matching fails.
 When an unmapped port matches abutting vertical bands of the same material, its
 mesh surface includes those bands and its center uses their combined height.
 Overlapping entries are not joined; candidates are considered in mesh-priority
@@ -434,6 +470,36 @@ sim.source(
 
 Monitor names are unique. Use `add()`, `remove()`, and `clear()` to manage the
 collection. A plane's size must be zero along its normal.
+
+### Fiber reference medium
+
+When `FiberMode.refractive_index` is omitted, the exporter determines the real
+index at the source center wavelength from the material covering the receiver's
+cropped aperture. It checks the exported tetrahedral mesh, including sidewalls,
+holes, overlapping material priorities, and both sides of the plane. A receiver
+outside stack volumes uses the simulation background. Different materials with
+the same real index can share a reference medium.
+
+Set `FiberMode(refractive_index=...)` to choose the reference medium explicitly.
+For an implicit receiver derived from a vertical port, use
+`sim.source(vertical_refractive_index=...)`. The selected vertical port's Gaussian
+beam and its receiver use the same index. Explicit `GaussianBeamSource` settings
+retain their existing behavior.
+
+An aperture spanning different indices, lying on an interface, or lacking a
+usable area cannot determine one homogeneous Gaussian reference. The exporter
+warns and retains the background index for compatibility; set the relevant
+explicit index to define the intended reference.
+
+This numerical correctness fix targets the next patch release after 0.9.0.
+Previously, an omitted fiber index always used the global background, even for
+a receiver embedded in a different stack material. Such setups can produce
+different coupling values after this fix, while their material assignments stay
+unchanged. To preserve the previous reference, supply the background's index
+explicitly through `FiberMode.refractive_index` or
+`PortSource.vertical_refractive_index`. Re-exporting updates solver inputs and
+their cache keys; existing downloaded results are unchanged. The simulation
+background default is unchanged by this fix.
 
 ## Results
 

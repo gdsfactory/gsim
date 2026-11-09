@@ -157,3 +157,31 @@ def test_newly_exposed_film_contributes_to_automatic_domain_height(
     points = _group_points(mesh, "buried_oxide")
     assert points[:, 2].min() == pytest.approx(-2000)
     assert points[:, 2].max() == pytest.approx(-1000)
+
+
+def test_merged_fiber_medium_samples_film_in_lateral_padding(tmp_path, blanket_pdk):
+    simulation = _simulation(blanket_pdk)
+    simulation.materials(background="ambient", overrides={"ambient": 1})
+    center = (1, 0.6, 0.35)
+    simulation.monitors.add_plane(
+        "padding_receiver",
+        center_um=center,
+        size_um=(0.2, 0.2, 0),
+        normal="+z",
+        fiber_mode=fdtd.FiberMode(
+            propagation_direction=(0, 0, 1),
+            e_polarization=(1, 0, 0),
+            focal_point_um=center,
+            waist_radius_um=0.2,
+        ),
+    )
+    artifacts = simulation.write(tmp_path)
+    config = json.loads(artifacts.config_path.read_text())
+    receiver = next(
+        monitor
+        for monitor in config["monitors"]
+        if monitor["name"] == "padding_receiver"
+    )
+    assert receiver["fiber_mode"]["refractive_index"] == pytest.approx(
+        1.444023621703261
+    )

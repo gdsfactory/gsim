@@ -38,6 +38,7 @@ from gsim.fdtd.api import (
     SourceType,
 )
 from gsim.fdtd.domain_geometry import resolve_domain_geometry
+from gsim.fdtd.fiber_medium import resolve_fiber_media
 from gsim.fdtd.mesh import generate_mesh
 from gsim.fdtd.metadata import write_metadata
 from gsim.fdtd.models import (
@@ -459,6 +460,14 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
+        resolve_fiber_media(
+            config,
+            mesh_path,
+            manifest,
+            material_snapshots,
+            monitors=self.monitors,
+            source=self.source,
+        )
         config_path.write_text(
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",
