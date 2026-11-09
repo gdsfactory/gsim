@@ -73,7 +73,7 @@ def _precompute_cross_section_geometry(
     pml_thickness: float = 0.0,
     resolution: float = 32,
     material_data: dict[str, Any] | None = None,
-    background_material: str = "air",  # noqa: ARG001
+    background_material: str = "air",
 ) -> Any:
     """Pre-compute 2D cross-section cell geometry for cloud serialization.
 
@@ -158,7 +158,10 @@ def _precompute_cross_section_geometry(
 
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and (
+            background_material in {"air", "Air"}
+            or not _layer_has_any_polygon(component, layer)
+        ):
             continue
         if material_data and layer.material not in material_data:
             continue
@@ -233,7 +236,7 @@ def _precompute_cross_section_geometry(
 
     # Add dielectric slabs (uniform horizontal layers)
     for diel in stack.dielectrics:
-        if diel["material"] in {"air", "Air"}:
+        if diel["material"] in {"air", "Air"} and background_material in {"air", "Air"}:
             continue
         z_lo = diel["zmin"] - z_center
         z_hi = diel["zmax"] - z_center

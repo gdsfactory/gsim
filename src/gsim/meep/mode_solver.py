@@ -184,7 +184,7 @@ def _build_slab_xz_cell(
 
     geometry: list[object] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and background_material in {"air", "Air"}:
             continue
         mat_data = materials.get(layer.material)
         if mat_data is None:
@@ -315,7 +315,10 @@ def _build_component_xz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and (
+            background_material in {"air", "Air"}
+            or not _layer_has_any_polygon(component, layer)
+        ):
             continue
         mat_data = materials.get(layer.material)
         if mat_data is None:
@@ -475,7 +478,10 @@ def _build_component_yz_cell(
     geometry: list[object] = []
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and (
+            background_material in {"air", "Air"}
+            or not _layer_has_any_polygon(component, layer)
+        ):
             continue
         mat_data = materials.get(layer.material)
         if mat_data is None:
@@ -1171,7 +1177,8 @@ def refractive_index_profile(
     import numpy as np
 
     used_materials: set[str] = {layer.material for layer in stack.layers.values()}
-    used_materials.difference_update({"air", "Air"})
+    if background_material in {"air", "Air"}:
+        used_materials.difference_update({"air", "Air"})
     if background_material not in {"air", "Air"}:
         used_materials.add(background_material)
     material_data = _resolve_materials_cached(
@@ -1200,7 +1207,10 @@ def refractive_index_profile(
             )
         n_profile = np.full_like(z_grid, n_bg)
         for layer in stack.layers.values():
-            if layer.material in {"air", "Air"}:
+            if layer.material in {"air", "Air"} and background_material in {
+                "air",
+                "Air",
+            }:
                 continue
             mat = material_data.get(layer.material)
             if mat is None or mat.epsilon_diag is None:
@@ -1267,7 +1277,10 @@ def refractive_index_profile(
 
     layer_h_masks: dict[tuple, np.ndarray] = {}
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and (
+            background_material in {"air", "Air"}
+            or not _layer_has_any_polygon(component, layer)
+        ):
             continue
         gds_layer = getattr(layer, "gds_layer", None)
         if not isinstance(gds_layer, tuple):
@@ -1281,7 +1294,10 @@ def refractive_index_profile(
         layer_h_masks[gds_layer] = mask
 
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and (
+            background_material in {"air", "Air"}
+            or not _layer_has_any_polygon(component, layer)
+        ):
             continue
         mat = material_data.get(layer.material)
         if mat is None or mat.epsilon_diag is None:
@@ -1877,7 +1893,7 @@ def solve_slab_wavelength_sweep(
     # Layer geometric descriptors (wavelength-independent)
     _layer_specs: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material in {"air", "Air"}:
+        if layer.material in {"air", "Air"} and background_material in {"air", "Air"}:
             continue
         z_size = layer.zmax - layer.zmin
         if z_size <= 0:

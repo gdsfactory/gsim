@@ -48,3 +48,35 @@ def test_conflicting_alias_overrides_are_rejected(aliased_pdk):
     simulation.materials(overrides={"legacy_si": 3.4, "Si": 3.5})
     with pytest.raises(fdtd.FDTDConfigError, match="Conflicting material overrides"):
         simulation.geometry("straight")
+
+
+@pytest.mark.parametrize("overrides", [{}, {"Si": 3.4}])
+def test_module_aliases_survive_automatic_domain_sizing(aliased_pdk, overrides):
+    aliased_pdk.MATERIAL_ALIASES["legacy_oxide"] = "SiO2"
+    aliased_pdk.MATERIAL_CARDS["SiO2"] = GSIM_MATERIAL_CARDS["SiO2"]
+    aliased_pdk.PDK.layer_stack.layers["buried_oxide"].material = "legacy_oxide"
+    simulation = fdtd.Simulation(pdk=aliased_pdk)
+    simulation.materials(background="legacy_oxide", overrides=overrides)
+    simulation.geometry("straight")
+    if not overrides:
+        assert simulation.resolved.pdk_module is aliased_pdk
+    assert simulation._background_bounds_nm()[2::3] == pytest.approx((-1000, 1000))
+    simulation.domain(z_bounds=(-0.4, 0.6))
+    assert simulation._background_bounds_nm()[2::3] == pytest.approx((-400, 600))
+
+
+def test_domain_keeps_distinct_module_card_names(fdtd_pdk_module):
+    fdtd_pdk_module.MATERIAL_CARDS.update(
+        {
+            "Air": GSIM_MATERIAL_CARDS["Air"],
+            "air": GSIM_MATERIAL_CARDS["air"].model_copy(
+                update={"info": {"distinct": True}}
+            ),
+        }
+    )
+    fdtd_pdk_module.PDK.layer_stack.layers["buried_oxide"].material = "air"
+    for background, expected in (("Air", (-1000, 1220)), ("air", (-1000, 1000))):
+        simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+        simulation.materials(background=background)
+        simulation.geometry("straight")
+        assert simulation._background_bounds_nm()[2::3] == pytest.approx(expected)

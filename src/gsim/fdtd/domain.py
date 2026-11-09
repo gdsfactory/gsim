@@ -78,10 +78,13 @@ def background_bounds_nm(
     ]
     if padding_z is None and z_bounds is None:
         background_z_bounds = []
-        background = canonical_material_name(background_material, resolved.pdk)
+        material_context = (
+            resolved.pdk_module if resolved.pdk_module is not None else resolved.pdk
+        )
+        background = canonical_material_name(background_material, material_context)
         for key, level in resolved.layer_stack.layers.items():
             if (
-                canonical_material_name(level.material, resolved.pdk) != background
+                canonical_material_name(level.material, material_context) != background
                 or level.thickness == 0
             ):
                 continue

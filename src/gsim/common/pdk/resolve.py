@@ -487,6 +487,7 @@ def resolve_passive_pcell(
         ports=ports,
         bounds=_bounds(layers),
         wavelength_um=float(wavelength_um),
+        pdk_module=pdk_or_module if pdk_or_module is not pdk_object else None,
     )
 
 
