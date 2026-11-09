@@ -67,3 +67,43 @@ port layer; automatic Z cropping currently follows one optical reference layer.
 ## Results
 
 - [`SParameterResult`][gsim.meep.SParameterResult]
+- [`s_matrix`][gsim.meep.s_matrix]
+
+### Export to SAX and Touchstone
+
+[`s_matrix`][gsim.meep.s_matrix] builds an [`SMatrix`][gsim.common.s_matrix.SMatrix] from one result per excited port, in
+the same way as the [GDSFactory FDTD export](fdtd.md#export-to-sax-and-touchstone), which describes the assumptions,
+conventions and limits.
+
+```python
+from gsim.meep import s_matrix
+
+matrix = s_matrix([result_o1, result_o2], port_names=["o1", "o2"])
+model = matrix.sax_model()
+matrix.write_touchstone("device")
+```
+
+Meep's result file numbers its ports, so pass `port_names` in port order, or the entries are named `port_1`, `port_2`.
+Meep uses exp(-iωt), and the values are conjugated so that `matrix.s` and Touchstone files hold exp(+jωt). Fiber-source
+results (`S10`) are normalized to launched flux, not to a port mode, so they are refused.
+
+Meep's monitors sit inward from each port center, by `source_port_offset` at non-source ports and by
+`source_port_offset + distance_source_to_monitors` at the source port. So in a matrix merged from several runs, the
+diagonal and off-diagonal entries are referenced to different planes: a reflection's phase differs by
+2·beta·`distance_source_to_monitors`, with beta the mode's propagation constant, from what the transmission entries
+received at that port imply. This follows from the monitor positions and has not been measured. gsim cannot correct it
+from the result file, which holds neither the offsets nor the mode index. Transmission phases are consistent between runs
+when the ports share one beta (S21 and S12 agree to about 2e-4 rad on a real 10 µm straight waveguide), but do not rely on
+reflection phases in circuits sensitive to them, such as resonators.
+
+[`s_matrix`][gsim.meep.s_matrix] warns about this on every matrix merged from several runs, because the result file
+cannot show whether the ports share one beta. The warning names each nonzero measured reflection and each entry copied
+with `assume_reciprocal`. A matrix from one run does not warn, because that run gives each port a single plane.
+
+Two more things are unchecked on that real straight waveguide. Its delay is 3.3% longer than a mode solver's group index
+predicts over the 9.6 µm between monitors, and one length cannot tell whether this comes from the group index or the
+monitor positions. Ports of different widths have not been run.
+
+Samples that repeat a wavelength, from `wavelength_span=0` or a span finer than the result file's 6 decimals, become one
+if their values agree, and are refused otherwise. Export supports at most 9 ports, because Meep's entry names are
+ambiguous from 10 ports up: `S111` may be port 1 from 11 or port 11 from 1.

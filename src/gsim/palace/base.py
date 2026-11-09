@@ -5,9 +5,6 @@ types — DrivenSim, EigenmodeSim, ElectrostaticSim and BoundaryModeSim:
 geometry and stack configuration, meshing, config generation, and the
 local run, including what a run that dies on a signal means.
 :class:`_PalaceSimBase` declares, once, the state those methods share.
-
-:class:`MeshSourceMixin` is the same surface for a simulation that does
-not mesh for itself but delegates to one that does.
 """
 
 from __future__ import annotations
@@ -42,6 +39,7 @@ from gsim.palace.models.results import (
     format_mesh_distortion,
     mesh_identity_lines,
 )
+from gsim.palace.ports.config import PortType
 from gsim.palace.solver_settings import SolverSettingsMixin
 
 if TYPE_CHECKING:
@@ -176,144 +174,6 @@ def _wrote_solver_output(postpro_dir: Path) -> bool:
     )
 
 
-class MeshSourceMixin:
-    """The configuration and mesh reads of whoever holds the mesh.
-
-    A simulation that does not mesh for itself still has to be
-    configured like one and asked the same questions afterwards: give it
-    a geometry, a stack, a Cross-section and its contacts, then ask
-    where the mesh landed and what groups it carries. A charge-transport
-    sim is that case — it delegates every one of them to a
-    :class:`~gsim.palace.BoundaryModeSim` it owns — and hand-mirroring
-    the surface is how the two drift apart.
-
-    Subclasses name the simulation that actually holds the mesh through
-    :meth:`_mesh_source`, and say whether it exists yet through
-    :meth:`_mesh_source_or_none`: the setters build it, the readers
-    answer for an unconfigured simulation rather than building one to
-    ask. The guard names the concrete class, so a user reads the sim
-    they called, not the delegate they never saw.
-    """
-
-    def _mesh_source(self) -> Any:
-        """The simulation that owns the mesh, built if it does not exist."""
-        raise NotImplementedError
-
-    def _mesh_source_or_none(self) -> Any | None:
-        """The simulation that owns the mesh, or ``None`` if never built."""
-        raise NotImplementedError
-
-    def _meshed_mesh_source(self) -> Any:
-        """The mesh source, or the report that nothing has meshed yet."""
-        source = self._mesh_source_or_none()
-        if source is None or not source.has_mesh:
-            raise ValueError(
-                f"No mesh generated for this {type(self).__name__}. Call mesh() first."
-            )
-        return source
-
-    # -------------------------------------------------------------------------
-    # Delegated configuration
-    # -------------------------------------------------------------------------
-
-    def set_geometry(self, component: Any) -> None:
-        """Set the gdsfactory component (delegates to the mesh pipeline)."""
-        self._mesh_source().set_geometry(component)
-
-    def set_stack(self, *args: Any, **kwargs: Any) -> None:
-        """Configure the layer stack (same arguments as the palace backends)."""
-        self._mesh_source().set_stack(*args, **kwargs)
-
-    def set_airbox(self, **kwargs: Any) -> None:
-        """Configure the background region around the clipped domain."""
-        self._mesh_source().set_airbox(**kwargs)
-
-    def set_output_dir(self, path: str | Path) -> None:
-        """Set the output directory for mesh files."""
-        self._mesh_source().set_output_dir(path)
-
-    def set_cross_section(
-        self,
-        plane: Any,
-        *,
-        window: tuple[float, float] | None = None,
-        window_z: tuple[float, float] | None = None,
-    ) -> None:
-        """Set the cross-section plane and the window clipping the mesh.
-
-        Args:
-            plane: Plane spec (``"x=<value>"`` / ``"y=<value>"``) or a
-                prebuilt ``CrossSectionPlaneConfig``.
-            window: In-plane ``(min, max)`` clip in um.
-            window_z: Vertical ``(min, max)`` clip in um.
-        """
-        self._mesh_source().set_cross_section(plane, window=window, window_z=window_z)
-
-    def add_contact(self, *, name: str, layer_a: str, layer_b: str) -> None:
-        """Declare a named contact at the interface between two layers."""
-        self._mesh_source().add_contact(name=name, layer_a=layer_a, layer_b=layer_b)
-
-    def add_interface(self, *, name: str, layer_a: str, layer_b: str) -> None:
-        """Declare a named interface between two semiconductor layers.
-
-        An interface is never a contact: it carries continuity across the
-        junction and no terminal voltage, and the mesh keeps the two
-        apart.
-
-        Args:
-            name: Interface / physical-group name (e.g. ``"junction"``).
-            layer_a: First doped region layer name.
-            layer_b: Second doped region layer name.
-        """
-        self._mesh_source().add_interface(name=name, layer_a=layer_a, layer_b=layer_b)
-
-    # -------------------------------------------------------------------------
-    # Delegated reads
-    # -------------------------------------------------------------------------
-
-    @property
-    def contact_specs(self) -> list[Any]:
-        """Declared contacts — the ohmic terminals, and nothing else."""
-        source = self._mesh_source_or_none()
-        return list(source.contact_specs) if source is not None else []
-
-    @property
-    def interface_specs(self) -> list[Any]:
-        """Declared semiconductor-semiconductor interfaces."""
-        source = self._mesh_source_or_none()
-        return list(source.interface_specs) if source is not None else []
-
-    @property
-    def output_dir(self) -> Path | None:
-        """Output directory (or None)."""
-        source = self._mesh_source_or_none()
-        return source.output_dir if source is not None else None
-
-    @property
-    def has_mesh(self) -> bool:
-        """Whether ``mesh()`` has run and left a mesh to read."""
-        source = self._mesh_source_or_none()
-        return source is not None and bool(source.has_mesh)
-
-    @property
-    def mesh_path(self) -> Path:
-        """Path of the generated mesh (um), once meshed.
-
-        Raises:
-            ValueError: When read before ``mesh()`` has run.
-        """
-        return Path(self._meshed_mesh_source().mesh_path)
-
-    @property
-    def mesh_groups(self) -> dict[str, Any]:
-        """Physical groups of the generated mesh, once meshed.
-
-        Raises:
-            ValueError: When read before ``mesh()`` has run.
-        """
-        return dict(self._meshed_mesh_source().mesh_groups)
-
-
 class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -328,8 +188,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement: RefinementConfig
         mesh_config: MeshConfig
         simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
-        absorbing_boundary: bool
+        absorbing_boundary: bool | None
         absorbing_order: Literal[1, 2]
+        _pec_default_noted: bool
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
@@ -1705,12 +1566,76 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             for wp in wave_ports
             if wp.name in by_name
         ]
+        pairs = same_face_pairs(faces)
+        if pairs:
+            pairs = self._pairs_on_one_surface(pairs, wave_ports)
         errors.extend(
             f"Wave ports {first!r} and {second!r} are on the same face; give a "
             "face one wave port and list its modes with modes=..."
-            for first, second in same_face_pairs(faces)
+            for first, second in pairs
         )
         return errors
+
+    def _pairs_on_one_surface(
+        self, pairs: list[tuple[str, str]], wave_ports: list[Any]
+    ) -> list[tuple[str, str]]:
+        """Keep the pairs at one centre and orientation that share a surface.
+
+        Ports there on layers that do not overlap in z get separate faces. When
+        the stack does not resolve, the centre and orientation decide and the
+        mesher reports the stack.
+        """
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        stack = self._resolve_stack_quietly()
+        if stack is None:
+            return pairs
+        shared = {
+            frozenset(pair)
+            for pair in same_surface_pairs(self._wave_palace_ports(wave_ports), stack)
+        }
+        return [pair for pair in pairs if frozenset(pair) in shared]
+
+    def _wave_palace_ports(self, wave_ports: list[Any]) -> list[Any]:
+        """The wave ports as the mesher sees them, for those on the component."""
+        from gsim.palace.ports.config import PalacePort, PortType
+
+        component = self.geometry.component if self.geometry else None
+        if component is None:
+            return []
+        by_name = {port.name: port for port in component.ports}
+        return [
+            PalacePort(
+                name=wp.name,
+                port_type=PortType.WAVEPORT,
+                center=(
+                    float(by_name[wp.name].center[0]),
+                    float(by_name[wp.name].center[1]),
+                ),
+                width=float(by_name[wp.name].width),
+                orientation=float(by_name[wp.name].orientation or 0.0),
+                layer=wp.layer or None,
+                z_margin=wp.z_margin,
+                lateral_margin=wp.lateral_margin,
+                max_size=wp.max_size,
+            )
+            for wp in wave_ports
+            if wp.name in by_name
+        ]
+
+    def _resolve_stack_quietly(self) -> Any:
+        """The resolved stack, or None when it does not resolve.
+
+        Resolving the stack must not leave a stack behind: set_stack() may
+        still follow, and mesh() resolves it again.
+        """
+        previous = self.stack
+        try:
+            return self._resolve_stack()
+        except Exception:
+            return None
+        finally:
+            self.stack = previous
 
     def _wave_port_face_errors(self, wave_ports: list[Any]) -> list[str]:
         """Errors for wave ports whose generated faces overlap.
@@ -1730,49 +1655,19 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         from gsim.palace.mesh.geometry import (
             UNBOUNDED_DOMAIN,
             overlapping_wave_ports,
+            same_surface_pairs,
             wave_port_overlap_message,
         )
-        from gsim.palace.ports.config import PalacePort, PortType
-        from gsim.palace.ports.modes import same_face_pairs
 
-        by_name = {port.name: port for port in component.ports}
-        ports = [
-            PalacePort(
-                name=wp.name,
-                port_type=PortType.WAVEPORT,
-                center=(
-                    float(by_name[wp.name].center[0]),
-                    float(by_name[wp.name].center[1]),
-                ),
-                width=float(by_name[wp.name].width),
-                orientation=float(by_name[wp.name].orientation or 0.0),
-                layer=wp.layer,
-                z_margin=wp.z_margin,
-                lateral_margin=wp.lateral_margin,
-                max_size=wp.max_size,
-            )
-            for wp in wave_ports
-            if wp.layer and wp.name in by_name
-        ]
+        ports = [p for p in self._wave_palace_ports(wave_ports) if p.layer]
         if len(ports) < 2:
             return []
-        # Resolving the stack must not leave a stack behind: set_stack() may
-        # still follow, and mesh() resolves it again.
-        previous = self.stack
-        try:
-            stack = self._resolve_stack()
-        except Exception:
+        stack = self._resolve_stack_quietly()
+        if stack is None:
             return []  # the mesher reports a stack that does not resolve
-        finally:
-            self.stack = previous
         # A pair on the same face is already reported by the multimode check
         reported = (
-            {
-                frozenset(pair)
-                for pair in same_face_pairs(
-                    (p.name, p.center, p.orientation) for p in ports
-                )
-            }
+            {frozenset(pair) for pair in same_surface_pairs(ports, stack)}
             if any(wp.modes for wp in wave_ports)
             else set()
         )
@@ -2003,7 +1898,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             write_config=write_config,
             planar_conductors=mesh_config.planar_conductors,
             pec_blocks=self._pec_blocks or None,
-            absorbing_boundary=self.absorbing_boundary,
+            absorbing_boundary=self._outer_wall(ports)[0],
             absorbing_order=self.absorbing_order,
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
@@ -2269,7 +2164,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 boundary_mode_config=self._get_problem_settings("boundary_mode"),
                 planar_conductors=mesh_config.planar_conductors,
                 pec_blocks=self._pec_blocks or None,
-                absorbing_boundary=self.absorbing_boundary,
+                absorbing_boundary=self._outer_wall(ports)[0],
                 absorbing_order=self.absorbing_order,
                 symmetry_plane=(
                     self._symmetry_planes[0] if self._symmetry_planes else None
@@ -2501,9 +2396,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         groups = getattr(self._last_mesh_result, "groups", None) or {}
         volumes = groups.get("volumes", {})
-        if groups.get("boundary_surfaces", {}).get("absorbing") and not any(
-            is_air_like_material(stack, name) for name in volumes
-        ):
+        if (
+            self._outer_wall(self._last_ports)[0]
+            and groups.get("boundary_surfaces", {}).get("absorbing")
+        ) and not any(is_air_like_material(stack, name) for name in volumes):
             logger.warning(
                 "Absorbing boundary is applied to solid dielectric surfaces "
                 "(%s) because the model has no air region, which produces "
@@ -2533,6 +2429,28 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             )
 
         return result
+
+    def _outer_wall(self, ports: list | None = None) -> tuple[bool, bool, bool]:
+        """Resolve the outer wall as (absorbing, metallic, pec_by_default).
+
+        An unset ``absorbing_boundary`` (``None``) is absorbing, except with
+        wave ports, where the wall is PEC like the port eigenproblem's. Wave
+        ports come from ``add_wave_port`` or from the extracted ports (which
+        include ``configure_wave_port`` metadata); ``ports`` defaults to the
+        last extracted ones.
+        """
+        absorbing = self.absorbing_boundary
+        metallic = bool(getattr(self, "metallic_boundaries", False))
+        if absorbing is not None:
+            return absorbing, metallic, False
+        if metallic:
+            return False, True, False
+        extracted = self._last_ports if ports is None else ports
+        if getattr(self, "wave_ports", None) or any(
+            p.port_type == PortType.WAVEPORT for p in extracted
+        ):
+            return False, True, True
+        return True, False, False
 
     def _config_options(self) -> dict[str, Any]:
         """Keyword arguments only this problem type gives the config generator."""
@@ -2588,6 +2506,31 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
+        absorbing, metallic, pec_default = self._outer_wall()
+        # The automatic PEC default (pec_default) is a convenience: it only
+        # applies where the mesh has an outer-boundary group to carry it. An
+        # explicit metallic_boundaries=True is not automatic, so it still
+        # reaches the strict check in the config generator.
+        boundary_groups = self._last_mesh_result.groups.get("boundary_surfaces", {})
+        has_outer = boundary_groups.get("absorbing") is not None
+        if pec_default and not has_outer:
+            metallic = False
+        if pec_default and not self._pec_default_noted:
+            self._pec_default_noted = True
+            if has_outer:
+                logger.info(
+                    "Wave ports: the outer wall is PEC, matching the port "
+                    "eigenproblem. Set absorbing_boundary=True to keep an "
+                    "absorbing wall."
+                )
+            else:
+                logger.info(
+                    "Wave ports: the mesh has no outer-boundary group (for "
+                    "example an airbox with zero margin), so the default PEC "
+                    "outer wall has nothing to attach to and no outer-wall "
+                    "entry is written."
+                )
+
         config_path = gen_write_config(
             mesh_result=self._last_mesh_result,
             stack=stack,
@@ -2598,13 +2541,13 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             numerical_config=self.solver,
             refinement_config=self.refinement,
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
-            absorbing_boundary=self.absorbing_boundary,
+            absorbing_boundary=absorbing,
             absorbing_order=self.absorbing_order,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
             impedance_boundaries=self._impedance_boundaries,
-            metallic_boundaries=getattr(self, "metallic_boundaries", False),
+            metallic_boundaries=metallic,
             **self._config_options(),
         )
 
@@ -2730,9 +2673,16 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             >>> # For DrivenSim: `results` is SParams -> results.s21.db
             >>> # For eigen / electrostatic: `results` is dict[str, Path]
         """
+        import json
         import subprocess
 
-        from gsim.palace.runtime import local_abort_report, resolve_launch, run_palace
+        from gsim.palace.runtime import (
+            launch_version,
+            local_abort_report,
+            resolve_launch,
+            run_palace,
+            strip_crack,
+        )
 
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
@@ -2810,7 +2760,28 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             else:
                 logger.warning("%s", msg)
 
+        # A Palace known to be older than 0.19 rejects "Crack" and always cracks,
+        # so it is handed a copy without the key. config.json keeps it for a later
+        # run on a newer Palace and for an upload; the copy sits beside it so the
+        # relative paths in it still hold. Its name is made up by mkstemp, so a
+        # file of the user's in this folder is never overwritten or removed.
+        run_config = config_path
+        local_config = None
+        config_text = config_path.read_text()
+        if '"Crack"' in config_text:
+            config = json.loads(config_text)
+            stripped = strip_crack(config, launch_version(launch))
+            if stripped is not config:
+                local_config = stripped
+
         try:
+            if local_config is not None:
+                handle, name = tempfile.mkstemp(
+                    dir=output_dir, prefix="config.", suffix=".json"
+                )
+                run_config = Path(name)
+                with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                    json.dump(local_config, stream, indent=4)
             run_palace(
                 launch,
                 cwd=output_dir,
@@ -2818,6 +2789,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 num_threads=num_threads,
                 verbose=verbose,
                 emit=_emit_info,
+                config=run_config.name,
             )
         except subprocess.CalledProcessError as failure:
             raise RuntimeError(
@@ -2830,6 +2802,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     remedy=remedy,
                 )
             ) from failure
+        finally:
+            if run_config != config_path:
+                run_config.unlink(missing_ok=True)
 
         if verbose:
             _emit_info("Simulation completed successfully")
@@ -3230,7 +3205,7 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     # Defaults set by each problem class
     simulation_type: Literal["driven", "eigenmode", "electrostatic", "boundarymode"]
-    absorbing_boundary: bool
+    absorbing_boundary: bool | None
     absorbing_order: Literal[1, 2] = Field(
         default=2,
         description=(
@@ -3256,5 +3231,6 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     # Internal state
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
+    _pec_default_noted: bool = PrivateAttr(default=False)
     _last_mesh_result: Any = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)

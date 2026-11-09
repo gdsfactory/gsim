@@ -1,4 +1,4 @@
-# gsim 0.8.0
+# gsim 0.9.0
 
 [![codecov](https://codecov.io/gh/gdsfactory/gsim/branch/main/graph/badge.svg)](https://codecov.io/gh/gdsfactory/gsim)
 

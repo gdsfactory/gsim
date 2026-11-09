@@ -265,10 +265,10 @@ class TestDeclareTerminalPaths:
         assert first == second == [2, 3, 4]
         assert len(sim.mode_paths) == 4
 
-    def test_the_sample_count_reaches_palace(self):
+    def test_paths_use_palaces_element_wise_integration(self):
         sim = BoundaryModeSim()
-        declare_terminal_paths(sim, GSSG, DOMAIN, nsamples=37)
-        assert {p["NSamples"] for p in sim.mode_postprocessing()["Voltage"]} == {37}
+        declare_terminal_paths(sim, GSSG, DOMAIN)
+        assert all("NSamples" not in p for p in sim.mode_postprocessing()["Voltage"])
 
 
 # -- synthetic saved modes -------------------------------------------------------

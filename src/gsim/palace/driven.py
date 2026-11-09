@@ -68,7 +68,9 @@ class DrivenSim(_PalaceSimBase):
     two_terminal_ports: list[TwoTerminalPortConfig] = Field(default_factory=list)
     terminals: None = None
 
-    absorbing_boundary: bool = True
+    # None: absorbing, except PEC when the sim has wave ports (see _outer_wall).
+    absorbing_boundary: bool | None = None
+    metallic_boundaries: bool = False
 
     solver: DrivenSolverConfig = Field(default_factory=DrivenSolverConfig)
 

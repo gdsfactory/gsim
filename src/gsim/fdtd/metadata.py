@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -97,24 +98,36 @@ def generate_metadata(
 
 def _cell_counts(config: FDTDConfig) -> dict[str, Any]:
     """Estimate the engine's z16 layout; the server must verify this hint."""
+    bounds = config.grid.non_pml_bounds
+    return estimate_cell_counts(
+        bounds.min,
+        bounds.max,
+        config.grid.nanometers_per_cell,
+        config.grid.pml_cells,
+    )
+
+
+def estimate_cell_counts(
+    lower_bounds_nm: Sequence[float],
+    upper_bounds_nm: Sequence[float],
+    cell_size_nm: float,
+    pml_cells: int,
+) -> dict[str, Any]:
+    """Estimate grid counts in nanometers for metadata and mesh previews."""
     # Match FDTD's MaterialGridBuilderV2::ComputeGridShape / ComputeAxisLayout:
     # https://github.com/doplaydo/FDTD/blob/c7d7443/src/fdtd_grid_layout.cc
     # The field path aligns Z to kMaxSimdWidth=16 on every CPU architecture.
-    bounds = config.grid.non_pml_bounds
-    cell_size = config.grid.nanometers_per_cell
     # Discard floating-point noise at integer boundaries before rounding up.
     interior = [
-        math.ceil(round((upper - lower) / cell_size, 6))
-        for lower, upper in zip(bounds.min, bounds.max, strict=True)
+        math.ceil(round((upper - lower) / cell_size_nm, 6))
+        for lower, upper in zip(lower_bounds_nm, upper_bounds_nm, strict=True)
     ]
     alignment = [1, 1, 16]
     aligned_interior = [
         ((cells + group - 1) // group) * group
         for cells, group in zip(interior, alignment, strict=True)
     ]
-    pml_per_face = [
-        ((config.grid.pml_cells + group - 1) // group) * group for group in alignment
-    ]
+    pml_per_face = [((pml_cells + group - 1) // group) * group for group in alignment]
     total = [
         cells + 2 * (pml + guard)
         for cells, pml, guard in zip(
