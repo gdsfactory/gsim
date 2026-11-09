@@ -334,6 +334,16 @@ class BoundaryModeSim(_PalaceSimBase):
         self.mode_paths = paths
         return len(paths)
 
+    def _config_options(self) -> dict[str, Any]:
+        """The boundary-mode settings the config generator reads."""
+        return {
+            "conductor_boundary": self.conductor_boundary,
+            "mode_postprocessing": self.mode_postprocessing(),
+            "cross_section_axis": (
+                self.cross_section.axis if self.cross_section is not None else None
+            ),
+        }
+
     def mode_postprocessing(self) -> dict[str, list[dict[str, object]]]:
         """Palace's ``Boundaries.Postprocessing`` block for the declared paths.
 

@@ -36,9 +36,7 @@ def test_impedance_boundary_normalization(target):
             }
         }
     }
-    entries = _resolve_impedance_boundaries(
-        {"_impedance_boundaries": [object(), boundary]}, groups
-    )
+    entries = _resolve_impedance_boundaries([object(), boundary], groups)
     if target == "missing":
         assert entries == []
     else:
@@ -163,7 +161,7 @@ def test_metallic_wall_and_anisotropic_material_configuration(tmp_path, wall, sh
         fmax=1e9,
         simulation_type="boundarymode",
         absorbing_boundary=wall == "absorbing",
-        hints={"_metallic_boundaries": True},
+        metallic_boundaries=True,
     )
     if wall in {"absent", "absorbing"}:
         with pytest.raises(ValueError, match="outer"):

@@ -236,7 +236,7 @@ class TestBoundaryModeFrequencyResolution:
             simulation_type="boundarymode",
             boundary_mode_config=boundary,
             absorbing_boundary=False,
-            hints={"_mode_postprocessing": postprocessing},
+            mode_postprocessing=postprocessing,
         )
         config = json.loads(config_path.read_text())
         assert config["Boundaries"]["Postprocessing"] == postprocessing
