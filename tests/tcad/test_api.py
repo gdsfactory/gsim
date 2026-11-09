@@ -72,6 +72,19 @@ class TestBatchUpdate:
         assert geometry.stack == "stack.yaml"
 
 
+class TestSemiconductorPermittivity:
+    def test_the_default_is_devsims_silicon(self):
+        assert Materials().semiconductor_permittivity == 11.1
+
+    def test_a_setting_saved_without_it_loads_with_the_default(self):
+        saved = {"temperature_k": 308.0, "insulators": {"sio2": 3.9}}
+        assert Materials.model_validate(saved).semiconductor_permittivity == 11.1
+
+    def test_it_survives_a_saved_setting(self):
+        saved = Materials(semiconductor_permittivity=11.7).model_dump()
+        assert Materials.model_validate(saved).semiconductor_permittivity == 11.7
+
+
 class TestDefaults:
     """The defaults are the ones the setter-style sim had."""
 
@@ -99,6 +112,17 @@ class TestValidation:
     def test_a_temperature_must_be_positive(self):
         with pytest.raises(ValidationError, match="temperature_k"):
             Materials(temperature_k=0.0)
+
+    @pytest.mark.parametrize("value", [0.0, 0.5])
+    def test_a_semiconductor_permittivity_below_vacuum_is_rejected(self, value):
+        with pytest.raises(ValidationError, match="semiconductor_permittivity"):
+            Materials(semiconductor_permittivity=value)
+
+    def test_a_semiconductor_permittivity_below_vacuum_fails_at_assignment(self):
+        materials = Materials()
+        with pytest.raises(ValidationError, match="semiconductor_permittivity"):
+            materials.semiconductor_permittivity = 0.5
+        assert materials.semiconductor_permittivity == 11.1
 
     def test_an_insulator_permittivity_must_be_positive(self):
         with pytest.raises(ValidationError, match="insulators"):

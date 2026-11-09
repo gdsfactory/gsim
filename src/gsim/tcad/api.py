@@ -31,6 +31,7 @@ from gsim.common.config import MutableModel
 from gsim.common.cross_section import parse_plane_spec
 from gsim.common.validation import AscendingInterval
 from gsim.tcad.doping import DopingProfile
+from gsim.tcad.silicon import SILICON_RELATIVE_PERMITTIVITY
 
 #: A refinement box ``(h_min, h_max, z_min, z_max, size)`` in um, held to
 #: ``size`` over its whole area.
@@ -143,6 +144,9 @@ class Materials(MutableModel):
     Attributes:
         temperature_k: Lattice temperature (K) of the silicon parameter set.
         semiconductor: DEVSIM material name given to the doped Regions.
+        semiconductor_permittivity: Static relative permittivity of every
+            doped Region, at least 1. The default, 11.1, is DEVSIM's silicon
+            value; the insulators keep their own.
         mobility: Low-field mobility against the total doping, evaluated
             node by node. DEVSIM's own silicon defaults are two constants
             whatever the doping, which misstates the series resistance of
@@ -157,6 +161,9 @@ class Materials(MutableModel):
 
     temperature_k: float = Field(default=300.0, gt=0.0)
     semiconductor: str = Field(default="Silicon", min_length=1)
+    semiconductor_permittivity: float = Field(
+        default=SILICON_RELATIVE_PERMITTIVITY, ge=1.0
+    )
     mobility: MobilityModel = Field(default_factory=MobilityModel.masetti_silicon)
     insulators: dict[str, PositiveFloat] = Field(default_factory=dict)
 
