@@ -15,6 +15,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.common.cloud import CloudJobMixin, submit
+from gsim.meep.mode_bounds import cell_extent, material_extent
 from gsim.meep.models.api import (
     FDTD,
     Domain,
@@ -136,8 +137,7 @@ def _precompute_cross_section_geometry(
     else:
         raise ValueError("Either port or position must be specified")
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -674,19 +674,7 @@ class Simulation(CloudJobMixin, BaseModel):
         stack = stack if stack is not None else self.geometry.stack
         if stack is None:
             return None
-        zmins: list[float] = []
-        zmaxs: list[float] = []
-        for layer in stack.layers.values():
-            if layer.material not in {"air", "Air"}:
-                zmins.append(layer.zmin)
-                zmaxs.append(layer.zmax)
-        for diel in stack.dielectrics:
-            if diel.get("material") not in {"air", "Air"}:
-                zmins.append(diel["zmin"])
-                zmaxs.append(diel["zmax"])
-        if not zmins:
-            return None
-        return min(zmins), max(zmaxs)
+        return material_extent(stack)
 
     def _resolve_xy_background_material(self, component: Any, stack: Any) -> str:
         """Resolve the blanket medium represented by a collapsed XY Z cut."""

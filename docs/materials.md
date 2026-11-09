@@ -104,6 +104,8 @@ Meep mode setup preserves drawn `Air`/`air` voids, including inside silicon with
 an air background. These regions keep their declared Z extent instead of being
 discarded or extended into the lower margin. Undrawn Air declarations remain
 excluded from component cross-sections.
+Mode cells and sampling grids use the same non-air Z reference as the reported
+domain, so unused Air padding does not enlarge the actual solver cell.
 
 ## Analytic PDK cards
 

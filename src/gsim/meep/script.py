@@ -1985,6 +1985,16 @@ def _make_medium(mat_data):
     return mp.Medium(epsilon=eps)
 
 
+def _mode_stack_z_extent(config):
+    entries = list(config["layer_stack"]) + list(config.get("dielectrics", []))
+    solid = [entry for entry in entries if entry["material"] not in {"Air", "air"}]
+    active = solid or entries
+    return (
+        min(entry["zmin"] for entry in active),
+        max(entry["zmax"] for entry in active),
+    )
+
+
 def build_slab_cell(config):
     \"""Build a 2D XZ MEEP cell for 1D slab eigenmode solving.\"""
     z_margin = config.get("z_margin", 0.0)
@@ -1999,8 +2009,7 @@ def build_slab_cell(config):
     materials = config["materials"]
     bg_mat = config.get("background_material", "air")
 
-    z_min = min(entry["zmin"] for entry in layer_stack)
-    z_max = max(entry["zmax"] for entry in layer_stack)
+    z_min, z_max = _mode_stack_z_extent(config)
     z_center = (z_min + z_max) / 2.0 + (zm_top - zm_bottom) / 2.0
 
     x_span = 2.0 / resolution
@@ -2249,8 +2258,7 @@ def main():
         else:
             zm_bottom = zm_top = z_margin
         layer_stack = config["layer_stack"]
-        z_min = min(entry["zmin"] for entry in layer_stack)
-        z_max = max(entry["zmax"] for entry in layer_stack)
+        z_min, z_max = _mode_stack_z_extent(config)
         z_center = (z_min + z_max) / 2.0 + (zm_top - zm_bottom) / 2.0
         z_span = (z_max - z_min) + zm_bottom + zm_top
         if pml_thickness > 0:

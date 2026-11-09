@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
+from gsim.meep.mode_bounds import cell_extent
 from gsim.meep.models.results import ModeResult
 
 if TYPE_CHECKING:
@@ -161,8 +162,7 @@ def _build_slab_xz_cell(
     """
     mp = _import_meep()
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -295,8 +295,7 @@ def _build_component_xz_cell(
     """
     mp = _import_meep()
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -459,8 +458,7 @@ def _build_component_yz_cell(
     """
     mp = _import_meep()
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1050,8 +1048,7 @@ def mode_z_grid(
     """
     import numpy as np
 
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
@@ -1447,8 +1444,7 @@ def solve_slab_mode(
     if field_z_grid is not None:
         field_x_grid = np.array([0.0])
         # Compute z_cell_center same way as _build_slab_xz_cell
-        z_min = min(layer.zmin for layer in stack.layers.values())
-        z_max = max(layer.zmax for layer in stack.layers.values())
+        z_min, z_max = cell_extent(stack)
         if isinstance(z_margin, (tuple, list)):
             zm_bottom, zm_top = z_margin
         else:
@@ -1674,8 +1670,7 @@ def solve_cross_section_mode(
     sim.init_sim()
 
     # Convert field_z_grid from absolute to MEEP frame
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         zm_bottom, zm_top = z_margin
     else:
@@ -1788,8 +1783,7 @@ def solve_slab_modes(
     field_z_grid_meep: np.ndarray | None = None
     if field_z_grid is not None:
         field_x_grid = np.array([0.0])
-        z_min = min(layer.zmin for layer in stack.layers.values())
-        z_max = max(layer.zmax for layer in stack.layers.values())
+        z_min, z_max = cell_extent(stack)
         if isinstance(z_margin, (tuple, list)):
             zm_bottom, zm_top = z_margin
         else:
@@ -1879,8 +1873,7 @@ def solve_slab_wavelength_sweep(
         raise ValueError("stack must be a LayerStack, got None")
 
     # --- pre-compute geometry meta-data (wavelength-independent) ---
-    z_min = min(layer.zmin for layer in stack.layers.values())
-    z_max = max(layer.zmax for layer in stack.layers.values())
+    z_min, z_max = cell_extent(stack)
     if isinstance(z_margin, (tuple, list)):
         z_margin_bottom, z_margin_top = z_margin
     else:
