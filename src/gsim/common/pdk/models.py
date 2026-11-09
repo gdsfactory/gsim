@@ -80,7 +80,11 @@ class ResolvedPort:
 
 @dataclass(frozen=True)
 class ResolvedPassivePcell:
-    """Canonical physical representation consumed by simulation backends."""
+    """Canonical physical representation consumed by simulation backends.
+
+    Retain an originating PDK module for downstream material-card and alias
+    lookup, while keeping ``pdk`` as the authoritative inner PDK object.
+    """
 
     component: Any
     derived_component: Any
@@ -91,6 +95,7 @@ class ResolvedPassivePcell:
     ports: Mapping[str, ResolvedPort]
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
     wavelength_um: float
+    pdk_module: Any | None = None
     clipped_layers: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 

@@ -140,13 +140,16 @@ warn. Source containment and guided-port face checks still apply.
 `clip_geometry` is deprecated starting with 0.10.0, but remains functional
 through that release. Its default remains `False`: explicit bounds must
 contain the geometry unless `clip_geometry=True` is supplied. Both values
-remain in saved domain settings and the JSON schema. Explicit domain
-configuration and assignments emit a `DeprecationWarning`; routine writes and
-previews do not warn about an unspecified switch.
+remain supported in saved domain settings and the JSON schema. Explicit domain
+configuration and assignments emit a `DeprecationWarning` attributed to the
+calling code. Dumps omit an unspecified switch, so ordinary model round trips,
+writes, and previews do not warn about a switch the user never set.
 
-Automatic clipping and removal of the switch are deferred to a later feature
-release, after this warning has shipped. Until then, keep the flag wherever
-clipping is required. Cloud cache lookup uses generated input files; changing
+The removal target is **0.12.0 or later**, and only after at least two feature
+releases and 12 months since the first released warning in 0.10.0. If those
+conditions are not met in 0.12.0, removal and automatic clipping move to a later
+incompatible release. Until then, keep the flag wherever clipping is required.
+Cloud cache lookup uses generated input files; changing
 the physical window can change the mesh, configuration, and cache identity.
 
 Port centers and diagnostic windows follow the clipped active bands. Automatic
@@ -243,6 +246,41 @@ sim.domain(
     clip_geometry=True,
 )
 ```
+
+## Background default in 0.10.0
+
+The 0.10.0 feature release changes the default simulation background from
+`"SiO2"` to `"Air"`, an ideal lossless, nondispersive material with refractive
+index 1. This intentional change does not target a 0.9.x patch release.
+
+Stack regions continue to use their own material cards and take priority over
+the background. The background fills space not occupied by those regions;
+it does not replace BOX, substrate, cladding, or patterned materials. A domain
+fully filled by stack regions retains those physical material assignments.
+
+Existing calls that omit a background can change behavior in uncovered space.
+Source and receiver references that inherit the background can also change.
+Automatic Z sizing can differ because it follows matching background stack
+levels when available. Unused Air declarations (such as an undrawn undercut)
+do not enlarge the automatic domain. `Air` and its built-in `air` alias use
+the same bounds. Explicit domain bounds remain in force.
+
+For example, a bare gpdk silicon component with no drawn oxide simulates silicon
+in air when the background is omitted, once its material names resolve.
+GDSFactory 9.x uses the lowercase `si` name; with those releases, supply
+`sim.materials(overrides={"si": 3.47})` when the PDK has no card for it.
+Declaring oxide in the LayerStack does
+not create oxide geometry. Select `background="SiO2"` to fill otherwise
+unoccupied space with oxide.
+
+To preserve the former environment, add `sim.materials(background="SiO2")`,
+or retain `background_material="SiO2"` in the historical constructor API.
+Saved settings with an explicit background are unchanged; settings omitting it
+use the new default when loaded. Set `z_bounds` or `padding_z` explicitly if
+preserving an automatically chosen vertical extent matters. Re-exporting
+updates inputs and cache keys; previously generated inputs and results are
+unchanged. The existing FDTD notebooks already choose their backgrounds
+explicitly.
 
 ## Setup visualization
 

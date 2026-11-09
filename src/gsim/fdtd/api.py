@@ -11,8 +11,10 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
     ValidationInfo,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -100,7 +102,7 @@ class Materials(_FiniteModel):
     the deployed GDSFactory FDTD solver does not accept those yet.
     """
 
-    background: str = Field(default="SiO2", min_length=1)
+    background: str = Field(default="Air", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)
     dispersion: bool = False
 
@@ -373,13 +375,25 @@ class Domain(_FiniteModel):
 
     def __call__(self, **updates: Any) -> Self:
         """Warn for explicit switch updates while validating the full domain."""
+        explicit_fields = self.model_fields_set | updates.keys()
         updated = type(self).model_validate(
             {**dict(self), **updates},
             context={"warn_clipping": "clip_geometry" in updates},
         )
         for field_name in type(self).model_fields:
             object.__setattr__(self, field_name, getattr(updated, field_name))
+        object.__setattr__(self, "__pydantic_fields_set__", explicit_fields)
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_domain(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Retain explicit switches without inventing one in default round trips."""
+        data = handler(self)
+        if "clip_geometry" not in self.model_fields_set:
+            data.pop("clip_geometry", None)
+        return data
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod

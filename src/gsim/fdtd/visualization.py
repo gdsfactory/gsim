@@ -91,7 +91,7 @@ class VisualizationMixin(RuntimeConfigMixin):
             manifest = generate_mesh(
                 resolved,
                 mesh_path,
-                background_material=self.materials.background,
+                background_material=self._background_material_name,
                 padding=self.domain.padding,
                 padding_x=self.domain.padding_x,
                 padding_y=self.domain.padding_y,
