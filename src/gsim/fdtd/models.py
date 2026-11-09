@@ -14,6 +14,10 @@ class FDTDGeometryError(FDTDArtifactError):
     """Raised when geometry cannot produce a valid GDSFactory FDTD mesh."""
 
 
+class GeometryClippingWarning(UserWarning):
+    """Explicit domain bounds remove part or all of a material layer."""
+
+
 class FDTDConfigError(FDTDArtifactError):
     """Raised when settings cannot produce a valid GDSFactory FDTD config."""
 
@@ -63,6 +67,7 @@ __all__ = [
     "FDTDArtifactError",
     "FDTDConfigError",
     "FDTDGeometryError",
+    "GeometryClippingWarning",
     "MeshGroup",
     "MeshManifest",
     "PortMeshGroup",

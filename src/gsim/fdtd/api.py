@@ -11,12 +11,15 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
 from gsim.common.config import MutableModel as _MutableModel
-from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.domain import Padding, padding_pair, warn_legacy_clipping
 from gsim.fdtd.mode_selection import ModeSelection
 from gsim.fdtd.monitor_names import resolve_monitor_name
 
@@ -347,10 +350,7 @@ class Domain(_FiniteModel):
     pml_cells: int = Field(default=32, ge=0)
     clip_geometry: bool = Field(
         default=False,
-        description=(
-            "Clip material geometry to explicit bounds and skip stack films "
-            "outside the vertical window."
-        ),
+        description="Deprecated: opt in to clipping material to explicit bounds.",
     )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
@@ -364,6 +364,35 @@ class Domain(_FiniteModel):
         default=None,
         description="Optional physical Z-domain bounds in micrometers.",
     )
+
+    @field_validator("clip_geometry", mode="before")
+    @classmethod
+    def accept_legacy_clipping(cls, value: Any, info: ValidationInfo) -> Any:
+        """Warn about the switch while retaining both values and saved settings."""
+        if (info.context or {}).get("warn_clipping", True):
+            warn_legacy_clipping()
+        return value
+
+    def __call__(self, **updates: Any) -> Self:
+        """Warn for explicit switch updates while validating the full domain."""
+        explicit_fields = self.model_fields_set | updates.keys()
+        updated = type(self).model_validate(
+            {**dict(self), **updates},
+            context={"warn_clipping": "clip_geometry" in updates},
+        )
+        for field_name in type(self).model_fields:
+            object.__setattr__(self, field_name, getattr(updated, field_name))
+        object.__setattr__(self, "__pydantic_fields_set__", explicit_fields)
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_domain(self, handler: SerializerFunctionWrapHandler):
+        """Retain explicit switches without inventing one in default round trips."""
+        # An unannotated return preserves the model's serialization JSON schema.
+        data = handler(self)
+        if "clip_geometry" not in self.model_fields_set:
+            data.pop("clip_geometry", None)
+        return data
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod
@@ -412,7 +441,9 @@ class Domain(_FiniteModel):
             "y_bounds",
             "z_bounds",
         } and hasattr(self, "__pydantic_fields_set__"):
-            type(self).model_validate({**self.model_dump(), name: value})
+            type(self).model_validate(
+                {**self.model_dump(), name: value}, context={"warn_clipping": False}
+            )
         super().__setattr__(name, value)
 
 

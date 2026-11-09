@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import warnings
 from math import isfinite
+from pathlib import Path
+
+import pydantic
 
 from gsim.common.materials import canonical_material_name
 from gsim.common.pdk import ResolvedPassivePcell
@@ -10,6 +14,23 @@ from gsim.fdtd.mesh_geometry import UM_TO_NM
 from gsim.fdtd.models import FDTDGeometryError
 
 Padding = float | tuple[float, float]
+
+
+def warn_legacy_clipping() -> None:
+    """Explain the replacement for the legacy clipping switch."""
+    warnings.warn(
+        "clip_geometry is deprecated. Its default remains False in 0.10.0: "
+        "explicit bounds must contain the geometry unless clip_geometry=True. "
+        "Automatic clipping and removal target 0.12.0 or later, and only after "
+        "two feature releases and at least 12 months since the first released "
+        "warning in 0.10.0. Keep the switch wherever clipping is required until then.",
+        DeprecationWarning,
+        stacklevel=2,
+        skip_file_prefixes=(
+            str(Path(__file__).resolve().parents[1]),
+            str(Path(pydantic.__file__).resolve().parent),
+        ),
+    )
 
 
 def padding_pair(value: Padding) -> tuple[float, float]:
@@ -31,7 +52,7 @@ def background_bounds_nm(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
-    clip_geometry: bool = False,
+    clip_geometry: bool | None = None,
 ) -> tuple[float, float, float, float, float, float]:
     """Size the physical domain, keeping automatic guided-port alignment.
 

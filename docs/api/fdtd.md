@@ -114,8 +114,8 @@ height. Existing string mappings retain their single-band behavior.
 
 ### Bounded PDK stacks
 
-Keep the PDK's LayerStack unchanged and opt into clipping when the simulation
-uses only a smaller physical window:
+Keep the PDK's LayerStack unchanged and specify the physical window directly.
+Opt in to trimming material geometry with `clip_geometry=True`:
 
 ```python
 sim = fdtd.Simulation(pdk=pdk)
@@ -129,8 +129,28 @@ are required. Sidewall overhangs are retained conservatively. This includes
 films with negative thickness; boundary-only contact has no material volume.
 Intersecting layers keep their original sidewall profiles and are clipped by
 the mesher; the PDK object is not modified. Missing materials inside the window
-still raise an error. With the default `clip_geometry=False`, explicit bounds
-must continue to contain the resolved geometry.
+still raise an error. `GeometryClippingWarning` identifies layers and axes
+where explicit bounds trim or wholly omit material, including truncated
+blanket films. Repeated resolution of the same component/window does not
+repeat this warning. Empty masks and bounds containing all material do not
+warn. Source containment and guided-port face checks still apply.
+
+#### Migration for 0.10.0
+
+`clip_geometry` is deprecated starting with 0.10.0, but remains functional
+through that release. Its default remains `False`: explicit bounds must
+contain the geometry unless `clip_geometry=True` is supplied. Both values
+remain supported in saved domain settings and the JSON schema. Explicit domain
+configuration and assignments emit a `DeprecationWarning` attributed to the
+calling code. Dumps omit an unspecified switch, so ordinary model round trips,
+writes, and previews do not warn about a switch the user never set.
+
+The removal target is **0.12.0 or later**, and only after at least two feature
+releases and 12 months since the first released warning in 0.10.0. If those
+conditions are not met in 0.12.0, removal and automatic clipping move to a later
+incompatible release. Until then, keep the flag wherever clipping is required.
+Cloud cache lookup uses generated input files; changing
+the physical window can change the mesh, configuration, and cache identity.
 
 Levels marked `background=True` fill the physical simulation domain in XY,
 including lateral padding, without requiring a drawn source polygon. Their
@@ -221,8 +241,10 @@ argument have been removed; configure `sim.domain(padding=...)` instead.
 
 Optional `x_bounds`, `y_bounds`, and `z_bounds` tuples set the non-PML physical
 domain in micrometers. Omitted axes remain automatically sized from the
-component, PDK stack, and padding. Explicit bounds must contain the geometry,
-sources, and monitors; guided ports must remain on a domain face. The backend
+component, PDK stack, and padding. With `clip_geometry=True`, explicit bounds
+trim material geometry and must contain sources; guided ports must remain on
+a domain face. Plane monitor
+windows are intersected with the domain and warn if cropped. The backend
 adds PML outside these bounds. The resulting box is written to `config.json` as
 `grid.non_pml_bounds`, in nanometers.
 Do not combine explicit bounds and explicit per-axis padding on the same axis;
@@ -233,6 +255,7 @@ sim.domain(
     x_bounds=(0.0, 35.0),
     y_bounds=(-12.0, 12.0),
     z_bounds=(-1.0, 1.55),
+    clip_geometry=True,
 )
 ```
 
@@ -291,6 +314,8 @@ The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
 subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
 `aspect="auto"` to fill the axes, or `figsize=(8, 4)` to set the figure size.
 An omitted `position_um` uses the geometry midpoint along the requested axis.
+If explicit bounds clip material on that axis, it uses the bounded domain
+midpoint instead; bounds containing the geometry keep the geometry midpoint.
 The current geometry and material settings are resolved for every call. A
 temporary mesh is generated; the plot does not require selecting a source port
 or writing run artifacts. A selected source port must exist, and sources and

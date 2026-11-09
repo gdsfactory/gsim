@@ -308,7 +308,7 @@ def generate_mesh(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
-    clip_geometry: bool = False,
+    clip_geometry: bool | None = None,
 ) -> MeshManifest:
     """Generate an exact-boundary transfer mesh with coarse volume tetrahedra."""
     if mesh_size_nm <= 0:
@@ -378,7 +378,7 @@ def generate_mesh(
                 tags,
                 background_tag,
                 background_bounds,
-                allow_empty=clip_geometry,
+                allow_empty=bool(clip_geometry),
             )
             for name, tags in layer_volume_tags.items()
         }
