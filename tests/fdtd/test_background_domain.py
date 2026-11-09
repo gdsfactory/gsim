@@ -67,6 +67,80 @@ def _group_points(mesh, name):
     return mesh.points[np.unique(cells)]
 
 
+def _group_volume(mesh, name):
+    """Integrate tetrahedra independently of the layer's profile builder."""
+    tags = mesh.cell_data_dict["gmsh:physical"]["tetra"]
+    cells = mesh.cells_dict["tetra"][tags == mesh.field_data[name][0]]
+    points = mesh.points[cells]
+    return np.abs(np.linalg.det(points[:, 1:] - points[:, :1])).sum() / 6
+
+
+@pytest.mark.parametrize("angle", [-10, 10])
+@pytest.mark.parametrize("reference", [0, 0.5, 1])
+def test_tapered_blankets_fill_the_domain_at_every_height(
+    tmp_path, blanket_pdk, angle, reference
+):
+    levels = blanket_pdk.PDK.layer_stack.layers
+    levels["core"].sidewall_angle = 0
+    for name in ("substrate", "box", "clad"):
+        levels[name].sidewall_angle = angle
+        levels[name].width_to_z = reference
+    simulation = _simulation(blanket_pdk)
+    mesh = meshio.read(simulation.write(tmp_path).mesh_path)
+    # Domain is 2 x 1.6 um. Substrate and clad retain half a micron.
+    # Physical groups retain overlap; material priority is applied by the solver.
+    assert _group_volume(mesh, "substrate") == pytest.approx(2 * 1.6 * 0.5 * 1e9)
+    assert _group_volume(mesh, "box") == pytest.approx(2 * 1.6 * 1e9)
+    assert _group_volume(mesh, "clad") == pytest.approx(2 * 1.6 * 0.5 * 1e9)
+
+
+def test_tapered_background_keeps_exclusion_mask_reference(blanket_pdk):
+    from math import radians, tan
+
+    from shapely.geometry import box
+
+    from gsim.common.polygon import fuse_polygons
+
+    component = blanket_pdk.PDK.get_component("straight").copy()
+    component.add_polygon(
+        [(0.7, -0.1), (1.3, -0.1), (1.3, 0.1), (0.7, 0.1)], layer=(9, 0)
+    )
+    level = blanket_pdk.PDK.layer_stack.layers["box"]
+    level.background_exclude_layers = [(9, 0)]
+    level.sidewall_angle = 10
+    level.width_to_z = 0.5
+    domain = box(0, -0.65, 2, 0.95)
+    geometry = fuse_polygons(
+        component, level, background_bounds=domain.bounds, simplify_tol=0
+    )
+    for fraction in (0, 0.5, 1):
+        offset = (0.5 - fraction) * tan(radians(10))
+        profile = geometry.buffer(offset, join_style=2).intersection(domain)
+        hole_width = max(0, 0.6 - 2 * offset)
+        hole_height = max(0, 0.2 - 2 * offset)
+        assert profile.area == pytest.approx(3.2 - hole_width * hole_height)
+
+
+def test_default_slice_stays_at_layout_midpoint_with_asymmetric_padding(
+    fdtd_pdk_module, monkeypatch
+):
+    from gsim.fdtd import slice_viz
+
+    fdtd_pdk_module.PDK.layer_stack.layers["buried_oxide"].background = True
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.domain(padding_y=(0.4, 0.7))
+    simulation.geometry("straight", mesh_size_nm=750)
+    positions = []
+    monkeypatch.setattr(
+        slice_viz,
+        "plot_mesh_slice",
+        lambda *_args, **kwargs: positions.append(kwargs["position_um"]),
+    )
+    simulation.plot_2d_static(axis="y")
+    simulation.plot_2d_static(axis="y", position_um=0.3)
+    assert positions == pytest.approx([0, 0.3])
+
+
 @pytest.mark.parametrize("z_bounds", [(-1.5, 0.5), (-0.5, 0.1), (-2.5, 1.2)])
 def test_blanket_mesh_fills_padding_and_clips_each_vertical_band(
     tmp_path, blanket_pdk, z_bounds

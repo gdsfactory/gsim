@@ -8,6 +8,7 @@ merged Shapely polygons.
 
 from __future__ import annotations
 
+from math import radians, tan
 from typing import TYPE_CHECKING, Any
 
 import shapely
@@ -130,7 +131,14 @@ def fuse_polygons(
 
     geometry = shapely.ops.unary_union(shapely_polygons)
     if expand_background and background_bounds is not None:
-        geometry = shapely.geometry.box(*background_bounds).difference(geometry)
+        slope = abs(float(layer.thickness)) * tan(radians(float(layer.sidewall_angle)))
+        # Keep artificial outer edges outside the domain at every Z section.
+        # Exclusion-mask contours stay at their original reference position.
+        overhang = max(0.0, -layer.width_to_z * slope, (1 - layer.width_to_z) * slope)
+        footprint = shapely.geometry.box(*background_bounds)
+        if overhang:
+            footprint = footprint.buffer(overhang, join_style=2)
+        geometry = footprint.difference(geometry)
     return geometry.simplify(simplify_tol, preserve_topology=False)
 
 
