@@ -17,6 +17,7 @@ from gsim.tcad.doping import (
     acceptor_donor_concentrations,
     net_doping_cm3,
 )
+from gsim.tcad.mesh import UM_TO_CM
 
 
 class TestStepDoping:
@@ -37,6 +38,19 @@ class TestStepDoping:
         y = np.array([0.1, 0.5, 0.1, 0.0])
         # Inside; y outside; x outside; on the closed boundary.
         np.testing.assert_allclose(step.concentration(x, y), [2e17, 0.0, 0.0, 2e17])
+
+    def test_box_edge_after_the_cm_round_trip_is_inside(self):
+        step = StepDoping(
+            region="slab",
+            dopant_type="donor",
+            concentration_cm3=1e18,
+            y_range=(0.0, 0.22),
+        )
+        y_node = (0.22 * UM_TO_CM) / UM_TO_CM
+        assert y_node > 0.22
+        np.testing.assert_allclose(
+            step.concentration(0.0, [y_node, 0.221]), [1e18, 0.0]
+        )
 
     def test_scalar_input(self):
         step = StepDoping(region="slab", dopant_type="donor", concentration_cm3=1e18)
@@ -147,6 +161,35 @@ class TestImplantDoping:
         assert float(implant.concentration(3.0, -0.05)) == pytest.approx(1e20)
         assert float(implant.concentration(0.0, -0.05)) == 0.0
 
+    def test_node_on_the_surface_after_the_cm_round_trip_is_implanted(self):
+        # DEVSIM holds the mesh in cm; reading a node at y = 0.22 um back
+        # gives 0.22000000000000003, a hair above the surface.
+        y_node = (0.22 * UM_TO_CM) / UM_TO_CM
+        assert y_node > 0.22
+        implant = ImplantDoping(
+            region="slab",
+            dopant_type="donor",
+            peak_cm3=1e18,
+            surface_y=0.22,
+            range_um=0.1,
+            straggle_um=0.05,
+        )
+        # N(0) = peak * exp(-Rp^2 / (2 dRp^2)) = 1e18 * exp(-2).
+        assert float(implant.concentration(0.0, y_node)) == pytest.approx(
+            1.353352832366127e17
+        )
+
+    def test_a_node_one_nanometre_above_the_surface_stays_undoped(self):
+        implant = ImplantDoping(
+            region="slab",
+            dopant_type="donor",
+            peak_cm3=1e18,
+            surface_y=0.22,
+            range_um=0.1,
+            straggle_um=0.05,
+        )
+        assert float(implant.concentration(0.0, 0.221)) == 0.0
+
 
 class TestSuperposition:
     def test_acceptors_and_donors_summed_separately(self):
@@ -225,6 +268,20 @@ class TestTableDoping:
         np.testing.assert_allclose(table.concentration(0.0, [-3.0, 9.0]), [0.0, 0.0])
         # Inside the grid, "zero" changes nothing.
         assert float(table.concentration(0.0, 0.1)) == pytest.approx(5.5e17)
+
+    def test_zero_fill_keeps_a_grid_end_after_the_cm_round_trip(self):
+        table = TableDoping(
+            region="rib",
+            dopant_type="acceptor",
+            y_um=[0.0, 0.22],
+            values_cm3=[1e18, 1e17],
+            fill="zero",
+        )
+        y_node = (0.22 * UM_TO_CM) / UM_TO_CM
+        assert y_node > 0.22
+        np.testing.assert_allclose(
+            table.concentration(0.0, [y_node, 0.221]), [1e17, 0.0]
+        )
 
     def test_two_axes_interpolate_bilinearly(self):
         table = TableDoping(
