@@ -100,7 +100,7 @@
       }
       button.group-button {
         background: var(--group-color);
-        color: #101216;
+        color: var(--group-text-color, #101216);
       }
       button.group-button.off {
         background: #343a46;
@@ -743,6 +743,13 @@
         return new THREE.Color(physicalGroupColors.get(group));
       }
 
+      function groupTextColor(color) {
+        // THREE stores linear RGB. Choose the higher-contrast label color.
+        const luminance =
+          0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+        return luminance > 0.193 ? "#101216" : "#ffffff";
+      }
+
       function groupName(mesh, group) {
         return mesh.names.get(group) ?? `Group ${group}`;
       }
@@ -1002,10 +1009,9 @@
           const button = document.createElement("button");
           button.className = "group-button";
           button.textContent = groupName(mesh, group);
-          button.style.setProperty(
-            "--group-color",
-            `#${colorFor(mesh, group).getHexString()}`,
-          );
+          const color = colorFor(mesh, group);
+          button.style.setProperty("--group-color", `#${color.getHexString()}`);
+          button.style.setProperty("--group-text-color", groupTextColor(color));
           button.classList.toggle("off", !root.visible);
           button.addEventListener("click", () => {
             root.visible = !root.visible;

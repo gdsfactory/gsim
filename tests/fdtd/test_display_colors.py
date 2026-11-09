@@ -1,5 +1,9 @@
 """PDK colors reach 3D surfaces and labels without changing simulation inputs."""
 
+import json
+import re
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -213,6 +217,34 @@ def test_explicit_color_is_embedded_and_precedes_fallbacks(tmp_path):
     largest = viewer.html.index("if (group === currentLargestGroup)", start)
     assert explicit < port < largest
     assert '"showGroups":["core"]' in viewer.html
+
+
+def test_dark_and_light_group_colors_have_readable_labels(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to exercise the viewer's color logic")
+    viewer = plot_mesh(_write_mesh(tmp_path / "mesh.msh"))
+    helper = re.search(
+        r"function groupTextColor\(color\) \{.*?\n      \}", viewer.html, re.DOTALL
+    )
+    assert helper is not None
+    colors = [
+        {"r": 0, "g": 0, "b": 0},
+        {"r": 0, "g": 0, "b": 1},
+        {"r": 1, "g": 1, "b": 1},
+        {"r": 1, "g": 0, "b": 0},
+    ]
+    script = (
+        f"const choose = ({helper.group()});"
+        f"console.log(JSON.stringify({json.dumps(colors)}.map(choose)));"
+    )
+    completed = subprocess.run(  # noqa: S603 -- Fixed interpreter and repository-owned JS.
+        [node, "-e", script], capture_output=True, text=True, check=True
+    )
+    assert json.loads(completed.stdout) == ["#ffffff", "#ffffff", "#101216", "#101216"]
+    compact_html = "".join(viewer.html.split())
+    assert '"--group-text-color",groupTextColor(color)' in compact_html
+    assert "color:var(--group-text-color,#101216)" in compact_html
 
 
 def test_simulation_uses_pdk_color_without_changing_saved_inputs(
