@@ -15,6 +15,7 @@ from gsim.common.materials import (
     get_project_material_cards,
     resolve_material_snapshot,
 )
+from gsim.common.pdk.clipping import material_clipping_axes
 from gsim.common.pdk.models import (
     ComponentResolutionError,
     LayerResolutionError,
@@ -126,6 +127,7 @@ def _resolved_layers(
     z_bounds: tuple[float, float] | None = None,
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
+    clipped_layers: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, ResolvedLayer]:
     """Extract nonempty physical layers while preserving fabrication fields."""
     for axis, bounds in (("x", x_bounds), ("y", y_bounds), ("z", z_bounds)):
@@ -139,16 +141,22 @@ def _resolved_layers(
     for layer_key, layer_level in layer_stack.layers.items():
         z_start = float(layer_level.zmin)
         z_end = z_start + float(layer_level.thickness)
-        if z_bounds is not None and (
-            max(z_start, z_end) <= z_bounds[0] or min(z_start, z_end) >= z_bounds[1]
-        ):
-            continue
         geometry = fuse_polygons(
             derived_component,
             layer_level,
             round_tol=6,
             simplify_tol=0.0,
         )
+        if clipped_layers is not None:
+            axes = material_clipping_axes(
+                geometry, layer_level, x_bounds, y_bounds, z_bounds
+            )
+            if axes:
+                clipped_layers[layer_key] = axes
+        if z_bounds is not None and (
+            max(z_start, z_end) <= z_bounds[0] or min(z_start, z_end) >= z_bounds[1]
+        ):
+            continue
         if geometry.is_empty or not _inside_xy_window(
             geometry, layer_level, x_bounds, y_bounds
         ):
@@ -249,8 +257,9 @@ def resolve_passive_pcell(
         raise LayerResolutionError(
             f"Could not evaluate derived layers: {error}"
         ) from error
+    clipped_layers: dict[str, tuple[str, ...]] = {}
     layers = _resolved_layers(
-        resolved_component, layer_stack, z_bounds, x_bounds, y_bounds
+        resolved_component, layer_stack, z_bounds, x_bounds, y_bounds, clipped_layers
     )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
     materials = {}
@@ -284,6 +293,7 @@ def resolve_passive_pcell(
         ports=ports,
         bounds=_bounds(layers),
         wavelength_um=float(wavelength_um),
+        clipped_layers=clipped_layers,
     )
 
 

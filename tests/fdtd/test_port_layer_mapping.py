@@ -78,7 +78,7 @@ def test_explicit_mapping_meshes_exactly_the_selected_height(
 ):
     module, component = mapped_stack
     simulation = fdtd.Simulation(pdk=module)
-    simulation.domain(z_bounds=crop, clip_geometry=True)
+    simulation.domain(z_bounds=crop)
     simulation.source(port="o1")
     resolved = simulation.geometry(
         component, port_layer_map={(100, 0): selection}, mesh_size_nm=700

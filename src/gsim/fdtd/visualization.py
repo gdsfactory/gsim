@@ -101,7 +101,6 @@ class VisualizationMixin(RuntimeConfigMixin):
                 x_bounds=self.domain.x_bounds,
                 y_bounds=self.domain.y_bounds,
                 z_bounds=self.domain.z_bounds,
-                clip_geometry=self.domain.clip_geometry,
             )
             return plot_mesh_slice(
                 mesh_path,
@@ -258,8 +257,8 @@ class VisualizationMixin(RuntimeConfigMixin):
         if position_um is not None or self._resolved is None:
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
-        if self.domain.clip_geometry:
-            bounds = self._background_bounds_nm()
-            return (bounds[axis_index] + bounds[axis_index + 3]) / 2000
+        explicit_bounds = getattr(self.domain, f"{axis}_bounds")
+        if explicit_bounds is not None:
+            return (explicit_bounds[0] + explicit_bounds[1]) / 2
         lower, upper = self.resolved.bounds
         return (lower[axis_index] + upper[axis_index]) / 2

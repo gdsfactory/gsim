@@ -269,7 +269,7 @@ def test_explicit_domain_bounds_set_background_box(
     }
 
 
-def test_explicit_domain_bounds_must_contain_geometry(
+def test_explicit_domain_bounds_must_keep_guided_ports_on_faces(
     tmp_path,
     fdtd_pdk_module,
 ) -> None:
@@ -279,9 +279,10 @@ def test_explicit_domain_bounds_must_contain_geometry(
         mesh_size_nm=750,
     )
     simulation.domain(x_bounds=(0.1, 2.0))
-    simulation.geometry("straight", settings={"length": 2.0})
+    with pytest.warns(fdtd.GeometryClippingWarning):
+        simulation.geometry("straight", settings={"length": 2.0})
 
-    with pytest.raises(FDTDGeometryError, match=r"domain\.x_bounds.*geometry"):
+    with pytest.raises(FDTDGeometryError, match=r"Port 'o1'.*domain face"):
         simulation.write(tmp_path)
 
 

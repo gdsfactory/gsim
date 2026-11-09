@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 from gsim.common.config import MutableModel as _MutableModel
-from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.domain import Padding, padding_pair, warn_legacy_clipping
 from gsim.fdtd.mode_selection import ModeSelection
 from gsim.fdtd.monitor_names import resolve_monitor_name
 
@@ -345,13 +345,6 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
-    clip_geometry: bool = Field(
-        default=False,
-        description=(
-            "Clip material geometry to explicit bounds and skip stack films "
-            "outside the vertical window."
-        ),
-    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
@@ -364,6 +357,26 @@ class Domain(_FiniteModel):
         default=None,
         description="Optional physical Z-domain bounds in micrometers.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_clipping(cls, value: Any) -> Any:
+        """Load old calls and saved domains without exporting the obsolete flag."""
+        if isinstance(value, Mapping) and "clip_geometry" in value:
+            warn_legacy_clipping()
+            return {key: item for key, item in value.items() if key != "clip_geometry"}
+        return value
+
+    @property
+    def clip_geometry(self) -> bool:
+        """Retain deprecated attribute reads during the API transition."""
+        warn_legacy_clipping()
+        return True
+
+    @clip_geometry.setter
+    def clip_geometry(self, _value: bool) -> None:
+        """Accept legacy assignments; explicit bounds always imply trimming."""
+        warn_legacy_clipping()
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod

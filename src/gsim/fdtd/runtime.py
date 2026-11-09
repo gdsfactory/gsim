@@ -91,7 +91,6 @@ class RuntimeConfigMixin:
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
-            clip_geometry=self.domain.clip_geometry,
         )
 
     def _validate_explicit_domain_contents(self) -> None:

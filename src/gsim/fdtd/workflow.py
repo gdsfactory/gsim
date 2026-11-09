@@ -169,6 +169,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         self.solver = Solver.model_validate(solver_data)
         self.geometry.bind(self._resolve_geometry)
         self._resolved: ResolvedPassivePcell | None = None
+        self._clipping_warning_key: tuple[Any, ...] | None = None
         self._last_artifacts: SimulationArtifacts | None = None
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -314,7 +315,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         if xy:
             if z_um is None:
                 low, high = resolved.bounds[0][2], resolved.bounds[1][2]
-                if self.domain.clip_geometry and self.domain.z_bounds is not None:
+                if self.domain.z_bounds is not None:
                     low = max(low, self.domain.z_bounds[0])
                     high = min(high, self.domain.z_bounds[1])
                 z_um = (low + high) / 2
@@ -337,7 +338,14 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
             existing_names.add(plane.name)
-        if self.domain.clip_geometry:
+        if any(
+            bounds is not None
+            for bounds in (
+                self.domain.x_bounds,
+                self.domain.y_bounds,
+                self.domain.z_bounds,
+            )
+        ):
             bounds = self._background_bounds_nm()
             for plane in planes:
                 monitor_region_nm(plane, bounds, warn=False)
@@ -369,9 +377,14 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
             port_layer_map=self.geometry.port_layer_map,
-            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
-            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
-            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
+            z_bounds=self.domain.z_bounds,
+            x_bounds=self.domain.x_bounds,
+            y_bounds=self.domain.y_bounds,
+        )
+        from gsim.fdtd.geometry_clipping import warn_geometry_clipping
+
+        self._clipping_warning_key = warn_geometry_clipping(
+            self._resolved, self.geometry, self.domain, self._clipping_warning_key
         )
         return self._resolved
 
@@ -459,7 +472,6 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
-            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
         resolve_fiber_media(

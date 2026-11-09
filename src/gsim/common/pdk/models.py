@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from shapely.geometry.base import BaseGeometry
@@ -91,6 +91,7 @@ class ResolvedPassivePcell:
     ports: Mapping[str, ResolvedPort]
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
     wavelength_um: float
+    clipped_layers: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 __all__ = [

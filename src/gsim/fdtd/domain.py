@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from math import isfinite
 
 from gsim.common.pdk import ResolvedPassivePcell
@@ -9,6 +10,19 @@ from gsim.fdtd.mesh_geometry import UM_TO_NM
 from gsim.fdtd.models import FDTDGeometryError
 
 Padding = float | tuple[float, float]
+
+
+def warn_legacy_clipping() -> None:
+    """Explain the replacement for the legacy clipping switch."""
+    warnings.warn(
+        "clip_geometry is deprecated and ignored: explicit x_bounds, y_bounds, "
+        "or z_bounds now trim material geometry automatically. Omit "
+        "clip_geometry; enlarge the bounds if clipping is unwanted. The "
+        "compatibility alias will remain for at least two feature releases "
+        "and 12 months after the first released warning.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 def padding_pair(value: Padding) -> tuple[float, float]:
@@ -30,7 +44,7 @@ def background_bounds_nm(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     z_bounds: tuple[float, float] | None = None,
-    clip_geometry: bool = False,
+    clip_geometry: bool | None = None,
 ) -> tuple[float, float, float, float, float, float]:
     """Size the physical domain, keeping automatic guided-port alignment.
 
@@ -38,6 +52,8 @@ def background_bounds_nm(
     sizing follows the PDK background stack when present. Padding is in um;
     the returned lower/upper coordinates are in nm.
     """
+    if clip_geometry is not None:
+        warn_legacy_clipping()
     lower, upper = resolved.bounds
     guided_ports = [port for port in resolved.ports.values() if not port.is_vertical]
     port_axes = {
@@ -104,13 +120,6 @@ def background_bounds_nm(
             raise FDTDGeometryError(
                 f"domain.{axis_name}_bounds lower bound must be smaller than "
                 "its upper bound."
-            )
-        if not clip_geometry and (
-            requested_lower > lower[axis] or requested_upper < upper[axis]
-        ):
-            raise FDTDGeometryError(
-                f"domain.{axis_name}_bounds {requested_bounds} must contain "
-                f"the geometry bounds ({lower[axis]}, {upper[axis]})."
             )
         final_bounds[axis] = requested_lower
         final_bounds[axis + 3] = requested_upper
