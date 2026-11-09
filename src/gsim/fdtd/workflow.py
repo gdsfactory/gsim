@@ -17,10 +17,12 @@ from gsim.common.cloud import CloudJobMixin
 from gsim.common.materials import (
     MaterialResolutionError,
     MaterialSnapshot,
+    canonical_material_name,
     get_project_material_cards,
     resolve_material_snapshot,
 )
 from gsim.common.materials._helpers import material_card
+from gsim.common.materials.registry import get_project_material_aliases
 from gsim.common.pdk import ResolvedPassivePcell, resolve_passive_pcell
 from gsim.fdtd.api import (
     DipoleSource,
@@ -101,10 +103,16 @@ def _source_from_value(value: SourceType | Mapping[str, Any] | None) -> SourceTy
 class _PdkWithMaterialOverrides:
     """Delegate to a PDK while exposing merged project material cards."""
 
-    def __init__(self, pdk: Any, material_cards: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        pdk: Any,
+        material_cards: Mapping[str, Any],
+        material_aliases: Mapping[str, str],
+    ) -> None:
         """Wrap a PDK and expose the merged material-card mapping."""
         self._pdk = pdk
         self.material_cards = material_cards
+        self.material_aliases = material_aliases
 
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown attributes to the wrapped PDK."""
@@ -387,22 +395,42 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         cards.update(
             {
                 name: _constant_material_card(name, material.refractive_index)
-                for name, material in self.materials.overrides.items()
+                for name, material in self._canonical_material_overrides().items()
             }
         )
-        return _PdkWithMaterialOverrides(pdk_object, cards)
+        return _PdkWithMaterialOverrides(
+            pdk_object, cards, get_project_material_aliases(self.pdk)
+        )
+
+    @property
+    def _background_material_name(self) -> str:
+        """Use the same canonical background for geometry and generated inputs."""
+        return canonical_material_name(self.materials.background, self.pdk)
+
+    def _canonical_material_overrides(self) -> dict[str, Any]:
+        """Keep legacy override names working with canonical PDK layer names."""
+        overrides = {}
+        for name, material in self.materials.overrides.items():
+            canonical = canonical_material_name(name, self.pdk)
+            if canonical in overrides and overrides[canonical] != material:
+                raise FDTDConfigError(
+                    f"Conflicting material overrides for {canonical!r}."
+                )
+            overrides[canonical] = material
+        return overrides
 
     def _material_snapshots(self) -> dict[str, MaterialSnapshot]:
         """Resolve project-first materials, then apply explicit index overrides."""
         snapshots = dict(self.resolved.materials)
-        background = self.materials.background
+        background = self._background_material_name
+        overrides = self._canonical_material_overrides()
         if background not in snapshots:
             try:
                 project_cards = dict(get_project_material_cards(self.pdk))
-                if background in self.materials.overrides:
+                if background in overrides:
                     project_cards[background] = _constant_material_card(
                         background,
-                        self.materials.overrides[background].refractive_index,
+                        overrides[background].refractive_index,
                     )
                 snapshots[background] = resolve_material_snapshot(
                     background,
@@ -413,7 +441,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 raise FDTDConfigError(
                     f"Could not resolve background material {background!r}: {error}"
                 ) from error
-        for name, material in self.materials.overrides.items():
+        for name, material in overrides.items():
             if name not in snapshots:
                 raise FDTDConfigError(
                     f"Material override {name!r} is not used by the geometry "
@@ -448,7 +476,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         manifest = generate_mesh(
             resolved,
             mesh_path,
-            background_material=self.materials.background,
+            background_material=self._background_material_name,
             padding=self.domain.padding,
             padding_x=self.domain.padding_x,
             padding_y=self.domain.padding_y,

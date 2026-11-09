@@ -202,7 +202,14 @@ fully filled by stack regions retains those physical material assignments.
 Existing calls that omit a background can change behavior in uncovered space.
 Source and receiver references that inherit the background can also change.
 Automatic Z sizing can differ because it follows matching background stack
-levels when available. Explicit domain bounds remain in force.
+levels when available. Unused Air declarations (such as an undrawn undercut)
+do not enlarge the automatic domain. `Air` and its built-in `air` alias use
+the same bounds. Explicit domain bounds remain in force.
+
+For example, a bare gpdk silicon component with no drawn oxide simulates silicon
+in air when the background is omitted. Declaring oxide in the LayerStack does
+not create oxide geometry. Select `background="SiO2"` to fill otherwise
+unoccupied space with oxide.
 
 To preserve the former environment, add `sim.materials(background="SiO2")`,
 or retain `background_material="SiO2"` in the historical constructor API.

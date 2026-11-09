@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from math import cos, isfinite, radians, sin, tan
 from typing import Any
 
@@ -12,6 +13,7 @@ from shapely import Point, box
 
 from gsim.common.materials import (
     MaterialResolutionError,
+    canonical_material_name,
     get_project_material_cards,
     resolve_material_snapshot,
 )
@@ -99,12 +101,9 @@ def _resolve_project_cards(
     pdk_or_module: Any | None,
 ) -> Mapping[str, MaterialCard]:
     """Return cards from a PDK object, module, or the active project."""
-    attached_cards = getattr(pdk, "material_cards", None)
-    if attached_cards is not None:
-        return attached_cards
-    if pdk_or_module is not None:
-        return get_project_material_cards(pdk_or_module)
-    return get_project_material_cards(pdk)
+    return get_project_material_cards(
+        pdk_or_module if pdk_or_module is not None else pdk
+    )
 
 
 def _inside_xy_window(geometry: Any, level: Any, x_bounds: Any, y_bounds: Any) -> bool:
@@ -449,6 +448,16 @@ def resolve_passive_pcell(
         resolved_component, layer_stack, z_bounds, x_bounds, y_bounds
     )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
+    layers = {
+        key: replace(
+            layer,
+            material=canonical_material_name(
+                layer.material,
+                pdk_or_module if pdk_or_module is not None else pdk_object,
+            ),
+        )
+        for key, layer in layers.items()
+    }
     materials = {}
     for material_name in dict.fromkeys(layer.material for layer in layers.values()):
         try:

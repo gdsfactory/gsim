@@ -83,3 +83,36 @@ def test_ideal_air_has_unit_index_and_no_absorption(name, wavelength) -> None:
 
     assert snapshot.refractive_index == 1
     assert snapshot.extinction_coefficient == 0
+
+
+def test_native_material_aliases_and_module_fallback() -> None:
+    from types import SimpleNamespace
+
+    from gsim.common.materials import (
+        canonical_material_name,
+        get_project_material_cards,
+    )
+
+    card = GSIM_MATERIAL_CARDS["Air"]
+    pdk = SimpleNamespace(
+        material_cards={"Air": card}, material_aliases={"air": "Air", "legacy": "air"}
+    )
+    assert get_project_material_cards(pdk)["legacy"] is card
+    assert canonical_material_name("legacy", pdk) == "Air"
+    module = SimpleNamespace(
+        PDK=SimpleNamespace(material_cards={}), MATERIAL_CARDS={"Air": card}
+    )
+    assert get_project_material_cards(module) == {"Air": card}
+
+
+def test_distinct_project_material_case_is_preserved() -> None:
+    from types import SimpleNamespace
+
+    from gsim.common.materials import canonical_material_name, get_material_card
+
+    air = GSIM_MATERIAL_CARDS["Air"]
+    other = air.model_copy(update={"name": "air", "info": {"distinct": True}})
+    pdk = SimpleNamespace(material_cards={"Air": air, "air": other})
+    assert canonical_material_name("air", pdk) == "air"
+    assert get_material_card("air", pdk.material_cards) is other
+    assert get_material_card("air", {"Air": air}) is air

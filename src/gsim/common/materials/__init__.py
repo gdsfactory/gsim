@@ -7,6 +7,7 @@ from gsim.common.materials.lithium_niobate import (
 )
 from gsim.common.materials.registry import (
     GSIM_MATERIAL_CARDS,
+    canonical_material_name,
     find_material_card,
     get_material_card,
     get_project_material_cards,
@@ -40,6 +41,7 @@ __all__ = [
     "MaterialResolutionError",
     "MaterialSnapshot",
     "WavelengthOutOfRangeError",
+    "canonical_material_name",
     "evaluate_material_card",
     "find_material_card",
     "get_material_card",

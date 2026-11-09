@@ -286,7 +286,7 @@ def build_cross_section_rectangles(
 
     rectangles: list[dict[str, Any]] = []
     for layer in stack.layers.values():
-        if layer.material == "air":
+        if layer.material in {"air", "Air"}:
             continue
         gds_layer = layer.gds_layer
         if gds_layer is None:

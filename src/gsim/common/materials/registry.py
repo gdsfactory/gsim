@@ -18,6 +18,45 @@ from gsim.common.materials.sio2_malitson import SIO2_MALITSON
 
 MaterialSource = Literal["project", "gsim"]
 
+
+def _project_materials(pdk: Any | None) -> tuple[Any, Mapping[str, MaterialCard]]:
+    """Find native PDK cards, retaining the legacy module fallback."""
+    module = gf.get_active_pdk() if pdk is None else pdk
+    pdk_object = getattr(module, "PDK", module)
+    cards = getattr(pdk_object, "material_cards", None)
+    return module, cards or getattr(module, "MATERIAL_CARDS", None) or {}
+
+
+def canonical_material_name(material_name: str, pdk: Any | None = None) -> str:
+    """Resolve declared PDK aliases and the built-in air alias, without case folding.
+
+    An exact project card takes precedence over a built-in alias. Distinct
+    project names such as ``Air`` and ``air`` therefore remain distinct.
+    """
+    module, cards = _project_materials(pdk)
+    aliases = get_project_material_aliases(module)
+    seen = set()
+    while material_name in aliases:
+        if material_name in seen:
+            raise ValueError(f"Material alias cycle at {material_name!r}")
+        seen.add(material_name)
+        material_name = aliases[material_name]
+    if material_name == "air" and material_name not in cards:
+        return "Air"
+    return material_name
+
+
+def get_project_material_aliases(pdk: Any | None = None) -> Mapping[str, str]:
+    """Return explicit compatibility names declared by a PDK or its module."""
+    module = gf.get_active_pdk() if pdk is None else pdk
+    pdk_object = getattr(module, "PDK", module)
+    return (
+        getattr(pdk_object, "material_aliases", None)
+        or getattr(module, "MATERIAL_ALIASES", None)
+        or {}
+    )
+
+
 GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
     "Air": AIR,
     "air": AIR.model_copy(update={"name": "air"}),
@@ -36,12 +75,17 @@ GSIM_MATERIAL_CARDS: dict[str, MaterialCard] = {
 
 def get_project_material_cards(pdk: Any | None = None) -> Mapping[str, MaterialCard]:
     """Return cards attached to a PDK object or PDK module."""
-    pdk_or_module = gf.get_active_pdk() if pdk is None else pdk
-    pdk_object = getattr(pdk_or_module, "PDK", pdk_or_module)
-    cards = getattr(pdk_object, "material_cards", None)
-    if cards is None:
-        cards = getattr(pdk_or_module, "MATERIAL_CARDS", None)
-    return cards or {}
+    module, cards = _project_materials(pdk)
+    aliases = get_project_material_aliases(module)
+    expanded = dict(cards)
+    for alias in aliases:
+        target = canonical_material_name(alias, module)
+        if target not in cards:
+            raise ValueError(
+                f"Material alias {alias!r} targets missing card {target!r}"
+            )
+        expanded[alias] = cards[target]
+    return expanded
 
 
 def find_material_card(
@@ -56,6 +100,8 @@ def find_material_card(
     )
     if material_name in cards:
         return cards[material_name], "project"
+    if material_name == "air" and "Air" in cards:
+        return cards["Air"], "project"
     if material_name in GSIM_MATERIAL_CARDS:
         return GSIM_MATERIAL_CARDS[material_name], "gsim"
     available = sorted(set(cards) | set(GSIM_MATERIAL_CARDS))
@@ -77,7 +123,9 @@ def get_material_card(
 __all__ = [
     "GSIM_MATERIAL_CARDS",
     "MaterialSource",
+    "canonical_material_name",
     "find_material_card",
     "get_material_card",
+    "get_project_material_aliases",
     "get_project_material_cards",
 ]

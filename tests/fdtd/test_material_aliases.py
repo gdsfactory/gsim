@@ -1,0 +1,50 @@
+"""Declared material aliases stay consistent through public FDTD exports."""
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from gsim import fdtd
+from gsim.common.materials import GSIM_MATERIAL_CARDS
+
+
+@pytest.fixture
+def aliased_pdk(fdtd_pdk_module):
+    stack = fdtd_pdk_module.PDK.layer_stack.model_copy(deep=True)
+    stack.layers["core"].material = "legacy_si"
+    pdk = fdtd_pdk_module.PDK.model_copy(update={"layer_stack": stack})
+    return SimpleNamespace(
+        PDK=pdk,
+        MATERIAL_CARDS={
+            "Si": GSIM_MATERIAL_CARDS["Si"],
+            "Air": GSIM_MATERIAL_CARDS["Air"],
+        },
+        MATERIAL_ALIASES={"legacy_si": "Si", "air": "Air"},
+    )
+
+
+def test_legacy_and_canonical_overrides_write_identical_inputs(tmp_path, aliased_pdk):
+    documents = []
+    meshes = []
+    for background, silicon in (("Air", "Si"), ("air", "legacy_si")):
+        simulation = fdtd.Simulation(pdk=aliased_pdk, source={"port": "o1"})
+        simulation.materials(
+            background=background, overrides={silicon: 3.4, background: 1.1}
+        )
+        simulation.geometry("straight", mesh_size_nm=750)
+        assert simulation.resolved.layers["core"].material == "Si"
+        artifacts = simulation.write(tmp_path / background)
+        documents.append(json.loads(artifacts.config_path.read_text()))
+        meshes.append(artifacts.mesh_path.read_bytes())
+    assert documents[0] == documents[1]
+    assert meshes[0] == meshes[1]
+    assert documents[0]["materials"]["Si"]["refractive_index"] == 3.4
+    assert documents[0]["materials"]["Air"]["refractive_index"] == 1.1
+
+
+def test_conflicting_alias_overrides_are_rejected(aliased_pdk):
+    simulation = fdtd.Simulation(pdk=aliased_pdk)
+    simulation.materials(overrides={"legacy_si": 3.4, "Si": 3.5})
+    with pytest.raises(fdtd.FDTDConfigError, match="Conflicting material overrides"):
+        simulation.geometry("straight")

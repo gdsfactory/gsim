@@ -158,7 +158,7 @@ def _precompute_cross_section_geometry(
 
     layer_data: list[dict] = []
     for layer in stack.layers.values():
-        if layer.material == "air":
+        if layer.material in {"air", "Air"}:
             continue
         if material_data and layer.material not in material_data:
             continue
@@ -233,7 +233,7 @@ def _precompute_cross_section_geometry(
 
     # Add dielectric slabs (uniform horizontal layers)
     for diel in stack.dielectrics:
-        if diel["material"] == "air":
+        if diel["material"] in {"air", "Air"}:
             continue
         z_lo = diel["zmin"] - z_center
         z_hi = diel["zmax"] - z_center
@@ -673,11 +673,11 @@ class Simulation(CloudJobMixin, BaseModel):
         zmins: list[float] = []
         zmaxs: list[float] = []
         for layer in stack.layers.values():
-            if layer.material != "air":
+            if layer.material not in {"air", "Air"}:
                 zmins.append(layer.zmin)
                 zmaxs.append(layer.zmax)
         for diel in stack.dielectrics:
-            if diel.get("material") != "air":
+            if diel.get("material") not in {"air", "Air"}:
                 zmins.append(diel["zmin"])
                 zmaxs.append(diel["zmax"])
         if not zmins:
@@ -707,7 +707,7 @@ class Simulation(CloudJobMixin, BaseModel):
         containing_dielectrics = [
             dielectric
             for dielectric in stack.dielectrics
-            if dielectric.get("material") != "air"
+            if dielectric.get("material") not in {"air", "Air"}
             and float(dielectric["zmin"]) <= cut_z <= float(dielectric["zmax"])
         ]
         if not containing_dielectrics:

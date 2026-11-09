@@ -92,6 +92,11 @@ print(snapshot.refractive_index)
 ```
 
 Lookup is case-sensitive. A project card with the same name replaces that fallback.
+PDKs can declare `material_aliases` (or module-level `MATERIAL_ALIASES`) mapping
+compatibility names to canonical card keys. These aliases also apply to layer
+materials and FDTD index overrides. No general case folding is performed;
+distinct project material names remain distinct. The built-in `air` alias
+resolves to `Air` unless an exact project card overrides it.
 
 ## Analytic PDK cards
 

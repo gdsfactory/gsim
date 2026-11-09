@@ -2014,7 +2014,7 @@ def build_slab_cell(config):
 
     geometry = []
     for entry in layer_stack:
-        if entry["material"] == "air":
+        if entry["material"] in {"air", "Air"}:
             continue
         mat_data = materials.get(entry["material"])
         if mat_data is None:
