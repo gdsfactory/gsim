@@ -23,7 +23,7 @@ from gsim.common.materials import (
 )
 from gsim.common.materials._helpers import material_card
 from gsim.common.materials.registry import get_project_material_aliases
-from gsim.common.pdk import ResolvedPassivePcell, resolve_passive_pcell
+from gsim.common.pdk import ResolvedPassivePcell
 from gsim.fdtd.api import (
     DipoleSource,
     Domain,
@@ -39,6 +39,7 @@ from gsim.fdtd.api import (
     Solver,
     SourceType,
 )
+from gsim.fdtd.domain_geometry import resolve_domain_geometry
 from gsim.fdtd.fiber_medium import resolve_fiber_media
 from gsim.fdtd.mesh import generate_mesh
 from gsim.fdtd.metadata import write_metadata
@@ -372,15 +373,12 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 "No geometry is configured. Call Simulation.geometry(...) first."
             )
         pdk = self._pdk_for_resolution()
-        self._resolved = resolve_passive_pcell(
-            self.geometry.component,
+        self._resolved = resolve_domain_geometry(
+            self.geometry,
             pdk=pdk,
-            settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
-            port_layer_map=self.geometry.port_layer_map,
-            z_bounds=self.domain.z_bounds if self.domain.clip_geometry else None,
-            x_bounds=self.domain.x_bounds if self.domain.clip_geometry else None,
-            y_bounds=self.domain.y_bounds if self.domain.clip_geometry else None,
+            domain=self.domain,
+            background_material=self.materials.background,
         )
         from gsim.fdtd.geometry_clipping import warn_geometry_clipping
 

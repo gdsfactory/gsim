@@ -152,6 +152,18 @@ incompatible release. Until then, keep the flag wherever clipping is required.
 Cloud cache lookup uses generated input files; changing
 the physical window can change the mesh, configuration, and cache identity.
 
+Levels marked `background=True` fill the physical simulation domain in XY,
+including lateral padding, without requiring a drawn source polygon. Their
+`background_exclude_layers` masks still remove material. Patterned levels follow
+their masks. Every blanket film intersecting the chosen z interval is retained
+and clipped to that interval; films wholly outside it are omitted. Preview and
+written Gmsh geometry use the same domain. Automatic padding is applied once,
+and neither the component nor the PDK stack is modified.
+
+Display metadata such as `info.visible=False` only changes initial viewer
+visibility. Hidden films remain in the simulation and can be enabled for
+inspection.
+
 Port centers and diagnostic windows follow the clipped active bands. Automatic
 diagnostic planes, including their cladding margins, are intersected with the
 physical domain when previewed or written. The requested monitor windows remain
@@ -331,12 +343,25 @@ mesh. `plot_2d_interactive()` and `plot_3d()` return a standalone `MeshViewer`.
 Each call resolves the current settings and generates a temporary mesh, so edits
 to geometry, meshing, background material, and domain settings appear immediately.
 Previously written simulation artifacts are preserved.
-The 3D viewer uses each PDK stack entry's `info["opacity"]` and layer-view
+The 3D viewer uses PDK layer-view fill colors, falling back to frame colors when
+the fill is absent. Stack `info["color"]` overrides the layer-view color. Colors
+can be CSS color strings; their alpha channel does not change surface opacity.
+An exactly named layer view matching the stack key, or its declared name,
+is preferred over a physical-layer lookup. Otherwise the derived layer view
+is preferred, with the source layer view as a fallback. A drawing layer reused
+by background films of distinct materials does not supply an individual film
+color: those films use explicit stack/named colors or the fallback palette.
+Visibility and opacity still follow their existing PDK defaults.
+For duplicate colored views of a GDS layer, the first effectively visible view
+is preferred, then the first colored view. Missing colors retain the viewer's
+fallback palette, including its port and largest-group colors. These display
+choices do not change the mesh or solver configuration.
+
+The viewer also uses each PDK stack entry's `info["opacity"]` and layer-view
 visibility by default, including hidden parent groups. If several layer views
 refer to the same GDS layer, it is initially visible when any of those views
 and its enclosing groups are visible, regardless of view order. Stack `info["visible"]`
-overrides layer-view visibility. The derived layer view is preferred, with the
-source layer view as a fallback. Only stack entries with resolved geometry have
+overrides layer-view visibility. Only stack entries with resolved geometry have
 their display metadata applied and validated. A zero opacity starts a layer hidden;
 enabling it in the viewer's layer list makes it fully opaque (`opacity=1.0`),
 which can obscure enclosed layers. Explicit `show_groups`

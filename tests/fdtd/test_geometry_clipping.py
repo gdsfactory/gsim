@@ -216,13 +216,32 @@ def test_fully_removed_masks_do_not_report_material_clipping(fdtd_pdk_module, bl
         object.__setattr__(level, "background_exclude_layers", [(1, 0)])
     fdtd_pdk_module.PDK.layer_stack.layers["empty"] = level
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, domain={"clip_geometry": True})
-    simulation.domain(z_bounds=(-0.1, 0.3))
+    # Keep the exclusion mask over the complete physical XY domain. Lateral
+    # padding would expose a real blanket film beyond this mask.
+    simulation.domain(x_bounds=(0, 2), y_bounds=(-0.25, 0.25), z_bounds=(-0.1, 0.3))
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", fdtd.GeometryClippingWarning)
         simulation.geometry(component)
     assert not [
         w for w in caught if issubclass(w.category, fdtd.GeometryClippingWarning)
     ]
+    assert "unknown" not in simulation.resolved.materials
+
+
+def test_laterally_exposed_blanket_warns_when_omitted_in_z(fdtd_pdk_module):
+    component = _one_port_component(fdtd_pdk_module)
+    fdtd_pdk_module.PDK.layer_stack.layers["remote_film"] = LayerLevel(
+        layer=(9, 0),
+        background=True,
+        background_exclude_layers=[(1, 0)],
+        zmin=3,
+        thickness=1,
+        material="unknown",
+    )
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module, domain={"clip_geometry": True})
+    simulation.domain(padding_y=0.5, z_bounds=(-0.1, 0.3))
+    with pytest.warns(fdtd.GeometryClippingWarning, match=r"remote_film \(z\)"):
+        simulation.geometry(component)
     assert "unknown" not in simulation.resolved.materials
 
 

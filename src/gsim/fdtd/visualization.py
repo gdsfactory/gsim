@@ -179,11 +179,16 @@ class VisualizationMixin(RuntimeConfigMixin):
         zoom_to_cursor: bool = True,
         height: int = 600,
     ) -> Any:
-        """Show 3D geometry with PDK opacity and initial visibility defaults.
+        """Show 3D geometry with PDK color, opacity and visibility defaults.
 
-        Stack info.opacity controls surface opacity; info.visible overrides
-        layer-view visibility. Zero opacity starts a layer hidden and becomes
-        fully opaque when enabled in the viewer. Explicit show_groups and
+        Stack info.color overrides named and physical layer-view colors. Named
+        stack views are preferred, then derived/source fill or frame colors.
+        Shared drawing colors for blanket films of distinct materials are
+        ambiguous and use the fallback palette. Color alpha does not
+        change opacity. Stack info.opacity controls surface opacity;
+        info.visible overrides layer-view visibility. Zero opacity starts a
+        layer hidden and becomes fully opaque when enabled in the viewer.
+        Explicit show_groups and
         hide_groups take precedence over PDK visibility, with hide_groups
         taking priority.
         """
@@ -259,7 +264,9 @@ class VisualizationMixin(RuntimeConfigMixin):
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
         explicit_bounds = getattr(self.domain, f"{axis}_bounds")
-        lower, upper = self.resolved.bounds
+        lower, upper = (
+            getattr(self.resolved, "layout_bounds", None) or self.resolved.bounds
+        )
         clipped_axes = getattr(self.resolved, "clipped_layers", {}).values()
         if (
             explicit_bounds is not None
