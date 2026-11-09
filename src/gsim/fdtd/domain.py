@@ -39,7 +39,8 @@ def background_bounds_nm(
     sizing follows the PDK background stack when present. Padding is in um;
     the returned lower/upper coordinates are in nm.
     """
-    lower, upper = resolved.bounds
+    # Expanding blanket films must not apply automatic padding a second time.
+    lower, upper = resolved.layout_bounds or resolved.bounds
     guided_ports = [port for port in resolved.ports.values() if not port.is_vertical]
     port_axes = {
         next(index for index, value in enumerate(port.normal) if value)

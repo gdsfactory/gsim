@@ -132,6 +132,18 @@ the mesher; the PDK object is not modified. Missing materials inside the window
 still raise an error. With the default `clip_geometry=False`, explicit bounds
 must continue to contain the resolved geometry.
 
+Levels marked `background=True` fill the physical simulation domain in XY,
+including lateral padding, without requiring a drawn source polygon. Their
+`background_exclude_layers` masks still remove material. Patterned levels follow
+their masks. Every blanket film intersecting the chosen z interval is retained
+and clipped to that interval; films wholly outside it are omitted. Preview and
+written Gmsh geometry use the same domain. Automatic padding is applied once,
+and neither the component nor the PDK stack is modified.
+
+Display metadata such as `info.visible=False` only changes initial viewer
+visibility. Hidden films remain in the simulation and can be enabled for
+inspection.
+
 Port centers and diagnostic windows follow the clipped active bands. Automatic
 diagnostic planes, including their cladding margins, are intersected with the
 physical domain when previewed or written. The requested monitor windows remain

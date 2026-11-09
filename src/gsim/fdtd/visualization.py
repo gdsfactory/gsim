@@ -261,5 +261,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         if self.domain.clip_geometry:
             bounds = self._background_bounds_nm()
             return (bounds[axis_index] + bounds[axis_index + 3]) / 2000
-        lower, upper = self.resolved.bounds
+        lower, upper = (
+            getattr(self.resolved, "layout_bounds", None) or self.resolved.bounds
+        )
         return (lower[axis_index] + upper[axis_index]) / 2
