@@ -17,6 +17,7 @@ from scripts.magnetostatic_pec_bundle import (
     _ribbons,
     equivalent_radius,
     maxwell_mutual,
+    references,
     ring_bundle,
     ring_references,
     self_and_mutual,
@@ -89,3 +90,14 @@ def test_the_bundle_reproduces_its_published_series() -> None:
     self_inductance, mutual = self_and_mutual(1.0)
     assert self_inductance == pytest.approx(52.827, abs=1e-3)
     assert mutual == pytest.approx(-0.95518, abs=1e-5)
+
+
+def test_a_coarse_extrapolation_reaches_the_quoted_pair_references() -> None:
+    """The notebook quotes M = -0.9606 and L = 52.48 pH from widths 0.25 and 0.2 um.
+
+    Those take a minute to compute, so this extrapolates from 1 and 0.5 um instead,
+    which agrees within the extrapolation error.
+    """
+    values = references(coarse=1.0, fine=0.5)
+    assert values["M"] == pytest.approx(-0.9606, rel=2e-3)
+    assert values["L"] == pytest.approx(52.48, rel=2e-3)

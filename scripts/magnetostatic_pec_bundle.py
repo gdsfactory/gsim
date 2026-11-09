@@ -15,10 +15,11 @@ of its 2 x 3 um trace, and the inductance of the bundle comes from Neumann's for
 - A perfect conductor takes the current split of least magnetic energy at fixed loop
   currents, so every ribbon of a loop links the same flux, and the loop matrix is
   ``(C^T L^-1 C)^-1``, where ``C`` maps ribbons to loops.
-- A wall of the outer box adds one image of each ribbon: a mirror image with the
-  current reversed for a perfect electric conductor.
 
-Run ``python scripts/magnetostatic_pec_bundle.py``; it takes about five minutes.
+The references are for open space. The notebook removes the outer wall from Palace's
+side instead, with the mean of a PEC and a PMC run.
+
+Run ``python scripts/magnetostatic_pec_bundle.py``; it takes a few minutes.
 """
 
 from __future__ import annotations
@@ -34,15 +35,6 @@ MU0_4PI = 0.1  # mu0/4pi in pH/um
 WIDTH, THICKNESS, Z_MID = 2.0, 3.0, 12.53  # TopMetal2 trace, um
 CENTRE_Y, APOTHEM, LEAD_X = 44.675, 13.675, 2.05  # inductor2, um
 PITCH = 39.35  # um
-#: Outer box of the notebook's mesh of the pair, as (axis, plane in um).
-BOX_WALLS = (
-    (0, -114.675),
-    (0, 154.025),
-    (1, -100.0),
-    (1, 159.35),
-    (2, -152.0),
-    (2, 165.93),
-)
 GL_X, GL_W = np.polynomial.legendre.leggauss(4)
 
 
@@ -251,12 +243,11 @@ def _log_mean_distance(d: float, s: float) -> float:
     return (primitive(d + s) - 2 * primitive(d) + primitive(d - s)) / (s * s)
 
 
-def self_and_mutual(s: float, *, pec_walls: bool = False) -> tuple[float, float]:
+def self_and_mutual(s: float) -> tuple[float, float]:
     """Self inductance of one coil and mutual of the pair, in pH.
 
     Args:
         s: Ribbon width, in um.
-        pec_walls: Add one image of each ribbon per wall of the notebook's PEC box.
 
     Returns:
         ``(L, M)`` of two coils ``PITCH`` apart.
@@ -282,46 +273,31 @@ def self_and_mutual(s: float, *, pec_walls: bool = False) -> tuple[float, float]
                 )
     across = _block(coil_a, coil_b, same_loop=False)
     full = np.block([[own, across], [across.T, own]])
-    if pec_walls:
-        both = (
-            np.concatenate([coil_a[0], coil_b[0]]),
-            np.concatenate([coil_a[1], coil_b[1]]),
-        )
-        for axis, plane in BOX_WALLS:
-            image = tuple(array.copy() for array in both)
-            for array in image:
-                array[..., axis] = 2 * plane - array[..., axis]
-            full -= _block(both, image, same_loop=False)
-        full = (full + full.T) / 2
     loops = np.zeros((2 * count, 2))
     loops[:count, 0] = loops[count:, 1] = 1.0
     matrix = np.linalg.inv(loops.T @ np.linalg.solve(full, loops))
     return float(matrix[0, 0]), float(matrix[0, 1])
 
 
-def references() -> dict[str, float]:
-    """The references quoted by the notebook, in pH.
+def references(coarse: float = 0.25, fine: float = 0.2) -> dict[str, float]:
+    """The open-space references quoted by the notebook, in pH.
 
-    The error of a ribbon solution is proportional to ``s``, so the open-space values
-    extrapolate the two finest widths linearly to ``s = 0``. The factors of the PEC box
-    come from the coarsest width, since a wall moves little.
+    The error of a ribbon solution is proportional to ``s``, so the values
+    extrapolate two ribbon widths linearly to ``s = 0``.
+
+    Args:
+        coarse: The coarser ribbon width, in um.
+        fine: The finer ribbon width, in um.
 
     Returns:
-        ``M`` and ``L`` in open space, and ``M_pec`` and ``L_pec`` in the PEC box.
+        ``M`` and ``L`` of two coils ``PITCH`` apart in open space.
     """
-    coarse, fine = 0.25, 0.2
     l_coarse, m_coarse = self_and_mutual(coarse)
     l_fine, m_fine = self_and_mutual(fine)
     weight = fine / (coarse - fine)
-    mutual = m_fine + weight * (m_fine - m_coarse)
-    self_ = l_fine + weight * (l_fine - l_coarse)
-    l_open, m_open = self_and_mutual(0.5)
-    l_wall, m_wall = self_and_mutual(0.5, pec_walls=True)
     return {
-        "M": mutual,
-        "L": self_,
-        "M_pec": mutual * m_wall / m_open,
-        "L_pec": self_ * l_wall / l_open,
+        "M": m_fine + weight * (m_fine - m_coarse),
+        "L": l_fine + weight * (l_fine - l_coarse),
     }
 
 
