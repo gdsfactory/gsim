@@ -10,6 +10,8 @@ from shapely.geometry.base import BaseGeometry
 
 from gsim.common.materials import MaterialSnapshot
 
+type Bounds3D = tuple[tuple[float, float, float], tuple[float, float, float]]
+
 
 class PdkResolutionError(ValueError):
     """Base error for canonical PDK resolution."""
@@ -80,7 +82,11 @@ class ResolvedPort:
 
 @dataclass(frozen=True)
 class ResolvedPassivePcell:
-    """Canonical physical representation consumed by simulation backends."""
+    """Canonical physical representation consumed by simulation backends.
+
+    ``layout_bounds`` retains the unpadded XY footprint and resolved material
+    height when a backend extends blanket films over its domain.
+    """
 
     component: Any
     derived_component: Any
@@ -89,8 +95,9 @@ class ResolvedPassivePcell:
     layers: Mapping[str, ResolvedLayer]
     materials: Mapping[str, MaterialSnapshot]
     ports: Mapping[str, ResolvedPort]
-    bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
+    bounds: Bounds3D
     wavelength_um: float
+    layout_bounds: Bounds3D | None = None
 
 
 __all__ = [

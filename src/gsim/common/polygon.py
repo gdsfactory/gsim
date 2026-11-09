@@ -33,6 +33,18 @@ def round_coordinates(geom: AnyShapelyPolygon, ndigits: int = 4) -> AnyShapelyPo
     return shapely.ops.transform(_round_coords, geom)
 
 
+def _background_exclusions(component: GFComponent, layer) -> Any:
+    """Collect the source masks removed from a blanket film."""
+    import gdsfactory as gf
+    from kfactory import kdb
+
+    excluded = kdb.Region()
+    for excluded_layer in getattr(layer, "background_exclude_layers", ()):
+        layer_index = component.kcl.layer(*gf.get_layer_tuple(excluded_layer))
+        excluded += kdb.Region(component.kdb_cell.begin_shapes_rec(layer_index))
+    return excluded
+
+
 def layer_level_region(component: GFComponent, layer) -> Any:
     """Evaluate the KLayout region a layer or LayerLevel covers on a component.
 
@@ -46,14 +58,11 @@ def layer_level_region(component: GFComponent, layer) -> Any:
     versions the attribute is absent and every level evaluates its source layer.
     """
     if getattr(layer, "background", False):
-        import gdsfactory as gf
         from kfactory import kdb
 
-        region = kdb.Region(component.kdb_cell.bbox())
-        for excluded_layer in getattr(layer, "background_exclude_layers", ()):
-            layer_index = component.kcl.layer(*gf.get_layer_tuple(excluded_layer))
-            region -= kdb.Region(component.kdb_cell.begin_shapes_rec(layer_index))
-        return region
+        return kdb.Region(component.kdb_cell.bbox()) - _background_exclusions(
+            component, layer
+        )
 
     source_layer = getattr(layer, "layer", layer)
     return source_layer.get_shapes(component)
@@ -64,6 +73,8 @@ def fuse_polygons(
     layer,
     round_tol: int = 4,
     simplify_tol: float = 1e-4,
+    *,
+    background_bounds: tuple[float, float, float, float] | None = None,
 ) -> AnyShapelyPolygon:
     """Extract and merge all polygons for a layer from a component.
 
@@ -79,11 +90,20 @@ def fuse_polygons(
             ``.layer`` attribute which is a LogicalLayer or DerivedLayer)
         round_tol: decimal places for coordinate rounding
         simplify_tol: tolerance for polygon simplification
+        background_bounds: Optional XY bounds in micrometers for blanket films.
+            Patterned masks are unchanged; background exclusion masks still apply.
 
     Returns:
         Merged Shapely Polygon or MultiPolygon
     """
-    layer_region = layer_level_region(component, layer).dup()
+    expand_background = background_bounds is not None and getattr(
+        layer, "background", False
+    )
+    layer_region = (
+        _background_exclusions(component, layer)
+        if expand_background
+        else layer_level_region(component, layer)
+    ).dup()
     # KLayout's default merge can produce self-touching rings, invalid in GEOS.
     layer_region.min_coherence = True
 
@@ -108,9 +128,10 @@ def fuse_polygons(
             )
         )
 
-    return shapely.ops.unary_union(shapely_polygons).simplify(
-        simplify_tol, preserve_topology=False
-    )
+    geometry = shapely.ops.unary_union(shapely_polygons)
+    if expand_background and background_bounds is not None:
+        geometry = shapely.geometry.box(*background_bounds).difference(geometry)
+    return geometry.simplify(simplify_tol, preserve_topology=False)
 
 
 def cleanup_component(

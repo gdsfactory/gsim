@@ -150,6 +150,14 @@ def _resolved_layers(
             layer_level,
             round_tol=6,
             simplify_tol=0.0,
+            background_bounds=(
+                x_bounds[0] if x_bounds else derived_component.dxmin,
+                y_bounds[0] if y_bounds else derived_component.dymin,
+                x_bounds[1] if x_bounds else derived_component.dxmax,
+                y_bounds[1] if y_bounds else derived_component.dymax,
+            )
+            if x_bounds is not None or y_bounds is not None
+            else None,
         )
         if geometry.is_empty or not _inside_xy_window(
             geometry, layer_level, x_bounds, y_bounds
@@ -430,7 +438,8 @@ def resolve_passive_pcell(
     remains its primary material/priority reference.
 
     Optional axis bounds omit external films and footprints before material
-    lookup. Intersecting layers retain their original extrusion profiles; the
+    lookup. Blanket films fill the requested XY bounds, retaining their exclusion
+    masks. Intersecting layers retain their original extrusion profiles; the
     backend clips their solids. Contiguous bands of the same material at an
     unmapped port contribute to its complete cross-section.
     """

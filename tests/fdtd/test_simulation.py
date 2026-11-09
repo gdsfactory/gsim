@@ -199,7 +199,10 @@ def test_write_keeps_background_level_without_polygons(
     )
     resolved = simulation.geometry("straight", settings={"length": 2.0})
 
-    assert resolved.layers["buried_oxide"].geometry.area == pytest.approx(2.0 * 0.5)
+    assert resolved.layers["buried_oxide"].geometry.area == pytest.approx(2.0 * 1.0)
+    assert resolved.layers["buried_oxide"].geometry.bounds == pytest.approx(
+        (0, -0.5, 2, 0.5)
+    )
 
     artifacts = simulation.write(tmp_path)
     mesh = meshio.read(artifacts.mesh_path)
