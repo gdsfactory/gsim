@@ -140,8 +140,9 @@ warn. Source containment and guided-port face checks still apply.
 `clip_geometry` is deprecated starting with 0.10.0, but remains functional
 through that release. Its default remains `False`: explicit bounds must
 contain the geometry unless `clip_geometry=True` is supplied. Both values
-remain in saved domain settings and the JSON schema. Explicit calls and
-assignments emit a `DeprecationWarning`.
+remain in saved domain settings and the JSON schema. Explicit domain
+configuration and assignments emit a `DeprecationWarning`; routine writes and
+previews do not warn about an unspecified switch.
 
 Automatic clipping and removal of the switch are deferred to a later feature
 release, after this warning has shipped. Until then, keep the flag wherever
@@ -263,6 +264,8 @@ The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
 subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
 `aspect="auto"` to fill the axes, or `figsize=(8, 4)` to set the figure size.
 An omitted `position_um` uses the geometry midpoint along the requested axis.
+If explicit bounds clip material on that axis, it uses the bounded domain
+midpoint instead; bounds containing the geometry keep the geometry midpoint.
 The current geometry and material settings are resolved for every call. A
 temporary mesh is generated; the plot does not require selecting a source port
 or writing run artifacts. A selected source port must exist, and sources and

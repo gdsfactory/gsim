@@ -259,7 +259,12 @@ class VisualizationMixin(RuntimeConfigMixin):
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
         explicit_bounds = getattr(self.domain, f"{axis}_bounds")
-        if explicit_bounds is not None:
-            return (explicit_bounds[0] + explicit_bounds[1]) / 2
         lower, upper = self.resolved.bounds
+        clipped_axes = getattr(self.resolved, "clipped_layers", {}).values()
+        if (
+            explicit_bounds is not None
+            and self.domain.clip_geometry
+            and any(axis in axes for axes in clipped_axes)
+        ):
+            return (explicit_bounds[0] + explicit_bounds[1]) / 2
         return (lower[axis_index] + upper[axis_index]) / 2

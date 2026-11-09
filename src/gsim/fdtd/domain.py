@@ -51,8 +51,6 @@ def background_bounds_nm(
     sizing follows the PDK background stack when present. Padding is in um;
     the returned lower/upper coordinates are in nm.
     """
-    if clip_geometry is not None:
-        warn_legacy_clipping()
     lower, upper = resolved.bounds
     guided_ports = [port for port in resolved.ports.values() if not port.is_vertical]
     port_axes = {

@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -362,13 +363,23 @@ class Domain(_FiniteModel):
         description="Optional physical Z-domain bounds in micrometers.",
     )
 
-    @model_validator(mode="before")
+    @field_validator("clip_geometry", mode="before")
     @classmethod
-    def accept_legacy_clipping(cls, value: Any) -> Any:
+    def accept_legacy_clipping(cls, value: Any, info: ValidationInfo) -> Any:
         """Warn about the switch while retaining both values and saved settings."""
-        if isinstance(value, Mapping) and "clip_geometry" in value:
+        if (info.context or {}).get("warn_clipping", True):
             warn_legacy_clipping()
         return value
+
+    def __call__(self, **updates: Any) -> Self:
+        """Warn for explicit switch updates while validating the full domain."""
+        updated = type(self).model_validate(
+            {**dict(self), **updates},
+            context={"warn_clipping": "clip_geometry" in updates},
+        )
+        for field_name in type(self).model_fields:
+            object.__setattr__(self, field_name, getattr(updated, field_name))
+        return self
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod
@@ -409,8 +420,6 @@ class Domain(_FiniteModel):
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Keep failed assignments of competing axis controls atomic."""
-        if name == "clip_geometry":
-            warn_legacy_clipping()
         if name in {
             "padding_x",
             "padding_y",
@@ -419,7 +428,9 @@ class Domain(_FiniteModel):
             "y_bounds",
             "z_bounds",
         } and hasattr(self, "__pydantic_fields_set__"):
-            type(self).model_validate({**self.model_dump(), name: value})
+            type(self).model_validate(
+                {**self.model_dump(), name: value}, context={"warn_clipping": False}
+            )
         super().__setattr__(name, value)
 
 

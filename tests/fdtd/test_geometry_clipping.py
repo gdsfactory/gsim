@@ -236,9 +236,7 @@ def test_clipping_does_not_relax_guided_port_faces(tmp_path, fdtd_pdk_module):
         simulation.write(tmp_path)
 
 
-def test_low_level_bounds_clip_and_legacy_mesh_argument_warns(
-    tmp_path, fdtd_pdk_module
-):
+def test_low_level_bounds_honor_the_clipping_switch(tmp_path, fdtd_pdk_module):
     component = _one_port_component(fdtd_pdk_module)
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, domain={"clip_geometry": True})
     resolved = replace(simulation.geometry(component), ports={})
@@ -248,10 +246,7 @@ def test_low_level_bounds_clip_and_legacy_mesh_argument_warns(
         background_bounds_nm(resolved, "air", 1, x_bounds=(0, 1), clip_geometry=True)[3]
         == 1000
     )
-    with (
-        pytest.warns(DeprecationWarning, match="deprecated"),
-        pytest.raises(fdtd.FDTDGeometryError, match="must contain"),
-    ):
+    with pytest.raises(fdtd.FDTDGeometryError, match="must contain"):
         generate_mesh(
             resolved,
             tmp_path / "rejected.msh",
@@ -262,17 +257,16 @@ def test_low_level_bounds_clip_and_legacy_mesh_argument_warns(
             x_bounds=(0, 1),
             clip_geometry=False,
         )
-    with pytest.warns(DeprecationWarning, match="deprecated"):
-        manifest = generate_mesh(
-            resolved,
-            tmp_path / "mesh.msh",
-            background_material="air",
-            padding=1,
-            mesh_size_nm=700,
-            geometry_tolerance_nm=10,
-            x_bounds=(0, 1),
-            clip_geometry=True,
-        )
+    manifest = generate_mesh(
+        resolved,
+        tmp_path / "mesh.msh",
+        background_material="air",
+        padding=1,
+        mesh_size_nm=700,
+        geometry_tolerance_nm=10,
+        x_bounds=(0, 1),
+        clip_geometry=True,
+    )
     assert manifest.domain_max_nm[0] == 1000
 
 
@@ -297,3 +291,50 @@ def test_vertical_source_focus_follows_clipped_device(
     )
     fiber = next(monitor for monitor in config["monitors"] if monitor["name"] == "o2")
     assert fiber["fiber_mode"]["focal_point"][2] == pytest.approx(expected)
+
+
+def test_default_domain_operations_do_not_warn_about_deprecation(
+    tmp_path, fdtd_pdk_module
+):
+    from matplotlib import pyplot as plt
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        simulation.domain(padding_y=0.5)
+        simulation.domain.padding_y = 0.7
+        simulation.domain.z_bounds = (-1, 1)
+        simulation.source(port="o1")
+        simulation.geometry("straight", mesh_size_nm=700)
+        simulation.write(tmp_path)
+        axes = simulation.plot_2d_static()
+        plt.close(axes.figure)
+        simulation.plot_2d_interactive()
+    assert not [
+        warning
+        for warning in caught
+        if issubclass(warning.category, DeprecationWarning)
+        and "clip_geometry" in str(warning.message)
+    ]
+
+
+@pytest.mark.parametrize("clip", [False, True])
+def test_default_slice_keeps_geometry_midpoint_without_clipping(fdtd_pdk_module, clip):
+    from matplotlib import pyplot as plt
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        simulation = fdtd.Simulation(
+            pdk=fdtd_pdk_module,
+            domain={"y_bounds": (-100, 0.25), "clip_geometry": clip},
+        )
+    component = _one_port_component(fdtd_pdk_module)
+    simulation.source(port="o1")
+    simulation.geometry(component, mesh_size_nm=5000)
+    axes = simulation.plot_2d_static(axis="y")
+    assert axes.get_title() == "FDTD · y = 0 µm"
+    plt.close(axes.figure)
+    assert '"positionUm":0.0' in simulation.plot_2d_interactive(axis="y").html
+    explicit = simulation.plot_2d_static(axis="y", position_um=0.1)
+    assert explicit.get_title() == "FDTD · y = 0.1 µm"
+    plt.close(explicit.figure)
