@@ -4,7 +4,7 @@ import gdsfactory as gf
 import pytest
 
 from gsim.common.stack import Layer, LayerStack
-from gsim.palace.mesh.generator import _generate_native_boundarymode_groups
+from gsim.palace.mesh.generator import _generate_native_2d_groups
 from gsim.palace.mesh.geometry import extract_geometry
 from gsim.palace.models import CrossSectionPlaneConfig
 
@@ -57,7 +57,7 @@ def test_native_material_priority_preserves_domain_area(kernel, axis, conductivi
         airbox_z_above=None,
         airbox_z_below=None,
     )
-    groups = _generate_native_boundarymode_groups(
+    groups = _generate_native_2d_groups(
         cross_section=CrossSectionPlaneConfig(
             axis=axis, value=1, window=(-1, 4), window_z=(-1, 2)
         ),
@@ -70,6 +70,6 @@ def test_native_material_priority_preserves_domain_area(kernel, axis, conductivi
     assert "metal" in groups["conductor_surfaces" if conductivity else "pec_surfaces"]
     assert groups["refinement_lines"]
     with pytest.raises(ValueError, match="does not intersect"):
-        _generate_native_boundarymode_groups(
+        _generate_native_2d_groups(
             cross_section=CrossSectionPlaneConfig(axis=axis, value=100), **options
         )
