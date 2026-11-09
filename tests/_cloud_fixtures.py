@@ -356,6 +356,20 @@ __all__ = [
 ]
 
 
+def _misplaced_layers(pdk) -> list[str]:
+    """Names of ``pdk`` layers whose layout index holds another layer."""
+    layout = gf.kcl.layout
+    misplaced = []
+    for layer in pdk.layers:
+        index = int(layer)
+        if not layout.is_valid_layer(index):
+            continue
+        info = layout.get_info(index)
+        if (info.layer, info.datatype) != (layer.layer, layer.datatype):
+            misplaced.append(layer.name)
+    return misplaced
+
+
 def inductor2_pair(pitch: float = 39.35, stacked: bool = False) -> gf.Component:
     """Two single-turn IHP ``inductor2`` coils, for magnetostatic tests.
 
@@ -372,6 +386,15 @@ def inductor2_pair(pitch: float = 39.35, stacked: bool = False) -> gf.Component:
     from ihp import PDK, cells
 
     PDK.activate()
+    if _misplaced_layers(PDK):
+        # Layers added under another PDK can hold IHP's fixed layout indices
+        # (e.g. 10/0 on Activnofill's), and activation keeps them while cells
+        # draw on them, so inductor2's marker shapes would land on a meshed
+        # metal. Dropping the cached cells lets activation restore the indices.
+        gf.clear_cache()
+        gf.gpdk.PDK.activate()
+        PDK.activate()
+        assert not _misplaced_layers(PDK), _misplaced_layers(PDK)[:5]
 
     @gf.cell
     def inductor2_pair_cell(pitch: float, stacked: bool) -> gf.Component:
