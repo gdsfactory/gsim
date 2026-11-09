@@ -234,3 +234,65 @@ def test_local_slab_variants_preserve_custom_air(
 def test_empty_wavelength_sweep_still_returns_no_results(backend):
     assert mode_solver.solve_slab_wavelength_sweep(LayerStack(layers={}), []) == {}
     assert not backend.instances
+
+
+@pytest.mark.parametrize("air", ["Air", "air"])
+@pytest.mark.parametrize(
+    ("where", "plane", "wavelengths", "bands"),
+    [
+        ("cross_section", "xz", [1.55], 1),
+        ("cross_section", "yz", [1.55], 1),
+        ("slab", "yz", [1.55], 1),
+        ("slab", "yz", [1.55], 2),
+        ("slab", "yz", [1.5, 1.6], 1),
+    ],
+)
+def test_background_only_custom_air_is_resolved_everywhere(
+    tmp_path,
+    backend,
+    custom_air_setup,
+    air,
+    where,
+    plane,
+    wavelengths,
+    bands,
+):
+    simulation = custom_air_setup(air, plane)
+    stack = simulation.geometry.stack
+    del stack.layers["custom_cladding"]
+    simulation.mode_solver = ModeSolver(
+        where=where,
+        port="cut" if where == "cross_section" else None,
+        wavelengths=wavelengths,
+        num_bands=bands,
+        background_material=air,
+        x_span=4 if where == "cross_section" else None,
+        y_span=4 if where == "cross_section" else None,
+    )
+    directory = simulation.write_mode_solver_config(tmp_path)
+    config = json.loads((directory / "mode_solver_config.json").read_text())
+    assert config["materials"][air]["epsilon_diag"] == [2.25] * 3
+    assert config["background_material"] == air
+    assert all(entry["material"] != air for entry in config["layer_stack"])
+    simulation.solve_modes_local()
+    assert backend.instances
+    for native in backend.instances:
+        assert native.default_material.epsilon == 2.25
+    for is_cross_section in (False, True):
+        selection = {}
+        if is_cross_section:
+            selection = {
+                "component": simulation.geometry.component,
+                "port": "cut",
+                "x_grid" if plane == "xz" else "y_grid": np.array([0.0, 1.0]),
+            }
+        profile = mode_solver.refractive_index_profile(
+            stack,
+            1.55,
+            z_grid=np.array([0.8]),
+            background_material=air,
+            overrides=simulation._material_overrides(),
+            overlay=simulation._pdk_overlay,
+            **selection,
+        )
+        np.testing.assert_allclose(profile, 1.5)

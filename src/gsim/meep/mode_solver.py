@@ -1189,8 +1189,7 @@ def refractive_index_profile(
     import numpy as np
 
     used_materials: set[str] = {layer.material for layer in stack.layers.values()}
-    if background_material not in {"air", "Air"}:
-        used_materials.add(background_material)
+    used_materials.add(background_material)
     material_data = _resolve_materials_cached(
         used_materials,
         overrides=overrides,
@@ -1422,8 +1421,7 @@ def solve_slab_mode(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
-    if background_material not in {"air", "Air"}:
-        used_materials.add(background_material)
+    used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1643,8 +1641,7 @@ def solve_cross_section_mode(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
-    if background_material not in {"air", "Air"}:
-        used_materials.add(background_material)
+    used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1774,8 +1771,7 @@ def solve_slab_modes(
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
-    if background_material not in {"air", "Air"}:
-        used_materials.add(background_material)
+    used_materials.add(background_material)
 
     material_data = _resolve_materials_cached(
         used_materials,
@@ -1898,6 +1894,7 @@ def solve_slab_wavelength_sweep(
 
     used_materials = {layer.material for layer in stack.layers.values()}
     used_materials.update(diel["material"] for diel in stack.dielectrics)
+    used_materials.add(background_material)
     material_data = _resolve_materials_cached(
         used_materials,
         overrides=overrides,
@@ -1936,8 +1933,7 @@ def solve_slab_wavelength_sweep(
         )
 
     used_materials: set[str] = {s["name"] for s in _layer_specs}
-    if background_material not in {"air", "Air"}:
-        used_materials.add(background_material)
+    used_materials.add(background_material)
 
     field_x_grid: np.ndarray | None = None
     field_z_grid_meep: np.ndarray | None = None

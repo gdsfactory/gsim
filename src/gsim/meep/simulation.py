@@ -1175,6 +1175,7 @@ class Simulation(CloudJobMixin, BaseModel):
         for diel in stack.dielectrics:
             used_materials.add(diel["material"])
 
+        used_materials.add(self.mode_solver.background_material)
         material_data = resolve_materials(
             used_materials,
             overrides=self._material_overrides(),
