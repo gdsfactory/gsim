@@ -37,9 +37,14 @@ class MeshGrading(BaseModel):
               between two regions (a TCAD Interface, such as a
               metallurgical junction), at ``refined_mesh_size``.
             - ``"fine_regions"``: each refinement box, whose own size is
-              held inside it, and the internal edges of each layer whose
-              numeric ``mesh_resolution`` is below ``refined_mesh_size``,
-              at that resolution.
+              held inside it, and the internal edges of each layer with a
+              numeric ``mesh_resolution`` below ``max_mesh_size``, at that
+              resolution. Without grading only layers finer than
+              ``refined_mesh_size`` get their own size, since every
+              internal curve is refined anyway.
+
+            A feature size above ``max_mesh_size`` is held at
+            ``max_mesh_size``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

@@ -92,6 +92,10 @@ are half of `refined_mesh_size_um`; with grading, the elements on the conductors
 `refined_mesh_size_um` itself. To keep the same size at the contacts and the junction when you turn grading on, halve
 `refined_mesh_size_um`.
 
+A layer with a numeric `mesh_resolution` keeps that size with grading whatever `refined_mesh_size_um` is, as long as
+`"fine_regions"` is among the sources; without grading it gets its own size only when it is finer than
+`refined_mesh_size_um`. Any size above `max_mesh_size_um` is held at `max_mesh_size_um`.
+
 ### Doping
 
 A profile names the mesh Region it applies to and its dopant type. `StepDoping` is uniform inside an optional box,

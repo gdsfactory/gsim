@@ -1112,7 +1112,7 @@ def _setup_mesh_fields(
 def _fine_size_targets(
     groups: dict,
     stack,
-    refined_mesh_size: float,
+    cutoff: float,
 ) -> dict[str, float]:
     """Map volume names to requested fine mesh sizes (no gmsh needed).
 
@@ -1128,7 +1128,7 @@ def _fine_size_targets(
         if isinstance(resolution, bool) or not isinstance(resolution, (int, float)):
             continue
         size_um = float(resolution)
-        if 0.0 < size_um < refined_mesh_size:
+        if 0.0 < size_um < cutoff:
             targets[name] = size_um
     return targets
 
@@ -1136,7 +1136,7 @@ def _fine_size_targets(
 def _collect_fine_size_requests(
     groups: dict,
     stack,
-    refined_mesh_size: float,
+    cutoff: float,
 ) -> list[tuple[list[int], float]]:
     """Collect per-volume fine mesh-size requests for native 2D meshing.
 
@@ -1149,7 +1149,7 @@ def _collect_fine_size_requests(
     """
     if not gmsh.isInitialized():
         return []
-    targets = _fine_size_targets(groups, stack, refined_mesh_size)
+    targets = _fine_size_targets(groups, stack, cutoff)
 
     internal_curves: set[int] = set()
     for iface in groups.get("interface_surfaces", {}).values():
@@ -1210,7 +1210,7 @@ def _graded_curve_sampling(length: float, size: float, rate: float) -> int:
     them and gets the size ``size + rate * h / 2``. The spacing is chosen
     so that this excess stays within ``_GRADED_SIZE_TOLERANCE * size``,
     and is never above half the size. A warning is logged when the cap on
-    the number of samples prevents it.
+    the number of samples lets the excess go beyond that tolerance.
     """
     if length <= 0:
         return 2000
@@ -1219,6 +1219,8 @@ def _graded_curve_sampling(length: float, size: float, rate: float) -> int:
     if wanted <= _MAX_CURVE_SAMPLING:
         return wanted
     excess = rate * length / _MAX_CURVE_SAMPLING / 2.0
+    if excess <= _GRADED_SIZE_TOLERANCE * size:
+        return _MAX_CURVE_SAMPLING
     logger.warning(
         "Mesh grading samples a %.4g um curve at %d points, so the element "
         "size on it may reach %.3g um instead of %.3g um. Lower "
@@ -1270,11 +1272,17 @@ def _setup_graded_fields(
         if tags:
             curve_sets.append((sorted(tags), refined_mesh_size))
     if "fine_regions" in sources:
-        curve_sets.extend(_collect_fine_size_requests(groups, stack, refined_mesh_size))
+        # Without grading every internal curve is refined, so only layers
+        # finer than refined_mesh_size need their own field. With grading
+        # only the sources refine the mesh, so every numeric resolution
+        # below the cap is one; otherwise it would be silently dropped.
+        curve_sets.extend(_collect_fine_size_requests(groups, stack, max_mesh_size))
 
     field_ids: list[int] = []
     next_field_id = 1
-    for curve_tags, size in curve_sets:
+    for curve_tags, requested in curve_sets:
+        # A feature size above the cap would give an inverted Threshold.
+        size = min(requested, max_mesh_size)
         sampling = _graded_curve_sampling(_curve_length_bound(curve_tags), size, rate)
         field_ids.append(
             gmsh_utils.setup_mesh_refinement(

@@ -8,6 +8,7 @@ import pytest
 
 from gsim.common import Layer, LayerStack
 from gsim.palace import BoundaryModeSim, MeshGrading
+from gsim.palace.mesh import generator
 from gsim.palace.mesh.generator import _graded_curve_sampling, generate_mesh
 from gsim.palace.models import MeshConfig
 
@@ -160,8 +161,63 @@ class TestCurveSampling:
         assert "Lower growth_per_um" in caplog.text
         assert self._size_between_samples(length, size, rate, sampling) > 1.1 * size
 
+    def test_no_warning_when_the_cap_stays_within_a_tenth(self, caplog):
+        # 150 um at 0.01 um wants more than 20000 samples, but the size
+        # between them reaches only 1.09 times the feature size.
+        length, size, rate = 150.0, 0.01, 0.25
+        with caplog.at_level("WARNING", logger="gsim.palace.mesh.generator"):
+            sampling = _graded_curve_sampling(length, size, rate)
+
+        assert sampling == 20000
+        assert self._size_between_samples(length, size, rate, sampling) <= 1.1 * size
+        assert caplog.text == ""
+
     def test_no_warning_below_the_cap(self, caplog):
         with caplog.at_level("WARNING", logger="gsim.palace.mesh.generator"):
             _graded_curve_sampling(10.0, 0.05, 2.0)
 
         assert caplog.text == ""
+
+
+def _graded_thresholds(monkeypatch, tmp_path, **mesh_kwargs):
+    """Mesh the section with grading and return (curves, size, cap) per field."""
+    original = generator.gmsh_utils.setup_mesh_refinement
+    calls = []
+
+    def refine(curves, minimum, maximum, **kwargs):
+        calls.append((curves, minimum, maximum))
+        return original(curves, minimum, maximum, **kwargs)
+
+    monkeypatch.setattr(generator.gmsh_utils, "setup_mesh_refinement", refine)
+    result = _simulation(tmp_path).mesh(verbose=False, **mesh_kwargs)
+    assert _counts(result.mesh_path)[1] > 0
+    return calls
+
+
+def test_a_feature_size_above_the_cap_is_held_at_the_cap(monkeypatch, tmp_path):
+    calls = _graded_thresholds(
+        monkeypatch,
+        tmp_path,
+        refined_mesh_size=0.8,
+        max_mesh_size=0.5,
+        mesh_grading=MeshGrading(growth_per_um=0.25, sources=["conductors"]),
+    )
+
+    assert calls
+    assert all(size <= cap == 0.5 for _, size, cap in calls)
+
+
+def test_a_fine_layer_coarser_than_refined_size_is_still_graded(monkeypatch, tmp_path):
+    # The core asks for 0.05 um. Without grading every internal curve gets
+    # half of refined_mesh_size, so 0.05 at refined_mesh_size=0.04 needs no
+    # field of its own; with grading only the sources refine, so the core
+    # must remain one.
+    calls = _graded_thresholds(
+        monkeypatch,
+        tmp_path,
+        refined_mesh_size=0.04,
+        max_mesh_size=0.5,
+        mesh_grading=MeshGrading(growth_per_um=0.25, sources=["fine_regions"]),
+    )
+
+    assert [size for _, size, _ in calls] == [0.05]
