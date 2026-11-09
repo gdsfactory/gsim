@@ -100,6 +100,79 @@ def test_missing_colors_keep_the_viewer_palette():
     }
 
 
+def _background_level(material, *, name=None, derived_layer=None, **info):
+    return SimpleNamespace(
+        layer=LogicalLayer(layer=(9, 0)),
+        derived_layer=derived_layer,
+        name=name,
+        material=material,
+        background=True,
+        info=info,
+    )
+
+
+def test_shared_background_drawing_color_is_not_a_material_color():
+    views = LayerViews(layer_views={"drawing": LayerView(layer=(9, 0), color="red")})
+    levels = {
+        "lower": _background_level("medium_a"),
+        "upper": _background_level("medium_b"),
+    }
+    assert layer_group_styles(_resolved(levels, views)) == {
+        "lower": {"visible": True},
+        "upper": {"visible": True},
+    }
+
+
+def test_shared_background_same_material_can_use_drawing_color():
+    views = LayerViews(layer_views={"drawing": LayerView(layer=(9, 0), color="red")})
+    levels = {
+        "lower": _background_level("medium_a"),
+        "upper": _background_level("medium_a"),
+    }
+    assert layer_group_styles(_resolved(levels, views)) == {
+        "lower": {"visible": True, "color": "#ff0000"},
+        "upper": {"visible": True, "color": "#ff0000"},
+    }
+
+
+def test_shared_background_uses_named_physical_views_and_stack_override():
+    views = LayerViews(
+        layer_views={
+            "drawing": LayerView(layer=(9, 0), color="red"),
+            "lower": LayerView(layer=(9, 0), fill_color="blue"),
+            "declared_upper": LayerView(layer=(9, 0), frame_color="lime"),
+        }
+    )
+    levels = {
+        "lower": _background_level("medium_a"),
+        "upper": _background_level("medium_b", name="declared_upper"),
+    }
+    assert layer_group_styles(_resolved(levels, views)) == {
+        "lower": {"visible": True, "color": "#0000ff"},
+        "upper": {"visible": True, "color": "#00ff00"},
+    }
+    levels["lower"].info["color"] = "yellow"
+    assert layer_group_styles(_resolved(levels, views))["lower"]["color"] == "#ffff00"
+
+
+def test_shared_background_can_use_distinct_derived_layer_color():
+    views = LayerViews(
+        layer_views={
+            "drawing": LayerView(layer=(9, 0), color="red"),
+            "physical": LayerView(layer=(100, 0), color="blue"),
+        }
+    )
+    levels = {
+        "lower": _background_level(
+            "medium_a", derived_layer=LogicalLayer(layer=(100, 0))
+        ),
+        "upper": _background_level("medium_b"),
+    }
+    styles = layer_group_styles(_resolved(levels, views))
+    assert styles["lower"]["color"] == "#0000ff"
+    assert "color" not in styles["upper"]
+
+
 def test_unused_stack_color_is_not_validated():
     resolved = _resolved({"core": _level(), "unused": _level((2, 0), color="invalid")})
     resolved.layers = {"core": resolved.layers["core"]}

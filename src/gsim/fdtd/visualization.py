@@ -181,9 +181,10 @@ class VisualizationMixin(RuntimeConfigMixin):
     ) -> Any:
         """Show 3D geometry with PDK color, opacity and visibility defaults.
 
-        Stack info.color overrides layer-view fill color (or frame color when
-        fill is absent). Derived-layer colors take precedence over source-layer
-        colors. Missing colors retain the viewer palette. Color alpha does not
+        Stack info.color overrides named and physical layer-view colors. Named
+        stack views are preferred, then derived/source fill or frame colors.
+        Shared drawing colors for blanket films of distinct materials are
+        ambiguous and use the fallback palette. Color alpha does not
         change opacity. Stack info.opacity controls surface opacity;
         info.visible overrides layer-view visibility. Zero opacity starts a
         layer hidden and becomes fully opaque when enabled in the viewer.

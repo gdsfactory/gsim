@@ -274,7 +274,12 @@ Previously written simulation artifacts are preserved.
 The 3D viewer uses PDK layer-view fill colors, falling back to frame colors when
 the fill is absent. Stack `info["color"]` overrides the layer-view color. Colors
 can be CSS color strings; their alpha channel does not change surface opacity.
-The derived layer view is preferred, with the source layer view as a fallback.
+An exactly named layer view matching the stack key, or its declared name,
+is preferred over a physical-layer lookup. Otherwise the derived layer view
+is preferred, with the source layer view as a fallback. A drawing layer reused
+by background films of distinct materials does not supply an individual film
+color: those films use explicit stack/named colors or the fallback palette.
+Visibility and opacity still follow their existing PDK defaults.
 For duplicate colored views of a GDS layer, the first effectively visible view
 is preferred, then the first colored view. Missing colors retain the viewer's
 fallback palette, including its port and largest-group colors. These display
