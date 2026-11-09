@@ -386,10 +386,9 @@ class Domain(_FiniteModel):
         return self
 
     @model_serializer(mode="wrap")
-    def serialize_domain(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
+    def serialize_domain(self, handler: SerializerFunctionWrapHandler):
         """Retain explicit switches without inventing one in default round trips."""
+        # An unannotated return preserves the model's serialization JSON schema.
         data = handler(self)
         if "clip_geometry" not in self.model_fields_set:
             data.pop("clip_geometry", None)

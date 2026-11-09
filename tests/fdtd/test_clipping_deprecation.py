@@ -10,6 +10,15 @@ import pytest
 from gsim import fdtd
 
 
+@pytest.mark.parametrize("mode", ["validation", "serialization"])
+def test_domain_schema_keeps_public_fields(mode):
+    schema = fdtd.Domain.model_json_schema(mode=mode)
+    assert schema["properties"]["clip_geometry"]["default"] is False
+    assert {"padding", "pml_cells", "x_bounds", "y_bounds", "z_bounds"} <= set(
+        schema["properties"]
+    )
+
+
 @pytest.mark.parametrize(
     "statement",
     [
