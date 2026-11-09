@@ -92,7 +92,13 @@ Every Region of the device takes one role, and the declarations state it:
 - A **doped Region** carries at least one doping profile. It holds the potential and both carrier densities.
 - A **Contact** is where an electrode meets a doped Region: an ohmic contact whose bias the solve sets.
   `semiconductor` is the doped Region it injects into; `electrode` is the Region on the other side, the metal or any
-  Region that is neither doped nor insulating.
+  Region that is neither doped nor insulating. Where the Contact ends on another solved Region (an Interface to the
+  next doped Region, or the oxide), that Region's node touches the same metal and the Contact holds it too: a doped
+  Region's node as an ohmic contact of its own doping, an insulator's at the potential of the Contact's node beside it.
+  Its charge and current count towards the Contact. A node on another Contact's curve stays with that Contact, and a
+  node two Contacts reach at a shared end goes to the one declared first. Where the doping steps at the end, say a
+  contact implant beside a plus implant, each side is neutral at the metal's Fermi level, so the potential steps there
+  by the step's built-in voltage, `V_t ln(N_high/N_low)`: the drop a real high-low junction makes over a Debye length.
 - An **Interface** is where two doped Regions meet. Potential and carriers are continuous across it; it carries no bias.
   Declare one between every pair of touching doped Regions: two touching doped Regions without one are refused, since
   no carrier would cross between them.

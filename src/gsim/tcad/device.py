@@ -19,12 +19,15 @@ import sys
 import warnings
 from contextlib import suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import meshio
 import numpy as np
 from numpy.typing import NDArray
 from scipy.constants import epsilon_0 as EPS0  # noqa: N812
 
+from gsim.common.mesh_regions import cell_blocks, group_tags
 from gsim.tcad.doping import DopingProfile, acceptor_donor_concentrations
 from gsim.tcad.mesh import UM_TO_CM, line_group_points
 from gsim.tcad.results import BiasPoint, CarrierMap
@@ -56,6 +59,28 @@ INSULATOR_MATERIAL: str = "Oxide"
 _ELECTRODE_GROUPS: tuple[str, ...] = ("volumes", "conductor_surfaces", "pec_surfaces")
 
 
+def _node_keys(points_cm: NDArray[np.float64]) -> list[tuple[int, int]]:
+    """Node coordinates as hashable keys, rounded far below any element."""
+    return [
+        (round(float(x) / _NODE_KEY_CM), round(float(y) / _NODE_KEY_CM))
+        for x, y in points_cm
+    ]
+
+
+def _region_nodes(devsim: Any, device: str, region: str) -> dict[tuple[int, int], int]:
+    """DEVSIM's node index of *region* at each coordinate key."""
+    coords = np.column_stack(
+        [
+            np.asarray(
+                devsim.get_node_model_values(device=device, region=region, name=axis),
+                dtype=np.float64,
+            )
+            for axis in ("x", "y")
+        ]
+    )
+    return {key: i for i, key in enumerate(_node_keys(coords))}
+
+
 def _unique_devsim_name(kind: str) -> str:
     """Return a process-unique DEVSIM mesh or device name."""
     return f"gsim_tcad_{kind}_{next(_DEVSIM_NAME_IDS)}"
@@ -73,6 +98,106 @@ def _release_gsim_devices(devsim: Any) -> None:
         with suppress(Exception):
             devsim.delete_device(device=name)
         _LIVE_DEVICES.discard(name)
+
+
+@dataclass(frozen=True)
+class _ContactEnd:
+    """A node of another Region on a Contact's curve, claimed by the Contact.
+
+    Attributes:
+        name: Mesh point group and DEVSIM contact holding the node.
+        region: The Region the node belongs to.
+        point: Its in-plane coordinates, in the mesh's unit.
+    """
+
+    name: str
+    region: str
+    point: tuple[float, float]
+
+
+def _write_contact_ends(
+    src: Path, dst: Path, contact_regions: dict[str, str], solved: list[str]
+) -> dict[str, list[_ContactEnd]]:
+    """Copy a gmsh mesh, adding a point group for every end of a Contact.
+
+    A Contact's curve touches the other solved Regions at its end points:
+    an Interface to the next doped Region, or the oxide. Each such node of
+    another Region gets a point group of its own, so DEVSIM can make it a
+    contact of that Region.
+
+    Returns:
+        The ends of each Contact that has any; the mesh is written only
+        when there are some.
+    """
+    mesh = meshio.read(str(src), file_format="gmsh")
+    lines, line_tags = cell_blocks(mesh, "line")
+    triangles, triangle_tags = cell_blocks(mesh, "triangle")
+    curves = group_tags(mesh, dim=1)
+    surfaces = group_tags(mesh, dim=2)
+    taken = {str(name) for name in mesh.field_data}
+    region_nodes = {
+        region: set(triangles[triangle_tags == surfaces[region]].ravel().tolist())
+        for region in solved
+        if region in surfaces
+    }
+    next_tag = 1 + max(int(np.asarray(v)[0]) for v in mesh.field_data.values())
+    contact_curves = {
+        contact: set(lines[line_tags == curves[contact]].ravel().tolist())
+        for contact in contact_regions
+    }
+    # A node on another Contact's curve in its own Region is that
+    # Contact's: two Contacts meeting at a point keep their own nodes.
+    held = {
+        (region, node)
+        for contact, region in contact_regions.items()
+        for node in contact_curves[contact]
+    }
+    ends: dict[str, list[_ContactEnd]] = {}
+    groups: list[tuple[str, int, int]] = []
+    for contact, region in contact_regions.items():
+        curve = contact_curves[contact] & region_nodes.get(region, set())
+        for other, nodes in region_nodes.items():
+            if other == region:
+                continue
+            for node in sorted(curve & nodes):
+                if (other, node) in held:
+                    continue
+                # The first Contact, in declaration order, to reach a node
+                # keeps it: a node takes one boundary condition only.
+                held.add((other, node))
+                name = f"{contact}_end_{other}_{node}"
+                while name in taken:
+                    name += "_"
+                taken.add(name)
+                groups.append((name, next_tag, node))
+                next_tag += 1
+                x, y = mesh.points[node, :2]
+                ends.setdefault(contact, []).append(
+                    _ContactEnd(name=name, region=other, point=(float(x), float(y)))
+                )
+    if not groups:
+        return ends
+    physical = list(mesh.cell_data["gmsh:physical"])
+    geometrical = list(mesh.cell_data.get("gmsh:geometrical", physical))
+    cells = list(mesh.cells)
+    field_data = dict(mesh.field_data)
+    for name, tag, node in groups:
+        cells.append(meshio.CellBlock("vertex", np.array([[node]])))
+        physical.append(np.array([tag]))
+        geometrical.append(np.array([tag]))
+        field_data[name] = np.array([tag, 0])
+    meshio.write(
+        str(dst),
+        meshio.Mesh(
+            mesh.points,
+            cells,
+            cell_data={"gmsh:physical": physical, "gmsh:geometrical": geometrical},
+            field_data=field_data,
+        ),
+        file_format="gmsh22",
+        binary=False,
+    )
+    return ends
 
 
 @dataclass(frozen=True)
@@ -279,6 +404,7 @@ class Device:
     mesh_name: str | None = None
     dd_initialized: bool = False
     current_bias: dict[str, float] = field(default_factory=dict)
+    contact_ends: dict[str, list[_ContactEnd]] = field(default_factory=dict)
 
     _CONTINUITY_EQUATIONS: ClassVar[dict[str, str]] = {
         "Potential": "PotentialEquation",
@@ -318,12 +444,15 @@ class Device:
         self.mesh_name = None
         self.dd_initialized = False
         self.current_bias = {}
+        self.contact_ends = {}
 
     def setup(self, name: str | None = None) -> str:
         """Create the DEVSIM device from the shared mesh.
 
         Loads the cm-scaled mesh, registers one DEVSIM region per doped
         and insulating mesh region and one contact per declared contact,
+        plus one per node of another Region at a contact's ends (written
+        as point groups into ``<mesh>_contact_ends.msh`` beside the mesh),
         applies the doping node models, and sets up the potential-only
         physics.
 
@@ -364,7 +493,17 @@ class Device:
 
         mesh_name = _unique_devsim_name("mesh")
         self.mesh_name = mesh_name
-        devsim.create_gmsh_mesh(mesh=mesh_name, file=str(self.mesh.devsim_mesh_path))
+        mesh_path = self.mesh.devsim_mesh_path
+        ends_path = mesh_path.with_name(f"{mesh_path.stem}_contact_ends.msh")
+        self.contact_ends = _write_contact_ends(
+            mesh_path,
+            ends_path,
+            layout.contact_regions,
+            [*layout.regions, *layout.insulators],
+        )
+        devsim.create_gmsh_mesh(
+            mesh=mesh_name, file=str(ends_path if self.contact_ends else mesh_path)
+        )
         for region in layout.regions:
             devsim.add_gmsh_region(
                 mesh=mesh_name,
@@ -386,6 +525,14 @@ class Device:
                 region=layout.contact_regions[contact.name],
                 material="metal",
                 name=contact.name,
+            )
+        for end in (end for ends in self.contact_ends.values() for end in ends):
+            devsim.add_gmsh_contact(
+                mesh=mesh_name,
+                gmsh_name=end.name,
+                region=end.region,
+                material="metal",
+                name=end.name,
             )
         for interface, (region_a, region_b) in layout.interface_regions.items():
             devsim.add_gmsh_interface(
@@ -438,6 +585,7 @@ class Device:
                     device, layout.contact_regions[contact.name], contact.name, True
                 )
                 self.current_bias[contact.name] = 0.0
+            self._hold_contact_ends(devsim, sp, device)
             for interface in (*layout.interface_regions, *bound):
                 self._interface_continuity(devsim, sp, device, interface, "Potential")
         except BaseException:
@@ -514,31 +662,8 @@ class Device:
         if not layout.insulator_interfaces:
             return []
         mesh_path = self.mesh.devsim_mesh_path
-
-        def keys(points_cm: NDArray[np.float64]) -> list[tuple[int, int]]:
-            """Coordinates as hashable keys, rounded far below any element."""
-            return [
-                (round(float(x) / _NODE_KEY_CM), round(float(y) / _NODE_KEY_CM))
-                for x, y in points_cm
-            ]
-
-        def region_nodes(region: str) -> dict[tuple[int, int], int]:
-            """DEVSIM's node index of *region* at each coordinate key."""
-            coords = np.column_stack(
-                [
-                    np.asarray(
-                        devsim.get_node_model_values(
-                            device=device, region=region, name=axis
-                        ),
-                        dtype=np.float64,
-                    )
-                    for axis in ("x", "y")
-                ]
-            )
-            return {key: i for i, key in enumerate(keys(coords))}
-
         nodes = {
-            region: region_nodes(region)
+            region: _region_nodes(devsim, device, region)
             for pair in layout.insulator_interfaces.values()
             for region in pair
         }
@@ -548,7 +673,7 @@ class Device:
                 *(contact.name for contact in self.contacts),
                 *layout.interface_regions,
             )
-            for key in keys(line_group_points(mesh_path, name))
+            for key in _node_keys(line_group_points(mesh_path, name))
         }
 
         bound: list[str] = []
@@ -556,7 +681,7 @@ class Device:
         for name, (other, insulator) in layout.insulator_interfaces.items():
             free = [
                 key
-                for key in keys(line_group_points(mesh_path, name))
+                for key in _node_keys(line_group_points(mesh_path, name))
                 if key not in taken
             ]
             shared = [
@@ -588,6 +713,57 @@ class Device:
                 stacklevel=2,
             )
         return bound
+
+    def _hold_contact_ends(self, devsim: Any, sp: Any, device: str) -> None:
+        """Hold the claimed end nodes at their Contact's potential.
+
+        A doped Region's end node is an ohmic contact of its own doping,
+        as the Contact's own nodes are. An insulator's end node takes the
+        potential the Contact holds at the same point. Both answer to the
+        Contact's circuit node, so their charge and current are the
+        Contact's.
+        """
+        layout = self.layout
+        n_i = intrinsic_density_cm3(self.materials.temperature_k)
+        for contact, ends in self.contact_ends.items():
+            region = layout.contact_regions[contact]
+            bias = sp.GetContactBiasName(contact)
+            v_t = float(devsim.get_parameter(device=device, region=region, name="V_t"))
+            profiles = [p for p in self.doping if p.region == region]
+            for end in ends:
+                if end.region in layout.regions:
+                    # simple_physics' own ohmic condition.
+                    equilibrium = (
+                        f"ifelse(NetDoping > 0, V_t*log({sp.celec_model}/n_i), "
+                        f"-V_t*log({sp.chole_model}/n_i))"
+                    )
+                else:
+                    x_um, y_um = (value / UM_TO_CM for value in end.point)
+                    acceptors, donors = acceptor_donor_concentrations(
+                        profiles, np.array([x_um]), np.array([y_um])
+                    )
+                    net = float(donors[0] - acceptors[0])
+                    equilibrium = repr(v_t * math.asinh(net / (2.0 * n_i)))
+                model = f"{end.name}nodemodel"
+                for model_name, equation in (
+                    (model, f"Potential - {bias} - {equilibrium}"),
+                    (f"{model}:Potential", "1"),
+                    (f"{model}:{bias}", "-1"),
+                ):
+                    devsim.contact_node_model(
+                        device=device,
+                        contact=end.name,
+                        name=model_name,
+                        equation=equation,
+                    )
+                devsim.contact_equation(
+                    device=device,
+                    contact=end.name,
+                    name="PotentialEquation",
+                    node_model=model,
+                    edge_charge_model="PotentialEdgeFlux",
+                    circuit_node=bias,
+                )
 
     # ------------------------------------------------------------------
     # Solving
@@ -674,8 +850,60 @@ class Device:
         for interface in self.layout.interface_regions:
             self._interface_continuity(devsim, sp, device, interface, "Electrons")
             self._interface_continuity(devsim, sp, device, interface, "Holes")
+        self._hold_contact_end_carriers(devsim, sp, device)
         self._solve_dc(devsim)
         self.dd_initialized = True
+
+    def _hold_contact_end_carriers(self, devsim: Any, sp: Any, device: str) -> None:
+        """Hold the carriers of doped end nodes at their equilibrium values.
+
+        The ohmic condition simple_physics puts on a Contact's own nodes,
+        with the carrier currents flowing into the Contact's circuit node.
+        """
+        for contact, ends in self.contact_ends.items():
+            bias = sp.GetContactBiasName(contact)
+            for end in ends:
+                if end.region not in self.layout.regions:
+                    continue
+                for carrier, equation, value in (
+                    (
+                        "Electrons",
+                        "ElectronContinuityEquation",
+                        (
+                            f"ifelse(NetDoping > 0, {sp.celec_model}, "
+                            f"n_i^2/{sp.chole_model})"
+                        ),
+                    ),
+                    (
+                        "Holes",
+                        "HoleContinuityEquation",
+                        (
+                            f"ifelse(NetDoping < 0, {sp.chole_model}, "
+                            f"n_i^2/{sp.celec_model})"
+                        ),
+                    ),
+                ):
+                    model = f"{end.name}node{carrier.lower()}"
+                    devsim.contact_node_model(
+                        device=device,
+                        contact=end.name,
+                        name=model,
+                        equation=f"{carrier} - {value}",
+                    )
+                    devsim.contact_node_model(
+                        device=device,
+                        contact=end.name,
+                        name=f"{model}:{carrier}",
+                        equation="1",
+                    )
+                    devsim.contact_equation(
+                        device=device,
+                        contact=end.name,
+                        name=equation,
+                        node_model=model,
+                        edge_current_model=f"{carrier[:-1]}Current",
+                        circuit_node=bias,
+                    )
 
     @staticmethod
     def _source_name(contact: str) -> str:
@@ -703,11 +931,19 @@ class Device:
         )
 
     def _contact_charge(self, devsim: Any, contact: str) -> float:
-        """Contact charge from the potential equation in C per cm of depth."""
-        return float(
-            devsim.get_contact_charge(
-                device=self.name, contact=contact, equation="PotentialEquation"
+        """Contact charge from the potential equation in C per cm of depth.
+
+        The charge on the nodes of other Regions the Contact claimed at its
+        ends is the Contact's too.
+        """
+        names = [contact, *(end.name for end in self.contact_ends.get(contact, []))]
+        return sum(
+            float(
+                devsim.get_contact_charge(
+                    device=self.name, contact=name, equation="PotentialEquation"
+                )
             )
+            for name in names
         )
 
     def _collect_carriers(self, devsim: Any) -> CarrierMap:
