@@ -489,6 +489,53 @@ explicitly through `FiberMode.refractive_index` or
 their cache keys; existing downloaded results are unchanged. The simulation
 background default is unchanged by this fix.
 
+### Complex-field export
+
+Request complex plane fields with `Fields`. Omit `fields` to retain the
+existing output, or pass `Fields()` to save all six E/H components at the
+monitor's wavelengths. Components are case-insensitive; explicit selections
+must be nonempty and unique. The field request can select its own wavelengths
+in micrometers and can be used without flux, heatmaps, or a fiber mode.
+
+```python
+sim.monitors.add_plane(
+    name="capture",
+    center_um=(5, 0, 1),
+    size_um=(10, 8, 0),
+    normal="+z",
+    flux=False,
+    fields=fdtd.Fields(
+        components=["ex", "ey", "hx", "hy"],
+        wavelengths_um=[1.54, 1.55, 1.56],
+    ),
+)
+result = sim.run(check_cache=True)
+monitor = result.monitors["capture"]
+sample = monitor.field("ey", wavelength_um=1.55)
+ey = sample.load()  # Complex NumPy array, shape (v, u).
+u_um = sample.coordinates.u_um
+v_um = sample.coordinates.v_um
+sample.metadata["normalization"]  # "raw_dft" for GDSFactory FDTD output.
+```
+
+`monitor.fields` contains the exported component/frequency records. `field()`
+selects the closest exported wavelength for the requested component; inspect
+the returned `wavelength_um`. Real and imaginary sidecars are loaded lazily,
+with shape, dtype, and finite-value checks. A missing file raises an error
+when loaded. Actual sample coordinates and the snapped normal position are
+available through `monitor.field_coordinates` or `sample.coordinates`, in
+micrometers. They can differ from the requested monitor bounds and position.
+
+Loading preserves the exported complex values without source normalization,
+noise masking, or phase corrections. `sample.metadata` retains the backend's
+normalization, DFT convention, phase reference, colocation, field-unit system,
+solver time unit, and boundary-interpolation metadata. Raw DFT fields are not
+incident-power-normalized fields or fiber coupling efficiencies. Quantitative
+overlap postprocessing requires consistent normalization and sampling.
+
+Selecting fewer components or wavelengths reduces the saved field payload.
+Existing result files without complex fields continue to load normally.
+
 ## Results
 
 ```python
@@ -605,5 +652,8 @@ Phases are referenced where the solver's port monitors sit, and gsim does not de
 - [`LineCurrentSource`][gsim.fdtd.LineCurrentSource]
 - [`GaussianBeamSource`][gsim.fdtd.GaussianBeamSource]
 - [`PlaneMonitor`][gsim.fdtd.PlaneMonitor]
+- [`Fields`][gsim.fdtd.Fields]
+- [`ComplexFieldResult`][gsim.fdtd.ComplexFieldResult]
+- [`FieldCoordinates`][gsim.fdtd.FieldCoordinates]
 - [`FDTDResult`][gsim.fdtd.FDTDResult]
 - [`s_matrix`][gsim.fdtd.s_matrix]

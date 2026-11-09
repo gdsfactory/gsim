@@ -409,6 +409,7 @@ class RuntimeConfigMixin:
                 else None
             ),
             fiber_mode=fiber_mode,
+            fields=monitor.fields.to_config() if monitor.fields is not None else None,
         )
 
     def _fiber_mode_config(

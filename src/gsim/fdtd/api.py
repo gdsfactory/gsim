@@ -17,6 +17,7 @@ from pydantic import (
 
 from gsim.common.config import MutableModel as _MutableModel
 from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.field_requests import Fields
 from gsim.fdtd.mode_selection import ModeSelection
 from gsim.fdtd.monitor_names import resolve_monitor_name
 
@@ -260,6 +261,7 @@ class PlaneMonitor(_FiniteModel):
     wavelengths_um: list[float] | None = None
     heatmap: Heatmap | None = None
     fiber_mode: FiberMode | None = None
+    fields: Fields | None = None
 
     @model_validator(mode="after")
     def validate_plane(self) -> Self:
@@ -273,9 +275,15 @@ class PlaneMonitor(_FiniteModel):
             wavelength <= 0 for wavelength in self.wavelengths_um
         ):
             raise ValueError("monitor wavelengths must be positive")
-        if not self.flux and self.heatmap is None and self.fiber_mode is None:
+        if (
+            not self.flux
+            and self.heatmap is None
+            and self.fiber_mode is None
+            and self.fields is None
+        ):
             raise ValueError(
-                "a plane monitor must request flux, a heatmap, or fiber overlap"
+                "a plane monitor must request flux, a heatmap, "
+                "fiber overlap, or complex fields"
             )
         return self
 
@@ -430,6 +438,7 @@ __all__ = [
     "DipoleSource",
     "Domain",
     "FiberMode",
+    "Fields",
     "GaussianBeamSource",
     "Geometry",
     "Heatmap",
