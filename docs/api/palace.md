@@ -493,8 +493,9 @@ for port in ("o1", "o2"):
 The receiver copies the source's geometry, stack, airbox, PEC blocks, symmetry
 plane and port declarations. A port it declares itself, with the source's
 geometry, keeps its own excitation, impedance and R/L/C; the other ports keep
-the source's settings, and an eigenmode source leaves its lumped ports
-unexcited. A driven receiver needs at least one port with `excited=True`. The
+the source's settings but are not excited, whatever the source excites. A
+driven receiver needs at least one port it excites itself, declared with
+`excited=True` or set on the copied port config. The
 solver settings and the outer wall stay per simulation: with
 `absorbing_boundary=False` the outer boundary is Palace's natural magnetic wall
 (PMC), which reflects. Each simulation needs its own output directory, neither
@@ -525,9 +526,10 @@ geometry and kind back from the source: each port the source declares keeps the
 receiver's excitation, impedance and R/L/C, and ports the source lacks are
 dropped. On a receiver without a reused mesh, a declared port that does not
 match the source is refused instead.
-Port settings, solver settings, mesh sizes (`mesh_config`) and material values
-(permittivity, loss tangent, conductor conductivity) stay free. The mesh was
-sized for the source's values, so check that it still resolves the new ones,
+Port settings, solver settings, mesh sizes and material values (permittivity,
+loss tangent, conductor conductivity) stay free. The receiver's `mesh_config`
+holds the settings the source's mesh was made with, after presets and
+auto-sizing. The mesh was sized for the source's values, so check that it still resolves the new ones,
 for example against a fresh `mesh()`.
 
 Only driven and eigenmode simulations share meshes, in either direction.

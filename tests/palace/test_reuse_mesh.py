@@ -1238,6 +1238,80 @@ def test_driven_receiver_with_no_excited_port_is_refused(
     assert not (tmp_path / "driven" / "config.json").exists()
 
 
+def test_excited_cpw_port_of_an_eigenmode_source_is_not_excited_on_the_receiver(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """A CPW port keeps excited=True on an eigenmode source; a receiver
+    that declares nothing does not inherit that excitation."""
+    source = make_sim(EigenmodeSim, tmp_path / "eigen", ports={})
+    source.add_cpw_port("o1", layer="m1", s_width=1.0, gap_width=1.0)
+    assert source.cpw_ports[0].excited
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+
+    receiver = make_sim(DrivenSim, tmp_path / "driven", ports={})
+    receiver.reuse_mesh(source)
+
+    assert [(p.name, p.excited) for p in receiver.cpw_ports] == [("o1", False)]
+    assert not any(p.excited for p in receiver._last_ports)
+    with pytest.raises(ValueError, match="excites none of its ports"):
+        receiver.write_config(validate_mesh=False)
+    assert source.cpw_ports[0].excited
+
+    receiver.cpw_ports[0].excited = True
+    assert receiver.write_config(validate_mesh=False).is_file()
+
+
+def test_driven_receiver_does_not_inherit_the_driven_sources_excitation(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """Source excites o1, receiver declares only o2: only o2 is excited."""
+    source = make_sim(
+        DrivenSim,
+        tmp_path / "source",
+        ports={
+            "o1": {"layer": "m1", "length": 1.0, "excited": True},
+            "o2": {"layer": "m1", "length": 1.0, "excited": False},
+        },
+    )
+    source.mesh(verbose=False)
+    fake_gmsh.allowed = False
+
+    receiver = make_sim(
+        DrivenSim,
+        tmp_path / "receiver",
+        ports={"o2": {"layer": "m1", "length": 1.0, "excited": True}},
+    )
+    receiver.reuse_mesh(source)
+    config = json.loads(receiver.write_config(validate_mesh=False).read_text())
+
+    assert _excitations(config) == [False, 2]
+    assert [(p.name, p.excited) for p in receiver.ports] == [
+        ("o1", False),
+        ("o2", True),
+    ]
+    assert [p.excited for p in source.ports] == [True, False]
+
+
+def test_receiver_mesh_config_holds_the_sizes_the_source_mesh_used(
+    make_sim, fake_gmsh, tmp_path
+) -> None:
+    """mesh(preset=...) sizes are not stored on source.mesh_config."""
+    source = make_sim(EigenmodeSim, tmp_path / "eigen")
+    source.mesh(preset="coarse", verbose=False)
+    used = source._last_mesh_config
+    assert used.refined_mesh_size != source.mesh_config.refined_mesh_size
+    fake_gmsh.allowed = False
+
+    receiver = make_sim(DrivenSim, tmp_path / "driven")
+    receiver.reuse_mesh(source)
+
+    assert receiver.mesh_config == used
+    assert receiver.mesh_config is not used
+    assert receiver.mesh_config.refined_mesh_size == used.refined_mesh_size
+    assert receiver.mesh_config.max_mesh_size == used.max_mesh_size
+
+
 def test_driven_receiver_exciting_a_port_without_surface_is_refused(
     meshed_eigen, make_sim, fake_gmsh, tmp_path
 ) -> None:

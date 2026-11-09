@@ -527,6 +527,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
         _configured_ports: bool
         _last_mesh_result: Any
+        _last_mesh_config: MeshConfig | None
         _last_ports: list
         _mesh_fingerprint: dict[str, str] | None
         _mesh_reused: bool
@@ -2162,6 +2163,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # Store mesh_result for deferred config generation
         self._last_mesh_result = mesh_result
+        self._last_mesh_config = mesh_config.model_copy(deep=True)
         self._last_ports = ports
 
         return SimulationResult(
@@ -2690,7 +2692,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         Copied from the source, as independent copies that replace what this
         simulation had: the geometry, the stack and its settings, the
         material overrides, the airbox, the PEC blocks, the symmetry plane,
-        ``mesh_config`` and the port declarations. The geometry copy is flat:
+        the mesh settings the source's mesh was made with (as
+        ``mesh_config``, after presets and auto-sizing) and the port
+        declarations. The geometry copy is flat:
         it has the source's polygons and ports but no instances, so it shares
         no cells with the source. Kept per simulation: the
         simulation type, the solver and problem settings, the absorbing
@@ -2702,9 +2706,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         simulation chooses its excited ports: declare them with
         ``excited=True``, before or after this call, or set ``excited`` on
         the copied port config. Every other source port is copied with the
-        source's settings; an eigenmode source leaves its lumped ports
-        unexcited. A declared port of another kind or geometry, or one the
-        source does not declare, is refused.
+        source's settings except ``excited``, which is cleared, so this
+        simulation excites only the ports it chooses. A declared port of
+        another kind or geometry, or one the source does not declare, is
+        refused.
 
         On a simulation that already holds a reused mesh, its ports came from
         a source, so the call takes the Port geometry and kind back from the
@@ -2861,7 +2866,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         stack_kwargs = copy.deepcopy(source._stack_kwargs)
         materials = {k: v.model_copy(deep=True) for k, v in source.materials.items()}
         airbox_config = copy.deepcopy(source._airbox_config)
-        mesh_config = source.mesh_config.model_copy(deep=True)
+        # The settings the source's mesh was made with, so ``mesh_config``
+        # shows the receiver the sizes of the mesh it holds
+        mesh_config = (source._last_mesh_config or source.mesh_config).model_copy(
+            deep=True
+        )
         pec_blocks = [block.model_copy(deep=True) for block in source._pec_blocks]
         symmetry_planes = [p.model_copy(deep=True) for p in source._symmetry_planes]
 
@@ -2956,6 +2965,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         self.stack = stack
         self.materials = materials
         self.mesh_config = mesh_config
+        self._last_mesh_config = mesh_config.model_copy(deep=True)
         for kind, cfgs in ports.items():
             setattr(self, kind, cfgs)
         self._stack_kwargs = stack_kwargs
@@ -3826,6 +3836,9 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
     _last_mesh_result: Any = PrivateAttr(default=None)
+    # The mesh settings the last mesh was made with, after presets and
+    # auto-sizing; ``mesh_config`` holds only what the user set
+    _last_mesh_config: MeshConfig | None = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)
     # What the mesh was made from, and whether it came from another sim
     _mesh_fingerprint: dict[str, str] | None = PrivateAttr(default=None)

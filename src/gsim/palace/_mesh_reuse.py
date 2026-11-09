@@ -91,7 +91,7 @@ def merge_port_declarations(
         The receiver's new port lists, in the source's order. A port the
         receiver declared with the source's kind and geometry is its own
         object, with its own settings; every other port is a deep copy of
-        the source's declaration.
+        the source's declaration with ``excited=False``.
 
     Raises:
         ValueError: Unless ``take_geometry_back``: if a receiver port has the
@@ -125,7 +125,11 @@ def merge_port_declarations(
                         "call mesh() on this simulation instead."
                     )
             if match is None:
-                merged[kind].append(cfg.model_copy(deep=True))
+                # The receiver did not choose this port, so it does not
+                # excite it: the source's excitation is the source's choice
+                merged[kind].append(
+                    cfg.model_copy(deep=True, update={"excited": False})
+                )
             else:
                 merged[kind].append(match)
                 kept.add(id(match))
