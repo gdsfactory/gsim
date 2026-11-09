@@ -15,6 +15,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from gsim.common.cloud import CloudJobMixin, submit
+from gsim.meep.layer_order import order_by_mesh_order
 from gsim.meep.mode_bounds import cell_extent, material_extent
 from gsim.meep.models.api import (
     FDTD,
@@ -157,7 +158,7 @@ def _precompute_cross_section_geometry(
     blocks: list[Any] = []
 
     layer_data: list[dict] = []
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
             component, layer
         ):
@@ -181,6 +182,7 @@ def _precompute_cross_section_geometry(
                 "z_hi": layer.zmax - z_center,
                 "intervals": intervals,
                 "material": layer.material,
+                "mesh_order": getattr(layer, "mesh_order", None),
             }
         )
 
@@ -209,6 +211,7 @@ def _precompute_cross_section_geometry(
                         z_center=block_z_center,
                         z_size=block_z_size,
                         material=ld["material"],
+                        mesh_order=ld["mesh_order"],
                     )
                 )
 
@@ -232,6 +235,7 @@ def _precompute_cross_section_geometry(
                         z_center=(ext_z_lo + ext_z_hi) / 2.0,
                         z_size=ext_z_size,
                         material=ld["material"],
+                        mesh_order=ld["mesh_order"],
                     )
                 )
 
@@ -255,12 +259,13 @@ def _precompute_cross_section_geometry(
                 z_center=block_z_center,
                 z_size=z_size,
                 material=diel["material"],
+                mesh_order=diel.get("mesh_order"),
             )
         )
 
     return CrossSectionGeometry(
         plane="yz" if _use_yz else "xz",
-        blocks=blocks,
+        blocks=order_by_mesh_order(blocks),
         cell_horizontal_span=horizontal_span,
         cell_z_span=z_span,
         z_center=z_center,
@@ -1128,7 +1133,7 @@ class Simulation(CloudJobMixin, BaseModel):
 
         # Collect material names from stack layers and dielectrics.
         used_materials: set[str] = set()
-        for layer in stack.layers.values():
+        for layer in order_by_mesh_order(stack.layers.values()):
             used_materials.add(layer.material)
         for diel in stack.dielectrics:
             used_materials.add(diel["material"])
@@ -1980,6 +1985,18 @@ class Simulation(CloudJobMixin, BaseModel):
                 background_material=ms.background_material,
             )
 
+        layer_mesh_orders = {
+            layer.name: layer.mesh_order
+            for layer in stack.layers.values()
+            if layer.mesh_order is not None
+        }
+        layer_mesh_orders.update(
+            {
+                diel["name"]: diel["mesh_order"]
+                for diel in stack.dielectrics
+                if diel.get("mesh_order") is not None
+            }
+        )
         config = ModeSolverConfig(
             wavelengths=ms.wavelengths,
             bands=bands,
@@ -1991,6 +2008,7 @@ class Simulation(CloudJobMixin, BaseModel):
             eigensolver_tol=ms.eigensolver_tol,
             n_field_z=ms.n_field_z,
             layer_stack=dielectrics,
+            layer_mesh_orders=layer_mesh_orders,
             materials=material_data,
             cross_section_geometry=cross_section_geometry,
             n_field_x=n_field_x,

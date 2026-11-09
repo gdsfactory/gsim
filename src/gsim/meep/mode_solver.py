@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
+from gsim.meep.layer_order import order_by_mesh_order
 from gsim.meep.mode_bounds import cell_extent
 from gsim.meep.models.results import ModeResult
 
@@ -183,8 +184,12 @@ def _build_slab_xz_cell(
     cell_size = mp.Vector3(x_span, 0.0, z_span)
 
     geometry: list[object] = []
-    for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and background_material in {"air", "Air"}:
+    for layer in order_by_mesh_order(stack.layers.values()):
+        if (
+            layer.material in {"air", "Air"}
+            and background_material in {"air", "Air"}
+            and getattr(layer, "mesh_order", None) is None
+        ):
             continue
         mat_data = materials.get(layer.material)
         if mat_data is None:
@@ -313,7 +318,7 @@ def _build_component_xz_cell(
 
     geometry: list[object] = []
     layer_data: list[dict] = []
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
             component, layer
         ):
@@ -476,7 +481,7 @@ def _build_component_yz_cell(
 
     geometry: list[object] = []
     layer_data: list[dict] = []
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
             component, layer
         ):
@@ -1203,11 +1208,12 @@ def refractive_index_profile(
                 "port is required for 2D refractive_index_profile when x_grid is given"
             )
         n_profile = np.full_like(z_grid, n_bg)
-        for layer in stack.layers.values():
-            if layer.material in {"air", "Air"} and background_material in {
-                "air",
-                "Air",
-            }:
+        for layer in order_by_mesh_order(stack.layers.values()):
+            if (
+                layer.material in {"air", "Air"}
+                and background_material in {"air", "Air"}
+                and getattr(layer, "mesh_order", None) is None
+            ):
                 continue
             mat = material_data.get(layer.material)
             if mat is None or mat.epsilon_diag is None:
@@ -1270,11 +1276,9 @@ def refractive_index_profile(
     nh = len(horizontal_grid)
     nz = len(z_grid)
     n_profile = np.full((nz, nh), n_bg)
-    set_by_layer = np.zeros((nz, nh), dtype=bool)
-    bounded_air = np.zeros((nz, nh), dtype=bool)
 
     layer_h_masks: dict[tuple, np.ndarray] = {}
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
             component, layer
         ):
@@ -1290,7 +1294,7 @@ def refractive_index_profile(
             mask |= (horizontal_grid >= lo) & (horizontal_grid <= hi)
         layer_h_masks[gds_layer] = mask
 
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         if layer.material in {"air", "Air"} and not _layer_has_any_polygon(
             component, layer
         ):
@@ -1309,6 +1313,16 @@ def refractive_index_profile(
         h_mask = layer_h_masks.get(gds_layer)
         if h_mask is None:
             continue
+        if layer.material not in {"Air", "air"}:
+            below_mask = np.zeros(nh, dtype=bool)
+            for other in stack.layers.values():
+                if other is layer or other.zmax > layer.zmin + 1e-12:
+                    continue
+                other_mask = layer_h_masks.get(getattr(other, "gds_layer", None))
+                if other_mask is not None:
+                    below_mask |= other_mask
+            extension_mask = h_mask & ~below_mask
+            n_profile[np.ix_(z_grid < layer.zmin, extension_mask)] = np.sqrt(eps)
         z_mask = (z_grid >= layer.zmin) & (z_grid < layer.zmax)
         sw_deg = float(getattr(layer, "sidewall_angle", 0.0) or 0.0)
         z_idx = np.where(z_mask)[0]
@@ -1333,27 +1347,8 @@ def refractive_index_profile(
             n_profile[np.ix_(z_idx, np.arange(nh_local))] = np.where(
                 combined, np.sqrt(eps), n_profile[np.ix_(z_idx, np.arange(nh_local))]
             )
-            set_by_layer[np.ix_(z_idx, np.arange(nh_local))] |= combined
-            bounded_air[np.ix_(z_idx, np.arange(nh_local))] = np.where(
-                combined,
-                layer.material in {"Air", "air"},
-                bounded_air[np.ix_(z_idx, np.arange(nh_local))],
-            )
         else:
             n_profile[np.ix_(z_mask, h_mask)] = np.sqrt(eps)
-            set_by_layer[np.ix_(z_mask, h_mask)] = True
-            bounded_air[np.ix_(z_mask, h_mask)] = layer.material in {"Air", "air"}
-
-    for ih in range(nh):
-        col = n_profile[:, ih]
-        col_set = set_by_layer[:, ih]
-        if not col_set.any():
-            continue
-        first_set = int(np.where(col_set)[0][0])
-        if first_set > 0 and not bounded_air[first_set, ih]:
-            fill_mask = ~col_set[:first_set]
-            col[:first_set][fill_mask] = col[first_set]
-
     return n_profile
 
 
@@ -1415,7 +1410,7 @@ def solve_slab_mode(
         raise ValueError("stack must be a LayerStack, got None")
 
     used_materials: set[str] = set()
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
@@ -1630,7 +1625,7 @@ def solve_cross_section_mode(
         raise ValueError("Either port or position must be specified")
 
     used_materials: set[str] = set()
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
@@ -1755,7 +1750,7 @@ def solve_slab_modes(
         raise ValueError("stack must be a LayerStack, got None")
 
     used_materials: set[str] = set()
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         used_materials.add(layer.material)
     for diel in stack.dielectrics:
         used_materials.add(diel["material"])
@@ -1890,8 +1885,12 @@ def solve_slab_wavelength_sweep(
 
     # Layer geometric descriptors (wavelength-independent)
     _layer_specs: list[dict] = []
-    for layer in stack.layers.values():
-        if layer.material in {"air", "Air"} and background_material in {"air", "Air"}:
+    for layer in order_by_mesh_order(stack.layers.values()):
+        if (
+            layer.material in {"air", "Air"}
+            and background_material in {"air", "Air"}
+            and getattr(layer, "mesh_order", None) is None
+        ):
             continue
         z_size = layer.zmax - layer.zmin
         if z_size <= 0:

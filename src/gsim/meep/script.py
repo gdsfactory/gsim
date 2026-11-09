@@ -1985,6 +1985,15 @@ def _make_medium(mat_data):
     return mp.Medium(epsilon=eps)
 
 
+def _order_mode_entries(entries, mesh_orders=None):
+    def priority(entry):
+        value = entry.get("mesh_order")
+        if value is None:
+            value = (mesh_orders or {}).get(entry.get("name"))
+        return float("inf") if value is None else value
+    return sorted(entries, key=priority, reverse=True)
+
+
 def _mode_stack_z_extent(config):
     entries = list(config["layer_stack"]) + list(config.get("dielectrics", []))
     solid = [entry for entry in entries if entry["material"] not in {"Air", "air"}]
@@ -2022,8 +2031,15 @@ def build_slab_cell(config):
     cell_size = mp.Vector3(x_span, 0.0, z_span)
 
     geometry = []
-    for entry in layer_stack:
-        if entry["material"] in {"air", "Air"} and bg_mat in {"air", "Air"}:
+    for entry in _order_mode_entries(layer_stack, config.get("layer_mesh_orders")):
+        mesh_order = entry.get("mesh_order")
+        if mesh_order is None:
+            mesh_order = config.get("layer_mesh_orders", {}).get(entry.get("name"))
+        if (
+            entry["material"] in {"air", "Air"}
+            and bg_mat in {"air", "Air"}
+            and mesh_order is None
+        ):
             continue
         mat_data = materials.get(entry["material"])
         if mat_data is None:
@@ -2085,7 +2101,7 @@ def build_cross_section_cell(config):
         cell_size = mp.Vector3(h_span, 0.0, z_span)
 
     geometry = []
-    for blk in geom["blocks"]:
+    for blk in _order_mode_entries(geom["blocks"]):
         mat_data = materials.get(blk["material"])
         if mat_data is None:
             continue

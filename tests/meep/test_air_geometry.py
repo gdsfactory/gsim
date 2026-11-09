@@ -276,7 +276,8 @@ def test_actual_mode_cells_and_grids_honor_reported_domain(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name in {"_mode_stack_z_extent", "build_slab_cell"}
+        and node.name
+        in {"_mode_stack_z_extent", "_order_mode_entries", "build_slab_cell"}
     ]
     namespace = {
         "mp": fake_mode_solver._import_meep(),

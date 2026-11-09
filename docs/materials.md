@@ -106,6 +106,9 @@ discarded or extended into the lower margin. Undrawn Air declarations remain
 excluded from component cross-sections.
 Mode cells and sampling grids use the same non-air Z reference as the reported
 domain, so unused Air padding does not enlarge the actual solver cell.
+Mode geometry honors PDK `mesh_order`: lower values win overlaps, including Air
+voids. Equal priorities retain declaration order; unranked legacy entries keep
+their relative order and precede explicitly ranked regions.
 
 ## Analytic PDK cards
 
