@@ -574,6 +574,74 @@ explicitly through `FiberMode.refractive_index` or
 their cache keys; existing downloaded results are unchanged. The simulation
 background default is unchanged by this fix.
 
+### Complex-field export
+
+Request complex plane fields with `Fields`. Omit `fields` to retain the
+existing output, or pass `Fields()` to save all six E/H components at the
+monitor's wavelengths. Components are case-insensitive; explicit selections
+must be nonempty and unique. The field request can select its own wavelengths
+in micrometers and can be used without flux, heatmaps, or a fiber mode.
+
+```python
+sim.monitors.add_plane(
+    name="capture",
+    center_um=(5, 0, 1),
+    size_um=(10, 8, 0),
+    normal="+z",
+    flux=False,
+    fields=fdtd.Fields(
+        components=["ex", "ey", "hx", "hy"],
+        wavelengths_um=[1.54, 1.55, 1.56],
+    ),
+)
+result = sim.run(check_cache=True)
+monitor = result.monitors["capture"]
+sample = monitor.field("ey", wavelength_um=1.55)
+ey = sample.load()  # Complex NumPy array, shape (v, u).
+u_um = sample.coordinates.u_um
+v_um = sample.coordinates.v_um
+sample.metadata["normalization"]  # "raw_dft" for GDSFactory FDTD output.
+```
+
+`monitor.fields` contains the exported component/frequency records. `field()`
+selects the closest exported wavelength for the requested component; inspect
+the returned `wavelength_um`. Real and imaginary sidecars are loaded lazily,
+with shape, dtype, and finite-value checks. A missing file raises an error
+when loaded. Actual sample coordinates and the snapped normal position are
+available through `monitor.field_coordinates` or `sample.coordinates`, in
+micrometers. They can differ from the requested monitor bounds and position.
+
+The plane's `monitor.shape` is `(n_u, n_v)`. Complex-field and heatmap arrays
+are `(n_v, n_u)`: rows follow `v_um`, columns follow `u_um`. For example, a
+plane with three U samples and two V samples reports `(3, 2)` and loads
+arrays of shape `(2, 3)`.
+
+Loading preserves the exported complex values without source normalization,
+noise masking, or phase corrections. `sample.metadata` retains the backend's
+normalization, DFT convention, phase reference, colocation, field-unit system,
+solver time unit, and boundary-interpolation metadata. Raw DFT fields are not
+incident-power-normalized fields or fiber coupling efficiencies. Quantitative
+overlap postprocessing requires consistent normalization and sampling.
+
+`dft_convention="exp(-i*omega*t)"` describes the Fourier **integration kernel**:
+the solver accumulates `sum(field(t) * exp(-i*omega*t) * sample_dt)`.
+The corresponding phasor has time dependence **exp(+iωt)**, so a forward
+wave's phase decreases along its propagation direction. This agrees with
+`result.s_parameters`; the loader does not conjugate either result. Electric
+and magnetic fields use their actual Yee sample times before spatial colocation.
+Missing or unsupported DFT conventions are rejected; legacy results without
+complex-field entries remain supported.
+
+A [recorded straight-waveguide run](https://github.com/gdsfactory/gsim/tree/main/tests/fdtd/data/plane_fields)
+checks both conventions on real output. Its `(25, 32)` arrays retain the forward
+phase decrease, and the independent `0.5 * Re(E × conj(H))` integral agrees with
+the native plane flux within 1.2%. Exact equality is not expected because the
+exported fields are colocated while the native flux retains transverse Yee
+staggering. The sample includes the result JSON and paired arrays.
+
+Selecting fewer components or wavelengths reduces the saved field payload.
+Existing result files without complex fields continue to load normally.
+
 ## Results
 
 ```python
@@ -690,5 +758,8 @@ Phases are referenced where the solver's port monitors sit, and gsim does not de
 - [`LineCurrentSource`][gsim.fdtd.LineCurrentSource]
 - [`GaussianBeamSource`][gsim.fdtd.GaussianBeamSource]
 - [`PlaneMonitor`][gsim.fdtd.PlaneMonitor]
+- [`Fields`][gsim.fdtd.Fields]
+- [`ComplexFieldResult`][gsim.fdtd.ComplexFieldResult]
+- [`FieldCoordinates`][gsim.fdtd.FieldCoordinates]
 - [`FDTDResult`][gsim.fdtd.FDTDResult]
 - [`s_matrix`][gsim.fdtd.s_matrix]

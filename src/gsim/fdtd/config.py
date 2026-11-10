@@ -17,6 +17,7 @@ from gsim.common.materials import (
     evaluate_material_card,
     tabulated_wavelengths_um,
 )
+from gsim.fdtd.field_requests import FieldsConfig
 from gsim.fdtd.mode_selection import ModeSelection
 from gsim.fdtd.models import FDTDConfigError, MeshManifest
 
@@ -214,6 +215,7 @@ class PlaneMonitorConfig(_StrictModel):
     wavelengths: list[float] | None = None
     heatmap: HeatmapConfig | None = None
     fiber_mode: FiberModeConfig | None = None
+    fields: FieldsConfig | None = None
 
     @model_validator(mode="after")
     def validate_plane(self) -> PlaneMonitorConfig:
@@ -660,6 +662,7 @@ __all__ = [
     "ExcitationConfig",
     "FDTDConfig",
     "FiberModeConfig",
+    "FieldsConfig",
     "GaussianBeamConfig",
     "GeometryConfig",
     "GridConfig",
