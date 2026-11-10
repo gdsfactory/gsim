@@ -174,7 +174,8 @@ class CapacitanceMatrices:
         The inverse is not checked when the Maxwell matrix is singular within
         ``rtol``: with no ground conductor and no grounded outer boundary, the
         terminals have no capacitance to ground, every row sums to zero, and
-        no matrix inverts it.
+        no matrix inverts it. The skip covers the whole matrix, so a floating
+        pair also hides a wrong inverse for a grounded terminal beside it.
         Only the first problem is reported when a value is not finite, since
         every other check is meaningless then.
 

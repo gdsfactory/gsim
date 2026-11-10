@@ -316,12 +316,39 @@ def test_a_floating_pair_skips_the_inverse_check() -> None:
     assert cap.problems() == []
 
 
-def test_a_nearly_floating_pair_still_checks_the_inverse() -> None:
-    """A small capacitance to ground, above the tolerance, keeps the check."""
-    plate, ground = 179.7e-15, 1e-15
+@pytest.mark.parametrize(("factor", "checked"), [(0.5, False), (2.0, True)])
+def test_the_inverse_check_starts_at_the_tolerance(factor, checked) -> None:
+    """A pair whose capacitance to ground is ``factor * rtol`` of the plate's.
+
+    The matrix's smallest eigenvalue is that capacitance to ground, so the
+    check is skipped below ``rtol`` times the largest entry and made above it.
+    """
+    rtol, plate = 1e-3, 179.7e-15
+    ground = factor * rtol * plate
     maxwell = np.array([[plate + ground, -plate], [-plate, plate + ground]])
     cap = replace(_from_maxwell(maxwell), inverse=np.eye(2) * 1e15)
-    assert any("does not invert" in text for text in cap.problems())
+    reported = any("does not invert" in text for text in cap.problems(rtol))
+    assert reported is checked
+
+
+def test_a_floating_pair_hides_the_inverse_of_a_grounded_terminal() -> None:
+    """A known limit: the skip applies to the whole matrix.
+
+    A third terminal with its own capacitance to ground has a well-defined
+    block of the inverse, but the floating pair makes the matrix singular, so
+    a wrong inverse goes unreported.
+    """
+    plate, grounded = 179.7e-15, 50e-15
+    maxwell = np.zeros((3, 3))
+    maxwell[:2, :2] = [[plate, -plate], [-plate, plate]]
+    maxwell[2, 2] = grounded
+    cap = replace(_from_maxwell(np.eye(3)), maxwell=maxwell)
+    cap = replace(
+        cap,
+        mutual=-(maxwell - np.diag(np.diag(maxwell))) + np.diag(maxwell.sum(axis=1)),
+        inverse=np.eye(3),
+    )
+    assert not any("does not invert" in text for text in cap.problems())
 
 
 @pytest.mark.parametrize(
