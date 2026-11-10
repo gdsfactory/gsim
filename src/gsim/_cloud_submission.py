@@ -38,13 +38,25 @@ def read_sizing_requirements(
         raise ValueError("Sizing metadata solver must match the submitted job type")
     try:
         if solver == "fdtd":
-            return {
-                solver: {
-                    "cells": _positive_count(
-                        metadata["grid"]["cell_counts"]["total_cells"], "total_cells"
-                    )
-                }
+            requirements = {
+                "cells": _positive_count(
+                    metadata["grid"]["cell_counts"]["total_cells"], "total_cells"
+                )
             }
+            memory = metadata.get("memory", {})
+            if "estimated_monitor_memory_bytes" in memory:
+                estimate = memory["estimated_monitor_memory_bytes"]
+                if (
+                    isinstance(estimate, bool)
+                    or not isinstance(estimate, int)
+                    or not 0 <= estimate < 2**64
+                ):
+                    raise ValueError(
+                        "estimated_monitor_memory_bytes must be a nonnegative "
+                        "64-bit integer"
+                    )
+                requirements["estimated_monitor_memory_bytes"] = estimate
+            return {solver: requirements}
         mesh = metadata["mesh"]
         refinement = metadata.get("simulation", {}).get("refinement", {})
         max_field_dofs = None

@@ -435,6 +435,20 @@ types return outgoing port amplitudes and powers.
 
 ## Plane monitors
 
+FDTD input exports include a versioned monitor-memory estimate in
+`metadata.json` under `memory.estimated_monitor_memory_bytes`. The estimate
+covers explicit plane monitors, automatic guided-port monitors, spectral field
+accumulators, reference profiles, retained port-mode data, and sample buffers.
+It uses conservative pixel bounds and excludes the main grid, material/PML
+state, and temporary eigensolver workspace. More wavelength points increase
+spectral storage even when no extra monitor is added.
+
+Cloud preparation sends this byte estimate alongside the unchanged Yee-cell
+count as `sizing_requirements.fdtd.estimated_monitor_memory_bytes`. Resource
+selection remains server-owned. Older input directories without the estimate
+retain their cell-count-only sizing request. Diagnostic metadata remains
+excluded from the simulation input hash.
+
 For notebook diagnostics, add center-wavelength field intensity images with one
 call after configuring geometry, source and solver:
 

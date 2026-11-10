@@ -211,8 +211,8 @@ def test_cell_counts_rounding_near_admission_boundaries(
     assert metadata["grid"]["cell_counts"]["total_cells"] == cell_count
 
 
-def test_source_material_and_monitor_changes_do_not_expand_metadata(tmp_path):
-    """Physics settings remain in the configuration rather than diagnostics."""
+def test_monitor_changes_update_memory_without_changing_grid_metadata(tmp_path):
+    """Monitor storage changes independently of the physical grid dimensions."""
     mesh_path = _mesh(tmp_path)
     original = fdtd_metadata.generate_metadata(_manifest(), _config(), mesh_path)
     config = _config(source="dipole", halfspan=0).model_dump()
@@ -229,7 +229,10 @@ def test_source_material_and_monitor_changes_do_not_expand_metadata(tmp_path):
     metadata = fdtd_metadata.generate_metadata(
         _manifest(), FDTDConfig.model_validate(config), mesh_path
     )
-    assert metadata == original
+    assert metadata["grid"] == original["grid"]
+    assert metadata["mesh"] == original["mesh"]
+    assert metadata["memory"]["estimated_monitor_memory_bytes"] > 0
+    assert metadata["memory"] != original["memory"]
 
 
 def test_metadata_rejects_config_and_manifest_group_mismatch(tmp_path):
@@ -287,7 +290,9 @@ def test_write_emits_metadata_from_finalized_inputs(
     assert metadata["solver"] == "fdtd"
     assert {key: metadata["grid"][key] for key in config["grid"]} == config["grid"]
     assert metadata["grid"]["cell_counts"]["total_cells"] > 0
-    assert set(metadata) == {"schema_version", "solver", "mesh", "grid"}
+    assert set(metadata) == {"schema_version", "solver", "mesh", "grid", "memory"}
+    assert metadata["memory"]["estimator_version"] == 1
+    assert metadata["memory"]["estimated_monitor_memory_bytes"] >= 0
     if not historical:
         assert metadata["mesh"]["bounds_nm"] == {
             "min": [0, -1000, -1000],
