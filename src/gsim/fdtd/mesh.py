@@ -13,7 +13,7 @@ from gsim.common.pdk import ResolvedLayer, ResolvedPassivePcell, ResolvedPort
 from gsim.fdtd.domain import Padding, background_bounds_nm
 from gsim.fdtd.mesh_geometry import GEOMETRY_TOLERANCE_NM, UM_TO_NM
 from gsim.fdtd.mesh_loft import add_layer_volumes
-from gsim.fdtd.mesh_validation import validate_mesh
+from gsim.fdtd.mesh_validation import MESH_BOUNDS_TOLERANCE_NM, validate_mesh
 from gsim.fdtd.models import (
     FDTDGeometryError,
     MeshGroup,
@@ -103,9 +103,11 @@ def _clip_layer_to_background(
     bounded_tags = []
     for tag in volume_tags:
         solid_bounds = kernel.getBoundingBox(3, tag)
+        # OCC bounds include tolerance padding even for an exactly contained
+        # solid. Avoid clipping solely because of that numerical padding.
         if all(
-            solid_bounds[axis] >= bounds[axis]
-            and solid_bounds[axis + 3] <= bounds[axis + 3]
+            solid_bounds[axis] >= bounds[axis] - MESH_BOUNDS_TOLERANCE_NM
+            and solid_bounds[axis + 3] <= bounds[axis + 3] + MESH_BOUNDS_TOLERANCE_NM
             for axis in range(3)
         ):
             bounded_tags.append(tag)

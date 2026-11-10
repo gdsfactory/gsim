@@ -13,8 +13,8 @@ from shapely.ops import unary_union
 from shapely.validation import explain_validity
 
 from gsim.common.pdk import ResolvedLayer, ResolvedPort
+from gsim.fdtd.mesh_prism import extrude_polygon
 from gsim.fdtd.models import FDTDGeometryError
-from gsim.palace.mesh.gmsh_utils import extrude_polygon
 
 UM_TO_NM = 1000.0
 GEOMETRY_TOLERANCE_NM = 1e-3
