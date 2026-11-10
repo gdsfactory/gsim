@@ -146,6 +146,8 @@ result.mesh_stats["gmsh_options"]["Mesh.MaxNumThreads2D"]
 Equal hashes mean the same nodes (to 1e-4 um) and the same elements in each physical group. Compare hashes only between
 runs with the same Gmsh version on the same kind of host; the stats do not record the host. A different hash under
 reproducible settings points at a change in the geometry, the mesh settings or the Gmsh build.
+To run a second driven or eigenmode simulation on the identical mesh without relying on Gmsh being deterministic, give it
+the first one's mesh with [`reuse_mesh`](api/palace.md#reuse-a-mesh).
 
 ## Evidence and limits
 

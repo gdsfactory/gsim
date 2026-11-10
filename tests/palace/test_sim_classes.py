@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from gsim.common.stack import LayerStack
 from gsim.palace import BoundaryModeSim, DrivenSim, EigenmodeSim, ElectrostaticSim
 from gsim.palace.models import MeshConfig
 
@@ -497,7 +498,7 @@ class TestMixinMethods:
             "validate_config",
             _fake_validate_config,
         )
-        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: object())
+        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: LayerStack())
         monkeypatch.setattr(
             DrivenSim,
             "_configure_ports_on_component",
@@ -549,7 +550,7 @@ class TestMixinMethods:
             "validate_config",
             lambda _self: SimpleNamespace(valid=True, errors=[]),
         )
-        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: object())
+        monkeypatch.setattr(DrivenSim, "_resolve_stack", lambda _self: LayerStack())
         monkeypatch.setattr(
             DrivenSim,
             "_configure_ports_on_component",
