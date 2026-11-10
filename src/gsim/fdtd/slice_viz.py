@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from itertools import combinations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -15,6 +14,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.colors import ListedColormap, Normalize
 
 from gsim.common.viz._matplotlib import add_bottom_legend
+from gsim.fdtd.mesh_sections import tetrahedron_section
 from gsim.fdtd.slice_overlay import draw_setup_overlay, pml_thickness_um
 from gsim.fdtd.viz import validate_slice
 
@@ -26,39 +26,6 @@ if TYPE_CHECKING:
     from gsim.fdtd.models import MeshManifest
     from gsim.fdtd.visualization import VisualizationMixin
     from gsim.fdtd.viz import Axis
-
-
-def _section_polygon(vertices: Any, axis: int, position: float) -> Any:
-    """Intersect a tetrahedron with a plane, retaining coplanar faces."""
-    tolerance = 1e-9
-    distances = vertices[:, axis] - position
-    points = [
-        point
-        for point, distance in zip(vertices, distances, strict=True)
-        if abs(distance) <= tolerance
-    ]
-    for start, end in combinations(range(4), 2):
-        if distances[start] * distances[end] < -(tolerance**2):
-            fraction = distances[start] / (distances[start] - distances[end])
-            points.append(
-                vertices[start] + fraction * (vertices[end] - vertices[start])
-            )
-    if len(points) < 3:
-        return None
-    plane_axes = [index for index in range(3) if index != axis]
-    unique_points = np.unique(np.round(np.asarray(points)[:, plane_axes], 12), axis=0)
-    if len(unique_points) < 3:
-        return None
-    centered = unique_points - unique_points.mean(axis=0)
-    polygon = unique_points[np.argsort(np.arctan2(centered[:, 1], centered[:, 0]))]
-    area = (
-        abs(
-            np.dot(polygon[:, 0], np.roll(polygon[:, 1], 1))
-            - np.dot(polygon[:, 1], np.roll(polygon[:, 0], 1))
-        )
-        / 2
-    )
-    return polygon if area > tolerance**2 else None
 
 
 def _mesh_sections(mesh_path: Path, axis: int, position: float) -> dict[int, list[Any]]:
@@ -78,7 +45,7 @@ def _mesh_sections(mesh_path: Path, axis: int, position: float) -> dict[int, lis
         for vertices, tag in zip(
             tetrahedra[intersecting], tags[intersecting], strict=True
         ):
-            polygon = _section_polygon(vertices, axis, position)
+            polygon = tetrahedron_section(vertices, axis, position)
             if polygon is not None:
                 sections.setdefault(int(tag), []).append(polygon)
     return sections
@@ -150,6 +117,8 @@ def plot_mesh_slice(
             linewidths=0.35 if show_mesh else 0,
             antialiaseds=show_mesh,
             label=f"{group.name} ({group.material})",
+            # Rasterize the mesh so vector exports (SVG, PDF) stay small.
+            rasterized=True,
         )
         ax.add_collection(collection)
     plane_axes = [index for index in range(3) if index != normal_axis]

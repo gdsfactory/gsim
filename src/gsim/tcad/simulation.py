@@ -341,6 +341,7 @@ class Simulation:
             refined_mesh_size=solver.refined_mesh_size_um,
             max_mesh_size=solver.max_mesh_size_um,
             refinement_boxes=solver.refinement_boxes,
+            mesh_grading=solver.mesh_grading,
             verbose=verbose,
         )
         devsim_mesh_path = write_scaled_msh(
@@ -500,7 +501,11 @@ class Simulation:
         contact = self._resolve_contact(contact)
         with devsim_output(verbose):
             points = [device.solve_point(bias, contact) for bias in values]
-        return BiasSweepResult(contact=contact, points=points)
+        return BiasSweepResult(
+            contact=contact,
+            points=points,
+            semiconductor_permittivity=self.materials.semiconductor_permittivity,
+        )
 
 
 __all__ = ["Simulation"]

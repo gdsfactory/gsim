@@ -78,7 +78,7 @@ def _generate(
     ports,
     *,
     simulation_type="driven",
-    hints=None,
+    impedance_boundaries=None,
     absorbing_boundary=True,
     port_info=None,
 ):
@@ -93,7 +93,7 @@ def _generate(
         fmax=100e9,
         simulation_type=simulation_type,
         absorbing_boundary=absorbing_boundary,
-        hints=hints,
+        impedance_boundaries=impedance_boundaries,
     )
     return json.loads(config_path.read_text())
 
@@ -118,14 +118,14 @@ def test_pmc_plane_never_enters_waveport_pec_via_other_lists(tmp_path):
     Guards against a change of the 'Robin boundaries become PEC' rule (#310)
     pulling the plane into the port eigenproblem as PEC.
     """
-    hints = {
-        "_impedance_boundaries": [
+    boundaries = _generate(
+        tmp_path,
+        _groups("pmc"),
+        _wave_ports(),
+        impedance_boundaries=[
             ImpedanceBoundaryConfig(attributes=[PLANE_PG, 20], resistance=1.0)
-        ]
-    }
-    boundaries = _generate(tmp_path, _groups("pmc"), _wave_ports(), hints=hints)[
-        "Boundaries"
-    ]
+        ],
+    )["Boundaries"]
     assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8, 12, 20]}
 
 

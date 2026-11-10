@@ -18,6 +18,7 @@ __all__ = [
     "set_trame_backend",
 ]
 
+import atexit
 import contextlib
 import hashlib
 import logging
@@ -102,13 +103,48 @@ def _is_headless() -> bool:
     return not os.environ.get("DISPLAY")
 
 
+#: Virtual display started by this process, and the PID that owns it.
+_XVFB: tuple[Any, int] | None = None
+
+#: PID of the process whose display start failed, so a host without Xvfb is
+#: not retried on every plot.  A forked child has a different PID and tries
+#: once on its own.
+_XVFB_FAILED_PID: int | None = None
+
+
+def _own_xvfb() -> Any | None:
+    """Return the virtual display this process started, if it is running.
+
+    A forked child inherits the parent's handle, but that display belongs to
+    the parent and stops when the parent exits, so the child treats it as
+    absent.
+    """
+    if _XVFB is None or _XVFB[1] != os.getpid():
+        return None
+    return _XVFB[0]
+
+
 def _start_xvfb() -> None:
     """Start a virtual frame buffer when ``pyvirtualdisplay`` is available.
+
+    At most one display is started per process; later calls reuse it and
+    point ``DISPLAY`` back at it.  A failed start is not retried in the same
+    process.  The display is stopped at interpreter exit so no Xvfb outlives
+    Python.
 
     Xvfb only exists on Linux. Windows and macOS never set ``DISPLAY`` and
     render off-screen without it, so they skip the attempt.
     """
+    global _XVFB, _XVFB_FAILED_PID  # noqa: PLW0603
     if not sys.platform.startswith("linux"):
+        return
+    display = _own_xvfb()
+    if display is not None:
+        display_var = getattr(display, "new_display_var", None)
+        if isinstance(display_var, str) and display_var:
+            os.environ["DISPLAY"] = display_var
+        return
+    if os.getpid() == _XVFB_FAILED_PID:
         return
     try:
         from pyvirtualdisplay import Display  # pyright: ignore[reportMissingImports]
@@ -116,11 +152,38 @@ def _start_xvfb() -> None:
         display = Display(visible=False, size=(1440, 900))
         display.start()
     except Exception:  # optional dependency / headless host
+        _XVFB_FAILED_PID = os.getpid()
         # Off-screen rendering still works, so this is not a warning.
         logger.debug("pyvirtualdisplay not available; continuing without Xvfb")
+        return
+    _XVFB = (display, os.getpid())
+    atexit.register(_stop_xvfb)
 
 
-def _ensure_pyvista():
+def _stop_xvfb() -> None:
+    """Stop the virtual display started by this process, if any.
+
+    Open plotters are closed first so VTK does not talk to a dead X server.
+    Forked children inherit the handle but leave the parent's display alone.
+    """
+    global _XVFB  # noqa: PLW0603
+    if _XVFB is None:
+        return
+    display, owner = _XVFB
+    _XVFB = None
+    if owner != os.getpid():
+        return
+    with contextlib.suppress(Exception):
+        import pyvista
+
+        pyvista.close_all()
+    try:
+        display.stop()
+    except Exception:
+        logger.debug("Failed to stop the virtual display", exc_info=True)
+
+
+def _ensure_pyvista(*, start_display: bool = True):
     """Import PyVista, forcing off-screen rendering only when headless.
 
     When a usable ``DISPLAY`` is present normal rendering is left untouched
@@ -128,10 +191,16 @@ def _ensure_pyvista():
     off-screen (optionally backed by a virtual frame buffer), which is what
     tests and CI rely on.  ``GSIM_FORCE_OFFSCREEN=1`` always forces
     off-screen rendering.
+
+    Call this right before rendering.  ``start_display=False`` configures
+    PyVista without starting the virtual frame buffer, as done on import.
     """
     headless = _is_headless() or _VIZ_MODE == "static"
     if headless:
-        os.environ.pop("DISPLAY", None)
+        # Keep the DISPLAY of the virtual frame buffer this process started;
+        # any other X display is dropped so VTK renders off-screen.
+        if _own_xvfb() is None:
+            os.environ.pop("DISPLAY", None)
         os.environ.setdefault("VTK_DEFAULT_RENDER_WINDOW_OFFSCREEN", "1")
 
     import warnings
@@ -140,6 +209,7 @@ def _ensure_pyvista():
 
     if headless:
         pv.OFF_SCREEN = True
+    if headless and start_display:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -149,7 +219,7 @@ def _ensure_pyvista():
     return pv
 
 
-pv = _ensure_pyvista()
+pv = _ensure_pyvista(start_display=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1248,6 +1318,7 @@ def plot_topview(
                     norm=norm,
                     vmin=plot_vmin,
                     vmax=plot_vmax,
+                    rasterized=True,
                 )
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
                 ax.set_title(title)
@@ -1303,6 +1374,7 @@ def plot_topview(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
     ax.set_title(title)
@@ -1499,6 +1571,7 @@ def plot_cross_section(
         norm=norm,
         vmin=plot_vmin,
         vmax=plot_vmax,
+        rasterized=True,
     )
 
     if quiver:

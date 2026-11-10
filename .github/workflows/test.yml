@@ -20,7 +20,9 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
     - name: Install UV
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        prune-cache: true
     - name: Create environment
       run: uv sync --dev --all-extras
     - name: Run tests
@@ -40,7 +42,9 @@ jobs:
     - name: Install system dependencies
       run: sudo apt-get update && sudo apt-get install -y libglu1-mesa libegl1 libgl1 libxrender1 libxcursor1 libxft2 libxinerama1
     - name: Install UV
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        prune-cache: true
     - name: Install Just
       uses: taiki-e/install-action@just
     - name: Create environment

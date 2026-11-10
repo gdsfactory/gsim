@@ -127,9 +127,10 @@ class TestPotentialOnlyRegion:
         oxide_sim._setup_device()
         assert [args[1] for args in sp.called("CreateOxidePotentialOnly")] == ["sio2"]
         [permittivity] = [
-            c for c in devsim.called("set_parameter") if c["name"] == "Permittivity"
+            c
+            for c in devsim.called("set_parameter")
+            if c["name"] == "Permittivity" and c["region"] == "sio2"
         ]
-        assert permittivity["region"] == "sio2"
         assert permittivity["value"] == pytest.approx(
             OXIDE_PERMITTIVITY * VACUUM_PERMITTIVITY_F_PER_CM
         )

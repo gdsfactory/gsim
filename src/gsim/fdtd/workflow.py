@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import replace
 from math import isfinite
@@ -16,11 +17,13 @@ from gsim.common.cloud import CloudJobMixin
 from gsim.common.materials import (
     MaterialResolutionError,
     MaterialSnapshot,
+    canonical_material_name,
     get_project_material_cards,
     resolve_material_snapshot,
 )
 from gsim.common.materials._helpers import material_card
-from gsim.common.pdk import ResolvedPassivePcell, resolve_passive_pcell
+from gsim.common.materials.registry import get_project_material_aliases
+from gsim.common.pdk import ResolvedPassivePcell
 from gsim.fdtd.api import (
     DipoleSource,
     Domain,
@@ -36,6 +39,8 @@ from gsim.fdtd.api import (
     Solver,
     SourceType,
 )
+from gsim.fdtd.domain_geometry import resolve_domain_geometry
+from gsim.fdtd.fiber_medium import resolve_fiber_media
 from gsim.fdtd.mesh import generate_mesh
 from gsim.fdtd.metadata import write_metadata
 from gsim.fdtd.models import (
@@ -43,6 +48,8 @@ from gsim.fdtd.models import (
     FDTDGeometryError,
     SimulationArtifacts,
 )
+from gsim.fdtd.monitor_bounds import monitor_region_nm
+from gsim.fdtd.monitor_names import resolve_monitor_name
 from gsim.fdtd.visualization import VisualizationMixin
 
 # Flat constructor arguments of the original API, as (concern, field).
@@ -98,10 +105,16 @@ def _source_from_value(value: SourceType | Mapping[str, Any] | None) -> SourceTy
 class _PdkWithMaterialOverrides:
     """Delegate to a PDK while exposing merged project material cards."""
 
-    def __init__(self, pdk: Any, material_cards: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        pdk: Any,
+        material_cards: Mapping[str, Any],
+        material_aliases: Mapping[str, str],
+    ) -> None:
         """Wrap a PDK and expose the merged material-card mapping."""
         self._pdk = pdk
         self.material_cards = material_cards
+        self.material_aliases = material_aliases
 
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown attributes to the wrapped PDK."""
@@ -165,6 +178,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         self.solver = Solver.model_validate(solver_data)
         self.geometry.bind(self._resolve_geometry)
         self._resolved: ResolvedPassivePcell | None = None
+        self._clipping_warning_key: tuple[Any, ...] | None = None
         self._last_artifacts: SimulationArtifacts | None = None
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -231,14 +245,22 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         return self._job_id
 
     def add_monitors(
-        self, *, xy: bool = True, z_um: float | None = None, margin_um: float = 0.75
+        self,
+        *,
+        xy: bool = True,
+        xy_name: str | None = None,
+        z_um: float | None = None,
+        margin_um: float = 0.75,
     ) -> Self:
-        """Add center-wavelength port intensity images and an optional XY overview.
+        """Add center-wavelength port intensity images and an optional XY field image.
 
         Args:
-            xy: Include the component-wide XY overview (default: True).
-            z_um: Overview height in micrometers. None uses the resolved geometry's
-                vertical midpoint. Ignored when xy is False.
+            xy: Include a component-wide XY field image (default: True).
+            xy_name: XY image name. Use field_xy for new code. None retains
+                overview_xy with a DeprecationWarning during the transition.
+                Ignored when xy is False.
+            z_um: XY image height in micrometers. None uses the resolved geometry's
+                vertical midpoint within any opted-in crop. Ignored when xy is False.
             margin_um: Nonnegative cladding margin on each side of a port's
                 active cross section, in micrometers (default: 0.75).
 
@@ -246,9 +268,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             This simulation, with the diagnostic planes added to its monitors.
 
         Notes:
-            Optical port windows follow the port width and owning PDK layer's
-            vertical bounds, plus margin_um, three Yee cells inward from each
-            port. Each plane records only the source center wavelength,
+            Optical port windows follow the port width and selected physical
+            bands' active bounds, plus margin_um, three Yee cells inward from
+            each port. Preview and output windows are cropped to the domain
+            without changing the requested settings.
+            Each plane records only the source center wavelength,
             without additional flux measurements. Guided S-parameter measurements
             remain implicit. Existing monitors are preserved; duplicate names
             raise ValueError before any planes are added. This method does not
@@ -268,7 +292,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 raise FDTDGeometryError(
                     f"Optical port {port.name!r} has no owning layer"
                 )
-            z_lower, z_upper = resolved.layers[port.layer_key].z_bounds
+            owners = [resolved.layers[key] for key in port.physical_layer_keys]
+            z_lower, z_upper = port.z_bounds or (
+                min(layer.z_bounds[0] for layer in owners),
+                max(layer.z_bounds[1] for layer in owners),
+            )
             width_um = port.width + 2 * margin_um
             height_um = z_upper - z_lower + 2 * margin_um
             normal: SignedAxis = (
@@ -280,7 +308,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                     center_um=(
                         port.center[0] - nx * offset_um,
                         port.center[1] - ny * offset_um,
-                        port.center[2],
+                        (z_lower + z_upper) / 2,
                     ),
                     size_um=(0, width_um, height_um)
                     if nx
@@ -295,11 +323,15 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         if xy:
             if z_um is None:
-                z_um = (resolved.bounds[0][2] + resolved.bounds[1][2]) / 2
+                low, high = resolved.bounds[0][2], resolved.bounds[1][2]
+                if self.domain.clip_geometry and self.domain.z_bounds is not None:
+                    low = max(low, self.domain.z_bounds[0])
+                    high = min(high, self.domain.z_bounds[1])
+                z_um = (low + high) / 2
             component = resolved.component
             planes.append(
                 PlaneMonitor(
-                    name="overview_xy",
+                    name="overview_xy" if xy_name is None else xy_name,
                     center_um=(component.dx, component.dy, z_um),
                     size_um=(component.dxsize, component.dysize, 0),
                     normal="+z",
@@ -312,8 +344,24 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             )
         existing_names = {monitor.name for monitor in self.monitors}
         for plane in planes:
-            if plane.name in existing_names:
+            if resolve_monitor_name(plane.name, existing_names) in existing_names:
                 raise ValueError(f"monitor {plane.name!r} already exists")
+            existing_names.add(plane.name)
+        if self.domain.clip_geometry:
+            bounds = self._background_bounds_nm()
+            for plane in planes:
+                monitor_region_nm(plane, bounds, warn=False)
+        if xy and xy_name is None:
+            warnings.warn(
+                "The default XY monitor name 'overview_xy' is deprecated and "
+                "will change to 'field_xy' no earlier than 0.11.0 and only after "
+                "at least two feature releases and 12 months have passed since "
+                "the first released warning. "
+                "Pass xy_name='field_xy' to adopt the new name, or "
+                "xy_name='overview_xy' to retain the existing generated name.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         for plane in planes:
             self.monitors.add(plane)
         return self
@@ -325,12 +373,17 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 "No geometry is configured. Call Simulation.geometry(...) first."
             )
         pdk = self._pdk_for_resolution()
-        self._resolved = resolve_passive_pcell(
-            self.geometry.component,
+        self._resolved = resolve_domain_geometry(
+            self.geometry,
             pdk=pdk,
-            settings=self.geometry.settings,
             wavelength_um=self.source.wavelength_um,
-            port_layer_map=self.geometry.port_layer_map,
+            domain=self.domain,
+            background_material=self.materials.background,
+        )
+        from gsim.fdtd.geometry_clipping import warn_geometry_clipping
+
+        self._clipping_warning_key = warn_geometry_clipping(
+            self._resolved, self.geometry, self.domain, self._clipping_warning_key
         )
         return self._resolved
 
@@ -343,26 +396,46 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             if self.pdk is None
             else getattr(self.pdk, "PDK", self.pdk)
         )
-        cards = dict(get_project_material_cards(self.pdk))
+        cards = dict(get_project_material_cards(self.pdk, include_aliases=False))
         cards.update(
             {
                 name: _constant_material_card(name, material.refractive_index)
-                for name, material in self.materials.overrides.items()
+                for name, material in self._canonical_material_overrides().items()
             }
         )
-        return _PdkWithMaterialOverrides(pdk_object, cards)
+        return _PdkWithMaterialOverrides(
+            pdk_object, cards, get_project_material_aliases(self.pdk)
+        )
+
+    @property
+    def _background_material_name(self) -> str:
+        """Use the same canonical background for geometry and generated inputs."""
+        return canonical_material_name(self.materials.background, self.pdk)
+
+    def _canonical_material_overrides(self) -> dict[str, Any]:
+        """Keep legacy override names working with canonical PDK layer names."""
+        overrides = {}
+        for name, material in self.materials.overrides.items():
+            canonical = canonical_material_name(name, self.pdk)
+            if canonical in overrides and overrides[canonical] != material:
+                raise FDTDConfigError(
+                    f"Conflicting material overrides for {canonical!r}."
+                )
+            overrides[canonical] = material
+        return overrides
 
     def _material_snapshots(self) -> dict[str, MaterialSnapshot]:
         """Resolve project-first materials, then apply explicit index overrides."""
         snapshots = dict(self.resolved.materials)
-        background = self.materials.background
+        background = self._background_material_name
+        overrides = self._canonical_material_overrides()
         if background not in snapshots:
             try:
                 project_cards = dict(get_project_material_cards(self.pdk))
-                if background in self.materials.overrides:
+                if background in overrides:
                     project_cards[background] = _constant_material_card(
                         background,
-                        self.materials.overrides[background].refractive_index,
+                        overrides[background].refractive_index,
                     )
                 snapshots[background] = resolve_material_snapshot(
                     background,
@@ -373,7 +446,7 @@ class Simulation(CloudJobMixin, VisualizationMixin):
                 raise FDTDConfigError(
                     f"Could not resolve background material {background!r}: {error}"
                 ) from error
-        for name, material in self.materials.overrides.items():
+        for name, material in overrides.items():
             if name not in snapshots:
                 raise FDTDConfigError(
                     f"Material override {name!r} is not used by the geometry "
@@ -404,10 +477,11 @@ class Simulation(CloudJobMixin, VisualizationMixin):
         config_path = directory / "config.json"
         material_snapshots = self._material_snapshots()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         manifest = generate_mesh(
             resolved,
             mesh_path,
-            background_material=self.materials.background,
+            background_material=self._background_material_name,
             padding=self.domain.padding,
             padding_x=self.domain.padding_x,
             padding_y=self.domain.padding_y,
@@ -417,8 +491,17 @@ class Simulation(CloudJobMixin, VisualizationMixin):
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
         config = self._config(manifest, material_snapshots)
+        resolve_fiber_media(
+            config,
+            mesh_path,
+            manifest,
+            material_snapshots,
+            monitors=self.monitors,
+            source=self.source,
+        )
         config_path.write_text(
             config.model_dump_json(indent=2, exclude_none=True) + "\n",
             encoding="utf8",

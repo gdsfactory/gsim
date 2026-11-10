@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import gmsh
 import numpy as np
@@ -45,16 +46,55 @@ if TYPE_CHECKING:
         RefinementConfig,
         SolverConfig,
     )
-    from gsim.palace.models.ports import TerminalConfig
+    from gsim.palace.models.ports import ImpedanceBoundaryConfig, TerminalConfig
     from gsim.palace.ports.config import PalacePort
     from gsim.palace.terminals import ResolvedTerminal
 
 
-def _resolve_impedance_boundaries(
+# Deprecated ``hints`` keys and the keyword argument that replaced each.
+_DEPRECATED_HINT_KEYWORDS = {
+    "_impedance_boundaries": "impedance_boundaries",
+    "_metallic_boundaries": "metallic_boundaries",
+    "_conductor_boundary": "conductor_boundary",
+    "_mode_postprocessing": "mode_postprocessing",
+    "_cross_section_axis": "cross_section_axis",
+}
+
+
+def _split_hints(
     hints: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split hints into JSON entries and values for deprecated private keys.
+
+    Other ``_``-prefixed keys were never read and are still dropped.
+
+    Returns:
+        The entries to merge into the JSON, and the deprecated values by the
+        name of the keyword argument that replaced them.
+    """
+    extras = {k: v for k, v in (hints or {}).items() if not k.startswith("_")}
+    deprecated = {
+        keyword: hints[key]
+        for key, keyword in _DEPRECATED_HINT_KEYWORDS.items()
+        if hints and key in hints
+    }
+    if deprecated:
+        names = ", ".join(sorted(deprecated))
+        warnings.warn(
+            f"Passing private keys in hints is deprecated; use the keyword "
+            f"arguments {names}.",
+            DeprecationWarning,
+            # Name the caller, through write_config or not.
+            skip_file_prefixes=(str(Path(__file__).parent),),
+        )
+    return extras, deprecated
+
+
+def _resolve_impedance_boundaries(
+    raw: list[ImpedanceBoundaryConfig] | None,
     groups: dict,
 ) -> list[dict[str, object]]:
-    """Resolve impedance boundary configs from hints into Palace format entries.
+    """Resolve impedance boundary configs into Palace format entries.
 
     For interface-based entries (layer_a + layer_b), looks up the interface
     physical group and divides absolute values by the stored curve length.
@@ -65,7 +105,6 @@ def _resolve_impedance_boundaries(
     """
     from gsim.palace.models.ports import ImpedanceBoundaryConfig
 
-    raw = (hints or {}).get("_impedance_boundaries")
     if not raw:
         return []
 
@@ -285,6 +324,7 @@ def _multimode_entries(
     first_free_index: int,
     wave_ports: list[dict[str, object]],
     ports: list[PalacePort],
+    stack: LayerStack | None = None,
 ) -> list[PortModeEntry]:
     """Add the observation entries of the multimode wave ports to ``wave_ports``.
 
@@ -300,6 +340,10 @@ def _multimode_entries(
         first_free_index: The first index after all ports.
         wave_ports: The ``WavePort`` entries so far; extended in place.
         ports: Every port of the simulation.
+        stack: The layer stack. With it, ports at one centre and
+            orientation are on one face only where their generated faces
+            overlap, so ports on layers that do not overlap in z are
+            separate faces. Without it the centre and orientation decide.
 
     Returns:
         The map from Palace index to (port, mode, active), in index order.
@@ -309,12 +353,18 @@ def _multimode_entries(
     """
     if not multimode:
         return []
-    faces = [
-        (p.name, (float(p.center[0]), float(p.center[1])), float(p.orientation))
-        for p in ports
-        if p.port_type == PortType.WAVEPORT
-    ]
-    if pairs := same_face_pairs(faces):
+    if stack is None:
+        faces = [
+            (p.name, (float(p.center[0]), float(p.center[1])), float(p.orientation))
+            for p in ports
+            if p.port_type == PortType.WAVEPORT
+        ]
+        pairs = same_face_pairs(faces)
+    else:
+        from gsim.palace.mesh.geometry import same_surface_pairs
+
+        pairs = same_surface_pairs(ports, stack)
+    if pairs:
         first, second = pairs[0]
         raise ValueError(
             f"Wave ports {first!r} and {second!r} are on the same face. A "
@@ -424,6 +474,12 @@ def generate_palace_config(
     periodic_translation: tuple[float, float, float] | None = None,
     resolved_terminals: list[ResolvedTerminal] | None = None,
     absorbing_order: int = 2,
+    *,
+    impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
+    metallic_boundaries: bool | None = None,
+    conductor_boundary: Literal["conductivity", "pec"] | None = None,
+    mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
+    cross_section_axis: str | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -443,7 +499,19 @@ def generate_palace_config(
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
         periodic_axis: Optional periodic axis identifier
         periodic_translation: Actual donor-to-receiver translation in mesh units
-        hints: Additional config hints merged into the JSON
+        hints: Additional entries merged into the top level of the JSON.
+            Private ``_``-prefixed keys for the options below are deprecated;
+            a keyword passed explicitly wins over its private key.
+        impedance_boundaries: Impedance boundaries to add to the config
+        metallic_boundaries: Put a perfect conductor on the outer wall.
+            ``None`` (the default) means ``False``.
+        conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
+            surfaces perfect conductors instead of finite-conductivity ones.
+            ``None`` (the default) means ``"conductivity"``.
+        mode_postprocessing: A boundary-mode run's voltage and impedance paths,
+            written as ``Boundaries.Postprocessing``
+        cross_section_axis: Normal axis of a boundary-mode cross-section; the
+            material tensors are written in the frame of its 2D mesh
         refinement_config: Optional RefinementConfig for adaptive mesh
             refinement. Defaults to AMR off.
         resolved_terminals: Electrostatic terminals resolved to nets; needed
@@ -458,6 +526,20 @@ def generate_palace_config(
 
     if refinement_config is None:
         refinement_config = RefinementConfig()
+
+    hints, deprecated = _split_hints(hints)
+    # A keyword the caller passed wins over its deprecated hint, even a falsy
+    # one; ``None`` means the keyword was not passed.
+    if impedance_boundaries is None:
+        impedance_boundaries = deprecated.get("impedance_boundaries")
+    if metallic_boundaries is None:
+        metallic_boundaries = bool(deprecated.get("metallic_boundaries", False))
+    if conductor_boundary is None:
+        conductor_boundary = deprecated.get("conductor_boundary", "conductivity")
+    if mode_postprocessing is None:
+        mode_postprocessing = deprecated.get("mode_postprocessing")
+    if cross_section_axis is None:
+        cross_section_axis = deprecated.get("cross_section_axis")
 
     if simulation_type not in (
         "driven",
@@ -593,7 +675,7 @@ def generate_palace_config(
         )
         # The 2D mesh has its own axes (see _to_section_frame); the tensors
         # of the materials in the mesh are written in them, not in the layout's.
-        section_axis = (hints or {}).get("_cross_section_axis")
+        section_axis = cross_section_axis
 
     # Support material keys with different capitalization conventions
     # between stack layers and material dictionaries.
@@ -819,7 +901,7 @@ def generate_palace_config(
         # are perfect conductors, as in the 3D wave-port eigenproblem
         # (WavePortPEC). Exactly those attributes move from Conductivity to
         # PEC; nothing else in the configuration changes.
-        conductors_as_pec = (hints or {}).get("_conductor_boundary") == "pec"
+        conductors_as_pec = conductor_boundary == "pec"
         if conductors and not conductors_as_pec:
             boundaries["Conductivity"] = conductors
         boundary_pec = set(pec_attrs)
@@ -829,7 +911,6 @@ def generate_palace_config(
             boundaries["PEC"] = {"Attributes": sorted(boundary_pec)}
         # Postprocessing-only voltage/impedance paths (mode-V.csv / mode-Z.csv).
         # These do not load the 2D eigenproblem.
-        mode_postprocessing = (hints or {}).get("_mode_postprocessing")
         if mode_postprocessing:
             boundaries["Postprocessing"] = mode_postprocessing
 
@@ -943,7 +1024,7 @@ def generate_palace_config(
 
         # The other modes of a multimode port: entries on the same face, after
         # every port, so the active entry keeps the lowest index of its face.
-        mode_rows = _multimode_entries(multimode, port_idx, wave_ports, ports)
+        mode_rows = _multimode_entries(multimode, port_idx, wave_ports, ports, stack)
 
         boundaries: dict[str, Any] = {
             "Conductivity": conductors,
@@ -984,7 +1065,7 @@ def generate_palace_config(
             )
             boundaries["PEC"] = {"Attributes": sorted(merged)}
 
-    if (hints or {}).get("_metallic_boundaries"):
+    if metallic_boundaries:
         # A metallic window: the outer wall of the domain carries a
         # perfect-conductor condition, so the solve is a shielded one.
         # Without it Palace assigns its own default to an unconditioned
@@ -1015,8 +1096,8 @@ def generate_palace_config(
             groups, eigenmode_config, periodic_axis, periodic_translation
         )
 
-    # Process impedance boundaries from hints (interface-based or attribute-based)
-    impedance_entries = _resolve_impedance_boundaries(hints, groups)
+    # Process impedance boundaries (interface-based or attribute-based)
+    impedance_entries = _resolve_impedance_boundaries(impedance_boundaries, groups)
     if impedance_entries:
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
 
@@ -1047,10 +1128,8 @@ def generate_palace_config(
 
     config["Boundaries"] = boundaries
 
-    # Merge any extra hints into the config (strip internal keys first)
-    if hints:
-        clean_hints = {k: v for k, v in hints.items() if not k.startswith("_")}
-        config.update(clean_hints)
+    # Merge any extra hints into the config
+    config.update(hints)
 
     # Write config file
     config_path = output_path / "config.json"
@@ -1302,6 +1381,12 @@ def write_config(
     refinement_config: RefinementConfig | None = None,
     resolved_terminals: list[ResolvedTerminal] | None = None,
     absorbing_order: int = 2,
+    *,
+    impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
+    metallic_boundaries: bool | None = None,
+    conductor_boundary: Literal["conductivity", "pec"] | None = None,
+    mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
+    cross_section_axis: str | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -1317,7 +1402,19 @@ def write_config(
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
-        hints: Additional config hints merged into the JSON
+        hints: Additional entries merged into the top level of the JSON.
+            Private ``_``-prefixed keys for the options below are deprecated;
+            a keyword passed explicitly wins over its private key.
+        impedance_boundaries: Impedance boundaries to add to the config
+        metallic_boundaries: Put a perfect conductor on the outer wall.
+            ``None`` (the default) means ``False``.
+        conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
+            surfaces perfect conductors instead of finite-conductivity ones.
+            ``None`` (the default) means ``"conductivity"``.
+        mode_postprocessing: A boundary-mode run's voltage and impedance paths,
+            written as ``Boundaries.Postprocessing``
+        cross_section_axis: Normal axis of a boundary-mode cross-section; the
+            material tensors are written in the frame of its 2D mesh
         resolved_terminals: Electrostatic terminals resolved to nets, for a
             mesh with one physical group per net
 
@@ -1358,6 +1455,11 @@ def write_config(
         refinement_config=refinement_config,
         resolved_terminals=resolved_terminals,
         absorbing_order=absorbing_order,
+        impedance_boundaries=impedance_boundaries,
+        metallic_boundaries=metallic_boundaries,
+        conductor_boundary=conductor_boundary,
+        mode_postprocessing=mode_postprocessing,
+        cross_section_axis=cross_section_axis,
     )
 
     # Update the mesh_result with the config path

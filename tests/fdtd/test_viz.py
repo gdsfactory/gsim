@@ -107,19 +107,21 @@ def test_viewer_embeds_mesh_and_slice_options(tmp_path: Path) -> None:
     assert "function tetrahedronVolume" in viewer.html
     assert "function largestMaterialGroup" in viewer.html
     assert "function orderedGroupEntries" in viewer.html
-    assert "constopacity=isLargestMaterial?(isSlice?0.55:0.35):1;" in compact_html
-    assert "transparent:isLargestMaterial" in compact_html
-    assert "depthWrite:!isLargestMaterial" in compact_html
     assert 'height="420"' in viewer._repr_html_()
     assert viewer.save(tmp_path / "viewer.html").is_file()
 
 
-def test_simulation_view_methods_reuse_last_mesh(tmp_path: Path) -> None:
+def test_simulation_view_methods_keep_viewer_options(
+    tmp_path: Path, monkeypatch
+) -> None:
     simulation = fdtd.Simulation()
     mesh_path = _write_mesh(tmp_path / "mesh.msh")
     simulation_state = cast(Any, simulation)
     simulation_state._last_artifacts = SimpleNamespace(mesh_path=mesh_path)
     simulation_state._resolved = SimpleNamespace(bounds=((0, -1, 0.1), (2, 1, 0.3)))
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation_state._last_artifacts
+    )
 
     assert '"mode":"surface"' in simulation.plot_3d().html
     assert '"hideGroups":[]' in simulation.plot_3d().html

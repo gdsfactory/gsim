@@ -9,6 +9,61 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+GradingSource = Literal["conductors", "junctions", "fine_regions"]
+
+
+class MeshGrading(BaseModel):
+    """Element size that grows linearly with the distance from chosen features.
+
+    Native-2D cross-section meshes only. At a distance ``d`` (um) from the
+    nearest graded feature the size is ``size + growth_per_um * d``, capped
+    at ``max_mesh_size``, where ``size`` is the feature's own size. It
+    replaces the sizing that applies to every internal curve without
+    grading (half of ``refined_mesh_size`` on the curve, reaching
+    ``max_mesh_size`` at ``max_mesh_size / 2``, a growth of about 2 per um):
+    only the chosen features refine the mesh. The conductors and junctions
+    get ``refined_mesh_size`` itself, twice the size the ungraded mesh puts
+    on them; halve ``refined_mesh_size`` to keep that size.
+
+    Attributes:
+        growth_per_um: Increase of the element size per um of distance.
+            0.1 to 0.25 keeps the elements around small features well
+            shaped; larger values give fewer nodes.
+        sources: Features the size grows from:
+
+            - ``"conductors"``: the edges of the conductors, at
+              ``refined_mesh_size``.
+            - ``"junctions"``: the curves of the declared interfaces
+              between two regions (a TCAD Interface, such as a
+              metallurgical junction), at ``refined_mesh_size``.
+            - ``"fine_regions"``: each refinement box, whose own size is
+              held inside it, and the internal edges of each layer with a
+              numeric ``mesh_resolution`` below ``max_mesh_size``, at that
+              resolution. Without grading only layers finer than
+              ``refined_mesh_size`` get their own size, since every
+              internal curve is refined anyway.
+
+            A feature size above ``max_mesh_size`` is held at
+            ``max_mesh_size``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    growth_per_um: float = Field(gt=0)
+    sources: tuple[GradingSource, ...] = Field(
+        default=("conductors", "junctions", "fine_regions"), min_length=1
+    )
+
+    @field_validator("sources")
+    @classmethod
+    def unique_sources(
+        cls, sources: tuple[GradingSource, ...]
+    ) -> tuple[GradingSource, ...]:
+        """Each source is named once."""
+        if len(set(sources)) != len(sources):
+            raise ValueError(f"Mesh grading sources repeat: {sources}.")
+        return sources
+
 
 class MeshConfig(BaseModel):
     """Configuration for mesh generation with quality presets.
@@ -40,6 +95,10 @@ class MeshConfig(BaseModel):
             element size, each ``(h_min, h_max, z_min, z_max, size)`` in um.
             Refinement lines size the elements on them only, and the size
             grows at once with the distance; a box holds it over an area
+        mesh_grading: Native-2D cross-section meshes only: a
+            :class:`MeshGrading` whose size grows from chosen features at a
+            set rate, in place of the fixed growth from every internal
+            curve. ``None`` (default) keeps that fixed growth.
         algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt". In the
             800 um CPW tests behind gsim#283 HXT gave a different mesh and was
             slower than Delaunay at every thread count.
@@ -90,6 +149,7 @@ class MeshConfig(BaseModel):
             "on the cross-section (um) inside which elements keep to size."
         ),
     )
+    mesh_grading: MeshGrading | None = None
     algorithm_3d: Literal["delaunay", "hxt"] = "delaunay"
     threads: int = Field(default=1, ge=1)
     surface_threads: int = Field(default=1, ge=1)

@@ -9,6 +9,8 @@ import numpy as np
 
 from gsim.fdtd.models import FDTDGeometryError, MeshManifest
 
+MESH_BOUNDS_TOLERANCE_NM = 1e-7
+
 
 def _manifest_names(manifest: MeshManifest) -> set[str]:
     """Return all physical names expected in a mesh."""
@@ -41,14 +43,13 @@ def validate_mesh(mesh_path: Path, manifest: MeshManifest) -> None:
     mesh = meshio.read(mesh_path, file_format="gmsh")
     # Match the solver's all-node AABB containment check, including nodes that
     # are not referenced by a material or port element.
-    bounds_tolerance_nm = 1e-7
     if (
         not np.isfinite(mesh.points).all()
         or np.any(
-            mesh.points < np.asarray(manifest.domain_min_nm) - bounds_tolerance_nm
+            mesh.points < np.asarray(manifest.domain_min_nm) - MESH_BOUNDS_TOLERANCE_NM
         )
         or np.any(
-            mesh.points > np.asarray(manifest.domain_max_nm) + bounds_tolerance_nm
+            mesh.points > np.asarray(manifest.domain_max_nm) + MESH_BOUNDS_TOLERANCE_NM
         )
     ):
         raise FDTDGeometryError(

@@ -100,7 +100,7 @@
       }
       button.group-button {
         background: var(--group-color);
-        color: #101216;
+        color: var(--group-text-color, #101216);
       }
       button.group-button.off {
         background: #343a46;
@@ -727,6 +727,8 @@
       }
 
       function colorFor(mesh, group) {
+        const color = groupStyle(mesh, group).color;
+        if (color !== undefined) return new THREE.Color(color);
         if (isPortGroup(mesh, group)) return new THREE.Color(0xf4f7fb);
         if (group === currentLargestGroup)
           return new THREE.Color(largestGroupColor);
@@ -741,6 +743,13 @@
         return new THREE.Color(physicalGroupColors.get(group));
       }
 
+      function groupTextColor(color) {
+        // THREE stores linear RGB. Choose the higher-contrast label color.
+        const luminance =
+          0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+        return luminance > 0.193 ? "#101216" : "#ffffff";
+      }
+
       function groupName(mesh, group) {
         return mesh.names.get(group) ?? `Group ${group}`;
       }
@@ -748,14 +757,23 @@
       function shouldShow(mesh, group) {
         const name = groupName(mesh, group);
         if (
-          options.showGroups &&
-          !options.showGroups.includes(name) &&
-          !options.showGroups.includes(group)
+          options.hideGroups.includes(name) ||
+          options.hideGroups.includes(group)
         )
           return false;
+        if (options.showGroups)
+          return (
+            options.showGroups.includes(name) ||
+            options.showGroups.includes(group)
+          );
+        return groupStyle(mesh, group).visible !== false;
+      }
+
+      function groupStyle(mesh, group) {
         return (
-          !options.hideGroups.includes(name) &&
-          !options.hideGroups.includes(group)
+          options.groupStyles?.[groupName(mesh, group)] ??
+          options.groupStyles?.[group] ??
+          {}
         );
       }
 
@@ -853,7 +871,10 @@
           rawGeometry.dispose();
         }
         const color = colorFor(mesh, group);
-        const opacity = isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1;
+        const style = groupStyle(mesh, group);
+        const opacity =
+          style.opacity ?? (isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1);
+        const transparent = opacity < 1;
         const material = new THREE.MeshStandardMaterial({
           color,
           roughness: 0.72,
@@ -862,9 +883,9 @@
             isSlice || group.startsWith("2_")
               ? THREE.DoubleSide
               : THREE.FrontSide,
-          transparent: isLargestMaterial,
+          transparent,
           opacity,
-          depthWrite: !isLargestMaterial,
+          depthWrite: !transparent,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
@@ -911,12 +932,8 @@
             `${size.map((value) => formatNumber(value)).join(" × ")} µm`,
           ],
         ];
-        if (options.cellSizeNm) {
-          const pmlCells = options.pmlCells ?? 0;
-          const interiorGrid = size.map((value) =>
-            Math.ceil((value * 1000) / options.cellSizeNm),
-          );
-          const yeeGrid = interiorGrid.map((count) => count + 2 * pmlCells);
+        if (options.gridShape) {
+          const yeeGrid = options.gridShape;
           const totalCells = yeeGrid.reduce(
             (product, count) => product * count,
             1,
@@ -933,7 +950,7 @@
         title.className = "stats-title muted";
         title.textContent = "Simulation estimate";
         title.title =
-          "Yee-grid dimensions include PML cells on both sides of each axis.";
+          "Yee-grid dimensions include aligned interiors, PML, and solver guard cells.";
         const list = document.createElement("dl");
         list.className = "stats-grid";
         for (const [label, value] of stats) {
@@ -992,10 +1009,9 @@
           const button = document.createElement("button");
           button.className = "group-button";
           button.textContent = groupName(mesh, group);
-          button.style.setProperty(
-            "--group-color",
-            `#${colorFor(mesh, group).getHexString()}`,
-          );
+          const color = colorFor(mesh, group);
+          button.style.setProperty("--group-color", `#${color.getHexString()}`);
+          button.style.setProperty("--group-text-color", groupTextColor(color));
           button.classList.toggle("off", !root.visible);
           button.addEventListener("click", () => {
             root.visible = !root.visible;

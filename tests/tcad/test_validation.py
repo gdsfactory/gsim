@@ -26,12 +26,12 @@ def _empty_carriers():
     )
 
 
-def _synthetic_sweep(voltages, capacitances):
+def _synthetic_sweep(voltages, capacitances, **fields):
     points = [
         BiasPoint(bias_v=v, carriers=_empty_carriers(), capacitance_f_per_cm=c)
         for v, c in zip(voltages, capacitances, strict=True)
     ]
-    return BiasSweepResult(contact="cathode", points=points)
+    return BiasSweepResult(contact="cathode", points=points, **fields)
 
 
 class TestAnalyticCapacitance:
@@ -81,6 +81,36 @@ class TestCompareCapacitance:
         assert comparison.max_relative_deviation == pytest.approx(0.05, rel=1e-6)
         assert comparison.within(0.06)
         assert not comparison.within(0.04)
+
+    def test_an_unset_junction_takes_the_permittivity_the_sweep_was_solved_with(self):
+        voltages = [0.0, 0.5, 1.0]
+        junction = PNJunctionConfig(
+            na_cm3=1e18, nd_cm3=1e18, ni_cm3=intrinsic_density_cm3(300.0)
+        )
+        sweep = _synthetic_sweep(voltages, np.ones(3), semiconductor_permittivity=11.7)
+
+        comparison = compare_capacitance(junction, sweep, height_um=0.22)
+
+        at_11p1 = analytic_capacitance_f_per_cm(
+            _solver_junction(), voltages, height_um=0.22
+        )
+        # sqrt(11.7 / 11.1): the depletion capacitance goes as sqrt(eps).
+        np.testing.assert_allclose(
+            comparison.c_analytic_f_per_cm / at_11p1, 1.02667135, rtol=1e-8
+        )
+
+    def test_a_permittivity_set_on_the_junction_still_wins(self):
+        voltages = [0.0, 1.0]
+        junction = _solver_junction()
+        sweep = _synthetic_sweep(voltages, np.ones(2), semiconductor_permittivity=11.7)
+        comparison = compare_capacitance(junction, sweep, height_um=0.22)
+        np.testing.assert_allclose(
+            comparison.c_analytic_f_per_cm,
+            analytic_capacitance_f_per_cm(junction, voltages, height_um=0.22),
+        )
+
+    def test_a_sweep_without_it_is_read_as_the_default_silicon(self):
+        assert _synthetic_sweep([0.0], [1.0]).semiconductor_permittivity == 11.1
 
     def test_anode_sweep_sign_convention(self):
         junction = _solver_junction()

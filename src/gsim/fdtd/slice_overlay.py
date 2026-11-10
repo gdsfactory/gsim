@@ -15,6 +15,7 @@ from gsim.fdtd.api import (
     PortSource,
 )
 from gsim.fdtd.models import FDTDGeometryError
+from gsim.fdtd.monitor_bounds import monitor_region_nm
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -145,8 +146,11 @@ def draw_setup_overlay(
         port_upper[width_axis] += port.width / 2
         if port.layer_key is None:
             raise FDTDGeometryError(f"Guided port {name!r} has no resolved layer.")
-        layer = simulation.resolved.layers[port.layer_key]
-        port_lower[2], port_upper[2] = layer.z_bounds
+        owners = [simulation.resolved.layers[key] for key in port.physical_layer_keys]
+        port_lower[2], port_upper[2] = port.z_bounds or (
+            min(layer.z_bounds[0] for layer in owners),
+            max(layer.z_bounds[1] for layer in owners),
+        )
         is_source = (
             isinstance(simulation.source, PortSource) and simulation.source.port == name
         )
@@ -209,14 +213,21 @@ def draw_setup_overlay(
                 "#d62728" if is_source else "#1f77b4",
             )
     for monitor in simulation.monitors:
-        center, half_size = (
-            np.asarray(monitor.center_um),
-            np.asarray(monitor.size_um) / 2,
+        monitor_lower, monitor_upper = monitor_region_nm(
+            monitor,
+            (
+                lower[0] * 1000,
+                lower[1] * 1000,
+                lower[2] * 1000,
+                upper[0] * 1000,
+                upper[1] * 1000,
+                upper[2] * 1000,
+            ),
         )
         _region(
             ax,
-            center - half_size,
-            center + half_size,
+            np.asarray(monitor_lower) / 1000,
+            np.asarray(monitor_upper) / 1000,
             normal_axis,
             position,
             f"Monitor {monitor.name}",

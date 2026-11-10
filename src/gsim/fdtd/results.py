@@ -12,6 +12,12 @@ from typing import Any
 import numpy as np
 
 from gsim.common.s_matrix import SMatrix, SMatrixRun, assemble_s_matrix
+from gsim.fdtd.field_results import (
+    ComplexFieldResult,
+    FieldCoordinates,
+    parse_complex_fields,
+)
+from gsim.fdtd.monitor_names import MonitorNameAliases
 
 _S_PARAMETER_PATTERN = re.compile(r"S\(([^,]+),([^\)]+)\)")
 
@@ -277,6 +283,21 @@ class PlaneMonitorResult:
     heatmaps: list[HeatmapResult] = field(default_factory=list)
     coupling_efficiency: ComplexTrace | None = None
     fiber_amplitude: ComplexTrace | None = None
+    fields: list[ComplexFieldResult] = field(default_factory=list)
+    field_coordinates: FieldCoordinates | None = None
+
+    def field(self, component: str, *, wavelength_um: float) -> ComplexFieldResult:
+        """Select a component at the closest available exported wavelength."""
+        if not np.isfinite(wavelength_um) or wavelength_um <= 0:
+            raise ValueError("field wavelength must be finite and positive")
+        candidates = [
+            value for value in self.fields if value.component == component.lower()
+        ]
+        if not candidates:
+            raise KeyError(f"monitor {self.name!r} has no complex field {component!r}")
+        return min(
+            candidates, key=lambda value: abs(value.wavelength_um - wavelength_um)
+        )
 
     def plot_flux(self, *, ax: Any = None) -> tuple[Any, Any]:
         """Plot signed outward flux against wavelength."""
@@ -335,7 +356,7 @@ class PlaneMonitorResult:
         return ax.figure, ax
 
 
-class MonitorResults(dict[str, PlaneMonitorResult]):
+class MonitorResults(MonitorNameAliases[PlaneMonitorResult]):
     """Plane-monitor results keyed by the names configured on the simulation."""
 
 
@@ -507,6 +528,9 @@ def _parse_monitor(
                 shape=tuple(metadata["shape"]),
             )
         )
+    fields, coordinates = parse_complex_fields(
+        data, output_dir, files, tuple(data["shape"])
+    )
     return PlaneMonitorResult(
         name=name,
         normal_axis=data["normal_axis"],
@@ -520,6 +544,8 @@ def _parse_monitor(
         wavelength_um=wavelengths,
         flux=np.asarray(data["flux"], dtype=float) if "flux" in data else None,
         heatmaps=heatmaps,
+        fields=fields,
+        field_coordinates=coordinates,
         coupling_efficiency=_optional_complex_trace(
             data.get("coupling_efficiency"), monitor_valid
         ),

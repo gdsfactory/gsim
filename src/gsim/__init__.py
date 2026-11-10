@@ -14,7 +14,7 @@ from __future__ import annotations
 from gsim import fdtd as fdtd
 from gsim.gcloud import get_status, wait_for_results
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "__version__",

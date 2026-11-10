@@ -31,6 +31,7 @@ from gsim.fdtd.config import (
 )
 from gsim.fdtd.mesh import background_bounds_nm
 from gsim.fdtd.models import FDTDConfigError, MeshManifest
+from gsim.fdtd.monitor_bounds import monitor_region_nm
 
 if TYPE_CHECKING:
     from gsim.common.pdk import ResolvedPassivePcell
@@ -76,13 +77,18 @@ class RuntimeConfigMixin:
         """Return canonical geometry supplied by the concrete simulation."""
         raise NotImplementedError
 
+    @property
+    def _background_material_name(self) -> str:
+        """Return the canonical background supplied by the concrete simulation."""
+        raise NotImplementedError
+
     def _background_bounds_nm(
         self,
     ) -> tuple[float, float, float, float, float, float]:
         """Return the resolved automatic or explicitly bounded domain."""
         return background_bounds_nm(
             self.resolved,
-            self.materials.background,
+            self._background_material_name,
             self.domain.padding,
             padding_x=self.domain.padding_x,
             padding_y=self.domain.padding_y,
@@ -90,10 +96,11 @@ class RuntimeConfigMixin:
             x_bounds=self.domain.x_bounds,
             y_bounds=self.domain.y_bounds,
             z_bounds=self.domain.z_bounds,
+            clip_geometry=self.domain.clip_geometry,
         )
 
     def _validate_explicit_domain_contents(self) -> None:
-        """Require public sources and monitors to fit explicit axis bounds."""
+        """Require source regions and fiber foci to fit explicit axis bounds."""
         explicit_bounds = (
             self.domain.x_bounds,
             self.domain.y_bounds,
@@ -138,16 +145,6 @@ class RuntimeConfigMixin:
             )
 
         for monitor in self.monitors:
-            center = _scale_vector(monitor.center_um, 1000)
-            half_size = _scale_vector(monitor.size_um, 500)
-            lower, upper = _vector_bounds(center, half_size)
-            regions.append(
-                (
-                    f"Monitor {monitor.name!r}",
-                    lower,
-                    upper,
-                )
-            )
             if monitor.fiber_mode is not None:
                 focal_point = _scale_vector(monitor.fiber_mode.focal_point_um, 1000)
                 regions.append(
@@ -168,6 +165,12 @@ class RuntimeConfigMixin:
                         f"{label} {axis_name}-extent {extent_um} exceeds "
                         f"domain.{axis_name}_bounds {requested_bounds}."
                     )
+
+    def _validate_monitor_regions(self) -> None:
+        """Reject unusable plane monitors before generating any mesh artifacts."""
+        bounds = self._background_bounds_nm()
+        for monitor in self.monitors:
+            monitor_region_nm(monitor, bounds, warn=False)
 
     def _selected_port_name(self) -> str:
         """Validate and return the explicitly selected source port."""
@@ -218,12 +221,14 @@ class RuntimeConfigMixin:
                 "Explicit monitor names cannot shadow vertical ports."
             )
         bounds = self._background_bounds_nm()
-        background_index = material_snapshots[
-            self.materials.background
-        ].refractive_index
+        background_index = (
+            self.source.vertical_refractive_index
+            or material_snapshots[self._background_material_name].refractive_index
+        )
         outward_sign = 1 if self.source.vertical_axis == "+z" else -1
         aperture_z_nm = bounds[5] if outward_sign > 0 else bounds[2]
         device_z_nm = self.resolved.bounds[1 if outward_sign > 0 else 0][2] * 1000
+        device_z_nm = min(max(device_z_nm, bounds[2]), bounds[5])
         monitor_heatmap = self.source.vertical_monitor_heatmap
         heatmap_config = (
             HeatmapConfig(
@@ -375,7 +380,7 @@ class RuntimeConfigMixin:
             focal_point=_scale_vector(source.focal_point_um, 1000),
             waist_radius=source.waist_radius_um * 1000,
             refractive_index=source.refractive_index
-            or material_snapshots[self.materials.background].refractive_index,
+            or material_snapshots[self._background_material_name].refractive_index,
         )
 
     def _plane_monitor_config(
@@ -384,9 +389,9 @@ class RuntimeConfigMixin:
         material_snapshots: Mapping[str, MaterialSnapshot],
     ) -> PlaneMonitorConfig:
         """Translate one public plane-monitor definition."""
-        center_nm = _scale_vector(monitor.center_um, 1000)
-        half_size_nm = _scale_vector(monitor.size_um, 500)
-        region_min, region_max = _vector_bounds(center_nm, half_size_nm)
+        region_min, region_max = monitor_region_nm(
+            monitor, self._background_bounds_nm()
+        )
         fiber_mode = self._fiber_mode_config(monitor.fiber_mode, material_snapshots)
         return PlaneMonitorConfig(
             name=monitor.name,
@@ -410,6 +415,7 @@ class RuntimeConfigMixin:
                 else None
             ),
             fiber_mode=fiber_mode,
+            fields=monitor.fields.to_config() if monitor.fields is not None else None,
         )
 
     def _fiber_mode_config(
@@ -426,7 +432,7 @@ class RuntimeConfigMixin:
             focal_point=_scale_vector(fiber_mode.focal_point_um, 1000),
             waist_radius=fiber_mode.waist_radius_um * 1000,
             refractive_index=fiber_mode.refractive_index
-            or material_snapshots[self.materials.background].refractive_index,
+            or material_snapshots[self._background_material_name].refractive_index,
         )
 
     def _config(
@@ -440,7 +446,7 @@ class RuntimeConfigMixin:
             return build_fdtd_config(
                 manifest,
                 material_snapshots,
-                background_material=self.materials.background,
+                background_material=self._background_material_name,
                 center_wavelength_nm=self.source.wavelength_um * 1000,
                 wavelength_halfspan_nm=self.source.wavelength_halfspan_um * 1000,
                 num_wavelengths=self.source.num_wavelengths,

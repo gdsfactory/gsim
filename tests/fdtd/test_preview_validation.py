@@ -21,10 +21,13 @@ from tests.fdtd.test_viz import _write_mesh
         {"height": 500, "zoom_to_cursor": False},
     ],
 )
-def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
+def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation._last_artifacts
     )
     with pytest.warns(DeprecationWarning, match=r"plot_2d_interactive.*plot_2d_static"):
         viewer = simulation.plot_2d(
@@ -48,10 +51,13 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options):
     assert output.read_text(encoding="utf8") == viewer.html
 
 
-def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path):
+def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation._last_artifacts
     )
     with pytest.warns(DeprecationWarning, match=r"plot_2d\(\) is deprecated"):
         viewer = simulation.plot_2d()
@@ -74,7 +80,7 @@ def test_static_preview_rejects_unknown_selected_port_before_meshing(
         simulation.plot_2d_static()
 
 
-@pytest.mark.parametrize("region", ["monitor", "dipole", "line_current", "gaussian"])
+@pytest.mark.parametrize("region", ["dipole", "line_current", "gaussian"])
 def test_static_preview_rejects_regions_outside_explicit_domain(
     fdtd_pdk_module, monkeypatch, region
 ):
@@ -83,11 +89,7 @@ def test_static_preview_rejects_regions_outside_explicit_domain(
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
     simulation.geometry("straight")
     simulation.domain(y_bounds=(-1, 1))
-    if region == "monitor":
-        simulation.monitors.add_plane(
-            name="outside", center_um=(1, 1.1, 0.11), size_um=(1, 0.4, 0), normal="+z"
-        )
-    elif region == "dipole":
+    if region == "dipole":
         simulation.source = fdtd.DipoleSource(
             position_um=(1, 1.1, 0.11), current_axis="z"
         )
@@ -109,6 +111,51 @@ def test_static_preview_rejects_regions_outside_explicit_domain(
         visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
     )
     with pytest.raises(fdtd.FDTDConfigError, match=r"exceeds domain.y_bounds"):
+        simulation.plot_2d_static()
+
+
+def test_static_preview_shows_cropped_monitor_with_warning(fdtd_pdk_module):
+    from matplotlib import pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    simulation.domain(y_bounds=(-1, 1))
+    simulation.monitors.add_plane(
+        "image", center_um=(1, 1.1, 0.11), size_um=(1, 0.4, 0), normal="+z"
+    )
+    with pytest.warns(UserWarning, match="Monitor 'image' cropped") as caught:
+        axes = simulation.plot_2d_static()
+    assert (
+        sum("Monitor 'image' cropped" in str(warning.message) for warning in caught)
+        == 1
+    )
+    patch = next(
+        patch for patch in axes.patches if patch.get_label() == "Monitor image"
+    )
+    assert isinstance(patch, Rectangle)
+    assert patch.get_bbox().bounds == pytest.approx((0.5, 0.9, 1, 0.1))
+    assert simulation.monitors["image"].size_um == (1, 0.4, 0)
+    plt.close(axes.figure)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_static_preview_rejects_outside_plane_before_meshing(
+    fdtd_pdk_module, monkeypatch, explicit
+):
+    from gsim.fdtd import visualization
+
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    simulation.geometry("straight")
+    if explicit:
+        simulation.domain(z_bounds=(-1, 1))
+    simulation.monitors.add_plane(
+        "outside", center_um=(1, 0, 100), size_um=(1, 1, 0), normal="+z"
+    )
+    monkeypatch.setattr(
+        visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
+    )
+    with pytest.raises(fdtd.FDTDConfigError, match=r"z-position.*outside"):
         simulation.plot_2d_static()
 
 

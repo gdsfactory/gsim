@@ -5,13 +5,15 @@ unless they are cracked. gsim meshes a 3D conductor as a shell with the
 dielectric inside it, so every such boundary is interior and needs the key to
 stay a thick conductor. A native 2D (boundary-mode) conductor is a hole in the
 mesh, its boundary exterior, so it gets no key. Palace before 0.19 rejects the
-key and always cracks, so a local run on it is handed a copy without the key.
+key and always cracks, so a local run on a Palace known to be older is handed
+a copy without the key, and config.json keeps it.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,7 +24,7 @@ from gsim.palace import DrivenSim, EigenmodeSim
 from gsim.palace.mesh.config_generator import generate_palace_config
 from gsim.palace.models import DrivenConfig
 from gsim.palace.ports.config import PalacePort, PortType
-from gsim.palace.runtime import strip_crack
+from gsim.palace.runtime import PalaceRuntime, strip_crack
 from tests.palace.test_boundarymode_conductor_pec import (
     config_of as boundarymode_config_of,
 )
@@ -185,7 +187,7 @@ class TestConductivityEntries:
             tmp_path,
             "boundarymode",
             _groups(native_2d=True),
-            hints={"_conductor_boundary": "pec"},
+            conductor_boundary="pec",
         )
         assert "Conductivity" not in config["Boundaries"]
         assert "Crack" not in json.dumps(config)
@@ -256,10 +258,18 @@ class TestStripCrack:
         config = _config_with_crack()
         assert strip_crack(config, tag) == config
 
-    @pytest.mark.parametrize("tag", ["nightly", "0dd8d015", "abc"])
+    @pytest.mark.parametrize(
+        "tag",
+        ["nightly", "0dd8d015", "abc", "", "0.18.0-dev", "v0.18.0-12-gabc123"],
+    )
     def test_an_unreadable_tag_keeps_it_for_palace_to_report(self, tag):
         config = _config_with_crack()
         assert strip_crack(config, tag) == config
+
+    def test_an_unknown_version_keeps_it(self):
+        config = _config_with_crack()
+        assert strip_crack(config, None) == config
+        assert strip_crack(config) == config
 
     def test_the_input_is_left_untouched(self):
         config = _config_with_crack()
@@ -288,25 +298,48 @@ class TestStripCrack:
     def test_a_config_without_conductors_passes_through(self, config):
         assert strip_crack(config, "0.18.0") == config
 
-    def test_the_runtime_tag_variable_decides_when_no_tag_is_given(self, monkeypatch):
-        config = _config_with_crack()
-        monkeypatch.setenv(TAG_ENV, "0.18.0")
-        assert strip_crack(config) == _without_crack(config)
-        monkeypatch.setenv(TAG_ENV, "0.19.0")
-        assert strip_crack(config) == config
-
 
 # ---------------------------------------------------------------------------
-# run_local hands an old runtime a config without the key
+# run_local hands a runtime known to be older a copy without the key
 # ---------------------------------------------------------------------------
+
+
+def _fake_gsim_runtime(monkeypatch, tmp_path: Path) -> None:
+    """Resolve gsim's own runtime, with no ``./bin/palace`` to take its place."""
+    binary = tmp_path / "runtime" / "palace"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "gsim.palace.runtime.resolve_palace_runtime",
+        lambda: PalaceRuntime(binary, "gsim cached runtime"),
+    )
 
 
 class TestRunLocal:
     @pytest.mark.parametrize(
-        ("tag", "keeps_key"), [("0.18.0", False), ("0.19.0", True)]
+        ("runtime", "tag", "answer", "keeps_key"),
+        [
+            # gsim's own runtime is known by its tag and is not asked
+            ("gsim", "0.18.0", None, False),
+            ("gsim", "0.19.0", None, True),
+            # a Palace the user installed says what it is, whatever the tag
+            ("user", "0.18.0", "Palace v0.19.0", True),
+            ("user", "0.19.0", "Palace v0.18.0", False),
+            # one that cannot be told keeps the key: a schema error is loud
+            ("user", "0.18.0", None, True),
+            ("user", "0.18.0", "no version here", True),
+            ("user", "0.18.0", "Palace v0.18.0-12-gabc123", True),
+        ],
     )
-    def test_what_palace_reads(self, monkeypatch, tmp_path, tag, keeps_key):
-        _setup_local_palace(monkeypatch, tmp_path)
+    def test_what_palace_reads(
+        self, monkeypatch, tmp_path, runtime, tag, answer, keeps_key
+    ):
+        if runtime == "gsim":
+            _fake_gsim_runtime(monkeypatch, tmp_path)
+        else:
+            _setup_local_palace(monkeypatch, tmp_path)
         monkeypatch.delenv("PALACE_SIF", raising=False)
         monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
         monkeypatch.setenv(TAG_ENV, tag)
@@ -314,10 +347,18 @@ class TestRunLocal:
         sim = DrivenSim()
         sim._last_mesh_result = _mesh_result(1_000, 1_000)
         _setup_sim(sim, output_dir)
-        (output_dir / "config.json").write_text(json.dumps(_config_with_crack()))
+        canonical = json.dumps(_config_with_crack())
+        (output_dir / "config.json").write_text(canonical)
+        asked: list[list[str]] = []
         seen: dict = {}
 
         def fake_run(cmd, **kwargs):
+            if cmd[-1] == "--version":
+                asked.append(cmd)
+                return SimpleNamespace(
+                    stdout=answer or "", stderr="", returncode=0 if answer else 1
+                )
+            seen["name"] = cmd[-1]
             seen["config"] = json.loads((Path(kwargs["cwd"]) / cmd[-1]).read_text())
             return SimpleNamespace(stdout="", stderr="")
 
@@ -325,3 +366,56 @@ class TestRunLocal:
         sim.run_local(num_processes=1, verbose=False)
         expected = _config_with_crack()
         assert seen["config"] == (expected if keeps_key else _without_crack(expected))
+        assert len(asked) == (0 if runtime == "gsim" else 1)
+        # config.json stays canonical: a stripped copy neither replaces nor
+        # outlives it
+        assert (seen["name"] == "config.json") == keeps_key
+        assert (output_dir / "config.json").read_text() == canonical
+        assert [p.name for p in output_dir.glob("config*.json")] == ["config.json"]
+
+    @pytest.mark.parametrize("palace_fails", [False, True])
+    def test_a_user_file_named_like_the_copy_is_left_alone(
+        self, monkeypatch, tmp_path, palace_fails
+    ):
+        _fake_gsim_runtime(monkeypatch, tmp_path)
+        monkeypatch.delenv("PALACE_SIF", raising=False)
+        monkeypatch.delenv("PALACE_EXECUTABLE", raising=False)
+        monkeypatch.setenv(TAG_ENV, "0.18.0")
+        output_dir = tmp_path / "sim"
+        sim = DrivenSim()
+        sim._last_mesh_result = _mesh_result(1_000, 1_000)
+        _setup_sim(sim, output_dir)
+        canonical = json.dumps(_config_with_crack())
+        (output_dir / "config.json").write_text(canonical)
+        # the name an earlier version of this code used for its copy
+        theirs = b'{"mine": true}\r\n'
+        (output_dir / "config.local.json").write_bytes(theirs)
+        seen: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["name"] = cmd[-1]
+            seen["config"] = json.loads((Path(kwargs["cwd"]) / cmd[-1]).read_text())
+            seen["files"] = sorted(p.name for p in output_dir.glob("config*.json"))
+            if palace_fails:
+                raise subprocess.CalledProcessError(1, cmd, stderr="boom")
+            return SimpleNamespace(stdout="", stderr="")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        if palace_fails:
+            with pytest.raises(RuntimeError, match="boom"):
+                sim.run_local(num_processes=1, verbose=False)
+        else:
+            sim.run_local(num_processes=1, verbose=False)
+        # Palace was given a third file, stripped of the key, beside the two
+        assert seen["name"] not in ("config.json", "config.local.json")
+        assert seen["files"] == sorted(
+            ["config.json", "config.local.json", seen["name"]]
+        )
+        assert seen["config"] == _without_crack(_config_with_crack())
+        # and it is gone again, whether or not Palace failed
+        assert (output_dir / "config.local.json").read_bytes() == theirs
+        assert (output_dir / "config.json").read_text() == canonical
+        assert sorted(p.name for p in output_dir.glob("config*.json")) == [
+            "config.json",
+            "config.local.json",
+        ]

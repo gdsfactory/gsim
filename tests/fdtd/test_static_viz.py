@@ -173,14 +173,14 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     artifacts = simulation.write(tmp_path / "run")
     simulation.materials(overrides={"Si": {"refractive_index": 2.5}})
     simulation.geometry("straight", settings={"length": 3})
-    simulation.add_monitors()
+    simulation.add_monitors(xy_name="field_xy")
     updated = simulation.plot_2d_static(show_mesh=True)
     assert simulation._last_artifacts is artifacts
     assert updated.get_xlim()[1] == pytest.approx(3 + 32 * 0.06)
     assert {text.get_text() for text in updated.texts} >= {
         "Source o1",
         "Monitor o2",
-        "Monitor overview_xy",
+        "Monitor field_xy",
     }
     assert updated.figure.axes[1].get_ylim()[1] == pytest.approx(2.5)
 
@@ -303,7 +303,7 @@ def test_vertical_port_is_drawn_at_runtime_aperture(fdtd_pdk_module):
     labels = {text.get_text() for text in ax.texts}
     assert {"Monitor o1", "Source o2"} <= labels
     source_line = next(line for line in ax.lines if line.get_label() == "Source o2")
-    np.testing.assert_allclose(np.asarray(source_line.get_ydata()), [1, 1])
+    np.testing.assert_allclose(np.asarray(source_line.get_ydata()), [1.22, 1.22])
     np.testing.assert_allclose(np.asarray(source_line.get_xdata()), [0.5, 1.5])
     filtered = simulation.plot_2d_static(
         axis="y", position_um=0, hide_groups=["port_o2"]

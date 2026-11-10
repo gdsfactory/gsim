@@ -217,7 +217,7 @@ def solve_modes(
     epsilon: dict[str, complex] | ArrayLike,
     wavelength_um: float,
     num_modes: int = 1,
-    order: int = 1,
+    order: int = 2,
     metallic_boundaries: bool = False,
     n_guess: float | None = None,
 ) -> Any:
@@ -233,7 +233,19 @@ def solve_modes(
         wavelength_um: Vacuum wavelength in um. For RF, pass the free-space
             wavelength of the target frequency (``c0 / f`` in um).
         num_modes: Number of modes to compute.
-        order: Finite element order of the mode solve.
+        order: Finite element order of the mode solve. Order 2, the
+            default, converges faster under mesh refinement than order 1
+            on optical and RF modes alike. Where the mesh is coarse away
+            from the structure, refining the structure itself does not
+            fix order 1: the series impedance of a lossy metal line
+            (``gamma * Z0``) comes out percent low that way, and order 2
+            brings it to a few 1e-3 or better. Order 2 does not remove
+            the error left by the coarse far mesh; cap the element size
+            there as well when the series impedance must be accurate to
+            1e-4. Order 2 costs more per solve, from about 2.5 times on
+            a mesh of a hundred elements to about 10 times above a
+            thousand; pass ``order=1`` for a cheaper solve where that
+            accuracy is not needed.
         metallic_boundaries: Enforce PEC on the outer boundary.
         n_guess: Effective-index guess centering the eigenvalue search.
             femwell's default guess tracks the largest permittivity, which

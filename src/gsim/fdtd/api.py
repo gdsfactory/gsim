@@ -11,13 +11,18 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
 from gsim.common.config import MutableModel as _MutableModel
-from gsim.fdtd.domain import Padding, padding_pair
+from gsim.fdtd.domain import Padding, padding_pair, warn_legacy_clipping
+from gsim.fdtd.field_requests import Fields
 from gsim.fdtd.mode_selection import ModeSelection
+from gsim.fdtd.monitor_names import resolve_monitor_name
 
 Vector3 = tuple[float, float, float]
 Axis = Literal["x", "y", "z"]
@@ -43,7 +48,9 @@ class Geometry(BaseModel):
 
     component: Any | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
-    port_layer_map: dict[tuple[int, int], str] = Field(default_factory=dict)
+    port_layer_map: dict[tuple[int, int], str | tuple[str, ...]] = Field(
+        default_factory=dict
+    )
     mesh_size_nm: float = Field(default=1000.0, gt=0)
     geometry_tolerance_nm: float = Field(default=10.0, gt=0, le=30.0)
     _resolver: Any = PrivateAttr(default=None)
@@ -57,7 +64,7 @@ class Geometry(BaseModel):
         component: Any | None = None,
         *,
         settings: Mapping[str, Any] | None = None,
-        port_layer_map: Mapping[tuple[int, int], str] | None = None,
+        port_layer_map: Mapping[tuple[int, int], str | tuple[str, ...]] | None = None,
         mesh_size_nm: float | None = None,
         geometry_tolerance_nm: float | None = None,
     ) -> Any:
@@ -96,7 +103,7 @@ class Materials(_FiniteModel):
     the deployed GDSFactory FDTD solver does not accept those yet.
     """
 
-    background: str = Field(default="SiO2", min_length=1)
+    background: str = Field(default="Air", min_length=1)
     overrides: dict[str, Material] = Field(default_factory=dict)
     dispersion: bool = False
 
@@ -182,6 +189,7 @@ class PortSource(Source):
     vertical_axis: Literal["+z", "-z"] = "+z"
     vertical_aperture_width_um: float | None = Field(default=None, gt=0)
     vertical_waist_radius_um: float | None = Field(default=None, gt=0)
+    vertical_refractive_index: float | None = Field(default=None, gt=0)
     vertical_monitor_heatmap: Heatmap | None = None
 
 
@@ -231,7 +239,12 @@ SourceType = PortSource | DipoleSource | LineCurrentSource | GaussianBeamSource
 
 
 class FiberMode(_FiniteModel):
-    """Analytic Gaussian fiber profile for overlap projection."""
+    """Analytic Gaussian fiber profile for overlap projection.
+
+    An omitted index is inferred from the exported material at the receiver
+    plane. Mixed media or an interface retain the background with a warning.
+    An explicit index always takes precedence.
+    """
 
     propagation_direction: Vector3
     e_polarization: Vector3
@@ -251,6 +264,7 @@ class PlaneMonitor(_FiniteModel):
     wavelengths_um: list[float] | None = None
     heatmap: Heatmap | None = None
     fiber_mode: FiberMode | None = None
+    fields: Fields | None = None
 
     @model_validator(mode="after")
     def validate_plane(self) -> Self:
@@ -264,9 +278,15 @@ class PlaneMonitor(_FiniteModel):
             wavelength <= 0 for wavelength in self.wavelengths_um
         ):
             raise ValueError("monitor wavelengths must be positive")
-        if not self.flux and self.heatmap is None and self.fiber_mode is None:
+        if (
+            not self.flux
+            and self.heatmap is None
+            and self.fiber_mode is None
+            and self.fields is None
+        ):
             raise ValueError(
-                "a plane monitor must request flux, a heatmap, or fiber overlap"
+                "a plane monitor must request flux, a heatmap, "
+                "fiber overlap, or complex fields"
             )
         return self
 
@@ -294,7 +314,7 @@ class Monitors:
 
     def remove(self, name: str) -> PlaneMonitor:
         """Remove and return one named plane monitor."""
-        return self._items.pop(name)
+        return self._items.pop(resolve_monitor_name(name, self._items))
 
     def clear(self) -> None:
         """Remove all explicitly configured plane monitors."""
@@ -302,7 +322,7 @@ class Monitors:
 
     def __getitem__(self, name: str) -> PlaneMonitor:
         """Return one monitor by name."""
-        return self._items[name]
+        return self._items[resolve_monitor_name(name, self._items)]
 
     def __iter__(self) -> Iterator[PlaneMonitor]:
         """Iterate over monitors in insertion order."""
@@ -336,6 +356,10 @@ class Domain(_FiniteModel):
         default=None, description="Z padding in um: scalar or (below, above) pair."
     )
     pml_cells: int = Field(default=32, ge=0)
+    clip_geometry: bool = Field(
+        default=False,
+        description="Deprecated: opt in to clipping material to explicit bounds.",
+    )
     x_bounds: tuple[float, float] | None = Field(
         default=None,
         description="Optional physical X-domain bounds in micrometers.",
@@ -348,6 +372,35 @@ class Domain(_FiniteModel):
         default=None,
         description="Optional physical Z-domain bounds in micrometers.",
     )
+
+    @field_validator("clip_geometry", mode="before")
+    @classmethod
+    def accept_legacy_clipping(cls, value: Any, info: ValidationInfo) -> Any:
+        """Warn about the switch while retaining both values and saved settings."""
+        if (info.context or {}).get("warn_clipping", True):
+            warn_legacy_clipping()
+        return value
+
+    def __call__(self, **updates: Any) -> Self:
+        """Warn for explicit switch updates while validating the full domain."""
+        explicit_fields = self.model_fields_set | updates.keys()
+        updated = type(self).model_validate(
+            {**dict(self), **updates},
+            context={"warn_clipping": "clip_geometry" in updates},
+        )
+        for field_name in type(self).model_fields:
+            object.__setattr__(self, field_name, getattr(updated, field_name))
+        object.__setattr__(self, "__pydantic_fields_set__", explicit_fields)
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_domain(self, handler: SerializerFunctionWrapHandler):
+        """Retain explicit switches without inventing one in default round trips."""
+        # An unannotated return preserves the model's serialization JSON schema.
+        data = handler(self)
+        if "clip_geometry" not in self.model_fields_set:
+            data.pop("clip_geometry", None)
+        return data
 
     @field_validator("padding", "padding_x", "padding_y", "padding_z")
     @classmethod
@@ -396,7 +449,9 @@ class Domain(_FiniteModel):
             "y_bounds",
             "z_bounds",
         } and hasattr(self, "__pydantic_fields_set__"):
-            type(self).model_validate({**self.model_dump(), name: value})
+            type(self).model_validate(
+                {**self.model_dump(), name: value}, context={"warn_clipping": False}
+            )
         super().__setattr__(name, value)
 
 
@@ -414,6 +469,7 @@ __all__ = [
     "DipoleSource",
     "Domain",
     "FiberMode",
+    "Fields",
     "GaussianBeamSource",
     "Geometry",
     "Heatmap",

@@ -1,6 +1,6 @@
 [project]
 name = "gsim"
-version = "0.8.0"
+version = "0.9.0"
 description = "Electromagnetic simulation for photonics and electronics, powered by GDSFactory."
 readme = "README.md"
 requires-python = "~=3.12.0"
@@ -371,6 +371,8 @@ unresolved-import = "ignore"
 include = ["src"]
 
 [tool.uv]
+# KLayout 0.30.13 has no Windows wheels; its source build needs unavailable headers.
+constraint-dependencies = ["klayout!=0.30.13; sys_platform == 'win32'"]
 # IHP's SAX dependency requires scikit-rf<2; the calibration guide needs >=2.1.
 conflicts = [
   [{ group = "test" }, { group = "rf-analysis" }],

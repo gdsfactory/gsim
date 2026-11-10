@@ -27,8 +27,7 @@ _RIB_HEIGHT_UM = 0.22
 _REVERSE_BIASES = [0.0, 0.5, 1.0]
 
 
-@pytest.fixture(scope="module")
-def meshed_diode(tmp_path_factory):
+def _meshed_diode(output_dir, **solver):
     comp, stack, _names = build_padded_diode(zmax=_RIB_HEIGHT_UM)
     sim = Simulation()
     sim.geometry(comp, stack=stack)
@@ -48,9 +47,16 @@ def meshed_diode(tmp_path_factory):
         sim.doping.add(
             StepDoping(region=region, dopant_type="donor", concentration_cm3=_ND_CM3)
         )
-    sim.solver(mesh_preset="coarse", refined_mesh_size_um=0.02, max_mesh_size_um=40.0)
-    sim.mesh(output_dir=tmp_path_factory.mktemp("tcad-runtime"))
+    sim.solver(
+        mesh_preset="coarse", refined_mesh_size_um=0.02, max_mesh_size_um=40.0, **solver
+    )
+    sim.mesh(output_dir=output_dir)
     return sim
+
+
+@pytest.fixture(scope="module")
+def meshed_diode(tmp_path_factory):
+    return _meshed_diode(tmp_path_factory.mktemp("tcad-runtime"))
 
 
 @pytest.fixture(scope="module")
@@ -118,15 +124,18 @@ class TestReferenceSweep:
     (#298) assembled with DEVSIM's own couples, which read obtuse
     triangles wrong: its C was 10 % to 15 % above these values (signed
     couples lower it by 9.3 % to 12.8 %), its reverse current up to 24 %
-    above, and its carrier sums within 0.2 %.
+    above, and its carrier sums within 0.2 %. Each Contact also holds the
+    rib's node where it ends on the Interface, which raises the reverse
+    current by 0.2 % and lowers Re(Y) by 4 % against a solve that left
+    that node untied.
     """
 
     C_F_PER_CM = (4.947358481043972e-12, 3.578515613706044e-12, 2.929373295368441e-12)
-    I_CATHODE_A_PER_CM = (0.0, -3.528761886027468e-15, -3.924130997825855e-15)
+    I_CATHODE_A_PER_CM = (0.0, -3.537339177885073e-15, -3.933150312607743e-15)
     Y_S_PER_CM = (
-        6.727108327147895e-05 + 0.031085007941224277j,
-        3.376227991223994e-05 + 0.022484417930863587j,
-        2.2109611177306638e-05 + 0.018405762944039356j,
+        6.470938642141968e-05 + 0.031085019339111085j,
+        3.242155054504931e-05 + 0.022484422150894873j,
+        2.1212269535416e-05 + 0.018405765238659295j,
     )
     N_NODES = 639
     ELECTRONS_SUM_CM3 = (
@@ -167,6 +176,40 @@ class TestReferenceSweep:
             assert point.carriers.holes_cm3.sum() == pytest.approx(p_sum, rel=1e-6)
 
 
+class TestSemiconductorPermittivity:
+    def test_capacitance_follows_the_depletion_formula(self, tmp_path):
+        """C goes as sqrt(eps) on a junction with no oxide to fringe through.
+
+        The 5 nm box resolves the 50 nm depletion region: the module's coarser
+        mesh leaves the ratio at 1.006, whatever the permittivity does.
+        """
+        sim = _meshed_diode(
+            tmp_path, refinement_boxes=[(-20.15, -19.85, 0.0, _RIB_HEIGHT_UM, 0.005)]
+        )
+        junction = PNJunctionConfig(na_cm3=_NA_CM3, nd_cm3=_ND_CM3)
+        sweeps = {}
+        comparisons = {}
+        for eps in (11.1, 11.7):
+            sim.materials.semiconductor_permittivity = eps
+            sweeps[eps] = sim.sweep([0.0], contact="cathode")
+            comparisons[eps] = compare_capacitance(
+                junction, sweeps[eps], height_um=_RIB_HEIGHT_UM
+            )
+
+        [ratio] = sweeps[11.7].capacitance_f_per_cm / sweeps[11.1].capacitance_f_per_cm
+        # The formula's own answer, sqrt(11.7 / 11.1).
+        assert PNJunctionConfig(
+            na_cm3=_NA_CM3, nd_cm3=_ND_CM3, permittivity=11.7
+        ).c_per_area / PNJunctionConfig(
+            na_cm3=_NA_CM3, nd_cm3=_ND_CM3, permittivity=11.1
+        ).c_per_area == pytest.approx(1.02667135, rel=1e-8)
+        assert ratio == pytest.approx(1.02667135, abs=5e-4)
+        # The comparison follows the solve, so its deviation does not jump.
+        assert comparisons[11.7].max_relative_deviation == pytest.approx(
+            comparisons[11.1].max_relative_deviation, abs=1e-3
+        )
+
+
 class TestSiliconConstants:
     def test_the_constants_are_devsims(self):
         from gsim.tcad.runtime import import_simple_physics
@@ -178,6 +221,21 @@ class TestSiliconConstants:
         sp = import_simple_physics()
         assert sp.eps_si == SILICON_RELATIVE_PERMITTIVITY
         assert sp.n_i == INTRINSIC_DENSITY_300K_CM3
+
+    def test_an_unset_permittivity_is_devsims_own_product(self, meshed_diode):
+        import devsim
+
+        from gsim.tcad.runtime import import_simple_physics
+
+        sp = import_simple_physics()
+        name = meshed_diode._setup_device()
+        permittivities = {
+            region: devsim.get_parameter(
+                device=name, region=region, name="Permittivity"
+            )
+            for region in ("p_rib", "p_pad", "n_rib", "n_pad")
+        }
+        assert permittivities == dict.fromkeys(permittivities, sp.eps_si * sp.eps_0)
 
     def test_the_built_in_voltage_falls_with_temperature(self, meshed_diode):
         from gsim.tcad.silicon import intrinsic_density_cm3

@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from gsim.common.stack.pn_junction import PNJunctionConfig
 from gsim.tcad.results import BiasSweepResult
-from gsim.tcad.silicon import SILICON_RELATIVE_PERMITTIVITY, intrinsic_density_cm3
+from gsim.tcad.silicon import intrinsic_density_cm3
 
 __all__ = [
     "CapacitanceComparison",
@@ -105,9 +105,9 @@ def compare_capacitance(
     The two sides describe the same silicon: a ``junction`` that leaves
     ``ni_cm3`` or ``permittivity`` at its default takes the solve's own
     values, :func:`gsim.tcad.silicon.intrinsic_density_cm3` at the
-    junction's temperature and
-    :data:`gsim.tcad.silicon.SILICON_RELATIVE_PERMITTIVITY`. Set them on
-    the junction to compare against other constants.
+    junction's temperature and the sweep's
+    ``semiconductor_permittivity``. Set them on the junction to compare
+    against other constants.
 
     Args:
         junction: Depletion-model parameters of the same junction.
@@ -123,7 +123,7 @@ def compare_capacitance(
     """
     solver_constants = {
         "ni_cm3": intrinsic_density_cm3(junction.temperature_k),
-        "permittivity": SILICON_RELATIVE_PERMITTIVITY,
+        "permittivity": sweep.semiconductor_permittivity,
     }
     junction = junction.model_copy(
         update={

@@ -258,6 +258,21 @@ exist; without these Robin terms, both omit `WavePortPEC`. A later `set_driven()
 call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
 updating other sweep options if you want to retain it.
 
+With wave ports, `DrivenSim` makes the outer wall of the 3D domain PEC
+(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself.
+Palace solves the port mode with PEC outer edges, so an absorbing wall makes the
+domain and the port mode disagree, which shows up as fake loss, reflection and
+mode conversion. To keep the absorbing wall, pass `absorbing_boundary=True`.
+Lumped-port-only runs stay absorbing by default. This applies to wave ports
+added with `add_wave_port()` and to those declared through
+`configure_wave_port()` component metadata.
+
+!!! note "Default change in 0.9.0"
+    Earlier releases left an unset `absorbing_boundary` absorbing even with wave
+    ports. The PEC default starts with 0.9.0. Saved
+    configurations and notebooks that relied on the old behavior should pass
+    `absorbing_boundary=True`.
+
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
 ## Result validation
@@ -501,6 +516,85 @@ searches are limited to 500 um; cross-layer gaps and arbitrary tapered or curved
 widths are not measured. These limitations make the estimate useful for choosing
 an initial mesh, rather than establishing simulation accuracy. Compare results
 across refinements before relying on resonance frequencies, Q, or S-parameters.
+
+### Reuse a mesh
+
+An eigenmode solve and driven sweeps of the same device can run on one mesh, so
+the resonances and the S-parameters come from the same discretization and Gmsh
+runs once. Mesh one simulation, then call `reuse_mesh` on the others instead of
+`mesh()`. Here `component` has lumped ports `o1` and `o2` on `topmetal2`, and
+each driven sweep excites one of them:
+
+```python
+from gsim.palace import DrivenSim, EigenmodeSim
+
+eigen = EigenmodeSim(absorbing_boundary=False)
+eigen.set_output_dir("./eigen")
+eigen.set_geometry(component)
+eigen.set_stack(substrate_thickness=2.0)
+eigen.add_port("o1", layer="topmetal2", length=5.0)
+eigen.add_port("o2", layer="topmetal2", length=5.0)
+eigen.set_eigenmode(num_modes=4, target=8e9)
+eigen.mesh(preset="default")
+
+for port in ("o1", "o2"):
+    driven = DrivenSim(absorbing_boundary=False)
+    driven.set_output_dir(f"./driven_{port}")
+    driven.add_port(port, layer="topmetal2", length=5.0, excited=True)
+    driven.reuse_mesh(eigen)  # copies the mesh; no Gmsh run
+    driven.set_driven(fmin=7e9, fmax=10e9)
+    driven.write_config()
+```
+
+The receiver copies the source's geometry, stack, airbox, PEC blocks, symmetry
+plane and port declarations. A port it declares itself, with the source's
+geometry, keeps its own excitation, impedance and R/L/C; the other ports keep
+the source's settings but are not excited, whatever the source excites. A
+driven receiver needs at least one port it excites itself, declared with
+`excited=True` or set on the copied port config. The
+solver settings and the outer wall stay per simulation: with
+`absorbing_boundary=False` the outer boundary is Palace's natural magnetic wall
+(PMC), which reflects. Each simulation needs its own output directory, neither
+the source's nor nested with it; `reuse_mesh` copies the `.msh` into it.
+
+The copy is a snapshot. Re-meshing or editing the source does not reach the
+receiver; call `reuse_mesh(source)` again to pick up the new mesh. The receiver's
+layout is a flat copy of the source's: same polygons and ports, no instances.
+
+The mesh fixes what it was built from: the layout polygons and component ports,
+the stack layers and dielectric regions, which materials are air-like, the
+airbox, PEC blocks, the symmetry plane and the port geometry (kind, layers,
+length, offset). Each `write_config()` of a receiver checks these and raises
+`ValueError` naming what changed. Undo the change, call `mesh()` on the
+receiver to mesh its current state, or call `reuse_mesh(source)` again.
+A stack from `set_stack(pdk_authoritative=True)` is rebuilt from the active PDK
+at each check. Activating another PDK is refused if it changes any of these
+inputs, or fails with the PDK's own error if the stack cannot be rebuilt. Its
+material values are free, like any other material value, and reach the config.
+
+A mesh made with `mesh(periodic_axis=...)` keeps its periodic faces out of the
+absorbing boundary, and only a Floquet eigenmode solve conditions them. A receiver
+with an absorbing outer wall (`absorbing_boundary=True`, or left unset without
+wave ports) and no Floquet solve is refused at `write_config()`, because those
+faces would reflect. Use `absorbing_boundary=False`, a Floquet
+eigenmode, or `mesh()` on the receiver.
+On a receiver that already holds a reused mesh, `reuse_mesh` takes the port
+geometry and kind back from the source: each port the source declares keeps the
+receiver's excitation, impedance and R/L/C, and ports the source lacks are
+dropped. On a receiver without a reused mesh, a declared port that does not
+match the source is refused instead.
+Port settings, solver settings, mesh sizes and material values (permittivity,
+loss tangent, conductor conductivity) stay free. The receiver's `mesh_config`
+holds the settings the source's mesh was made with, after presets and
+auto-sizing. The mesh was sized for the source's values, so check that it still resolves the new ones,
+for example against a fresh `mesh()`.
+
+Only driven and eigenmode simulations share meshes, in either direction.
+`ElectrostaticSim` and `BoundaryModeSim` raise `ValueError`, and a mesh file or
+`MeshResult` raises `TypeError`: a file alone has no physical-group or port
+mappings. See
+[`DrivenSim.reuse_mesh`][gsim.palace.driven.DrivenSim.reuse_mesh] and
+[`EigenmodeSim.reuse_mesh`][gsim.palace.eigenmode.EigenmodeSim.reuse_mesh].
 
 ## Nets
 

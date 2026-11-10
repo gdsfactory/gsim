@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from gsim.fdtd.api import PortSource
 from gsim.fdtd.mesh import generate_mesh
@@ -28,6 +29,7 @@ class VisualizationMixin(RuntimeConfigMixin):
     geometry: Geometry
     _resolved: ResolvedPassivePcell | None
     _last_artifacts: SimulationArtifacts | None
+    _last_artifacts_domain: dict[str, Any] | None
 
     def _resolve_geometry(self) -> ResolvedPassivePcell:
         """Resolve the geometry supplied by the concrete simulation."""
@@ -79,19 +81,17 @@ class VisualizationMixin(RuntimeConfigMixin):
         if isinstance(self.source, PortSource) and self.source.port is not None:
             self._selected_port_name()
         self._validate_explicit_domain_contents()
+        self._validate_monitor_regions()
         materials = self._material_snapshots()
         vertical_ports = self._vertical_port_configs(materials)
         if position_um is None:
-            normal_axis = "xyz".index(axis)
-            position_um = (
-                resolved.bounds[0][normal_axis] + resolved.bounds[1][normal_axis]
-            ) / 2
+            position_um = cast(float, self._default_slice_position(axis, None))
         with TemporaryDirectory(prefix="gsim-fdtd-slice-") as directory:
             mesh_path = Path(directory) / "mesh.msh"
             manifest = generate_mesh(
                 resolved,
                 mesh_path,
-                background_material=self.materials.background,
+                background_material=self._background_material_name,
                 padding=self.domain.padding,
                 padding_x=self.domain.padding_x,
                 padding_y=self.domain.padding_y,
@@ -101,6 +101,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 x_bounds=self.domain.x_bounds,
                 y_bounds=self.domain.y_bounds,
                 z_bounds=self.domain.z_bounds,
+                clip_geometry=self.domain.clip_geometry,
             )
             return plot_mesh_slice(
                 mesh_path,
@@ -130,24 +131,34 @@ class VisualizationMixin(RuntimeConfigMixin):
         hide_groups: Sequence[str] = (),
         zoom_to_cursor: bool = True,
         height: int = 600,
+        use_pdk_styles: bool = False,
     ) -> Any:
-        """Render the current or a temporary mesh with the FDTD viewer."""
+        """Render a fresh temporary mesh without changing saved run artifacts."""
+        from gsim.fdtd.display import layer_group_styles
         from gsim.fdtd.viz import plot_mesh
 
-        if (
-            self._last_artifacts is not None
-            and self._last_artifacts.mesh_path.is_file()
-        ):
+        def render(mesh_path: Path) -> Any:
+            metadata_path = mesh_path.with_name("metadata.json")
+            grid_shape = None
+            if metadata_path.is_file():
+                metadata = json.loads(metadata_path.read_text(encoding="utf8"))
+                grid_shape = metadata["grid"]["cell_counts"]["total_cells_xyz"]
             return plot_mesh(
-                self._last_artifacts.mesh_path,
+                mesh_path,
                 mode=mode,
                 axis=axis,
-                position_um=position_um,
+                position_um=self._default_slice_position(axis, position_um)
+                if mode in {"slice", "mesh_slice"}
+                else position_um,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
+                group_styles=layer_group_styles(self._resolved)
+                if use_pdk_styles
+                else None,
                 zoom_to_cursor=zoom_to_cursor,
                 cell_size_nm=self.solver.cell_size_nm,
                 pml_cells=self.domain.pml_cells,
+                grid_shape=grid_shape,
                 height=height,
             )
 
@@ -155,18 +166,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         with TemporaryDirectory(prefix="gsim-fdtd-view-") as directory:
             try:
                 artifacts = self.write(directory)
-                return plot_mesh(
-                    artifacts.mesh_path,
-                    mode=mode,
-                    axis=axis,
-                    position_um=position_um,
-                    show_groups=show_groups,
-                    hide_groups=hide_groups,
-                    zoom_to_cursor=zoom_to_cursor,
-                    cell_size_nm=self.solver.cell_size_nm,
-                    pml_cells=self.domain.pml_cells,
-                    height=height,
-                )
+                return render(artifacts.mesh_path)
             finally:
                 self._last_artifacts = previous_artifacts
 
@@ -179,13 +179,26 @@ class VisualizationMixin(RuntimeConfigMixin):
         zoom_to_cursor: bool = True,
         height: int = 600,
     ) -> Any:
-        """Show the 3D geometry, optionally with Gmsh surface edges."""
+        """Show 3D geometry with PDK color, opacity and visibility defaults.
+
+        Stack info.color overrides named and physical layer-view colors. Named
+        stack views are preferred, then derived/source fill or frame colors.
+        Shared drawing colors for blanket films of distinct materials are
+        ambiguous and use the fallback palette. Color alpha does not
+        change opacity. Stack info.opacity controls surface opacity;
+        info.visible overrides layer-view visibility. Zero opacity starts a
+        layer hidden and becomes fully opaque when enabled in the viewer.
+        Explicit show_groups and
+        hide_groups take precedence over PDK visibility, with hide_groups
+        taking priority.
+        """
         return self._plot_viewer(
             mode="mesh" if show_mesh else "surface",
             show_groups=show_groups,
             hide_groups=hide_groups,
             zoom_to_cursor=zoom_to_cursor,
             height=height,
+            use_pdk_styles=True,
         )
 
     def plot_2d(
@@ -233,7 +246,6 @@ class VisualizationMixin(RuntimeConfigMixin):
     ) -> Any:
         """Show the legacy interactive cross-section with a movable slice plane."""
         validate_slice(axis, position_um)
-        position_um = self._default_slice_position(axis, position_um)
         return self._plot_viewer(
             mode="mesh_slice" if show_mesh else "slice",
             axis=axis,
@@ -251,5 +263,15 @@ class VisualizationMixin(RuntimeConfigMixin):
         if position_um is not None or self._resolved is None:
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
-        lower, upper = self.resolved.bounds
+        explicit_bounds = getattr(self.domain, f"{axis}_bounds")
+        lower, upper = (
+            getattr(self.resolved, "layout_bounds", None) or self.resolved.bounds
+        )
+        clipped_axes = getattr(self.resolved, "clipped_layers", {}).values()
+        if (
+            explicit_bounds is not None
+            and self.domain.clip_geometry
+            and any(axis in axes for axes in clipped_axes)
+        ):
+            return (explicit_bounds[0] + explicit_bounds[1]) / 2
         return (lower[axis_index] + upper[axis_index]) / 2

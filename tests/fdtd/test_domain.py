@@ -141,3 +141,43 @@ def test_asymmetric_mesh_and_vertical_source_share_domain_bounds(
     assert beam["region_min"] == pytest.approx([500, -500, 820])
     assert beam["region_max"] == pytest.approx([1500, 500, 820])
     assert document["monitors"][0]["region_min"][2] == pytest.approx(820)
+
+
+@pytest.mark.parametrize("spelling", ["Air", "air"])
+def test_air_ignores_unused_undercut_declaration(fdtd_pdk_module, spelling) -> None:
+    """Renaming an unused air level must not change the exported domain."""
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    resolved = simulation.geometry("straight")
+    stack = resolved.layer_stack.model_copy(deep=True)
+    stack.layers["undercut"] = stack.layers["core"].model_copy(
+        update={"material": spelling, "zmin": -8, "thickness": 8.22}
+    )
+    resolved = replace(resolved, layer_stack=stack)
+    expected = (0, -750, -500, 2000, 750, 720)
+    for background in ("Air", "air"):
+        assert background_bounds_nm(resolved, background, 0.5) == pytest.approx(
+            expected
+        )
+        explicit = background_bounds_nm(resolved, background, 0.5, z_bounds=(-1, 1))
+        assert explicit[2::3] == pytest.approx((-1000, 1000))
+
+
+def test_air_geometry_still_contributes_to_domain(fdtd_pdk_module) -> None:
+    simulation = fdtd.Simulation(pdk=fdtd_pdk_module)
+    resolved = simulation.geometry("straight")
+    stack = resolved.layer_stack.model_copy(deep=True)
+    stack.layers["core"] = stack.layers["core"].model_copy(
+        update={"material": "Air", "zmin": -2, "thickness": 2.22}
+    )
+    active_air = replace(
+        resolved.layers["core"], material="Air", zmin=-2, thickness=2.22
+    )
+    resolved = replace(
+        resolved,
+        layer_stack=stack,
+        layers={"core": active_air},
+        bounds=((0, -0.25, -2), (2, 0.25, 0.22)),
+    )
+    assert background_bounds_nm(resolved, "air", 0.5)[2::3] == pytest.approx(
+        (-2000, 220)
+    )

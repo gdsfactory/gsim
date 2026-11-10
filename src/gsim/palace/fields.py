@@ -271,11 +271,14 @@ def extract_boundary_cells(
 
 
 def _require_pyvista() -> Any:
-    """Import pyvista or raise a clear error."""
+    """Import pyvista for rendering or raise a clear error."""
     try:
         import pyvista as pv
     except Exception as exc:
         raise ImportError("pyvista is required for field visualization") from exc
+    from gsim.viz import _ensure_pyvista
+
+    _ensure_pyvista()
     return pv
 
 

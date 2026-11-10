@@ -11,7 +11,7 @@ from gsim.meep.simulation import _precompute_cross_section_geometry
 @pytest.mark.parametrize("orientation", [0, 90])
 @pytest.mark.parametrize("position", [False, True])
 @pytest.mark.parametrize("filtered", [False, True])
-def test_cross_section_blocks_ignore_air_and_zero_thickness_layers(
+def test_cross_section_blocks_preserve_drawn_air_and_ignore_zero_thickness(
     index_context, orientation, position, filtered
 ):
     stack, component = index_context
@@ -45,7 +45,12 @@ def test_cross_section_blocks_ignore_air_and_zero_thickness_layers(
     assert (result.cell_horizontal_span, result.cell_z_span) == (4, 2)
     core = next(block for block in result.blocks if block.material == "core")
     assert (core.horizontal_size, core.z_size, core.z_center) == (2, 1, 0.5)
-    assert all(block.material != "air" and block.z_size > 0 for block in result.blocks)
+    assert all(block.z_size > 0 for block in result.blocks)
+    air_blocks = [block for block in result.blocks if block.material == "air"]
+    assert bool(air_blocks) == (not filtered)
+    for block in air_blocks:
+        assert block.z_center - block.z_size / 2 == pytest.approx(0)
+        assert block.z_center + block.z_size / 2 == pytest.approx(1)
     assert any(block.material == "unlisted" for block in result.blocks) == (
         not filtered
     )
