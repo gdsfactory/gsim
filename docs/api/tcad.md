@@ -236,6 +236,12 @@ The size of the correction depends on the mesh. Measured:
   to 12.8 % and the reverse current by up to 19 %, and the capacitance moves closer to the depletion approximation.
   Carrier totals move by 0.2 %.
 
+This correction lands without a transition period and with no option to restore DEVSIM's own couples, because those
+give wrong answers on any mesh with obtuse triangles. It is planned for gsim 0.10.0. Up to 0.9.0, every device was
+assembled with DEVSIM's own couples and volumes. Anyone with saved `gsim.tcad` results (capacitance, currents,
+admittance) should rerun them: the same mesh and settings now give the corrected values. To reproduce an earlier
+result exactly, run it with gsim 0.9.0 or older.
+
 Signed couples can be negative on an edge whose opposite angles add up to more than 180°. The Scharfetter-Gummel flux
 takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to a monotone scheme. Node
 volumes can be negative too, on a node at the end of the long edge of strongly obtuse triangles: two 150° triangles
