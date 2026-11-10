@@ -28,6 +28,25 @@ def _inputs(tmp_path, solver="fdtd"):
     return metadata
 
 
+@pytest.mark.parametrize("estimate", [0, 5 * 1024**3, 2**64 - 1])
+def test_fdtd_sizing_keeps_cells_and_adds_monitor_memory(tmp_path, estimate):
+    metadata = _inputs(tmp_path)
+    metadata["memory"] = {"estimated_monitor_memory_bytes": estimate}
+    tmp_path.joinpath("metadata.json").write_text(json.dumps(metadata))
+    assert _cloud_submission.read_sizing_requirements(tmp_path, "fdtd") == {
+        "fdtd": {"cells": 60480960, "estimated_monitor_memory_bytes": estimate}
+    }
+
+
+@pytest.mark.parametrize("estimate", [-1, True, None, 1.5, "1024", 2**64])
+def test_fdtd_sizing_rejects_invalid_monitor_memory(tmp_path, estimate):
+    metadata = _inputs(tmp_path)
+    metadata["memory"] = {"estimated_monitor_memory_bytes": estimate}
+    tmp_path.joinpath("metadata.json").write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match="estimated_monitor_memory_bytes"):
+        _cloud_submission.read_sizing_requirements(tmp_path, "fdtd")
+
+
 @pytest.fixture
 def upload_transport(monkeypatch):
     recorded: dict[str, Any] = {
@@ -149,6 +168,28 @@ def test_package_sdk_layout_uses_existing_authentication(
     )
     assert gcloud.upload(tmp_path, "fdtd", verbose=False) == "submitted"
     assert len(upload_transport["prepare"]) == 1
+
+
+def test_fdtd_upload_forwards_monitor_memory_and_preserves_physics_hash(
+    tmp_path, upload_transport
+):
+    metadata = _inputs(tmp_path)
+    original_hash = hashing.compute_input_hash(tmp_path, "fdtd")
+    metadata["memory"] = {
+        "estimator_version": 1,
+        "estimated_monitor_memory_bytes": 4 * 1024**3,
+    }
+    tmp_path.joinpath("metadata.json").write_text(json.dumps(metadata))
+    assert gcloud.upload_simulation_dir(tmp_path, "fdtd").job_id == "submitted"
+    assert upload_transport["prepare"][0]["sizing_requirements"] == {
+        "fdtd": {
+            "cells": 60480960,
+            "estimated_monitor_memory_bytes": 4 * 1024**3,
+        }
+    }
+    assert hashing.compute_input_hash(tmp_path, "fdtd") == original_hash
+    with zipfile.ZipFile(BytesIO(upload_transport["archive"][0])) as archive:
+        assert json.loads(archive.read("metadata.json")) == metadata
 
 
 @pytest.mark.parametrize("solver", ["palace", "fdtd"])

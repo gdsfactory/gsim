@@ -23,7 +23,7 @@ def test_viewer_refreshes_domain_without_overwriting_saved_run(
     tmp_path, fdtd_pdk_module, previous_y_extent, new_y_extent
 ):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, default_port="o1")
-    simulation.materials(overrides={"Si": 3.5, "SiO2": 1.44})
+    simulation.materials(background="SiO2", overrides={"Si": 3.5, "SiO2": 1.44})
     simulation.geometry("straight", settings={"length": 2.0})
     simulation.domain(
         y_bounds=(-previous_y_extent, previous_y_extent), z_bounds=(-0.5, 0.5)
@@ -54,7 +54,7 @@ def test_viewer_refreshes_all_mesh_inputs(
     tmp_path, fdtd_pdk_module, monkeypatch, method, edit
 ):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, default_port="o1")
-    simulation.materials(overrides={"Si": 3.5, "SiO2": 1.44})
+    simulation.materials(background="SiO2", overrides={"Si": 3.5, "SiO2": 1.44})
     simulation.geometry("straight", settings={"length": 2.0})
     artifacts = simulation.write(tmp_path / "saved")
     saved_files = {path: path.read_bytes() for path in (tmp_path / "saved").iterdir()}

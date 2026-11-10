@@ -23,7 +23,7 @@ from gsim.palace.models.cross_section import (
     InterfaceSpec,
 )
 from gsim.palace.models.geometry import GeometryConfig
-from gsim.palace.models.mesh import MeshConfig
+from gsim.palace.models.mesh import MeshConfig, MeshGrading
 from gsim.palace.models.numerical import NumericalConfig, RefinementConfig
 from gsim.palace.models.pec import PECBlockConfig
 from gsim.palace.models.ports import (
@@ -77,6 +77,7 @@ __all__ = [
     "MagnetostaticSolverConfig",
     "MaterialConfig",
     "MeshConfig",
+    "MeshGrading",
     "NumericalConfig",
     "PECBlockConfig",
     "PortConfig",

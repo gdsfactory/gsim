@@ -20,11 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common import Geometry, LayerStack
 from gsim.common.cloud import CloudJobMixin
+from gsim.palace._mesh_reuse import PORT_LISTS
 from gsim.palace.models import (
     CPWPortConfig,
     ImpedanceBoundaryConfig,
     MaterialConfig,
     MeshConfig,
+    MeshGrading,
     PortConfig,
     RefinementConfig,
     SymmetryPlaneConfig,
@@ -47,6 +49,7 @@ if TYPE_CHECKING:
 
     from gdsfactory.component import Component
 
+    from gsim.palace._mesh_fingerprint import PortDeclaration
     from gsim.palace.mesh.geometry import GeometryData
     from gsim.palace.mesh.nets import Nets
     from gsim.palace.ports.config import PalacePort
@@ -177,6 +180,192 @@ def _wrote_solver_output(postpro_dir: Path) -> bool:
     )
 
 
+# set_stack options only the PDK-authoritative path reads
+_PDK_AUTHORITATIVE_OPTIONS = frozenset(
+    {"pdk_authoritative", "dielectrics", "role_overrides", "use_pdk_overlay"}
+)
+
+
+def _resolve_pdk_authoritative_stack(
+    stack_kwargs: Mapping[str, Any],
+    materials: Mapping[str, MaterialConfig],
+    component: Any,
+    airbox_config: Mapping[str, Any] | None,
+) -> LayerStack:
+    """Build a stack directly from the PDK LayerStack (gsim#230).
+
+    No synthetic geometry and no silent material fallbacks. ``stack_kwargs`` is
+    only read: if resolution raises, a caller that follows the error's advice
+    (e.g. calls set_airbox() and retries) still resolves through this path.
+
+    Args:
+        stack_kwargs: Arguments recorded by ``set_stack``.
+        materials: Material overrides recorded by ``set_material``.
+        component: The gdsfactory component, or None.
+        airbox_config: The ``set_airbox`` settings, or None.
+
+    Returns:
+        LayerStack object for mesh generation
+
+    Raises:
+        ValueError: If the stack has no bulk dielectric region and no airbox
+            is configured.
+    """
+    from gsim.common.pdk import resolve_layer_stack
+    from gsim.common.stack.materials import MATERIAL_ALIASES
+    from gsim.palace.stack import build_palace_layer_stack
+
+    resolved = resolve_layer_stack(
+        component,
+        dielectrics=stack_kwargs.get("dielectrics"),
+        role_overrides=stack_kwargs.get("role_overrides"),
+        use_pdk_overlay=bool(stack_kwargs.get("use_pdk_overlay", True)),
+    )
+    canonical = build_palace_layer_stack(resolved)
+
+    # Apply material overrides to both canonical names and PDK tokens
+    # that resolve to them. Layers retain their original material token.
+    for name, props in materials.items():
+        target = MATERIAL_ALIASES.get(name.lower(), name.lower())
+        for token in canonical.materials:
+            if MATERIAL_ALIASES.get(token.lower(), token.lower()) == target:
+                canonical.materials[token] = props.to_dict()
+        canonical.materials[name] = props.to_dict()
+
+    # Keep stack free of synthetic air regions; Palace airboxes are
+    # generated explicitly from set_airbox().
+    canonical.dielectrics = [
+        d for d in canonical.dielectrics if str(d.get("material", "")).lower() != "air"
+    ]
+
+    if not canonical.dielectrics and not airbox_config:
+        raise ValueError(
+            "PDK-authoritative stack has no bulk dielectric region and "
+            "no airbox is configured, so Palace would fail with "
+            "'No dielectric volumes in mesh'. Pass "
+            "dielectrics=[...] to set_stack() or call set_airbox()."
+        )
+    if not canonical.dielectrics:
+        logger.warning(
+            "PDK-authoritative stack has no bulk dielectric region; the "
+            "domain background will be air only. Pass dielectrics=[...] "
+            "to set_stack() to model the BEOL/cladding."
+        )
+
+    return canonical
+
+
+def _flat_copy(component: Component) -> Component:
+    """A copy of a component that shares no cells with it.
+
+    ``Component.copy()`` duplicates the top cell only, so its instances still
+    point at the original child cells. Flattening the copy moves their polygons
+    into it, without merging them. The originals stay as they are.
+    """
+    copied = component.copy()
+    copied.kdb_cell.flatten(False)
+    return copied
+
+
+def _resolve_layer_stack(
+    stack: LayerStack | None,
+    stack_kwargs: Mapping[str, Any],
+    materials: Mapping[str, MaterialConfig],
+    *,
+    component: Any = None,
+    airbox_config: Mapping[str, Any] | None = None,
+) -> LayerStack:
+    """Resolve the layer stack from PDK, YAML, or custom object.
+
+    A prebuilt stack (``stack_kwargs`` marked ``_prebuilt``) is returned
+    as is, with the material overrides written into it in place. Otherwise
+    the stack is built from ``stack_kwargs``, the overrides are applied and
+    dielectric air regions are dropped. ``stack_kwargs`` is never modified.
+
+    Args:
+        stack: Stack given via ``set_stack(layer_stack)``, or None.
+        stack_kwargs: Arguments recorded by ``set_stack``.
+        materials: Material overrides recorded by ``set_material``.
+        component: The gdsfactory component, read by a PDK-authoritative stack.
+        airbox_config: The ``set_airbox`` settings, read by a PDK-authoritative
+            stack.
+
+    Returns:
+        LayerStack object for mesh generation
+    """
+    # If a custom stack was given via set_stack(layer_stack), use it
+    if stack is not None and stack_kwargs.get("_prebuilt"):
+        # Apply material overrides
+        for name, props in materials.items():
+            stack.materials[name] = props.to_dict()
+        return stack
+
+    if stack_kwargs.get("pdk_authoritative"):
+        return _resolve_pdk_authoritative_stack(
+            stack_kwargs, materials, component, airbox_config
+        )
+
+    from gsim.common.stack import get_stack
+
+    # The authoritative-only options must not reach the inferred extractor.
+    kwargs = {
+        k: v
+        for k, v in stack_kwargs.items()
+        if k != "yaml_path" and k not in _PDK_AUTHORITATIVE_OPTIONS
+    }
+    built = get_stack(yaml_path=stack_kwargs.get("yaml_path"), **kwargs)
+
+    # Apply material overrides
+    for name, props in materials.items():
+        built.materials[name] = props.to_dict()
+
+    # Keep stack free of synthetic air regions; Palace airboxes are
+    # generated explicitly from set_airbox().
+    built.dielectrics = [
+        d for d in built.dielectrics if str(d.get("material", "")).lower() != "air"
+    ]
+
+    return built
+
+
+def _all_ports(
+    port_lists: Mapping[str, Sequence[PortDeclaration]],
+) -> list[PortDeclaration]:
+    """Every port declaration of a sim's port lists, list after list."""
+    return [cfg for cfgs in port_lists.values() for cfg in cfgs]
+
+
+def _same_existing_folder(a: Path, b: Path) -> bool:
+    """Whether two existing paths are one folder, whatever the case rules."""
+    try:
+        return os.path.samefile(a, b)  # noqa: PTH121 - tests patch os.path.samefile
+    except OSError:
+        return False
+
+
+def _folder_relation(folder: Path, other: Path) -> str | None:
+    """How ``folder`` lies to ``other``: ``"is"``, ``"is inside"``, ``"contains"``.
+
+    Resolved paths are compared first. ``os.path.samefile`` then compares the
+    existing folders and their parents, in both directions, so ``./EIGEN`` is
+    ``./eigen`` on a case-insensitive file system. ``None`` if neither holds.
+    """
+    folder, other = folder.resolve(), other.resolve()
+    if folder == other:
+        return "is"
+    if folder.is_relative_to(other):
+        return "is inside"
+    if other.is_relative_to(folder):
+        return "contains"
+    if _same_existing_folder(folder, other):
+        return "is"
+    if any(_same_existing_folder(parent, other) for parent in folder.parents):
+        return "is inside"
+    if any(_same_existing_folder(parent, folder) for parent in other.parents):
+        return "contains"
+    return None
+
+
 class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -201,11 +390,13 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         _airbox_config: dict[str, Any]
         _pec_blocks: list
         _symmetry_planes: list[SymmetryPlaneConfig]
-        _hints: dict[str, Any]
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
         _configured_ports: bool
         _last_mesh_result: Any
+        _last_mesh_config: MeshConfig | None
         _last_ports: list
+        _mesh_fingerprint: dict[str, str] | None
+        _mesh_reused: bool
         # Declared by the sim classes that take 3D ports or terminals; a
         # boundary-mode sim has none, so these must not become fields.
         ports: list[PortConfig]
@@ -225,6 +416,31 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     ) -> list[Any] | None:
         """Terminals resolved to nets for the config; only net-mode sims have them."""
         return None
+
+    def _can_reuse_mesh(self) -> bool:
+        """Whether this sim can give its mesh to, or take one from, another sim."""
+        return False
+
+    def _current_mesh_fingerprint(self, stack: LayerStack) -> dict[str, str]:
+        """Fingerprint of the inputs that shape this sim's mesh, as they are now.
+
+        Args:
+            stack: The resolved layer stack.
+        """
+        from gsim.palace._mesh_fingerprint import mesh_inputs_fingerprint
+
+        return mesh_inputs_fingerprint(
+            component=self.geometry.component if self.geometry else None,
+            stack=stack,
+            airbox_config=self._airbox_config or {},
+            pec_blocks=self._pec_blocks,
+            symmetry_planes=self._symmetry_planes,
+            port_configs=_all_ports(self._port_lists()),
+        )
+
+    def _port_lists(self) -> dict[str, list[PortDeclaration]]:
+        """The declared ports by list: lumped, CPW, wave and two-terminal."""
+        return {kind: list(getattr(self, kind, None) or []) for kind in PORT_LISTS}
 
     # -------------------------------------------------------------------------
     # Output directory
@@ -954,112 +1170,30 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         Returns:
             LayerStack object for mesh generation
         """
-        # If a custom stack was given via set_stack(layer_stack), use it
-        if self.stack is not None and self._stack_kwargs.get("_prebuilt"):
-            # Apply material overrides
-            for name, props in self.materials.items():
-                self.stack.materials[name] = props.to_dict()
-            return self.stack
-
-        # PDK-authoritative path (gsim#230): build directly from the PDK
-        # LayerStack, with no synthetic geometry or silent material fallbacks.
-        # Read (do not pop) these options: if resolution raises, a caller that
-        # follows the error's advice (e.g. calls set_airbox() and retries) must
-        # still resolve through the authoritative path.
-        dielectrics = self._stack_kwargs.get("dielectrics")
-        role_overrides = self._stack_kwargs.get("role_overrides")
-        pdk_authoritative = bool(self._stack_kwargs.get("pdk_authoritative", False))
-        if pdk_authoritative:
-            from gsim.common.pdk import resolve_layer_stack
-            from gsim.palace.stack import build_palace_layer_stack
-
-            resolved = resolve_layer_stack(
-                self.component,
-                dielectrics=dielectrics,
-                role_overrides=role_overrides,
-                use_pdk_overlay=bool(self._stack_kwargs.get("use_pdk_overlay", True)),
-            )
-            canonical = build_palace_layer_stack(resolved)
-
-            # Apply material overrides to both canonical names and PDK tokens
-            # that resolve to them. Layers retain their original material token.
-            from gsim.common.stack.materials import MATERIAL_ALIASES
-
-            for name, props in self.materials.items():
-                target = MATERIAL_ALIASES.get(name.lower(), name.lower())
-                for token in canonical.materials:
-                    if MATERIAL_ALIASES.get(token.lower(), token.lower()) == target:
-                        canonical.materials[token] = props.to_dict()
-                canonical.materials[name] = props.to_dict()
-
-            # Keep stack free of synthetic air regions; Palace airboxes are
-            # generated explicitly from set_airbox().
-            canonical.dielectrics = [
-                d
-                for d in canonical.dielectrics
-                if str(d.get("material", "")).lower() != "air"
-            ]
-
-            has_airbox = bool(getattr(self, "_airbox_config", None))
-            if not canonical.dielectrics and not has_airbox:
-                raise ValueError(
-                    "PDK-authoritative stack has no bulk dielectric region and "
-                    "no airbox is configured, so Palace would fail with "
-                    "'No dielectric volumes in mesh'. Pass "
-                    "dielectrics=[...] to set_stack() or call set_airbox()."
-                )
-            if not canonical.dielectrics:
+        if not self._stack_kwargs.get("pdk_authoritative"):
+            # The authoritative-only options do not apply here: say so once.
+            dielectrics = self._stack_kwargs.pop("dielectrics", None)
+            role_overrides = self._stack_kwargs.pop("role_overrides", None)
+            self._stack_kwargs.pop("pdk_authoritative", None)
+            self._stack_kwargs.pop("use_pdk_overlay", None)
+            if dielectrics or role_overrides:
                 logger.warning(
-                    "PDK-authoritative stack has no bulk dielectric region; the "
-                    "domain background will be air only. Pass dielectrics=[...] "
-                    "to set_stack() to model the BEOL/cladding."
+                    "set_stack(dielectrics=/role_overrides=) only applies with "
+                    "pdk_authoritative=True; ignoring them."
                 )
 
-            self._stack_kwargs["pdk_authoritative"] = True
-            self._stack_kwargs["dielectrics"] = dielectrics
-            self._stack_kwargs["role_overrides"] = role_overrides
-            self._stack_kwargs["use_pdk_overlay"] = bool(
-                self._stack_kwargs.get("use_pdk_overlay", True)
-            )
-            self.stack = canonical
-            return canonical
-
-        # Legacy path: the authoritative-only options must not reach the
-        # inferred extractor.
-        dielectrics = self._stack_kwargs.pop("dielectrics", None)
-        role_overrides = self._stack_kwargs.pop("role_overrides", None)
-        self._stack_kwargs.pop("pdk_authoritative", None)
-        self._stack_kwargs.pop("use_pdk_overlay", None)
-        if dielectrics or role_overrides:
-            logger.warning(
-                "set_stack(dielectrics=/role_overrides=) only applies with "
-                "pdk_authoritative=True; ignoring them."
-            )
-
-        from gsim.common.stack import get_stack
-
-        yaml_path = self._stack_kwargs.pop("yaml_path", None)
-        legacy_stack = get_stack(yaml_path=yaml_path, **self._stack_kwargs)
-
-        # Restore yaml_path for potential re-resolution
-        self._stack_kwargs["yaml_path"] = yaml_path
-
-        # Apply material overrides
-        for name, props in self.materials.items():
-            legacy_stack.materials[name] = props.to_dict()
-
-        # Keep stack free of synthetic air regions; Palace airboxes are
-        # generated explicitly from set_airbox().
-        legacy_stack.dielectrics = [
-            d
-            for d in legacy_stack.dielectrics
-            if str(d.get("material", "")).lower() != "air"
-        ]
-
-        # Store the LayerStack
-        self.stack = legacy_stack
-
-        return legacy_stack
+        stack = _resolve_layer_stack(
+            self.stack,
+            self._stack_kwargs,
+            self.materials,
+            component=self.component,
+            airbox_config=self._airbox_config,
+        )
+        # A prebuilt stack comes back as the same object; store only a newly
+        # built one, so the prebuilt path triggers no assignment validation.
+        if stack is not self.stack:
+            self.stack = stack
+        return stack
 
     def nets(self) -> Nets:
         """Find the electrically connected conductor shapes of the geometry.
@@ -1129,6 +1263,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement_boxes: (
             list[tuple[float, float, float, float, float]] | None
         ) = None,
+        mesh_grading: MeshGrading | None = None,
         algorithm_3d: Literal["delaunay", "hxt"] | None = None,
         threads: int | None = None,
         surface_threads: int | None = None,
@@ -1231,6 +1366,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         mesh_config.high_order_order = existing_config.high_order_order
         mesh_config.high_order_optimize = existing_config.high_order_optimize
         mesh_config.refinement_boxes = list(existing_config.refinement_boxes)
+        mesh_config.mesh_grading = existing_config.mesh_grading
         mesh_config.algorithm_3d = existing_config.algorithm_3d
         mesh_config.threads = existing_config.threads
         mesh_config.surface_threads = existing_config.surface_threads
@@ -1278,6 +1414,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             mesh_config.high_order_optimize = high_order_optimize
         if refinement_boxes is not None:
             mesh_config.refinement_boxes = refinement_boxes
+        if mesh_grading is not None:
+            mesh_config.mesh_grading = mesh_grading
         if algorithm_3d is not None:
             mesh_config.algorithm_3d = algorithm_3d
         if threads is not None:
@@ -1963,6 +2101,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             high_order_order=mesh_config.high_order_order,
             high_order_optimize=mesh_config.high_order_optimize,
             refinement_boxes=mesh_config.refinement_boxes,
+            mesh_grading=mesh_config.mesh_grading,
             algorithm_3d=mesh_config.algorithm_3d,
             threads=mesh_config.threads,
             surface_threads=mesh_config.surface_threads,
@@ -1973,6 +2112,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # Store mesh_result for deferred config generation
         self._last_mesh_result = mesh_result
+        self._last_mesh_config = mesh_config.model_copy(deep=True)
         self._last_ports = ports
 
         return SimulationResult(
@@ -2248,6 +2388,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 high_order_order=mesh_config.high_order_order,
                 high_order_optimize=mesh_config.high_order_optimize,
                 refinement_boxes=mesh_config.refinement_boxes,
+                mesh_grading=mesh_config.mesh_grading,
                 algorithm_3d=mesh_config.algorithm_3d,
                 threads=mesh_config.threads,
                 surface_threads=mesh_config.surface_threads,
@@ -2293,6 +2434,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         refinement_boxes: (
             list[tuple[float, float, float, float, float]] | None
         ) = None,
+        mesh_grading: MeshGrading | None = None,
         algorithm_3d: Literal["delaunay", "hxt"] | None = None,
         threads: int | None = None,
         surface_threads: int | None = None,
@@ -2359,6 +2501,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 to an element size, each ``(h_min, h_max, z_min, z_max, size)``
                 in um. Refinement lines size the elements on them only; a box
                 holds the size over an area.
+            mesh_grading: Native-2D cross-section meshes only: a
+                :class:`~gsim.palace.models.MeshGrading` whose element size
+                grows from chosen features at a set rate per um, in place of
+                the fixed growth from every internal curve. Defaults to the
+                value in ``sim.mesh_config`` (``None``, the fixed growth).
             algorithm_3d: Gmsh 3D meshing algorithm, "delaunay" or "hxt".
             threads: Threads for 3D meshing (see ``MeshConfig``).
             surface_threads: Threads for 1D and 2D meshing. Above 1 the mesh
@@ -2412,6 +2559,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             high_order_order=high_order_order,
             high_order_optimize=high_order_optimize,
             refinement_boxes=refinement_boxes,
+            mesh_grading=mesh_grading,
             algorithm_3d=algorithm_3d,
             threads=threads,
             surface_threads=surface_threads,
@@ -2446,6 +2594,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             decimate_tolerance=decimate_tolerance,
             gmsh_verbosity=verbosity,
         )
+
+        # Record what the mesh was made from, after port configuration may
+        # have moved component ports, so a sim that reuses it can be checked.
+        if self._can_reuse_mesh():
+            self._mesh_fingerprint = self._current_mesh_fingerprint(stack)
+            self._mesh_reused = False
 
         # Without an airbox the absorbing boundary is applied straight to the
         # outer dielectric surface, often microns from the metal, where it acts
@@ -2489,6 +2643,420 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         return result
 
+    def reuse_mesh(self, source: PalaceSimMixin) -> SimulationResult:
+        """Take the mesh of another meshed simulation instead of meshing.
+
+        Driven and eigenmode simulations can share a mesh, in either
+        direction, so an eigenmode solve and driven sweeps with different
+        excitations run on one discretization. The call takes a snapshot of
+        the source: it copies the source's ``.msh`` into this simulation's
+        output directory, under the source's model name, and writes a new
+        ``metadata.json`` there. It never meshes, never writes to the source,
+        and keeps no link to it. To pick up a newer mesh of the source, call
+        ``reuse_mesh`` again. A later ``mesh()`` or ``reuse_mesh`` on this
+        simulation replaces the mesh.
+
+        Copied from the source, as independent copies that replace what this
+        simulation had: the geometry, the stack and its settings, the
+        material overrides, the airbox, the PEC blocks, the symmetry plane,
+        the mesh settings the source's mesh was made with (as
+        ``mesh_config``, after presets and auto-sizing) and the port
+        declarations. The geometry copy is flat:
+        it has the source's polygons and ports but no instances, so it shares
+        no cells with the source. Kept per simulation: the
+        simulation type, the solver and problem settings, the absorbing
+        boundary, refinement, impedance boundaries and the output directory.
+
+        Ports are matched by name. A port this simulation declared with the
+        source's kind and geometry keeps its own Port settings: excitation,
+        impedance, R/L/C and wave-port mode options. That is how a driven
+        simulation chooses its excited ports: declare them with
+        ``excited=True``, before or after this call, or set ``excited`` on
+        the copied port config. Every other source port is copied with the
+        source's settings except ``excited``, which is cleared, so this
+        simulation excites only the ports it chooses. A declared port of
+        another kind or geometry, or one the source does not declare, is
+        refused.
+
+        On a simulation that already holds a reused mesh, its ports came from
+        a source, so the call takes the Port geometry and kind back from the
+        source for every port instead: a port the source declares keeps this
+        simulation's Port settings, a port the source lacks is dropped.
+
+        Give each simulation its own output directory. The mesh fixes the
+        layout and component ports, the stack layers and dielectric regions,
+        which materials are air-like, the airbox, the PEC blocks, the
+        symmetry plane and the port geometry. Each ``write_config()`` checks
+        them first and raises ``ValueError`` naming what changed; call
+        ``mesh()`` on this simulation to mesh its current state, or
+        ``reuse_mesh(source)`` again to take the source's inputs back,
+        Port geometry included.
+        ``write_config()`` then re-applies the Port settings and validates
+        the configuration; a driven simulation needs at least one port with
+        ``excited=True``. Mesh sizes, Port settings,
+        solver settings and material values such as permittivity, loss
+        tangent and conductor conductivity can change freely; check that the
+        mesh still resolves the new values.
+
+        Args:
+            source: A meshed ``DrivenSim`` or ``EigenmodeSim``.
+
+        Returns:
+            SimulationResult of this simulation's mesh: its mesh path and
+            output directory, no config path, and copies of the source's port
+            info, mesh statistics and metadata.
+
+        Raises:
+            TypeError: If ``source`` is not a simulation, for example a mesh
+                file or a ``MeshResult``: a mesh file alone has no
+                physical-group or port mappings.
+            ValueError: If this simulation or the source is not a driven or
+                eigenmode simulation; if the source has no mesh, is this
+                simulation, or changed after its mesh was made; if no output
+                directory is set, or it is, contains or lies inside one of
+                the source's; if this simulation does not hold a reused mesh
+                and a declared port does not match the mesh; or if this is a
+                driven simulation and the mesh has no port surfaces.
+            FileNotFoundError: If the source's mesh file is missing.
+
+        Example:
+            ``eigen`` is an ``EigenmodeSim`` with lumped ports ``o1`` and
+            ``o2``, each declared with ``layer="topmetal2", length=5.0``. A
+            driven sweep excites ``o1`` on its mesh, with a reflecting outer
+            wall; ``o2`` is copied from ``eigen``, not excited.
+
+            >>> eigen.set_output_dir("./eigen")
+            >>> eigen.mesh(preset="default")
+            >>> driven = DrivenSim(absorbing_boundary=False)
+            >>> driven.set_output_dir("./driven")
+            >>> driven.add_port("o1", layer="topmetal2", length=5.0, excited=True)
+            >>> result = driven.reuse_mesh(eigen)
+            >>> driven.set_driven(fmin=7e9, fmax=10e9)
+            >>> driven.write_config()
+        """
+        import copy
+        import shutil
+
+        from gsim.palace._mesh_fingerprint import (
+            describe_changes,
+            mesh_inputs_fingerprint,
+        )
+        from gsim.palace._mesh_reuse import (
+            merge_port_declarations,
+            sync_port_settings,
+        )
+        from gsim.palace.mesh.generator import MeshResult
+        from gsim.palace.mesh.metadata import (
+            METADATA_FILENAME,
+            update_field_dofs,
+            write_metadata,
+        )
+
+        # 1. Every check, before anything changes
+        name = type(self).__name__
+        if not self._can_reuse_mesh():
+            raise ValueError(
+                f"This {name} cannot reuse a mesh; only driven and eigenmode "
+                f"simulations share meshes. Call mesh() on it instead."
+            )
+        if not isinstance(source, PalaceSimMixin):
+            raise TypeError(
+                "reuse_mesh() takes a meshed DrivenSim or EigenmodeSim, not a "
+                f"{type(source).__name__}: a mesh file alone has no "
+                "physical-group or port mappings."
+            )
+        source_name = type(source).__name__
+        if not source._can_reuse_mesh():
+            raise ValueError(
+                f"The mesh of the source {source_name} cannot be reused; only "
+                "driven and eigenmode simulations share meshes. Call mesh() on "
+                f"this {name} instead."
+            )
+        if not source.has_mesh:
+            raise ValueError(
+                f"The source {source_name} has no mesh. Call mesh() on it first."
+            )
+        if source is self:
+            raise ValueError(
+                f"This {name} cannot reuse its own mesh. Pass another meshed "
+                "simulation."
+            )
+        if self._output_dir is None:
+            raise ValueError("Output directory not set. Call set_output_dir() first.")
+
+        source_result = source._last_mesh_result
+        output_dir = Path(self._output_dir)
+        for folder in (source._output_dir, source_result.output_dir):
+            if folder is None:
+                continue
+            relation = _folder_relation(output_dir, Path(folder))
+            if relation is None:
+                continue
+            raise ValueError(
+                f"The output directory {output_dir} of this {name} {relation} "
+                f"the output directory {folder} of the source {source_name}. "
+                "Call set_output_dir() with a separate folder; reuse_mesh "
+                "copies the mesh into it."
+            )
+
+        source_mesh = Path(source_result.mesh_path)
+        if not source_mesh.is_file():
+            raise FileNotFoundError(
+                f"The mesh file {source_mesh} of the source {source_name} does "
+                "not exist. Call mesh() on the source again."
+            )
+
+        groups = source_result.groups or {}
+        if self.simulation_type == "driven" and not groups.get("port_surfaces"):
+            raise ValueError(
+                f"The mesh of the source {source_name} has no port surfaces, so "
+                f"this {name} would have no port to excite. Declare ports on the "
+                f"source and call mesh() on it again, or call mesh() on this "
+                f"{name}."
+            )
+
+        ports = merge_port_declarations(
+            source._port_lists(),
+            self._port_lists(),
+            source_name=source_name,
+            receiver_name=name,
+            take_geometry_back=self._mesh_reused,
+        )
+        port_configs = _all_ports(ports)
+
+        # 2. Independent copies of every mesh input, in locals
+        component = source.component
+        geometry = (
+            None if component is None else Geometry(component=_flat_copy(component))
+        )
+        stack = None if source.stack is None else source.stack.model_copy(deep=True)
+        stack_kwargs = copy.deepcopy(source._stack_kwargs)
+        materials = {k: v.model_copy(deep=True) for k, v in source.materials.items()}
+        airbox_config = copy.deepcopy(source._airbox_config)
+        # The settings the source's mesh was made with, so ``mesh_config``
+        # shows the receiver the sizes of the mesh it holds
+        mesh_config = (source._last_mesh_config or source.mesh_config).model_copy(
+            deep=True
+        )
+        pec_blocks = [block.model_copy(deep=True) for block in source._pec_blocks]
+        symmetry_planes = [p.model_copy(deep=True) for p in source._symmetry_planes]
+
+        last_ports = copy.deepcopy(source._last_ports)
+        port_info = copy.deepcopy(source_result.port_info)
+        sync_port_settings(
+            last_ports,
+            port_info,
+            port_configs,
+            simulation_type=self.simulation_type,
+        )
+        mesh_stats = copy.deepcopy(source_result.mesh_stats)
+        update_field_dofs(
+            mesh_stats,
+            field_order=self.solver.order if self.solver else 2,
+            problem_type=self.simulation_type,
+        )
+
+        # 3. The copies must still be what the source's mesh was made from
+        recorded = source._mesh_fingerprint
+        if recorded is None:
+            raise ValueError(
+                f"The source {source_name} has no record of the inputs its mesh "
+                "was made from. Call mesh() on it first."
+            )
+        component_copy = None if geometry is None else geometry.component
+        current = mesh_inputs_fingerprint(
+            component=component_copy,
+            stack=_resolve_layer_stack(
+                stack,
+                stack_kwargs,
+                materials,
+                component=component_copy,
+                airbox_config=airbox_config,
+            ),
+            airbox_config=airbox_config or {},
+            pec_blocks=pec_blocks,
+            symmetry_planes=symmetry_planes,
+            port_configs=port_configs,
+        )
+        if changes := describe_changes(recorded, current):
+            raise ValueError(
+                f"The source {source_name} changed after its mesh was made "
+                f"({', '.join(changes)}), so its mesh no longer matches it. "
+                "Call mesh() on the source again, or undo the change, before "
+                "reuse_mesh()."
+            )
+
+        # 4. Files: staged in this folder, then moved into place
+        mesh_path = output_dir / f"{source_result.model_name}.msh"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".reuse_mesh-", dir=output_dir))
+        try:
+            shutil.copy2(source_mesh, staging / mesh_path.name)
+            metadata = write_metadata(mesh_stats, staging, None)
+            # The mesh goes last, and a failure puts the metadata back, so the
+            # folder keeps the pair of files the receiver's state describes
+            metadata_path = output_dir / METADATA_FILENAME
+            previous_metadata = staging / f"previous-{METADATA_FILENAME}"
+            had_metadata = metadata_path.is_file()
+            if had_metadata:
+                shutil.copy2(metadata_path, previous_metadata)
+            (staging / METADATA_FILENAME).replace(metadata_path)
+            try:
+                (staging / mesh_path.name).replace(mesh_path)
+            except OSError:
+                if had_metadata:
+                    previous_metadata.replace(metadata_path)
+                else:
+                    metadata_path.unlink()
+                raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        mesh_result = MeshResult(
+            mesh_path=mesh_path,
+            config_path=None,
+            port_info=port_info,
+            mesh_stats=mesh_stats,
+            metadata=metadata,
+            groups=copy.deepcopy(source_result.groups),
+            output_dir=output_dir,
+            model_name=source_result.model_name,
+            fmax=source_result.fmax,
+            periodic_axis=source_result.periodic_axis,
+            periodic_translation=source_result.periodic_translation,
+            symmetry_plane=copy.deepcopy(source_result.symmetry_plane),
+        )
+
+        # 5. One assignment block; every value is a validated model already
+        self.geometry = geometry
+        self.stack = stack
+        self.materials = materials
+        self.mesh_config = mesh_config
+        self._last_mesh_config = mesh_config.model_copy(deep=True)
+        for kind, cfgs in ports.items():
+            setattr(self, kind, cfgs)
+        self._stack_kwargs = stack_kwargs
+        self._airbox_config = airbox_config
+        self._pec_blocks = pec_blocks
+        self._symmetry_planes = symmetry_planes
+        self._configured_ports = True
+        self._last_ports = last_ports
+        self._last_mesh_result = mesh_result
+        self._mesh_fingerprint = dict(recorded)
+        self._mesh_reused = True
+
+        logger.info(
+            "Reusing mesh of %s (%s): %s nodes \u00b7 %s tets",
+            source_name,
+            source_result.mesh_path,
+            f"{mesh_stats.get('nodes', 0):,}",
+            f"{mesh_stats.get('tetrahedra', 0):,}",
+        )
+
+        return SimulationResult(
+            mesh_path=mesh_path,
+            output_dir=output_dir,
+            config_path=None,
+            port_info=port_info,
+            mesh_stats=mesh_stats,
+            metadata=metadata,
+        )
+
+    def _check_reused_mesh(self, stack: LayerStack) -> None:
+        """Check that a reused mesh still holds this sim, and sync its ports.
+
+        Runs first in every ``write_config`` of a sim whose mesh came from
+        ``reuse_mesh``, in this order: the mesh inputs must equal the ones the
+        mesh was made from; the current Port settings are written into the
+        extracted ports; a periodic mesh must not leave its periodic faces
+        unconditioned beside an absorbing wall; the configuration must be
+        valid, as ``mesh()``
+        requires; and a driven sim must excite at least one port, each with
+        its surface in the mesh.
+
+        Args:
+            stack: The resolved layer stack.
+
+        Raises:
+            ValueError: If a mesh input changed after ``reuse_mesh``, a
+                periodic mesh is used with an absorbing wall and no Floquet
+                solve, the configuration is invalid, or a driven sim has no excited port
+                or excites a port without a surface in the mesh.
+        """
+        from gsim.palace._mesh_fingerprint import describe_changes
+        from gsim.palace._mesh_reuse import sync_port_settings
+
+        name = type(self).__name__
+        current = self._current_mesh_fingerprint(stack)
+        if changes := describe_changes(self._mesh_fingerprint or {}, current):
+            raise ValueError(
+                f"This {name} reuses a mesh, and its mesh inputs changed after "
+                f"reuse_mesh(): {', '.join(changes)}. A reused mesh cannot follow "
+                "geometry, stack, airbox, PEC, symmetry or Port geometry changes. "
+                "Undo the change, call mesh() to mesh this simulation from its "
+                "current state, or call reuse_mesh(source) again to take the "
+                "source's inputs back: every port gets the source's Port "
+                "geometry and keeps its Port settings, and ports the source "
+                "lacks are dropped. Port settings and solver settings can be "
+                "changed without a new mesh."
+            )
+
+        mesh_result = self._last_mesh_result
+        # set_periodic_mesh takes these faces out of the absorbing group, and
+        # only a Floquet eigenmode solve writes a Periodic block for them
+        eigenmode = self._get_problem_settings("eigenmode")
+        floquet = eigenmode is not None and eigenmode.floquet
+        # An unset absorbing_boundary is absorbing too, except with wave ports
+        absorbing = self._outer_wall()[0]
+        if mesh_result.periodic_axis and absorbing and not floquet:
+            raise ValueError(
+                f"This {name} reuses a mesh made with "
+                f"periodic_axis={mesh_result.periodic_axis!r}. Its periodic faces "
+                "are not in the absorbing boundary, so with an absorbing outer "
+                "wall and no Floquet solve they would reflect (PMC) instead of "
+                "absorbing. Use absorbing_boundary=False, a "
+                "Floquet eigenmode with set_eigenmode(floquet=True), or call "
+                "mesh() to mesh this simulation without a periodic axis."
+            )
+        sync_port_settings(
+            self._last_ports,
+            mesh_result.port_info,
+            _all_ports(self._port_lists()),
+            simulation_type=self.simulation_type,
+        )
+
+        validation = self.validate_config()
+        if not validation.valid:
+            raise ValueError("Invalid configuration:\n" + "\n".join(validation.errors))
+
+        if self.simulation_type != "driven":
+            return
+        surfaces = mesh_result.groups.get("port_surfaces") or {}
+        excited = [
+            (number, port.name)
+            for number, port in enumerate(self._last_ports, start=1)
+            if port.excited
+        ]
+        if not excited:
+            raise ValueError(
+                f"This {name} reuses a mesh but excites none of its ports; ports "
+                "copied from an eigenmode source are not excited. Declare the "
+                "port to excite on this simulation with excited=True and the "
+                "source's geometry (before or after reuse_mesh), or set "
+                "excited=True on its copied port config, for example "
+                "sim.ports[0].excited = True."
+            )
+        missing = [
+            (number, port) for number, port in excited if f"P{number}" not in surfaces
+        ]
+        if missing:
+            names = ", ".join(f"'{port}' (P{number})" for number, port in missing)
+            raise ValueError(
+                f"This {name} excites ports with no surface in the reused mesh: "
+                f"{names}. Set excited=False on them and excite a port of the "
+                "mesh, or call mesh() on this simulation."
+            )
+
     def _outer_wall(self, ports: list | None = None) -> tuple[bool, bool, bool]:
         """Resolve the outer wall as (absorbing, metallic, pec_by_default).
 
@@ -2511,6 +3079,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             return False, True, True
         return True, False, False
 
+    def _config_options(self) -> dict[str, Any]:
+        """Keyword arguments only this problem type gives the config generator."""
+        return {}
+
     def write_config(
         self,
         *,
@@ -2532,7 +3104,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             Path to the generated config.json
 
         Raises:
-            ValueError: If mesh() hasn't been called yet
+            ValueError: If mesh() hasn't been called yet. For a mesh taken
+                with reuse_mesh(), also if a mesh input changed since, a
+                periodic mesh is used with an absorbing wall and no Floquet
+                solve, the configuration is invalid, or a driven simulation
+                excites no port of the mesh.
 
         Example:
             >>> result = sim.mesh("./sim")
@@ -2558,13 +3134,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             )
 
         stack = self._resolve_stack()
+        if self._mesh_reused:
+            # A mesh from another sim: check it still fits, sync Port settings
+            self._check_reused_mesh(stack)
         electrostatic_config = self._get_problem_settings("electrostatic")
         terminals = getattr(self, "terminals", None)
 
-        # Thread impedance boundary configs through hints
-        hints = dict(self._hints)
-        if self._impedance_boundaries:
-            hints["_impedance_boundaries"] = self._impedance_boundaries
         absorbing, metallic, pec_default = self._outer_wall()
         # The automatic PEC default (pec_default) is a convenience: it only
         # applies where the mesh has an outer-boundary group to carry it. An
@@ -2574,8 +3149,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         has_outer = boundary_groups.get("absorbing") is not None
         if pec_default and not has_outer:
             metallic = False
-        if metallic:
-            hints["_metallic_boundaries"] = True
         if pec_default and not self._pec_default_noted:
             self._pec_default_noted = True
             if has_outer:
@@ -2591,22 +3164,6 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     "outer wall has nothing to attach to and no outer-wall "
                     "entry is written."
                 )
-        if getattr(self, "conductor_boundary", "conductivity") == "pec":
-            hints["_conductor_boundary"] = "pec"
-
-        # BoundaryMode voltage/impedance postprocessing paths. They do not
-        # affect the 2D eigenproblem; the boundary-mode sim declares them.
-        mode_postprocessing = getattr(self, "mode_postprocessing", None)
-        if mode_postprocessing is not None:
-            postprocessing = mode_postprocessing()
-            if postprocessing:
-                hints["_mode_postprocessing"] = postprocessing
-
-        # The 2D mesh of a cross-section has its own axes; the config
-        # generator writes material tensors in them (_to_section_frame).
-        cross_section = getattr(self, "cross_section", None)
-        if self.simulation_type == "boundarymode" and cross_section is not None:
-            hints["_cross_section_axis"] = cross_section.axis
 
         config_path = gen_write_config(
             mesh_result=self._last_mesh_result,
@@ -2620,10 +3177,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=absorbing,
             absorbing_order=self.absorbing_order,
-            hints=hints,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
+            impedance_boundaries=self._impedance_boundaries,
+            metallic_boundaries=metallic,
+            **self._config_options(),
             magnetostatic_config=self._get_problem_settings("magnetostatic"),
         )
 
@@ -3308,7 +3867,6 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _airbox_config: dict[str, Any] = PrivateAttr(default_factory=dict)
     _pec_blocks: list = PrivateAttr(default_factory=list)
     _symmetry_planes: list[SymmetryPlaneConfig] = PrivateAttr(default_factory=list)
-    _hints: dict[str, Any] = PrivateAttr(default_factory=dict)
     _impedance_boundaries: list[ImpedanceBoundaryConfig] = PrivateAttr(
         default_factory=list
     )
@@ -3318,4 +3876,10 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _configured_ports: bool = PrivateAttr(default=False)
     _pec_default_noted: bool = PrivateAttr(default=False)
     _last_mesh_result: Any = PrivateAttr(default=None)
+    # The mesh settings the last mesh was made with, after presets and
+    # auto-sizing; ``mesh_config`` holds only what the user set
+    _last_mesh_config: MeshConfig | None = PrivateAttr(default=None)
     _last_ports: list = PrivateAttr(default_factory=list)
+    # What the mesh was made from, and whether it came from another sim
+    _mesh_fingerprint: dict[str, str] | None = PrivateAttr(default=None)
+    _mesh_reused: bool = PrivateAttr(default=False)

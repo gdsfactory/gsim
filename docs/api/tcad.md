@@ -20,6 +20,35 @@ It brings `devsim` and `scipy-openblas32`, which gives DEVSIM a BLAS/LAPACK libr
 macOS it needs macOS 15 or later on Apple silicon, the only macOS wheel DEVSIM ships. `import gsim.tcad` works without
 DEVSIM; `solve()` and `sweep()` raise an error naming the extra.
 
+### BLAS/LAPACK library
+
+DEVSIM loads its BLAS/LAPACK library once, while it is first imported, from the file named by the `DEVSIM_MATH_LIBS`
+environment variable. You normally set nothing. Before gsim first imports DEVSIM it sets three variables, so DEVSIM uses the
+OpenBLAS that `scipy-openblas32` ships:
+
+- `DEVSIM_MATH_LIBS`: the first `libscipy_openblas*` shared library in the folder that `scipy_openblas32.get_lib_dir()`
+  returns (`.dll` on Windows, `.dylib` on macOS, `.so` otherwise).
+- `DEVSIM_BLAS_PREFIX`: `scipy_`.
+- `DEVSIM_BLAS_SUFFIX`: `_`.
+
+The prefix and suffix are there because `scipy-openblas32` exports its routines under prefixed names, such as `scipy_dgetrf_`.
+DEVSIM 2.11.1 and later looks each routine up as prefix + name + suffix.
+
+gsim leaves all three variables alone in these cases:
+
+- DEVSIM is already imported in the process, for example by your own `import devsim`.
+- `DEVSIM_MATH_LIBS` is already set. gsim then sets neither the prefix nor the suffix, so those two are yours to set when your
+  library exports prefixed or suffixed names.
+- `scipy-openblas32` is not installed, or its folder holds no `libscipy_openblas*` library. DEVSIM then runs its own
+  library discovery.
+
+If DEVSIM cannot find a BLAS/LAPACK library, gsim raises an `ImportError` that names these remedies. DEVSIM cannot initialise
+twice in one process, so restart Python (or the notebook kernel) after you change any of these variables.
+
+On Windows 11 with DEVSIM 2.11.2, a fresh process with only `DEVSIM_MATH_LIBS` set to scipy-openblas32's
+`libscipy_openblas.dll` also worked. If DEVSIM fails to initialise after you set `DEVSIM_MATH_LIBS` by hand, set
+`DEVSIM_BLAS_PREFIX=scipy_` and `DEVSIM_BLAS_SUFFIX=_` as well, the values gsim uses for this library.
+
 ## Configure and solve
 
 The simulation is set up by physical concern, like [`gsim.fdtd.Simulation`][gsim.fdtd.Simulation]:
@@ -70,13 +99,32 @@ their unit.
 - `domain(...)`: `plane` (`"x=<um>"` or `"y=<um>"`); `window` and `window_z`, `(min, max)` clips of the domain in µm;
   the airbox `margin_x`, `margin_y`, `z_above`, `z_below` in µm.
 - `materials(...)`: `temperature_k` (300 K); `semiconductor`, the DEVSIM material of the doped Regions (`"Silicon"`);
+  `semiconductor_permittivity`, the static relative permittivity of every doped Region (11.1, DEVSIM's value);
   `mobility`, a `MobilityModel` (Masetti silicon); `insulators`, Region to static relative permittivity.
 - `doping`: the doping profiles, with `add(profile)`, `remove(profile)`, `clear()`, iteration and `len()`.
 - `contacts`: `add(name=, semiconductor=, electrode=)`, `remove(name)`, `sim.contacts[name]`, iteration.
 - `interfaces`: `add(name=, region_a=, region_b=)`, `remove(name)`, `sim.interfaces[name]`, iteration.
-- `solver(...)`: mesh resolution (`mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `refinement_boxes`),
+- `solver(...)`: mesh resolution (`mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `refinement_boxes`,
+  `mesh_grading`),
   Newton convergence (`absolute_error`, `relative_error`, `max_iterations`, `bias_step_v`, `extended_precision`), the
   small-signal frequencies (`small_signal_freq_hz`, `junction_freq_hz`) and `claim_devsim_namespace`.
+
+Without grading, the mesh refines along every internal curve and the element size grows about 2 per µm from it, whatever
+the sizes set; a refinement box holds its size inside and steps to the surrounding size at its edge.
+`mesh_grading=MeshGrading(growth_per_um=0.25)` replaces that: the size is `refined_mesh_size_um` on the conductors and
+the declared Interfaces, and a box's own size inside each refinement box, and grows from them by `growth_per_um` per µm
+of distance up to `max_mesh_size_um`. `sources=` limits the features it grows from (`"conductors"`, `"junctions"`,
+`"fine_regions"`). A growth of 0.1 to 0.25 per µm keeps the oxide elements around a small section well shaped at a node
+count close to the ungraded mesh. Grading is off by default, so existing meshes and results do not change.
+
+`refined_mesh_size_um` does not set the same size in the two cases. Without grading, the elements on the internal curves
+are half of `refined_mesh_size_um`; with grading, the elements on the conductors and Interfaces are
+`refined_mesh_size_um` itself. To keep the same size at the contacts and the junction when you turn grading on, halve
+`refined_mesh_size_um`.
+
+A layer with a numeric `mesh_resolution` keeps that size with grading whatever `refined_mesh_size_um` is, as long as
+`"fine_regions"` is among the sources; without grading it gets its own size only when it is finer than
+`refined_mesh_size_um`. Any size above `max_mesh_size_um` is held at `max_mesh_size_um`.
 
 ### Doping
 
@@ -84,6 +132,9 @@ A profile names the mesh Region it applies to and its dopant type. `StepDoping` 
 `GaussianDoping` and `ImplantDoping` are analytic implants, `TableDoping` interpolates a sampled profile (a SIMS depth
 profile, a process simulator's output) and `CallableDoping` evaluates a function of `(x, y)` in µm. Profiles on the same
 Region add up; donors and acceptors compensate in the net doping and add up as scatterers in the mobility.
+Box and window edges, the implant surface and the ends of a zero-fill table are inclusive, with a 1e-9 µm slack that
+absorbs DEVSIM's µm to cm rounding. Two boxes on the same Region that abut therefore both dope the nodes on their shared
+edge, which then carry the sum; one box covering both dopes that edge once.
 
 ### Contacts, interfaces and insulators
 
@@ -92,7 +143,13 @@ Every Region of the device takes one role, and the declarations state it:
 - A **doped Region** carries at least one doping profile. It holds the potential and both carrier densities.
 - A **Contact** is where an electrode meets a doped Region: an ohmic contact whose bias the solve sets.
   `semiconductor` is the doped Region it injects into; `electrode` is the Region on the other side, the metal or any
-  Region that is neither doped nor insulating.
+  Region that is neither doped nor insulating. Where the Contact ends on another solved Region (an Interface to the
+  next doped Region, or the oxide), that Region's node touches the same metal and the Contact holds it too: a doped
+  Region's node as an ohmic contact of its own doping, an insulator's at the potential of the Contact's node beside it.
+  Its charge and current count towards the Contact. A node on another Contact's curve stays with that Contact, and a
+  node two Contacts reach at a shared end goes to the one declared first. Where the doping steps at the end, say a
+  contact implant beside a plus implant, each side is neutral at the metal's Fermi level, so the potential steps there
+  by the step's built-in voltage, `V_t ln(N_high/N_low)`: the drop a real high-low junction makes over a Debye length.
 - An **Interface** is where two doped Regions meet. Potential and carriers are continuous across it; it carries no bias.
   Declare one between every pair of touching doped Regions: two touching doped Regions without one are refused, since
   no carrier would cross between them.
@@ -149,10 +206,13 @@ comparison uses the solve's own silicon constants (below) for whatever the `PNJu
 
 ## Silicon constants
 
-The solve takes DEVSIM's silicon parameters, with one change: the intrinsic carrier density follows the temperature.
+The solve takes DEVSIM's silicon parameters, with two changes: the permittivity can be set, and the intrinsic carrier
+density follows the temperature.
 
-- **Permittivity:** static relative permittivity 11.1, DEVSIM's value
-  (`gsim.tcad.silicon.SILICON_RELATIVE_PERMITTIVITY`). The RF and optical stacks use 11.9 for silicon.
+- **Permittivity:** `materials.semiconductor_permittivity` sets the static relative permittivity of every doped Region.
+  It defaults to 11.1, DEVSIM's value (`gsim.tcad.silicon.SILICON_RELATIVE_PERMITTIVITY`), and does not reach the
+  insulators, which keep their own. A `BiasSweepResult` records the value it was solved with in
+  `semiconductor_permittivity`. The RF and optical stacks use 11.9 for silicon.
 - **Intrinsic density:** `n_i(T) = n_i(300 K) (T/300)^1.5 exp(E_g(300)/2kT_300 - E_g(T)/2kT)`, with Varshni's
   band gap and DEVSIM's `n_i(300 K) = 1e10` cm⁻³ (`gsim.tcad.silicon.intrinsic_density_cm3`). A 300 K solve is
   DEVSIM's own; away from 300 K the built-in voltage falls with temperature as it should.

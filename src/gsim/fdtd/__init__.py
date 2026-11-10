@@ -4,6 +4,7 @@ from gsim.fdtd.api import (
     DipoleSource,
     Domain,
     FiberMode,
+    Fields,
     GaussianBeamSource,
     Geometry,
     Heatmap,
@@ -17,10 +18,12 @@ from gsim.fdtd.api import (
     Solver,
 )
 from gsim.fdtd.config import FDTDConfig
+from gsim.fdtd.field_results import ComplexFieldResult, FieldCoordinates
 from gsim.fdtd.models import (
     FDTDArtifactError,
     FDTDConfigError,
     FDTDGeometryError,
+    GeometryClippingWarning,
     MeshManifest,
     SimulationArtifacts,
 )
@@ -52,6 +55,7 @@ def _parse_fdtd_result(run_result: RunResult) -> FDTDResult:
 register_result_parser("fdtd", _parse_fdtd_result)
 
 __all__ = [
+    "ComplexFieldResult",
     "ComplexTrace",
     "CouplingEfficiencyResult",
     "DipoleSource",
@@ -62,8 +66,11 @@ __all__ = [
     "FDTDGeometryError",
     "FDTDResult",
     "FiberMode",
+    "FieldCoordinates",
+    "Fields",
     "GaussianBeamSource",
     "Geometry",
+    "GeometryClippingWarning",
     "Heatmap",
     "HeatmapResult",
     "LineCurrentSource",

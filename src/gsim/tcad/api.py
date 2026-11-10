@@ -30,7 +30,9 @@ from gsim.common.carriers import MobilityModel
 from gsim.common.config import MutableModel
 from gsim.common.cross_section import parse_plane_spec
 from gsim.common.validation import AscendingInterval
+from gsim.palace.models.mesh import MeshGrading
 from gsim.tcad.doping import DopingProfile
+from gsim.tcad.silicon import SILICON_RELATIVE_PERMITTIVITY
 
 #: A refinement box ``(h_min, h_max, z_min, z_max, size)`` in um, held to
 #: ``size`` over its whole area.
@@ -143,6 +145,9 @@ class Materials(MutableModel):
     Attributes:
         temperature_k: Lattice temperature (K) of the silicon parameter set.
         semiconductor: DEVSIM material name given to the doped Regions.
+        semiconductor_permittivity: Static relative permittivity of every
+            doped Region, at least 1. The default, 11.1, is DEVSIM's silicon
+            value; the insulators keep their own.
         mobility: Low-field mobility against the total doping, evaluated
             node by node. DEVSIM's own silicon defaults are two constants
             whatever the doping, which misstates the series resistance of
@@ -157,6 +162,9 @@ class Materials(MutableModel):
 
     temperature_k: float = Field(default=300.0, gt=0.0)
     semiconductor: str = Field(default="Silicon", min_length=1)
+    semiconductor_permittivity: float = Field(
+        default=SILICON_RELATIVE_PERMITTIVITY, ge=1.0
+    )
     mobility: MobilityModel = Field(default_factory=MobilityModel.masetti_silicon)
     insulators: dict[str, PositiveFloat] = Field(default_factory=dict)
 
@@ -190,6 +198,7 @@ MESH_FIELDS: tuple[str, ...] = (
     "refined_mesh_size_um",
     "max_mesh_size_um",
     "refinement_boxes",
+    "mesh_grading",
 )
 
 
@@ -205,6 +214,18 @@ class Solver(MutableModel):
         refinement_boxes: Boxes ``(h_min, h_max, z_min, z_max, size)`` in
             um held to ``size`` over their whole area, e.g. where a
             depletion edge moves.
+        mesh_grading: A :class:`~gsim.palace.models.MeshGrading`: the
+            element size grows from the conductors, the declared
+            Interfaces and the refinement boxes at a set rate per um, in
+            place of the pipeline's fixed growth of about 2 per um from
+            every internal curve. ``None`` (default) keeps that growth. A
+            growth of 0.1 to 0.25 per um gives well-shaped elements in the
+            oxide around a small device at node counts close to the
+            default mesh, and with it the refinement boxes no longer have
+            to be nested by hand to grade the mesh. Without grading the
+            elements on the internal curves are half of
+            ``refined_mesh_size_um``; with grading the conductors and
+            Interfaces get ``refined_mesh_size_um`` itself.
         absolute_error: Newton absolute error target of ``devsim.solve``.
         relative_error: Newton relative error target of ``devsim.solve``.
             With extended precision the 2D drift-diffusion Newton reaches
@@ -230,6 +251,7 @@ class Solver(MutableModel):
     refined_mesh_size_um: PositiveFloat | None = None
     max_mesh_size_um: PositiveFloat | None = None
     refinement_boxes: list[RefinementBox] | None = None
+    mesh_grading: MeshGrading | None = None
 
     absolute_error: PositiveFloat = 1e10
     relative_error: PositiveFloat = 1e-6
@@ -287,7 +309,9 @@ class Contact(BaseModel):
     """Where an electrode meets a doped Region: an ohmic contact.
 
     The curve the two Regions share becomes a named line group on the
-    mesh, and DEVSIM drives the contact's bias there.
+    mesh, and DEVSIM drives the contact's bias there. Where the curve
+    ends on another solved Region (an Interface, or the oxide), that
+    Region's node touches the same metal and the contact holds it too.
 
     Attributes:
         name: Contact name, also its mesh group name (e.g. ``"anode"``).
@@ -442,6 +466,7 @@ __all__ = [
     "Interface",
     "Interfaces",
     "Materials",
+    "MeshGrading",
     "RefinementBox",
     "Solver",
     "TCADMesh",

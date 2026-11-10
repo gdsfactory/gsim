@@ -91,7 +91,7 @@ class VisualizationMixin(RuntimeConfigMixin):
             manifest = generate_mesh(
                 resolved,
                 mesh_path,
-                background_material=self.materials.background,
+                background_material=self._background_material_name,
                 padding=self.domain.padding,
                 padding_x=self.domain.padding_x,
                 padding_y=self.domain.padding_y,
@@ -179,11 +179,16 @@ class VisualizationMixin(RuntimeConfigMixin):
         zoom_to_cursor: bool = True,
         height: int = 600,
     ) -> Any:
-        """Show 3D geometry with PDK opacity and initial visibility defaults.
+        """Show 3D geometry with PDK color, opacity and visibility defaults.
 
-        Stack info.opacity controls surface opacity; info.visible overrides
-        layer-view visibility. Zero opacity starts a layer hidden and becomes
-        fully opaque when enabled in the viewer. Explicit show_groups and
+        Stack info.color overrides named and physical layer-view colors. Named
+        stack views are preferred, then derived/source fill or frame colors.
+        Shared drawing colors for blanket films of distinct materials are
+        ambiguous and use the fallback palette. Color alpha does not
+        change opacity. Stack info.opacity controls surface opacity;
+        info.visible overrides layer-view visibility. Zero opacity starts a
+        layer hidden and becomes fully opaque when enabled in the viewer.
+        Explicit show_groups and
         hide_groups take precedence over PDK visibility, with hide_groups
         taking priority.
         """
@@ -258,8 +263,15 @@ class VisualizationMixin(RuntimeConfigMixin):
         if position_um is not None or self._resolved is None:
             return position_um
         axis_index = {"x": 0, "y": 1, "z": 2}[axis]
-        if self.domain.clip_geometry:
-            bounds = self._background_bounds_nm()
-            return (bounds[axis_index] + bounds[axis_index + 3]) / 2000
-        lower, upper = self.resolved.bounds
+        explicit_bounds = getattr(self.domain, f"{axis}_bounds")
+        lower, upper = (
+            getattr(self.resolved, "layout_bounds", None) or self.resolved.bounds
+        )
+        clipped_axes = getattr(self.resolved, "clipped_layers", {}).values()
+        if (
+            explicit_bounds is not None
+            and self.domain.clip_geometry
+            and any(axis in axes for axes in clipped_axes)
+        ):
+            return (explicit_bounds[0] + explicit_bounds[1]) / 2
         return (lower[axis_index] + upper[axis_index]) / 2

@@ -40,6 +40,7 @@ from gsim.tcad.api import (
     Interface,
     Interfaces,
     Materials,
+    MeshGrading,
     Solver,
     TCADMesh,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "Interface",
     "Interfaces",
     "Materials",
+    "MeshGrading",
     "MobilityModel",
     "Simulation",
     "Solver",

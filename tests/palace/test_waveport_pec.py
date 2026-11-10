@@ -81,7 +81,13 @@ def _lumped_ports() -> list[PalacePort]:
 
 
 def _generate(
-    tmp_path, groups, ports, *, hints=None, absorbing_boundary=True, driven=None
+    tmp_path,
+    groups,
+    ports,
+    *,
+    impedance_boundaries=None,
+    absorbing_boundary=True,
+    driven=None,
 ):
     config_path = generate_palace_config(
         groups=groups,
@@ -94,25 +100,29 @@ def _generate(
         simulation_type="driven",
         absorbing_boundary=absorbing_boundary,
         driven_config=driven,
-        hints=hints,
+        impedance_boundaries=impedance_boundaries,
     )
     return json.loads(config_path.read_text())
 
 
 class TestWavePortPEC:
     def test_inherit_keeps_all_physical_boundaries(self, tmp_path):
-        hints = {
-            "_impedance_boundaries": [
-                ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)
-            ]
-        }
+        impedance = [ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)]
         default = _generate(
-            tmp_path, _groups(), _wave_ports(), hints=hints, driven=DrivenConfig()
+            tmp_path,
+            _groups(),
+            _wave_ports(),
+            impedance_boundaries=impedance,
+            driven=DrivenConfig(),
         )
         sim = DrivenSim()
         sim.set_driven(waveport_boundary="inherit")
         inherited = _generate(
-            tmp_path, _groups(), _wave_ports(), hints=hints, driven=sim.driven
+            tmp_path,
+            _groups(),
+            _wave_ports(),
+            impedance_boundaries=impedance,
+            driven=sim.driven,
         )
         assert default["Boundaries"].pop("WavePortPEC") == {
             "Attributes": [4, 5, 8, 12, 20]
@@ -147,12 +157,10 @@ class TestWavePortPEC:
         assert "WavePortPEC" not in config["Boundaries"]
 
     def test_includes_impedance_attributes(self, tmp_path):
-        hints = {
-            "_impedance_boundaries": [
-                ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)
-            ]
-        }
-        config = _generate(tmp_path, _groups(), _wave_ports(), hints=hints)
+        impedance = [ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)]
+        config = _generate(
+            tmp_path, _groups(), _wave_ports(), impedance_boundaries=impedance
+        )
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12, 20]}
 
     def test_not_emitted_when_no_robin_boundaries(self, tmp_path):

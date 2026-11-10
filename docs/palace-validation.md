@@ -1,5 +1,8 @@
 # Validate Palace result evidence
 
+This page is about checking the solver evidence of a run you made. It does not compare results with analytic, measured or
+published references.
+
 [`validate_solution`][gsim.palace.validation.validate_solution] reports core solver convergence, optional error
 estimation, adaptive sampling, process exit and OOM evidence, mode checks, and input provenance independently. A zero
 exit code does not establish physical validity. The function reads supplied evidence and never changes tolerances or
@@ -146,6 +149,8 @@ result.mesh_stats["gmsh_options"]["Mesh.MaxNumThreads2D"]
 Equal hashes mean the same nodes (to 1e-4 um) and the same elements in each physical group. Compare hashes only between
 runs with the same Gmsh version on the same kind of host; the stats do not record the host. A different hash under
 reproducible settings points at a change in the geometry, the mesh settings or the Gmsh build.
+To run a second driven or eigenmode simulation on the identical mesh without relying on Gmsh being deterministic, give it
+the first one's mesh with [`reuse_mesh`](api/palace.md#reuse-a-mesh).
 
 ## Evidence and limits
 

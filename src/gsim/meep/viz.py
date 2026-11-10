@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from gsim.common.geometry_model import GeometryModel
     from gsim.meep.models.config import DomainConfig, MaterialData
 
+from gsim.meep.layer_order import order_by_mesh_order
 
 # ---------------------------------------------------------------------------
 # Geometry model construction
@@ -121,7 +122,7 @@ def crop_geometry_model(
     # on layers alone would shrink the bbox to just the patterned geometry
     # (e.g. 0-0.22 um), causing PML to sit on the core.
     z_vals: list[float] = []
-    for layer in stack.layers.values():
+    for layer in order_by_mesh_order(stack.layers.values()):
         z_vals.extend((layer.zmin, layer.zmax))
     for diel in stack.dielectrics:
         z_vals.extend((diel["zmin"], diel["zmax"]))
@@ -285,9 +286,7 @@ def build_cross_section_rectangles(
         raise ValueError(f"slice_axis must be 'x' or 'y', got {slice_axis!r}")
 
     rectangles: list[dict[str, Any]] = []
-    for layer in stack.layers.values():
-        if layer.material == "air":
-            continue
+    for layer in order_by_mesh_order(stack.layers.values()):
         gds_layer = layer.gds_layer
         if gds_layer is None:
             continue

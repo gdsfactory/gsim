@@ -145,7 +145,8 @@ def port_mode_reference_voltages(
                 volts[i, k] = voltage_line_integral(
                     field, paths[name], nsamples=nsamples, tol_um=tol_um
                 )
-        references.append(volts * _UM)
+        volts *= _UM
+        references.append(volts)
     return references
 
 
