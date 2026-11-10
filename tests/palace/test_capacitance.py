@@ -296,6 +296,34 @@ def test_each_problem_is_reported(change, expected) -> None:
     assert any(expected in text for text in problems), problems
 
 
+def test_a_floating_pair_skips_the_inverse_check() -> None:
+    """Two plates with nothing to ground: the Maxwell matrix is singular.
+
+    The rows sum to zero, so whatever Palace writes as the inverse cannot
+    invert it, and that is not a problem of the run.
+    """
+    plate = 179.7e-15
+    maxwell = np.array([[plate, -plate], [-plate, plate]])
+    voltage = np.ones(2)
+    cap = CapacitanceMatrices(
+        terminals=("MINUS", "PLUS"),
+        maxwell=maxwell,
+        mutual=np.array([[0.0, plate], [plate, 0.0]]),
+        inverse=np.array([[1.0, 0.5], [0.5, 1.0]]) * 1e15,
+        excitation_voltage=voltage,
+        stored_energy=0.5 * np.diag(maxwell) * voltage**2,
+    )
+    assert cap.problems() == []
+
+
+def test_a_nearly_floating_pair_still_checks_the_inverse() -> None:
+    """A small capacitance to ground, above the tolerance, keeps the check."""
+    plate, ground = 179.7e-15, 1e-15
+    maxwell = np.array([[plate + ground, -plate], [-plate, plate + ground]])
+    cap = replace(_from_maxwell(maxwell), inverse=np.eye(2) * 1e15)
+    assert any("does not invert" in text for text in cap.problems())
+
+
 @pytest.mark.parametrize(
     ("name", "label"),
     [

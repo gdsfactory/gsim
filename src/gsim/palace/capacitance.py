@@ -171,6 +171,10 @@ class CapacitanceMatrices:
         terminal has a negative capacitance to ground, that the mutual matrix
         follows from it, and, when Palace wrote them, that the inverse inverts
         it and that each excitation's stored energy is ``1/2 C[i][i] V**2``.
+        The inverse is not checked when the Maxwell matrix is singular within
+        ``rtol``: with no ground conductor and no grounded outer boundary, the
+        terminals have no capacitance to ground, every row sums to zero, and
+        no matrix inverts it.
         Only the first problem is reported when a value is not finite, since
         every other check is meaningless then.
 
@@ -244,7 +248,8 @@ class CapacitanceMatrices:
                 f"= -C_ij, diagonal = row sum): largest difference {mismatch:.3g} F"
             )
 
-        if self.inverse is not None:
+        singular = float(np.abs(np.linalg.eigvalsh((maxwell + maxwell.T) / 2)).min())
+        if self.inverse is not None and singular > tol:
             error = float(np.abs(maxwell @ self.inverse - np.eye(len(maxwell))).max())
             if error > rtol:
                 found.append(
