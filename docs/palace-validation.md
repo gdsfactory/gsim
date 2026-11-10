@@ -1,7 +1,7 @@
 # Validate Palace result evidence
 
-This page is about checking the solver evidence of a run you made. How gsim results compare with analytic, measured or published
-references belongs on a separate benchmarks page, which is not published yet.
+This page is about checking the solver evidence of a run you made. It does not compare results with analytic, measured or
+published references.
 
 [`validate_solution`][gsim.palace.validation.validate_solution] reports core solver convergence, optional error
 estimation, adaptive sampling, process exit and OOM evidence, mode checks, and input provenance independently. A zero
