@@ -78,7 +78,7 @@ class SolverSettingsMixin:
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] | None = None,
         preconditioner: Literal["Default", "AMS", "BoomerAMG"] | None = None,
         device: Literal["CPU", "GPU"] = _DEFAULT_SOLVER.device,
-        mg_max_levels: int = _DEFAULT_SOLVER.linear.mg_max_levels,
+        mg_max_levels: int | None = None,
         pc_mat_real: bool = _DEFAULT_SOLVER.linear.pc_mat_real,
         complex_coarse_solve: bool = _DEFAULT_SOLVER.linear.complex_coarse_solve,
         estimator_tolerance: float | None = None,
@@ -90,7 +90,8 @@ class SolverSettingsMixin:
         Defaults match the simulation constructor: order 2, 400 iterations,
         and CPU. Tolerance, backend and preconditioner left as None take the
         simulation class's own linear defaults: complex MUMPS multigrid at 1e-6
-        (1e-9 for eigenmode), or AMS at 1e-8 for magnetostatic. Error
+        (1e-9 for eigenmode), or AMS at 1e-8 for magnetostatic. Multigrid
+        levels left as None are 100, or 1 for boundary-mode. Error
         estimator controls left as None are chosen by AMR state. Set individual
         controls directly through ``sim.solver`` to retain other common values.
 
@@ -114,7 +115,11 @@ class SolverSettingsMixin:
                         if preconditioner is None
                         else preconditioner
                     ),
-                    mg_max_levels=mg_max_levels,
+                    mg_max_levels=(
+                        defaults.mg_max_levels
+                        if mg_max_levels is None
+                        else mg_max_levels
+                    ),
                     pc_mat_real=pc_mat_real,
                     complex_coarse_solve=complex_coarse_solve,
                     estimator_tolerance=estimator_tolerance,
@@ -133,7 +138,7 @@ class SolverSettingsMixin:
         solver_type: Literal["Default", "SuperLU", "STRUMPACK", "MUMPS"] | None = None,
         preconditioner: Literal["Default", "AMS", "BoomerAMG"] | None = None,
         device: Literal["CPU", "GPU"] = _DEFAULT_SOLVER.device,
-        mg_max_levels: int = _DEFAULT_SOLVER.linear.mg_max_levels,
+        mg_max_levels: int | None = None,
         pc_mat_real: bool = _DEFAULT_SOLVER.linear.pc_mat_real,
         complex_coarse_solve: bool = _DEFAULT_SOLVER.linear.complex_coarse_solve,
     ) -> None:

@@ -25,7 +25,11 @@ sim.solver.eigenmode.save = 2
 The linear tolerance controls each linear solve. The eigenmode tolerance controls
 eigenvalue convergence. They are independent. All Palace simulation types default
 to **GMRES with complex MUMPS multigrid**, field order **2**, **400** maximum linear
-iterations, and `"CPU"`. Linear tolerance defaults to **1e-6**, except for
+iterations, and `"CPU"`. The exception is `BoundaryModeSim`, which defaults
+`mg_max_levels` to **1** (multigrid off): Palace's geometric multigrid gives wrong
+losses for 2D boundary-mode problems with conductivity or impedance boundaries
+([awslabs/palace#1177](https://github.com/awslabs/palace/issues/1177)). An explicit
+`mg_max_levels` is kept. Linear tolerance defaults to **1e-6**, except for
 `EigenmodeSim`, whose linear and eigenvalue tolerances both default to **1e-9**.
 `MagnetostaticSim` is the exception to the solver: its curl-curl operator is singular, so
 it defaults to Palace's iterative choice, the **AMS** preconditioner with **conjugate
@@ -40,7 +44,7 @@ The configurable multigrid and error estimator controls live under `sim.solver.l
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `solver_type` | `"MUMPS"` | Coarse solver backend; `"Default"` asks Palace to choose. |
-| `mg_max_levels` | `100` | Maximum multigrid levels; Palace uses the available hierarchy. Set 1 for a full-system solve. |
+| `mg_max_levels` | `100` (`1` boundary mode) | Maximum multigrid levels; Palace uses the available hierarchy. Set 1 for a full-system solve. |
 | `pc_mat_real` | `False` | Set True to use a real approximation of the preconditioner matrix. |
 | `complex_coarse_solve` | `True` | Use a complex coarse solve for complex-valued problems. |
 | `estimator_tolerance` | automatic: `1e-2` with AMR off, Palace's `1e-6` with AMR on | PCG tolerance of the error estimator (the AMR indicator). |
