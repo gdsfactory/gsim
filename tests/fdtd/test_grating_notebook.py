@@ -4,14 +4,78 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import matplotlib.pyplot as plt
 import meshio
 import nbformat
 import numpy as np
 import pytest
+from matplotlib.colors import SymLogNorm
 
 from gsim import fdtd
+
+
+@pytest.mark.parametrize("u_axis", ["x", "z"])
+def test_grating_field_plot_uses_recorded_physical_axes(u_axis, monkeypatch):
+    """A nonsquare analytic field must align with physical X/Z in either order."""
+    notebook_path = (
+        Path(__file__).resolve().parents[2]
+        / "nbs"
+        / "fdtd_focusing_grating_coupler_gpdk.ipynb"
+    )
+    notebook = nbformat.read(notebook_path, as_version=4)
+    source = next(
+        cell.source
+        for cell in notebook.cells
+        if "field_norm = SymLogNorm" in cell.source
+    )
+    monkeypatch.setattr(plt, "show", lambda: None)
+    x = np.array([2.0, 3.0, 4.0, 5.0])
+    z = np.array([-1.0, 0.0, 1.0])
+    physical = x[None, :] + 10 * z[:, None]
+    transposed = u_axis == "z"
+    coordinates = SimpleNamespace(
+        u_um=z if transposed else x,
+        v_um=x if transposed else z,
+        normal_position_um=0.0,
+    )
+    sample = SimpleNamespace(
+        wavelength_um=1.55,
+        coordinates=coordinates,
+        load=lambda: (physical.T if transposed else physical).astype(complex),
+    )
+    plane = SimpleNamespace(u_axis=u_axis, field=lambda *_args, **_kwargs: sample)
+    overlays = []
+    namespace: dict[str, Any] = {
+        "np": np,
+        "plt": plt,
+        "SymLogNorm": SymLogNorm,
+        "result": SimpleNamespace(monitors={"grating_side": plane}),
+        "simulation": SimpleNamespace(
+            plot_2d_static=lambda **kwargs: overlays.append(kwargs)
+        ),
+    }
+    try:
+        exec(compile(source, str(notebook_path), "exec"), namespace)  # noqa: S102
+        np.testing.assert_array_equal(namespace["x"], x)
+        np.testing.assert_array_equal(namespace["z"], z)
+        np.testing.assert_allclose(
+            namespace["image"].get_array(), physical / np.abs(physical).max()
+        )
+        assert namespace["axis"].get_xlim() == (x[0], x[-1])
+        assert namespace["axis"].get_ylim() == (z[0], z[-1])
+        assert overlays == [
+            {
+                "axis": "y",
+                "position_um": 0.0,
+                "ax": namespace["axis"],
+                "outline_only": True,
+            }
+        ]
+    finally:
+        plt.close(namespace.get("figure"))
 
 
 def test_grating_notebook_launches_guided_mode_and_captures_fiber_fields(tmp_path):
