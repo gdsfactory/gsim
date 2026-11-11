@@ -117,34 +117,36 @@ class TestAnalyticCrossCheck:
         assert width == pytest.approx(junction.w_um, rel=0.5)
 
 
-class TestParityWithChargeTransportSim:
-    """The concern-grouped API solves the same device as the setter API did.
+class TestReferenceSweep:
+    """Regression reference: the padded diode's sweep, solved by gsim.
 
-    Reference numbers from ``ChargeTransportSim`` on #298
-    (``feat/tcad-twmzm``), same device, same mesh settings, same biases.
-    Each Contact ends on the Interface to the rib; since the Contact holds
-    the rib's node there too, the reverse leakage is 0.2 % higher and
-    Re(Y) 3 % lower than those numbers, which left that node untied. The
-    capacitance and the carrier maps did not move.
+    Recorded with signed edge couples. The earlier ``ChargeTransportSim``
+    (#298) assembled with DEVSIM's own couples, which read obtuse
+    triangles wrong: its C was 10 % to 15 % above these values (signed
+    couples lower it by 9.3 % to 12.8 %), its reverse current up to 24 %
+    above, and its carrier sums within 0.2 %. Each Contact also holds the
+    rib's node where it ends on the Interface, which raises the reverse
+    current by 0.2 % and lowers Re(Y) by 4 % against a solve that left
+    that node untied.
     """
 
-    C_F_PER_CM = (5.457119288045399e-12, 4.105770096334684e-12, 3.3610442251991344e-12)
-    I_CATHODE_A_PER_CM = (0.0, -4.109476072641995e-15, -4.87800032090749e-15)
+    C_F_PER_CM = (4.947358481043972e-12, 3.578515613706044e-12, 2.929373295368441e-12)
+    I_CATHODE_A_PER_CM = (0.0, -3.537339177885073e-15, -3.933150312607743e-15)
     Y_S_PER_CM = (
-        7.13352575001484e-05 + 0.03428792450724963j,
-        3.8537161597591896e-05 + 0.02579724756667005j,
-        2.5180147443036465e-05 + 0.021118027348330445j,
+        6.470938642141968e-05 + 0.031085019339111085j,
+        3.242155054504931e-05 + 0.022484422150894873j,
+        2.1212269535416e-05 + 0.018405765238659295j,
     )
     N_NODES = 639
     ELECTRONS_SUM_CM3 = (
-        2.7794164626005203e20,
-        2.7416658783555882e20,
-        2.714170863614466e20,
+        2.7845711609212944e20,
+        2.745474466504581e20,
+        2.717844237021558e20,
     )
     HOLES_SUM_CM3 = (
-        2.7884171689711665e20,
-        2.7512049656009238e20,
-        2.7241141392524362e20,
+        2.7932762258659302e20,
+        2.7544611645204146e20,
+        2.7268334047103297e20,
     )
 
     def test_capacitance(self, solved_sweep):

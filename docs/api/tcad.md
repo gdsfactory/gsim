@@ -219,6 +219,42 @@ density follows the temperature.
 - **Temperature:** `materials.temperature_k` sets the thermal voltage, the intrinsic density and the SRH trap densities.
   The Masetti mobility is its 300 K fit at every temperature.
 
+## Edge couples and node volumes
+
+DEVSIM assembles its equations by finite boxes: each mesh edge carries a couple, the length of the boundary shared by
+its two nodes' boxes, and each node a volume. DEVSIM's own couples and volumes take the absolute cotangent of the angle
+opposite each edge, which is wrong on every obtuse triangle: the potential equation gains coupling it should not have,
+capacitance comes out too high and the node volumes of a Region add up to more than its area. gsim corrects this: each
+device is assembled with the signed cotangent couples and the node volumes that go with them, so the potential equation
+is the P1 finite-element Laplacian on any triangulation and the node volumes of each Region add up to its area.
+
+The size of the correction depends on the mesh. Measured:
+
+- A carriers-off capacitor on a mesh with obtuse triangles in both dielectrics now matches an independent P1
+  finite-element solve (scikit-fem) to 1e-14; DEVSIM's own couples read 35 % high on that mesh.
+- On the padded PN diode of the test suite (0, 0.5 and 1 V reverse bias), the small-signal capacitance falls by 9.3 %
+  to 12.8 % and the reverse current by up to 19 %, and the capacitance moves closer to the depletion approximation.
+  Carrier totals move by 0.2 %.
+
+This correction lands without a transition period and with no option to restore DEVSIM's own couples, because those
+give wrong answers on any mesh with obtuse triangles. It is planned for gsim 0.10.0. Up to 0.9.0, every device was
+assembled with DEVSIM's own couples and volumes. Anyone with saved `gsim.tcad` results (capacitance, currents,
+admittance) should rerun them: the same mesh and settings now give the corrected values. To reproduce an earlier
+result exactly, run it with gsim 0.9.0 or older.
+
+Signed couples can be negative on an edge whose opposite angles add up to more than 180°. The Scharfetter-Gummel flux
+takes them as they come; fewer obtuse triangles in the doped Regions keep the solve closer to a monotone scheme. Node
+volumes can be negative too, on a node at the end of the long edge of strongly obtuse triangles: two 150° triangles
+sharing their long edge of length `L` give each end of that edge `-0.18 L²`. A Region's volumes still add up to its
+area, but the space charge, recombination and stored charge of a node are weighted by its volume, so a negative volume
+flips their sign at that node. On a 1e17/1e17 cm⁻³ junction meshed with 640 triangles, from 0 to 2 V reverse:
+
+- With about 150 negative couples and no negative volume, the depletion width stays within 0.3 % of a right-angle mesh;
+  DEVSIM's own couples read 1.5 % to 3.4 % low.
+- With strongly obtuse triangles (about 180 negative couples and 3 to 7 negative volumes), it stays within a few
+  percent, depending on the mesh: 0.2 % to 9 % over twelve random meshes, not tied to the number of negative volumes.
+  DEVSIM's own couples read 17 % to 39 % low on the same meshes.
+
 ## Limits
 
 - DEVSIM keeps meshes, devices and its circuit in one process-wide namespace. By default each device setup claims it
@@ -227,3 +263,5 @@ density follows the temperature.
   doping-dependent mobility of `materials.mobility`. There is no field-dependent mobility (velocity saturation), no
   impact ionisation and no quantum correction.
 - Contacts, interfaces and insulators are declared, never inferred from the layer stack.
+- Strongly obtuse triangles in a doped Region can stop the Newton solve from converging with the signed couples, on
+  meshes where DEVSIM's own couples converge (to a less accurate answer). Keep such triangles out of doped Regions.
