@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -209,28 +208,27 @@ class VisualizationMixin(RuntimeConfigMixin):
         show_mesh: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show the HTML slice viewer through its deprecated original name.
+        ax: Axes | None = None,
+        cmap: str = "Blues",
+        legend: bool = True,
+        aspect: Literal["equal", "auto"] = "equal",
+        figsize: tuple[float, float] | None = None,
+    ) -> Axes:
+        """Plot a static Matplotlib cross-section, as with plot_2d_static().
 
-        Use plot_2d_interactive() for the same viewer and plot_2d_static() for
-        a Matplotlib cross-section. All original keywords remain supported.
+        Use plot_2d_interactive() for the HTML viewer with a movable slice.
         """
-        warnings.warn(
-            "plot_2d() is deprecated; use plot_2d_interactive() for the HTML "
-            "viewer or plot_2d_static() for a Matplotlib cross-section.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.plot_2d_interactive(
+        return self.plot_2d_static(
             axis=axis,
             position_um=position_um,
             show_mesh=show_mesh,
             show_groups=show_groups,
             hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
+            ax=ax,
+            cmap=cmap,
+            legend=legend,
+            aspect=aspect,
+            figsize=figsize,
         )
 
     def plot_2d_interactive(

@@ -21,7 +21,7 @@ from tests.fdtd.test_viz import _write_mesh
         {"height": 500, "zoom_to_cursor": False},
     ],
 )
-def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
+def test_explicit_interactive_plot_keeps_viewer_options(tmp_path, options, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
@@ -29,15 +29,14 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     monkeypatch.setattr(
         simulation, "write", lambda _directory: simulation._last_artifacts
     )
-    with pytest.warns(DeprecationWarning, match=r"plot_2d_interactive.*plot_2d_static"):
-        viewer = simulation.plot_2d(
-            axis="y",
-            position_um=0.25,
-            show_mesh=True,
-            show_groups=["core"],
-            hide_groups=["port_o2"],
-            **options,
-        )
+    viewer = simulation.plot_2d_interactive(
+        axis="y",
+        position_um=0.25,
+        show_mesh=True,
+        show_groups=["core"],
+        hide_groups=["port_o2"],
+        **options,
+    )
     assert isinstance(viewer, MeshViewer)
     assert '"mode":"mesh_slice"' in viewer.html
     assert '"axis":"y"' in viewer.html
@@ -47,11 +46,11 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     assert f'height="{options.get("height", 600)}"' in viewer._repr_html_()
     zoom = "true" if options.get("zoom_to_cursor", True) else "false"
     assert f'"zoomToCursor":{zoom}' in viewer.html
-    output = viewer.save(tmp_path / "legacy.html")
+    output = viewer.save(tmp_path / "interactive.html")
     assert output.read_text(encoding="utf8") == viewer.html
 
 
-def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
+def test_explicit_interactive_plot_keeps_default_slice_mode(tmp_path, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
@@ -59,8 +58,7 @@ def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(
         simulation, "write", lambda _directory: simulation._last_artifacts
     )
-    with pytest.warns(DeprecationWarning, match=r"plot_2d\(\) is deprecated"):
-        viewer = simulation.plot_2d()
+    viewer = simulation.plot_2d_interactive()
     assert isinstance(viewer, MeshViewer)
     assert '"mode":"slice"' in viewer.html
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -12,20 +13,34 @@ from matplotlib import pyplot as plt
 from matplotlib.cm import ScalarMappable
 from matplotlib.collections import PolyCollection
 from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.patches import Patch
+from matplotlib.path import Path as MatplotlibPath
+from shapely import get_parts, union_all
+from shapely.geometry import Polygon
+from shapely.geometry.polygon import orient
 
-from gsim.common.viz._matplotlib import add_bottom_legend
 from gsim.fdtd.mesh_sections import tetrahedron_section
 from gsim.fdtd.slice_overlay import draw_setup_overlay, pml_thickness_um
 from gsim.fdtd.viz import validate_slice
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
     from gsim.common.materials import MaterialSnapshot
     from gsim.fdtd.config import GaussianBeamConfig, PlaneMonitorConfig
-    from gsim.fdtd.models import MeshManifest
+    from gsim.fdtd.models import MeshGroup, MeshManifest
     from gsim.fdtd.visualization import VisualizationMixin
     from gsim.fdtd.viz import Axis
+
+
+@dataclass
+class _MaterialBatch:
+    """Consecutive equally colored groups that can share one material outline."""
+
+    groups: list[MeshGroup]
+    polygons: list[Any]
+    color: Any
 
 
 def _mesh_sections(mesh_path: Path, axis: int, position: float) -> dict[int, list[Any]]:
@@ -49,6 +64,64 @@ def _mesh_sections(mesh_path: Path, axis: int, position: float) -> dict[int, lis
             if polygon is not None:
                 sections.setdefault(int(tag), []).append(polygon)
     return sections
+
+
+def _material_paths(polygons: Sequence[Any]) -> list[MatplotlibPath]:
+    """Merge mesh cells so only material boundaries are antialiased."""
+    # Match the precision used by tetrahedron_section for shared intersections.
+    merged = union_all([Polygon(vertices) for vertices in polygons], grid_size=1e-12)
+    paths = []
+    for polygon in get_parts(merged):
+        if polygon.is_empty:
+            continue
+        # Opposite ring winding keeps holes transparent with nonzero path filling.
+        polygon = orient(polygon, sign=1)
+        rings = [polygon.exterior, *polygon.interiors]
+        paths.append(
+            MatplotlibPath.make_compound_path(
+                *[
+                    MatplotlibPath(np.asarray(ring.coords), closed=True)
+                    for ring in rings
+                ]
+            )
+        )
+    return paths
+
+
+def _add_slice_legend(
+    ax: Axes,
+    created_figure: Figure | None,
+    group_handles: Mapping[PolyCollection, list[Patch]],
+) -> None:
+    """Retain each physical group's legend entry after combining its fill."""
+    handles = []
+    for handle in ax.get_legend_handles_labels()[0]:
+        if isinstance(handle, PolyCollection) and handle in group_handles:
+            handles.extend(group_handles[handle])
+        else:
+            handles.append(handle)
+    if created_figure is not None:
+        unique_handles = {}
+        for handle in handles:
+            unique_handles.setdefault(str(handle.get_label()), handle)
+        if unique_handles:
+            created_figure.legend(
+                list(unique_handles.values()),
+                list(unique_handles),
+                loc="outside lower center",
+                ncols=min(4, len(unique_handles)),
+                fancybox=True,
+                framealpha=1,
+            )
+    elif handles:
+        ax.legend(
+            handles,
+            [str(handle.get_label()) for handle in handles],
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.2),
+            ncols=min(4, len(handles)),
+            framealpha=1,
+        )
 
 
 def plot_mesh_slice(
@@ -100,6 +173,7 @@ def plot_mesh_slice(
     created_figure = None
     if ax is None:
         created_figure, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+    batches: list[_MaterialBatch] = []
     for group in groups:
         if group.name in hide_groups or (
             show_groups is not None and group.name not in show_groups
@@ -108,19 +182,43 @@ def plot_mesh_slice(
         polygons = sections.get(group.physical_tag, [])
         if not polygons:
             continue
+        color = colormap(normalization(materials[group.material].refractive_index))
+        if not show_mesh and batches and batches[-1].color == color:
+            batches[-1].groups.append(group)
+            batches[-1].polygons.extend(polygons)
+        else:
+            batches.append(_MaterialBatch([group], list(polygons), color))
+    group_handles = {}
+    for batch in batches:
+        labels = [f"{group.name} ({group.material})" for group in batch.groups]
         collection = PolyCollection(
-            polygons,
-            facecolors=[
-                colormap(normalization(materials[group.material].refractive_index))
-            ],
+            batch.polygons if show_mesh else [],
+            facecolors=[batch.color],
             edgecolors="#444444" if show_mesh else "none",
             linewidths=0.35 if show_mesh else 0,
-            antialiaseds=show_mesh,
-            label=f"{group.name} ({group.material})",
-            # Rasterize the mesh so vector exports (SVG, PDF) stay small.
-            rasterized=True,
+            antialiaseds=True,
+            label=", ".join(labels),
+            # Detailed mesh overlays stay compact; material outlines stay vector.
+            rasterized=show_mesh,
         )
+        if not show_mesh:
+            # Shared edges must be antialiased once, including across groups.
+            paths = _material_paths(batch.polygons)
+            collection.set_verts_and_codes(
+                [path.vertices for path in paths],
+                # Matplotlib's stubs omit the outer sequence of code arrays.
+                [path.codes for path in paths],  # ty: ignore[invalid-argument-type]
+            )
         ax.add_collection(collection)
+        group_handles[collection] = [
+            Patch(
+                facecolor=batch.color,
+                edgecolor="#444444" if show_mesh else "none",
+                linewidth=0.35 if show_mesh else 0,
+                label=label,
+            )
+            for label in labels
+        ]
     plane_axes = [index for index in range(3) if index != normal_axis]
     draw_setup_overlay(
         ax,
@@ -146,14 +244,5 @@ def plot_mesh_slice(
         label=f"Refractive index n at \u03bb={simulation.source.wavelength_um:g} µm",
     )
     if legend:
-        if created_figure is not None:
-            add_bottom_legend(created_figure, ax)
-        else:
-            _, labels = ax.get_legend_handles_labels()
-            ax.legend(
-                loc="upper center",
-                bbox_to_anchor=(0.5, -0.2),
-                ncols=min(4, len(labels)),
-                framealpha=1,
-            )
+        _add_slice_legend(ax, created_figure, group_handles)
     return ax
