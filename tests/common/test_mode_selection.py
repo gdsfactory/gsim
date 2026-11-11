@@ -160,7 +160,7 @@ class TestIndexBound:
 
     def test_the_bound_is_on_the_magnitude(self):
         """A Mode at the bound stays; one just above it on |n_eff| goes."""
-        at_bound = 3.0 - 4.0j  # |n_eff| = 5
+        at_bound = 4.0 - 3.0j  # |n_eff| = 5, inside the loss bound
         assert propagating_modes([at_bound], max_index=5.0) == [at_bound]
         assert propagating_modes([at_bound], max_index=4.99) == []
 
