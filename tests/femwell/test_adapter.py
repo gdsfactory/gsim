@@ -6,6 +6,7 @@ import meshio
 import numpy as np
 import pytest
 
+from gsim.common.modes import select_line_mode
 from gsim.common.stack.extractor import Layer, LayerStack
 from gsim.common.stack.materials import MaterialProperties
 from gsim.femwell.adapter import (
@@ -155,11 +156,37 @@ class TestConductorIndexBound:
         bound = conductor_index_bound({"metal": eps_metal, "oxide": 3.9 + 0j})
         assert bound == pytest.approx(0.1 * abs(np.sqrt(eps_metal)))
 
-    def test_the_least_conductive_conductor_sets_it(self):
+    def test_the_least_conductive_strong_conductor_sets_it(self):
         bound = conductor_index_bound(
-            {"al": 1.0 - 6.8e8j, "si": 11.7 - 1.8e5j, "oxide": 3.9 + 0j}
+            {"al": 1.0 - 6.8e8j, "w": 1.0 - 3.3e8j, "oxide": 3.9 + 0j}
         )
-        assert bound == pytest.approx(0.1 * abs(np.sqrt(11.7 - 1.8e5j)))
+        assert bound == pytest.approx(0.1 * abs(np.sqrt(1.0 - 3.3e8j)))
+
+    def test_a_weak_conductor_alone_gives_no_bound(self):
+        """11.7-12j conducts, but 0.1|sqrt(eps)| = 0.41 is below the light line."""
+        with pytest.warns(UserWarning, match="skipped conductor"):
+            assert conductor_index_bound({"si": 11.7 - 12j, "oxide": 3.9 + 0j}) is None
+
+    def test_a_weak_conductor_does_not_lower_the_metal_bound(self):
+        """Doped silicon next to aluminium leaves the aluminium bound in place."""
+        eps = {"al": 1.0 - 6.8e8j, "si": 11.7 - 1000j, "oxide": 3.9 + 0j}
+        with pytest.warns(UserWarning, match="skipped conductor"):
+            bound = conductor_index_bound(eps)
+        assert bound == pytest.approx(0.1 * abs(np.sqrt(1.0 - 6.8e8j)))
+        line = 5.13 - 4.68j
+        assert select_line_mode([line, 2.5 - 0.01j], max_index=bound) == line
+
+    def test_the_margin_is_against_the_largest_dielectric_index(self):
+        """A conductor clears oxide by 10x but not silicon is skipped."""
+        eps_cond = 1.0 - 9e4j  # 0.1|sqrt(eps)| = 30
+        assert conductor_index_bound({"c": eps_cond, "ox": 3.9 + 0j}) == (
+            pytest.approx(30.0, rel=1e-4)
+        )
+        with pytest.warns(UserWarning, match="skipped conductor"):
+            assert (
+                conductor_index_bound({"c": eps_cond, "si": 11.7 + 0j, "ox": 3.9 + 0j})
+                is None
+            )
 
     def test_per_element_values(self):
         eps = np.array([3.9, 3.9, 1.0 - 6.8e8j, 3.9], dtype=complex)
@@ -177,6 +204,8 @@ class TestConductorIndexBound:
         assert default is not None
         assert conductor_index_bound(eps, fraction=0.5) == pytest.approx(5 * default)
 
-    def test_the_fraction_must_be_positive(self):
+    def test_the_fraction_and_margin_must_be_positive(self):
         with pytest.raises(ValueError, match="fraction"):
             conductor_index_bound({"metal": 1.0 - 6.8e8j}, fraction=0.0)
+        with pytest.raises(ValueError, match="margin"):
+            conductor_index_bound({"metal": 1.0 - 6.8e8j}, margin=0.0)

@@ -36,6 +36,7 @@ The sign convention is ``exp(+i omega t)``: lossy media have
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -217,6 +218,7 @@ def conductor_index_bound(
     epsilon: dict[str, complex] | ArrayLike,
     *,
     fraction: float = 0.1,
+    margin: float = 10.0,
 ) -> float | None:
     """Upper bound on ``|n_eff|`` that rejects Modes living inside a conductor.
 
@@ -232,34 +234,71 @@ def conductor_index_bound(
     order 1e-7 for an aluminium strip in oxide. Pass the bound returned
     here as ``max_index`` to ``select_line_mode``.
 
-    A region or element counts as a conductor when conduction dominates
-    its permittivity, ``|Im(eps)| > |Re(eps)|``.
+    A region or element is a conductor when conduction dominates its
+    permittivity, ``|Im(eps)| > |Re(eps)|``. That alone does not make
+    it a safe source for the bound: a weak conductor, such as moderately
+    doped silicon, has ``|sqrt(eps)|`` close to the indices a line Mode
+    can reach. A conductor sets the bound only when
+    ``fraction * |sqrt(eps)|`` is at least *margin* times the largest
+    ``|sqrt(eps)|`` of the other regions (and above the light line);
+    the others are skipped with a warning. A slow-wave line Mode can sit
+    several times above the dielectric index (3.5 times on an aluminium
+    strip in oxide at 1 GHz), hence the default margin of 10.
 
     Args:
         epsilon: The permittivity given to :func:`solve_modes`: either
             ``{region_name: eps}`` or per-element values.
-        fraction: Bound as a fraction of the smallest
-            ``|sqrt(eps)|`` over the conductors (default 0.1; spurious
-            metal Modes have been seen from 0.9 times that value up).
+        fraction: Bound as a fraction of a conductor's ``|sqrt(eps)|``
+            (default 0.1; spurious metal Modes have been seen from 0.9
+            times that value up).
+        margin: Smallest ratio between a conductor's bound and the
+            largest non-conductor index for the conductor to count
+            (default 10).
 
     Returns:
-        The bound, or ``None`` when no region is a conductor (no bound
-        is then needed from this source).
+        The smallest bound over the conductors that count, or ``None``
+        when none does (no bound is then given from this source).
 
     Raises:
-        ValueError: If *fraction* is not positive.
+        ValueError: If *fraction* or *margin* is not positive.
+
+    Warns:
+        UserWarning: When a conductor is skipped because its bound would
+            not clear the dielectric index by *margin*.
     """
     if fraction <= 0.0:
         raise ValueError(f"fraction must be positive, got {fraction}.")
+    if margin <= 0.0:
+        raise ValueError(f"margin must be positive, got {margin}.")
     values = (
         np.fromiter(epsilon.values(), dtype=np.complex128)
         if isinstance(epsilon, dict)
         else np.asarray(epsilon, dtype=np.complex128).ravel()
     )
-    conductors = values[np.abs(values.imag) > np.abs(values.real)]
-    if conductors.size == 0:
+    is_conductor = np.abs(values.imag) > np.abs(values.real)
+    if not is_conductor.any():
         return None
-    return float(fraction * np.sqrt(np.abs(conductors)).min())
+    dielectric = values[~is_conductor]
+    dielectric_index = (
+        float(np.sqrt(np.abs(dielectric)).max()) if dielectric.size else 1.0
+    )
+    floor = max(margin * dielectric_index, 1.0)
+    bounds = fraction * np.sqrt(np.abs(values[is_conductor]))
+    usable = bounds >= floor
+    if not usable.all():
+        skipped = np.unique(values[is_conductor][~usable])
+        shown = ", ".join(f"{eps:.4g}" for eps in skipped[:3])
+        more = f" and {skipped.size - 3} more" if skipped.size > 3 else ""
+        warnings.warn(
+            f"conductor_index_bound skipped conductor permittivity {shown}{more}: "
+            f"{fraction:g} * |sqrt(eps)| does not reach {margin:g} times the "
+            f"largest dielectric index ({dielectric_index:.4g}), so it cannot "
+            "tell a Mode inside it from the line Mode.",
+            stacklevel=2,
+        )
+    if not usable.any():
+        return None
+    return float(bounds[usable].min())
 
 
 def solve_modes(
