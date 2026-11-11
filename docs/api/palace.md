@@ -26,10 +26,11 @@ The linear tolerance controls each linear solve. The eigenmode tolerance control
 eigenvalue convergence. They are independent. All Palace simulation types default
 to **GMRES with complex MUMPS multigrid**, field order **2**, **400** maximum linear
 iterations, and `"CPU"`. The exception is `BoundaryModeSim`, which defaults
-`mg_max_levels` to **1** (multigrid off): Palace's geometric multigrid gives wrong
-losses for 2D boundary-mode problems with conductivity or impedance boundaries
-([awslabs/palace#1177](https://github.com/awslabs/palace/issues/1177)). An explicit
-`mg_max_levels` is kept. Linear tolerance defaults to **1e-6**, except for
+`mg_max_levels` to **1** (multigrid off) from 0.10.0: Palace's geometric multigrid
+gives wrong losses for 2D boundary-mode problems with conductivity or impedance
+boundaries ([awslabs/palace#1177](https://github.com/awslabs/palace/issues/1177)).
+An explicit `mg_max_levels` is kept; see
+[Boundary-mode multigrid default](#boundary-mode-multigrid-default-0100). Linear tolerance defaults to **1e-6**, except for
 `EigenmodeSim`, whose linear and eigenvalue tolerances both default to **1e-9**.
 `MagnetostaticSim` is the exception to the solver: its curl-curl operator is singular, so
 it defaults to Palace's iterative choice, the **AMS** preconditioner with **conjugate
@@ -192,6 +193,33 @@ version-dependent configuration switch.
 The `nsamples` settings on local field-integration routines such as
 `voltage_line_integral` remain available; they control Python-side quadrature,
 which is separate from Palace's path declarations.
+
+### Boundary-mode multigrid default (0.10.0)
+
+Before 0.10.0, `BoundaryModeSim` wrote `MGMaxLevels` **100**, like every other
+simulation type. The 0.10.0 feature release changes its default to **1**
+(multigrid off). It does not target a 0.9.x patch release. This is shorter than
+the usual warn-first transition because Palace's geometric multigrid gives wrong
+losses for 2D boundary-mode problems with conductivity or impedance boundaries
+([awslabs/palace#1177](https://github.com/awslabs/palace/issues/1177)), a
+correctness problem.
+
+Boundary-mode runs with lossy conductors or impedance boundaries can report
+different losses than before. The full-system solve can also take more memory
+and time. The new default applies on every path: `BoundaryModeSim`,
+`BoundaryModeSolverConfig`, `sim.set_solver(...)`, and the low-level `generate_mesh(...)` and
+`write_config(...)` with `simulation_type="boundarymode"` when no solver
+configuration is given or the one given leaves `mg_max_levels` unset. Settings
+that contain `mg_max_levels`, including saved ones, keep their value.
+
+To keep the old value, set it explicitly:
+
+```python
+from gsim.palace import BoundaryModeSim
+
+sim = BoundaryModeSim()
+sim.solver.linear.mg_max_levels = 100  # the pre-0.10.0 value
+```
 
 ### MUMPS behavior change
 
