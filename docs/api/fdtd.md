@@ -311,6 +311,19 @@ ax = sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
 ax.figure.savefig("cross_section.png", dpi=200, bbox_inches="tight")
 ```
 
+To overlay material boundaries on a field plot, pass its Matplotlib axes with
+`outline_only=True`. Boundaries follow the selected slice and material priority,
+including holes. Touching regions of the same material share one outline.
+This mode preserves existing axes limits, labels, aspect and colorbars, and adds
+no fills, setup annotations, legend or refractive-index colorbar.
+
+```python
+sim.plot_2d_static(axis="y", position_um=0, ax=field_ax, outline_only=True)
+```
+
+The same option is available on `plot_2d()`. Group filters remain available;
+`outline_only=True` cannot be combined with `show_mesh=True`.
+
 The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
 subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
 `aspect="auto"` to fill the axes, or `figsize=(8, 4)` to set the figure size.

@@ -11,7 +11,7 @@ import meshio
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.cm import ScalarMappable
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.colors import ListedColormap, Normalize
 from matplotlib.patches import Patch
 from matplotlib.path import Path as MatplotlibPath
@@ -26,6 +26,7 @@ from gsim.fdtd.viz import validate_slice
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
+    from shapely.geometry.base import BaseGeometry
 
     from gsim.common.materials import MaterialSnapshot
     from gsim.fdtd.config import GaussianBeamConfig, PlaneMonitorConfig
@@ -66,10 +67,15 @@ def _mesh_sections(mesh_path: Path, axis: int, position: float) -> dict[int, lis
     return sections
 
 
+def _merge_sections(polygons: Sequence[Any]) -> BaseGeometry:
+    """Merge tetrahedron sections with a consistent intersection precision."""
+    # Match the precision used by tetrahedron_section for shared intersections.
+    return union_all([Polygon(vertices) for vertices in polygons], grid_size=1e-12)
+
+
 def _material_paths(polygons: Sequence[Any]) -> list[MatplotlibPath]:
     """Merge mesh cells so only material boundaries are antialiased."""
-    # Match the precision used by tetrahedron_section for shared intersections.
-    merged = union_all([Polygon(vertices) for vertices in polygons], grid_size=1e-12)
+    merged = _merge_sections(polygons)
     paths = []
     for polygon in get_parts(merged):
         if polygon.is_empty:
@@ -86,6 +92,71 @@ def _material_paths(polygons: Sequence[Any]) -> list[MatplotlibPath]:
             )
         )
     return paths
+
+
+def _plot_material_outlines(
+    sections: Mapping[int, list[Any]],
+    groups: Sequence[MeshGroup],
+    lower: Any,
+    upper: Any,
+    *,
+    axis: Axis,
+    position_um: float,
+    ax: Axes | None,
+    aspect: Literal["equal", "auto"],
+    figsize: tuple[float, float] | None,
+) -> Axes:
+    """Draw visible material interfaces once, preserving supplied field axes."""
+    created_axes = ax is None
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+    covered = union_all([])
+    visible_materials: dict[str, list[BaseGeometry]] = {}
+    for group in reversed(groups):
+        polygons = sections.get(group.physical_tag, [])
+        if not polygons:
+            continue
+        region = _merge_sections(polygons)
+        visible = region.difference(covered)
+        if not visible.is_empty:
+            visible_materials.setdefault(group.material, []).append(visible)
+        covered = union_all([covered, region])
+    # Merge touching regions of the same material, then deduplicate interfaces
+    # shared by different materials. Hidden lower-priority edges stay hidden.
+    boundaries = [union_all(regions).boundary for regions in visible_materials.values()]
+    linework = union_all(boundaries)
+    segments = [
+        np.asarray(line.coords) for line in get_parts(linework) if not line.is_empty
+    ]
+    if segments:
+        zorder = (
+            max(
+                (artist.get_zorder() for artist in [*ax.collections, *ax.images]),
+                default=1,
+            )
+            + 1
+        )
+        ax.add_collection(
+            LineCollection(
+                segments,
+                colors="#444444",
+                linewidths=0.6,
+                zorder=zorder,
+                label="_nolegend_",
+            ),
+            autolim=False,
+        )
+    if created_axes:
+        plane_axes = [index for index in range(3) if index != "xyz".index(axis)]
+        ax.set(
+            xlim=(lower[plane_axes[0]], upper[plane_axes[0]]),
+            ylim=(lower[plane_axes[1]], upper[plane_axes[1]]),
+            xlabel=f"{'xyz'[plane_axes[0]]} (µm)",
+            ylabel=f"{'xyz'[plane_axes[1]]} (µm)",
+            title=f"FDTD · {axis} = {position_um:g} µm",
+            aspect=aspect,
+        )
+    return ax
 
 
 def _add_slice_legend(
@@ -133,6 +204,7 @@ def plot_mesh_slice(
     axis: Axis,
     position_um: float,
     show_mesh: bool = False,
+    outline_only: bool = False,
     show_groups: Sequence[str] | None = None,
     hide_groups: Sequence[str] = (),
     ax: Axes | None = None,
@@ -147,6 +219,8 @@ def plot_mesh_slice(
     validate_slice(axis, position_um)
     if aspect not in {"equal", "auto"}:
         raise ValueError("aspect must be 'equal' or 'auto'")
+    if outline_only and show_mesh:
+        raise ValueError("outline_only=True cannot be combined with show_mesh=True")
     normal_axis = "xyz".index(axis)
     lower = np.asarray(manifest.domain_min_nm) / 1000
     upper = np.asarray(manifest.domain_max_nm) / 1000
@@ -160,6 +234,23 @@ def plot_mesh_slice(
         {**manifest.volumes, **manifest.layers}.values(),
         key=lambda group: group.priority,
     )
+    if outline_only:
+        return _plot_material_outlines(
+            sections,
+            [
+                group
+                for group in groups
+                if group.name not in hide_groups
+                and (show_groups is None or group.name in show_groups)
+            ],
+            lower,
+            upper,
+            axis=axis,
+            position_um=position_um,
+            ax=ax,
+            aspect=aspect,
+            figsize=figsize,
+        )
     values = [1.0, *(material.refractive_index for material in materials.values())]
     minimum, maximum = min(values), max(values)
     if minimum == maximum:

@@ -48,6 +48,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         axis: Axis = "z",
         position_um: float | None = None,
         show_mesh: bool = False,
+        outline_only: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         ax: Axes | None = None,
@@ -70,12 +71,19 @@ class VisualizationMixin(RuntimeConfigMixin):
         Geometry is resolved afresh so edits to the setup are reflected. A
         temporary mesh is generated without writing run artifacts or requiring
         a selected source port.
+
+        Use outline_only=True to draw material boundaries over field data on
+        ax, without fills, setup annotations, a legend or an index colorbar.
+        Supplied axes retain their limits, labels, title and aspect. Group
+        filters still apply; outline_only cannot be combined with show_mesh.
         """
         from gsim.fdtd.slice_viz import plot_mesh_slice
 
         validate_slice(axis, position_um)
         if aspect not in {"equal", "auto"}:
             raise ValueError("aspect must be 'equal' or 'auto'")
+        if outline_only and show_mesh:
+            raise ValueError("outline_only=True cannot be combined with show_mesh=True")
         resolved = self._resolve_geometry()
         if isinstance(self.source, PortSource) and self.source.port is not None:
             self._selected_port_name()
@@ -110,6 +118,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 axis=axis,
                 position_um=position_um,
                 show_mesh=show_mesh,
+                outline_only=outline_only,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
                 ax=ax,
@@ -206,6 +215,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         axis: Axis = "z",
         position_um: float | None = None,
         show_mesh: bool = False,
+        outline_only: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         ax: Axes | None = None,
@@ -222,6 +232,7 @@ class VisualizationMixin(RuntimeConfigMixin):
             axis=axis,
             position_um=position_um,
             show_mesh=show_mesh,
+            outline_only=outline_only,
             show_groups=show_groups,
             hide_groups=hide_groups,
             ax=ax,
