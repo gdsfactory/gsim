@@ -407,8 +407,10 @@ To make setup examples easier to use, inspect and export, this default changes i
 Callers using `.html` or `.save()` should change
 their call to `plot_2d_interactive()` to retain the previous interactive behavior.
 Legacy `plot_2d(height=...)` or `plot_2d(zoom_to_cursor=...)` calls continue returning
-the HTML viewer with a `DeprecationWarning`; no removal of that compatibility path
-is scheduled. These viewer keywords cannot be mixed with static-only options
+the HTML viewer with a `DeprecationWarning`. Removal targets 0.12.0 or later,
+after two feature releases and at least three months since the first released
+warning in 0.10.0. If those conditions are not met, removal moves to a later feature
+release. These viewer keywords cannot be mixed with static-only options
 such as `ax` or `outline_only`. The explicit interactive method remains supported.
 For static exports, use
 `ax.figure.savefig(...)`; `ax`, `cmap`, `legend`, `aspect`, and `figsize` configure

@@ -276,6 +276,8 @@ class VisualizationMixin(RuntimeConfigMixin):
         Use plot_2d_interactive() for the HTML viewer with a movable slice.
         Legacy height or zoom_to_cursor arguments retain the HTML viewer with
         a DeprecationWarning; they cannot be combined with static-only options.
+        Their removal targets 0.12.0 or later, after at least three months since
+        the first released warning in 0.10.0.
         """
         if height is not None or zoom_to_cursor is not None:
             if (
@@ -295,7 +297,9 @@ class VisualizationMixin(RuntimeConfigMixin):
                 "The height and zoom_to_cursor viewer keywords "
                 "on plot_2d() are deprecated. "
                 "Use plot_2d_interactive() for the HTML viewer; "
-                "plot_2d() without viewer keywords now returns a Matplotlib Axes.",
+                "plot_2d() without viewer keywords now returns a Matplotlib Axes. "
+                "Removal targets 0.12.0 or later, after two feature releases and "
+                "at least three months since the first released warning in 0.10.0.",
                 DeprecationWarning,
                 stacklevel=2,
             )

@@ -83,7 +83,7 @@ def test_legacy_viewer_keywords_warn_and_keep_html_behavior(
     monkeypatch.setattr(
         simulation, "write", lambda _directory: simulation._last_artifacts
     )
-    with pytest.warns(DeprecationWarning, match="plot_2d_interactive"):
+    with pytest.warns(DeprecationWarning, match="plot_2d_interactive") as captured:
         viewer = simulation.plot_2d(
             axis="y",
             position_um=0.25,
@@ -92,6 +92,11 @@ def test_legacy_viewer_keywords_warn_and_keep_html_behavior(
             hide_groups=["port_o2"],
             **options,
         )
+    warning = str(captured[0].message)
+    assert "0.12.0 or later" in warning
+    assert "two feature releases" in warning
+    assert "at least three months" in warning
+    assert "first released warning in 0.10.0" in warning
     assert isinstance(viewer, MeshViewer)
     mode = "mesh_slice" if show_mesh else "slice"
     assert f'"mode":"{mode}"' in viewer.html
