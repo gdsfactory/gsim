@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from gsim.fdtd.api import PortSource
 from gsim.fdtd.mesh import generate_mesh
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from gsim.common.pdk import ResolvedPassivePcell
     from gsim.fdtd.api import Geometry
     from gsim.fdtd.models import SimulationArtifacts
+    from gsim.fdtd.viz import MeshViewer
 
 
 class VisualizationMixin(RuntimeConfigMixin):
@@ -49,6 +50,7 @@ class VisualizationMixin(RuntimeConfigMixin):
         axis: Axis = "z",
         position_um: float | None = None,
         show_mesh: bool = False,
+        outline_only: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
         ax: Axes | None = None,
@@ -71,12 +73,19 @@ class VisualizationMixin(RuntimeConfigMixin):
         Geometry is resolved afresh so edits to the setup are reflected. A
         temporary mesh is generated without writing run artifacts or requiring
         a selected source port.
+
+        Use outline_only=True to draw material boundaries over field data on
+        ax, without fills, setup annotations, a legend or an index colorbar.
+        Supplied axes retain their limits, labels, title and aspect. Group
+        filters still apply; outline_only cannot be combined with show_mesh.
         """
         from gsim.fdtd.slice_viz import plot_mesh_slice
 
         validate_slice(axis, position_um)
         if aspect not in {"equal", "auto"}:
             raise ValueError("aspect must be 'equal' or 'auto'")
+        if outline_only and show_mesh:
+            raise ValueError("outline_only=True cannot be combined with show_mesh=True")
         resolved = self._resolve_geometry()
         if isinstance(self.source, PortSource) and self.source.port is not None:
             self._selected_port_name()
@@ -111,6 +120,7 @@ class VisualizationMixin(RuntimeConfigMixin):
                 axis=axis,
                 position_um=position_um,
                 show_mesh=show_mesh,
+                outline_only=outline_only,
                 show_groups=show_groups,
                 hide_groups=hide_groups,
                 ax=ax,
@@ -201,36 +211,119 @@ class VisualizationMixin(RuntimeConfigMixin):
             use_pdk_styles=True,
         )
 
+    @overload
+    def plot_2d(
+        self,
+        *,
+        height: int,
+        zoom_to_cursor: bool | None = None,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+    ) -> MeshViewer: ...
+
+    @overload
+    def plot_2d(
+        self,
+        *,
+        zoom_to_cursor: bool,
+        height: int | None = None,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+    ) -> MeshViewer: ...
+
+    @overload
     def plot_2d(
         self,
         *,
         axis: Axis = "z",
         position_um: float | None = None,
         show_mesh: bool = False,
+        outline_only: bool = False,
         show_groups: Sequence[str] | None = None,
         hide_groups: Sequence[str] = (),
-        zoom_to_cursor: bool = True,
-        height: int = 600,
-    ) -> Any:
-        """Show the HTML slice viewer through its deprecated original name.
+        ax: Axes | None = None,
+        cmap: str = "Blues",
+        legend: bool = True,
+        aspect: Literal["equal", "auto"] = "equal",
+        figsize: tuple[float, float] | None = None,
+    ) -> Axes: ...
 
-        Use plot_2d_interactive() for the same viewer and plot_2d_static() for
-        a Matplotlib cross-section. All original keywords remain supported.
+    def plot_2d(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        outline_only: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        ax: Axes | None = None,
+        cmap: str = "Blues",
+        legend: bool = True,
+        aspect: Literal["equal", "auto"] = "equal",
+        figsize: tuple[float, float] | None = None,
+        height: int | None = None,
+        zoom_to_cursor: bool | None = None,
+    ) -> Axes | MeshViewer:
+        """Plot a static Matplotlib cross-section, as with plot_2d_static().
+
+        Use plot_2d_interactive() for the HTML viewer with a movable slice.
+        Legacy height or zoom_to_cursor arguments retain the HTML viewer with
+        a DeprecationWarning; they cannot be combined with static-only options.
+        Their removal targets 0.12.0 or later, after at least three months since
+        the first released warning in 0.10.0.
         """
-        warnings.warn(
-            "plot_2d() is deprecated; use plot_2d_interactive() for the HTML "
-            "viewer or plot_2d_static() for a Matplotlib cross-section.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.plot_2d_interactive(
+        if height is not None or zoom_to_cursor is not None:
+            if (
+                outline_only
+                or ax is not None
+                or cmap != "Blues"
+                or not legend
+                or aspect != "equal"
+                or figsize is not None
+            ):
+                raise TypeError(
+                    "Legacy viewer keywords cannot be combined "
+                    "with static plot options. "
+                    "Use plot_2d_static() or plot_2d_interactive() explicitly."
+                )
+            warnings.warn(
+                "The height and zoom_to_cursor viewer keywords "
+                "on plot_2d() are deprecated. "
+                "Use plot_2d_interactive() for the HTML viewer; "
+                "plot_2d() without viewer keywords now returns a Matplotlib Axes. "
+                "Removal targets 0.12.0 or later, after two feature releases and "
+                "at least three months since the first released warning in 0.10.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return self.plot_2d_interactive(
+                axis=axis,
+                position_um=position_um,
+                show_mesh=show_mesh,
+                show_groups=show_groups,
+                hide_groups=hide_groups,
+                height=600 if height is None else height,
+                zoom_to_cursor=True if zoom_to_cursor is None else zoom_to_cursor,
+            )
+        return self.plot_2d_static(
             axis=axis,
             position_um=position_um,
             show_mesh=show_mesh,
+            outline_only=outline_only,
             show_groups=show_groups,
             hide_groups=hide_groups,
-            zoom_to_cursor=zoom_to_cursor,
-            height=height,
+            ax=ax,
+            cmap=cmap,
+            legend=legend,
+            aspect=aspect,
+            figsize=figsize,
         )
 
     def plot_2d_interactive(

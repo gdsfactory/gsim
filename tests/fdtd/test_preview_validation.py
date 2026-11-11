@@ -21,7 +21,7 @@ from tests.fdtd.test_viz import _write_mesh
         {"height": 500, "zoom_to_cursor": False},
     ],
 )
-def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
+def test_explicit_interactive_plot_keeps_viewer_options(tmp_path, options, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
@@ -29,15 +29,14 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     monkeypatch.setattr(
         simulation, "write", lambda _directory: simulation._last_artifacts
     )
-    with pytest.warns(DeprecationWarning, match=r"plot_2d_interactive.*plot_2d_static"):
-        viewer = simulation.plot_2d(
-            axis="y",
-            position_um=0.25,
-            show_mesh=True,
-            show_groups=["core"],
-            hide_groups=["port_o2"],
-            **options,
-        )
+    viewer = simulation.plot_2d_interactive(
+        axis="y",
+        position_um=0.25,
+        show_mesh=True,
+        show_groups=["core"],
+        hide_groups=["port_o2"],
+        **options,
+    )
     assert isinstance(viewer, MeshViewer)
     assert '"mode":"mesh_slice"' in viewer.html
     assert '"axis":"y"' in viewer.html
@@ -47,11 +46,11 @@ def test_legacy_plot_2d_preserves_html_viewer(tmp_path, options, monkeypatch):
     assert f'height="{options.get("height", 600)}"' in viewer._repr_html_()
     zoom = "true" if options.get("zoom_to_cursor", True) else "false"
     assert f'"zoomToCursor":{zoom}' in viewer.html
-    output = viewer.save(tmp_path / "legacy.html")
+    output = viewer.save(tmp_path / "interactive.html")
     assert output.read_text(encoding="utf8") == viewer.html
 
 
-def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
+def test_explicit_interactive_plot_keeps_default_slice_mode(tmp_path, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._last_artifacts = SimpleNamespace(
         mesh_path=_write_mesh(tmp_path / "mesh.msh")
@@ -59,10 +58,78 @@ def test_legacy_plot_2d_keeps_default_slice_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(
         simulation, "write", lambda _directory: simulation._last_artifacts
     )
-    with pytest.warns(DeprecationWarning, match=r"plot_2d\(\) is deprecated"):
-        viewer = simulation.plot_2d()
+    viewer = simulation.plot_2d_interactive()
     assert isinstance(viewer, MeshViewer)
     assert '"mode":"slice"' in viewer.html
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"height": 500},
+        {"zoom_to_cursor": False},
+        {"zoom_to_cursor": True},
+        {"height": 500, "zoom_to_cursor": False},
+    ],
+)
+@pytest.mark.parametrize("show_mesh", [False, True])
+def test_legacy_viewer_keywords_warn_and_keep_html_behavior(
+    tmp_path, monkeypatch, options, show_mesh
+):
+    simulation = fdtd.Simulation()
+    cast(Any, simulation)._last_artifacts = SimpleNamespace(
+        mesh_path=_write_mesh(tmp_path / "mesh.msh")
+    )
+    monkeypatch.setattr(
+        simulation, "write", lambda _directory: simulation._last_artifacts
+    )
+    with pytest.warns(DeprecationWarning, match="plot_2d_interactive") as captured:
+        viewer = simulation.plot_2d(
+            axis="y",
+            position_um=0.25,
+            show_mesh=show_mesh,
+            show_groups=["core"],
+            hide_groups=["port_o2"],
+            **options,
+        )
+    warning = str(captured[0].message)
+    assert "0.12.0 or later" in warning
+    assert "two feature releases" in warning
+    assert "at least three months" in warning
+    assert "first released warning in 0.10.0" in warning
+    assert isinstance(viewer, MeshViewer)
+    mode = "mesh_slice" if show_mesh else "slice"
+    assert f'"mode":"{mode}"' in viewer.html
+    assert '"axis":"y"' in viewer.html
+    assert '"positionUm":0.25' in viewer.html
+    assert '"showGroups":["core"]' in viewer.html
+    assert '"hideGroups":["port_o2"]' in viewer.html
+    assert f'height="{options.get("height", 600)}"' in viewer._repr_html_()
+    zoom = "true" if options.get("zoom_to_cursor", True) else "false"
+    assert f'"zoomToCursor":{zoom}' in viewer.html
+
+
+@pytest.mark.parametrize(
+    "static_options",
+    [
+        {"outline_only": True},
+        {"ax": object()},
+        {"cmap": "viridis"},
+        {"legend": False},
+        {"aspect": "auto"},
+        {"figsize": (8, 3)},
+    ],
+)
+def test_legacy_viewer_keywords_reject_static_options_before_meshing(
+    monkeypatch, static_options
+):
+    from gsim.fdtd import visualization
+
+    monkeypatch.setattr(
+        visualization, "generate_mesh", lambda *_args, **_kwargs: pytest.fail("meshed")
+    )
+    with pytest.raises(TypeError, match="cannot be combined"):
+        fdtd.Simulation().plot_2d(height=500, **static_options)
 
 
 def test_static_preview_rejects_unknown_selected_port_before_meshing(

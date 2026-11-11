@@ -296,7 +296,8 @@ explicitly.
 
 ## Setup visualization
 
-`plot_2d_static()` produces a static Matplotlib cross-section, like the Meep setup view.
+`plot_2d()` produces a static Matplotlib cross-section, like the Meep setup view.
+`plot_2d_static()` remains available with the same behavior and arguments.
 Materials are colored by their real refractive index at the source center
 wavelength, with a colorbar, physical-domain boundary, hatched PML regions, and source
 and monitor annotations where they intersect the slice. The plot uses the FDTD
@@ -304,11 +305,24 @@ transfer mesh, including sidewalls and material priorities. All physical groups
 are shown by default; `show_groups` and `hide_groups` select physical group names.
 
 ```python
-ax = sim.plot_2d_static()                               # XY at geometry midpoint
-ax = sim.plot_2d_static(axis="z", position_um=0.11)      # XY at z = 0.11 µm
-ax = sim.plot_2d_static(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
+ax = sim.plot_2d()                               # XY at geometry midpoint
+ax = sim.plot_2d(axis="z", position_um=0.11)      # XY at z = 0.11 µm
+ax = sim.plot_2d(axis="x", position_um=0, show_mesh=True)  # YZ with mesh edges
 ax.figure.savefig("cross_section.png", dpi=200, bbox_inches="tight")
 ```
+
+To overlay material boundaries on a field plot, pass its Matplotlib axes with
+`outline_only=True`. Boundaries follow the selected slice and material priority,
+including holes. Touching regions of the same material share one outline.
+This mode preserves existing axes limits, labels, aspect and colorbars, and adds
+no fills, setup annotations, legend or refractive-index colorbar.
+
+```python
+sim.plot_2d_static(axis="y", position_um=0, ax=field_ax, outline_only=True)
+```
+
+The same option is available on `plot_2d()`. Group filters remain available;
+`outline_only=True` cannot be combined with `show_mesh=True`.
 
 The method returns a Matplotlib `Axes`. Pass `ax` to draw into an existing
 subplot, `cmap` to change the index colormap, `legend=False` to hide the legend,
@@ -324,6 +338,11 @@ thickness uses the same per-axis alignment as the metadata estimate: z PML is
 rounded up to a multiple of 16 cells (for example, 20 becomes 32). Guard cells
 are not drawn as PML. Mesh edges describe the tetrahedral transfer mesh,
 rather than the solver's Yee grid.
+Without mesh edges, adjacent cells are merged into material regions with
+antialiased boundaries. Consecutive equally colored physical groups share a
+fill to avoid seams at overlapping edges; their legend entries remain separate.
+SVG and PDF exports retain vector material outlines;
+`show_mesh=True` retains the individual mesh cells and rasterizes the overlay.
 
 The interactive setup views use the GDSFactory FDTD Three.js viewer and do not
 depend on PyVista. Smaller material groups are listed first, followed by the
@@ -376,18 +395,26 @@ and total cell count (including PML). Grid counts use the same Python calculatio
 as `metadata.json`, preserving its rounding and per-axis alignment. These values are estimates; the solver
 backend is authoritative when it constructs the final grid.
 
-### 2D plotting APIs and compatibility (0.9.0)
+### 2D plotting migration (0.10.0)
 
-Use `plot_2d_static()` for a Matplotlib `Axes` and export it with
-`ax.figure.savefig(...)`. Use `plot_2d_interactive()` for an HTML `MeshViewer`
-with `.html` and `.save()`.
+The next feature release, 0.10.0, intentionally changes `plot_2d()` from the
+interactive HTML `MeshViewer` to a static Matplotlib `Axes`, making the standard
+2D setup method produce the static preview. Static calls do not emit a deprecation
+warning. `plot_2d_static()` remains a supported equivalent.
 
-The original `plot_2d()` remains an alias for the interactive viewer, accepts
-all original keywords including `height` and `zoom_to_cursor`, and still returns
-`MeshViewer`. Starting with 0.9.0 it emits a `DeprecationWarning` directing callers
-to the explicit methods. The alias will remain for at least two feature releases
-and roughly 12 months after the first released warning. This change does not
-switch its default behavior or remove the old API.
+To make setup examples easier to use, inspect and export, this default changes in
+0.10.0 rather than following the normal two-feature-release, three-month transition.
+Callers using `.html` or `.save()` should change
+their call to `plot_2d_interactive()` to retain the previous interactive behavior.
+Legacy `plot_2d(height=...)` or `plot_2d(zoom_to_cursor=...)` calls continue returning
+the HTML viewer with a `DeprecationWarning`. Removal targets 0.12.0 or later,
+after two feature releases and at least three months since the first released
+warning in 0.10.0. If those conditions are not met, removal moves to a later feature
+release. These viewer keywords cannot be mixed with static-only options
+such as `ax` or `outline_only`. The explicit interactive method remains supported.
+For static exports, use
+`ax.figure.savefig(...)`; `ax`, `cmap`, `legend`, `aspect`, and `figsize` configure
+the static view. This default change is intended for 0.10.0, not a 0.9.x patch.
 
 ## Sources
 
