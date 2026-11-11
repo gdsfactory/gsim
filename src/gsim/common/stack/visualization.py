@@ -32,9 +32,9 @@ def parse_layer_stack(layer_stack: GfLayerStack | LayerStack) -> list[StackLayer
     """Parse a gdsfactory or gsim LayerStack into a list of StackLayer objects.
 
     A gsim ``LayerStack`` (``gsim.common.stack.extractor.LayerStack``, what
-    ``sim.stack`` holds) is read as is: each layer keeps its own ``layer_type``
-    and ``gds_layer``. For a gdsfactory ``LayerStack`` the layer type is
-    classified from the layer name.
+    ``sim.stack`` holds) is read as is: each layer keeps its own ``zmin``,
+    ``zmax``, ``layer_type`` and ``gds_layer``. For a gdsfactory ``LayerStack``
+    the layer type is classified from the layer name.
 
     Args:
         layer_stack: gdsfactory or gsim LayerStack object
@@ -50,7 +50,7 @@ def parse_layer_stack(layer_stack: GfLayerStack | LayerStack) -> list[StackLayer
                 StackLayer(
                     name=name,
                     zmin=level.zmin,
-                    zmax=level.zmin + level.thickness,
+                    zmax=level.zmax,
                     thickness=level.thickness,
                     material=level.material or None,
                     gds_layer=level.gds_layer[0],

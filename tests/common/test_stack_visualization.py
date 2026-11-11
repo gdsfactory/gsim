@@ -87,13 +87,15 @@ def _gsim_stack() -> GsimLayerStack:
         ("metal1", (8, 0), 0.0, 0.5, "aluminum", "conductor"),
         ("substrate", (1, 0), -2.0, 2.0, "si", "substrate"),
     ]
+    # The geometry uses zmax; one layer stores a zmax that is not zmin + thickness.
+    zmax_override = {"passivation": 3.0}
     return GsimLayerStack(
         layers={
             name: GsimLayer(
                 name=name,
                 gds_layer=gds_layer,
                 zmin=zmin,
-                zmax=zmin + thickness,
+                zmax=zmax_override.get(name, zmin + thickness),
                 thickness=thickness,
                 material=material,
                 layer_type=layer_type,
@@ -126,7 +128,7 @@ def test_gsim_layer_stack_keeps_its_own_layer_types_and_dimensions():
         source = stack.layers[layer.name]
         assert layer.zmin == source.zmin
         assert layer.thickness == source.thickness
-        assert layer.zmax == pytest.approx(source.zmin + source.thickness)
+        assert layer.zmax == source.zmax
         assert layer.material == source.material
 
 
@@ -146,3 +148,11 @@ def test_gsim_layer_stack_diagrams_and_plot():
     custom = layers.index(next(layer for layer in layers if layer.name == "m1_custom"))
     assert "Type: via" in figure.data[custom].hovertext
     assert figure.layout.shapes[custom].fillcolor == "#87CEEB"
+
+    # To scale, each shape spans the layer's stored zmin and zmax.
+    scaled = plot_stack(stack, to_scale=True)
+    for layer, shape in zip(layers, scaled.layout.shapes, strict=True):
+        np.testing.assert_allclose(
+            [shape.y0, shape.y1],
+            [stack.layers[layer.name].zmin, stack.layers[layer.name].zmax],
+        )
