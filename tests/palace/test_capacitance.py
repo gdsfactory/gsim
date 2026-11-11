@@ -17,6 +17,7 @@ import pytest
 
 from gsim.palace import CapacitanceMatrices, ElectrostaticSim, load_capacitance
 from gsim.palace.models import TerminalConfig
+from gsim.palace.results import load_text_results
 
 SPHERES = {
     "terminal-C.csv": """\
@@ -159,6 +160,21 @@ def test_reads_the_results_dict_that_run_returns(tmp_path) -> None:
     )
 
 
+def test_reads_the_results_that_run_local_returns(tmp_path) -> None:
+    """``run_local()`` returns a ``PalaceTextResults`` for an electrostatic run."""
+    run = _write(tmp_path / "run", SPHERES)
+    from_local = load_capacitance(load_text_results(run))
+    from_directory = load_capacitance(run)
+    assert from_local.terminals == from_directory.terminals
+    assert np.array_equal(from_local.maxwell, from_directory.maxwell)
+    assert np.array_equal(from_local.mutual, from_directory.mutual)
+    assert np.array_equal(from_local.inverse, from_directory.inverse)
+    assert np.array_equal(
+        from_local.excitation_voltage, from_directory.excitation_voltage
+    )
+    assert np.array_equal(from_local.stored_energy, from_directory.stored_energy)
+
+
 def test_finds_the_files_in_the_palace_output_subdirectory(tmp_path) -> None:
     _write(tmp_path / "sim" / "output" / "palace", SPHERES)
     assert load_capacitance(tmp_path / "sim").maxwell.shape == (2, 2)
@@ -278,6 +294,61 @@ def test_a_consistent_set_has_no_problems() -> None:
 def test_each_problem_is_reported(change, expected) -> None:
     problems = change(_clean()).problems()
     assert any(expected in text for text in problems), problems
+
+
+def test_a_floating_pair_skips_the_inverse_check() -> None:
+    """Two plates with nothing to ground: the Maxwell matrix is singular.
+
+    The rows sum to zero, so whatever Palace writes as the inverse cannot
+    invert it, and that is not a problem of the run.
+    """
+    plate = 179.7e-15
+    maxwell = np.array([[plate, -plate], [-plate, plate]])
+    voltage = np.ones(2)
+    cap = CapacitanceMatrices(
+        terminals=("MINUS", "PLUS"),
+        maxwell=maxwell,
+        mutual=np.array([[0.0, plate], [plate, 0.0]]),
+        inverse=np.array([[1.0, 0.5], [0.5, 1.0]]) * 1e15,
+        excitation_voltage=voltage,
+        stored_energy=0.5 * np.diag(maxwell) * voltage**2,
+    )
+    assert cap.problems() == []
+
+
+@pytest.mark.parametrize(("factor", "checked"), [(0.5, False), (2.0, True)])
+def test_the_inverse_check_starts_at_the_tolerance(factor, checked) -> None:
+    """A pair whose capacitance to ground is ``factor * rtol`` of the plate's.
+
+    The matrix's smallest eigenvalue is that capacitance to ground, so the
+    check is skipped below ``rtol`` times the largest entry and made above it.
+    """
+    rtol, plate = 1e-3, 179.7e-15
+    ground = factor * rtol * plate
+    maxwell = np.array([[plate + ground, -plate], [-plate, plate + ground]])
+    cap = replace(_from_maxwell(maxwell), inverse=np.eye(2) * 1e15)
+    reported = any("does not invert" in text for text in cap.problems(rtol))
+    assert reported is checked
+
+
+def test_a_floating_pair_hides_the_inverse_of_a_grounded_terminal() -> None:
+    """A known limit: the skip applies to the whole matrix.
+
+    A third terminal with its own capacitance to ground has a well-defined
+    block of the inverse, but the floating pair makes the matrix singular, so
+    a wrong inverse goes unreported.
+    """
+    plate, grounded = 179.7e-15, 50e-15
+    maxwell = np.zeros((3, 3))
+    maxwell[:2, :2] = [[plate, -plate], [-plate, plate]]
+    maxwell[2, 2] = grounded
+    cap = replace(_from_maxwell(np.eye(3)), maxwell=maxwell)
+    cap = replace(
+        cap,
+        mutual=-(maxwell - np.diag(np.diag(maxwell))) + np.diag(maxwell.sum(axis=1)),
+        inverse=np.eye(3),
+    )
+    assert not any("does not invert" in text for text in cap.problems())
 
 
 @pytest.mark.parametrize(

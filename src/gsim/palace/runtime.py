@@ -834,6 +834,7 @@ def run_palace(
     num_threads: int | None = None,
     verbose: bool = True,
     emit: Callable[[str], None] | None = None,
+    log_path: str | Path | None = None,
     config: str = "config.json",
 ) -> None:
     """Run Palace on a configuration file in ``cwd``.
@@ -845,6 +846,12 @@ def run_palace(
         num_threads: OpenMP threads, when set.
         verbose: Stream Palace's output line by line through ``emit``.
         emit: Where streamed lines go; defaults to this module's logger.
+        log_path: Optional file for combined solver stdout and stderr, also
+            retained when the run fails or verbose output is disabled. A
+            relative path is resolved against the current working directory,
+            not ``cwd``. Written as UTF-8 with LF line endings. An existing
+            file is replaced only once the run has started, so a launch that
+            fails leaves an earlier log intact.
         config: Name of the configuration file in ``cwd``.
 
     Raises:
@@ -863,8 +870,10 @@ def run_palace(
         emit(f"Command: {' '.join(cmd)}")
         emit(f"Processes: {num_processes}")
 
+    log_file = None
+    log_file_path = Path(log_path) if log_path is not None else None
     try:
-        if verbose:
+        if verbose or log_file_path is not None:
             streamed_lines: list[str] = []
             with subprocess.Popen(  # noqa: S603
                 cmd,
@@ -872,14 +881,30 @@ def run_palace(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=launch.env,
             ) as process:
+                # Open only once the launcher has started, so a launch that
+                # fails cannot truncate a log from an earlier run.
+                if log_file_path is not None:
+                    try:
+                        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+                        log_file = log_file_path.open(
+                            "w", encoding="utf-8", newline="\n"
+                        )
+                    except OSError:
+                        process.kill()
+                        raise
                 if process.stdout is not None:
                     for line in process.stdout:
+                        if log_file is not None:
+                            log_file.write(line)
+                            log_file.flush()
                         line = line.rstrip("\n")
                         streamed_lines.append(line)
-                        if line:
+                        if verbose and line:
                             emit(line)
                 returncode = process.wait()
             if returncode != 0:
@@ -898,6 +923,8 @@ def run_palace(
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=launch.env,
             )
             if result.stdout:
@@ -915,6 +942,9 @@ def run_palace(
             "correct path via palace_executable parameter, "
             "or set PALACE_EXECUTABLE environment variable."
         ) from e
+    finally:
+        if log_file is not None:
+            log_file.close()
 
 
 # Return codes carry POSIX signal numbers, even on a Windows host whose own

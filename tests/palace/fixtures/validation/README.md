@@ -18,9 +18,17 @@ Unicode mode symbols are retained.
   boundary-mode config with `Solver.Linear.EstimatorMaxIts=0`. Original lines: 240–241, 247–278.
 - `electrostatic-disabled-estimator.txt`: recorded GitTag `v0.18.1`. Source: local Palace v0.18.1 run of a gsim-built
   electrostatic config with `Solver.Linear.EstimatorMaxIts=0`. Original lines: 66, 148–158, 193–203.
+- `magnetostatic-converged.txt`: recorded GitTag `v0.18.1`. Source: local Palace v0.18.1 run (single rank) of Palace's
+  `examples/rings` magnetostatic example, kept as `tests/palace/fixtures/magnetostatic/rings/palace.log`. Original
+  lines: 61–65, 113–119, 168–180.
+- `magnetostatic-not-converged.txt`: recorded GitTag `v0.18.1`. Source: the same rings example run with `Solver.Order=1`
+  and `Solver.Linear.MaxIts=10`, kept as `tests/palace/fixtures/magnetostatic/rings-not-converged/palace.log`. Original
+  lines: 61–65, 74–83, 94–105.
 
 The first and third inputs explicitly set `Solver.Linear.EstimatorMaxIts=0`. The first has an evanescent selected mode
 despite GMRES convergence. The second reports successful adaptive sampling independently of an earlier failed GMRES
 solve. The dirty suffix is retained; these fixtures do not claim an exact clean build for that run. The eigenmode
-excerpt keeps a PETSc `EPS Object` view between the estimator header and the warnings. Tests also use explicitly
-constructed representative field-correction failures, missing outcomes, and caller-defined parity samples.
+excerpt keeps a PETSc `EPS Object` view between the estimator header and the warnings. The magnetostatic non-converged
+run exits 0 and still writes a full inductance matrix; only these log lines show that both current-source solves stopped
+at the iteration limit. Tests also use explicitly constructed representative field-correction failures, missing
+outcomes, and caller-defined parity samples.

@@ -1,0 +1,140 @@
+Running with Apptainer
+>> /usr/local/bin/mpirun -n 1 /opt/palace/bin/palace-x86_64.bin rings_noconv_p1.json
+
+_____________     _______
+_____   __   \____ __   /____ ____________
+____   /_/  /  __ ` /  /  __ ` /  ___/  _ \
+___   _____/  /_/  /  /  /_/  /  /__/  ___/
+  /__/     \___,__/__/\___,__/\_____\_____/
+
+Git changeset ID: v0.18.1
+Running with 1 MPI process, 4 OpenMP threads
+Device configuration: omp,cpu
+Memory configuration: host-std
+libCEED backend: /cpu/self/xsmm/blocked
+
+Added 3339 elements in 2 iterations of local bisection for under-resolved interior boundaries
+Added 698 duplicate vertices for interior boundaries in the mesh
+Added 2094 duplicate boundary elements for interior boundaries in the mesh
+
+Characteristic length and time scales:
+ Lc = 2.732e-03 m, tc = 9.113e-03 ns
+Finished partitioning mesh into 1 subdomain
+
+Mesh curvature order: 2
+Mesh bounding box:
+ (Xmin, Ymin, Zmin) = (-1.366e-03, -1.366e-03, -1.000e-03) m
+ (Xmax, Ymax, Zmax) = (+1.366e-03, +1.366e-03, +1.000e-03) m
+
+Parallel Mesh Stats:
+
+                minimum     average     maximum       total
+ vertices         13499       13499       13499       13499
+ edges            91916       91916       91916       91916
+ faces           154010      154010      154010      154010
+ elements         75592       75592       75592       75592
+ neighbors            0           0           0
+
+            minimum     maximum
+ h      0.000309032    0.117634
+ kappa            1     17.9668
+
+Estimated current per-rank memory usage is: Min. 93.3M, Max. 93.3M, Avg. 93.3M, Total 93.3M
+Estimated current per-node memory usage is: Min. 93.3M, Max. 93.3M, Avg. 93.3M, Total 93.3M
+
+Configuring surface current excitation source term at attributes:
+ 4: Index = 1, n = (-0.0,-0.0,-1.0)
+ 5: Index = 2, n = (+0.0,+0.0,+1.0)
+
+Configuring Dirichlet BC at attributes:
+ 2-3
+
+Assembling system matrices, number of global unknowns:
+ H1 (p = 1): 13499, ND (p = 1): 91916, RT (p = 1): 154010
+ Operator assembly level: Partial
+ Mesh geometries:
+  Tetrahedron: P = 6, Q = 4 (quadrature order = 2)
+
+Assembling multigrid hierarchy:
+ Level 0 (p = 1): 91916 unknowns
+
+Computing magnetostatic fields for 2 source boundaries
+
+It 1/2: Current Index = 1 (elapsed time = 2.52e-04 s)
+ Residual norms for PCG solve
+ 0 KSP residual norm ||r||_B = 6.232373e-03
+ 1 KSP residual norm ||r||_B = 8.260691e-03
+ 2 KSP residual norm ||r||_B = 1.831785e-02
+ 3 KSP residual norm ||r||_B = 2.340879e-02
+ 4 KSP residual norm ||r||_B = 2.682780e-02
+ 5 KSP residual norm ||r||_B = 2.289260e-02
+ 6 KSP residual norm ||r||_B = 1.582863e-02
+ 7 KSP residual norm ||r||_B = 9.486925e-03
+ 8 KSP residual norm ||r||_B = 7.025390e-03
+ 9 KSP residual norm ||r||_B = 4.697267e-03
+10 KSP residual norm ||r||_B = 3.675442e-03
+PCG solver did NOT converge in 10 iterations (avg. reduction factor: 9.486e-01)
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 5.897e-01 (norm(b) = 6.232e-03)!
+
+
+It 2/2: Current Index = 2 (elapsed time = 2.77e+00 s)
+ Residual norms for PCG solve
+ 0 KSP residual norm ||r||_B = 6.686927e-03
+ 1 KSP residual norm ||r||_B = 7.806376e-03
+ 2 KSP residual norm ||r||_B = 1.880876e-02
+ 3 KSP residual norm ||r||_B = 2.687977e-02
+ 4 KSP residual norm ||r||_B = 4.659904e-02
+ 5 KSP residual norm ||r||_B = 6.590608e-02
+ 6 KSP residual norm ||r||_B = 7.632625e-02
+ 7 KSP residual norm ||r||_B = 9.417979e-02
+ 8 KSP residual norm ||r||_B = 9.562554e-02
+ 9 KSP residual norm ||r||_B = 8.763804e-02
+10 KSP residual norm ||r||_B = 6.642385e-02
+PCG solver did NOT converge in 10 iterations (avg. reduction factor: 1.258e+00)
+
+[38;2;255;255;000m--> Warning![0m
+Linear solver did not converge, norm(Ax-b)/norm(b) = 9.933e+00 (norm(b) = 6.687e-03)!
+
+ Field energy H = 4.678e-14 J
+ Field energy H = 7.268e-13 J
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 4.926e-01, global unknowns = 91916
+ Max. iterations = 0, tol. = 1.000e-02
+
+Estimated peak per-rank memory usage is: Min. 392.0M, Max. 392.0M, Avg. 392.0M, Total 392.0M
+Estimated peak per-node memory usage is: Min. 392.0M, Max. 392.0M, Avg. 392.0M, Total 392.0M
+
+Elapsed Time Report (s)           Min.        Max.        Avg.
+==============================================================
+Initialization                   2.398       2.398       2.398
+  Mesh Preprocessing            20.075      20.075      20.075
+Operator Construction            1.744       1.744       1.744
+Linear Solve                     0.291       0.291       0.291
+  Setup                          0.675       0.675       0.675
+  Preconditioner                 3.963       3.963       3.963
+Estimation                       0.157       0.157       0.157
+  Construction                   5.387       5.387       5.387
+  Solve                          3.627       3.627       3.627
+Postprocessing                   0.287       0.287       0.287
+Disk IO                          7.016       7.016       7.016
+--------------------------------------------------------------
+Total                           45.889      45.889      45.889
+
+Peak Memory                   Per-Node       Total   Total HWM
+==============================================================
+Initialization                    2.1M        2.1M        2.1M
+  Mesh Preprocessing             33.0M       33.0M       35.1M
+Operator Construction            59.7M       59.7M       94.8M
+Linear Solve                    184.0K      184.0K       94.9M
+  Setup                         104.4M      104.4M      199.3M
+  Preconditioner                856.0K      856.0K      200.1M
+Estimation                       27.4M       27.4M      227.6M
+  Construction                   55.8M       55.8M      283.4M
+  Solve                          15.4M       15.4M      298.7M
+Postprocessing                  140.0K      140.0K      298.9M
+Disk IO                          61.1M       61.1M      360.0M
+--------------------------------------------------------------
+Total                           368.6M      368.6M      368.6M

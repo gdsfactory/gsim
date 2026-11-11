@@ -23,13 +23,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from gsim.palace.results import _find_file
+from gsim.palace._terminal_csv import _read_column, _read_table, _result_file
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import pandas as pd
     from numpy.typing import NDArray
+
+    from gsim.palace.results import PalaceTextResults
 
 
 @dataclass(frozen=True, eq=False)
@@ -169,6 +171,11 @@ class CapacitanceMatrices:
         terminal has a negative capacitance to ground, that the mutual matrix
         follows from it, and, when Palace wrote them, that the inverse inverts
         it and that each excitation's stored energy is ``1/2 C[i][i] V**2``.
+        The inverse is not checked when the Maxwell matrix is singular within
+        ``rtol``: with no ground conductor and no grounded outer boundary, the
+        terminals have no capacitance to ground, every row sums to zero, and
+        no matrix inverts it. The skip covers the whole matrix, so a floating
+        pair also hides a wrong inverse for a grounded terminal beside it.
         Only the first problem is reported when a value is not finite, since
         every other check is meaningless then.
 
@@ -242,7 +249,8 @@ class CapacitanceMatrices:
                 f"= -C_ij, diagonal = row sum): largest difference {mismatch:.3g} F"
             )
 
-        if self.inverse is not None:
+        singular = float(np.abs(np.linalg.eigvalsh((maxwell + maxwell.T) / 2)).min())
+        if self.inverse is not None and singular > tol:
             error = float(np.abs(maxwell @ self.inverse - np.eye(len(maxwell))).max())
             if error > rtol:
                 found.append(
@@ -261,30 +269,17 @@ class CapacitanceMatrices:
         return found
 
 
-def _read_table(path: Path) -> NDArray[np.float64]:
-    """Read a Palace CSV table; the header line is skipped."""
-    return np.loadtxt(path, delimiter=",", skiprows=1, ndmin=2, encoding="utf-8")
-
-
-def _read_column(path: Path, column: str) -> NDArray[np.float64] | None:
-    """Read one named column of a Palace CSV table, None if it has no such column."""
-    with path.open(encoding="utf-8") as file:
-        header = [name.strip() for name in file.readline().split(",")]
-    if column not in header:
-        return None
-    return _read_table(path)[:, header.index(column)]
-
-
 def load_capacitance(
-    source: str | Path | dict,
+    source: str | Path | dict | PalaceTextResults,
     *,
     terminal_names: Sequence[str] | None = None,
 ) -> CapacitanceMatrices:
     """Load the capacitance matrices of an electrostatic Palace run.
 
     Args:
-        source: The results dict that ``run()`` returns, or the simulation or
-            Palace output directory.
+        source: The results dict that ``run()`` returns, the
+            ``PalaceTextResults`` that ``run_local()`` returns, or the
+            simulation or Palace output directory.
         terminal_names: Names for the terminals, in Palace's index order, which
             is the order they were added to the simulation. Defaults to
             ``T1``, ``T2``, ...
@@ -297,18 +292,10 @@ def load_capacitance(
         ValueError: If the terminal names do not match the matrices.
     """
 
-    def find(name: str) -> Path | None:
-        if isinstance(source, dict):
-            value = source.get(name)
-            path = Path(value) if value is not None else None
-        else:
-            path = _find_file(Path(source), name)
-        return path if path is not None and path.exists() else None
-
     def require(name: str) -> Path:
-        path = find(name)
+        path = _result_file(source, name)
         if path is None:
-            where = "the results" if isinstance(source, dict) else str(source)
+            where = str(source) if isinstance(source, (str, Path)) else "the results"
             msg = f"{name} not found in {where}"
             raise FileNotFoundError(msg)
         return path
@@ -336,9 +323,9 @@ def load_capacitance(
         msg = f"the terminal names must be different: {list(names)}"
         raise ValueError(msg)
 
-    inverse_path = find("terminal-Cinv.csv")
-    voltage_path = find("terminal-V.csv")
-    energy_path = find("domain-E.csv")
+    inverse_path = _result_file(source, "terminal-Cinv.csv")
+    voltage_path = _result_file(source, "terminal-V.csv")
+    energy_path = _result_file(source, "domain-E.csv")
     return CapacitanceMatrices(
         terminals=names,
         maxwell=maxwell,

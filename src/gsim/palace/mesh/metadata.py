@@ -12,6 +12,8 @@ import numpy as np
 METADATA_FILENAME = "metadata.json"
 _EDGE_VERTICES = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
 _FACE_VERTICES = ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3))
+# Problem types whose unknown lives in the Nedelec (ND) space.
+_ND_PROBLEMS = frozenset({"driven", "eigenmode", "magnetostatic"})
 
 
 def tetrahedral_topology(blocks: list[tuple[int, np.ndarray, np.ndarray]]) -> dict:
@@ -42,6 +44,10 @@ def tetrahedral_topology(blocks: list[tuple[int, np.ndarray, np.ndarray]]) -> di
 def update_field_dofs(mesh_stats: dict, *, field_order: int, problem_type: str) -> None:
     """Set the input ND-space estimate for a purely tetrahedral 3D EM mesh.
 
+    Driven, eigenmode and magnetostatic problems all solve for a field in the
+    Nedelec space (magnetostatics for the vector potential A), so they share
+    the estimate; electrostatic (H1) and boundary-mode problems get none.
+
     MFEM's order-p Nedelec space has p DOFs per edge, p(p-1) per triangular
     face and p(p-1)(p-2)/2 per tetrahedron interior. This is before Palace's
     boundary splitting, periodic constraints and mesh refinement. It is not a
@@ -55,7 +61,7 @@ def update_field_dofs(mesh_stats: dict, *, field_order: int, problem_type: str) 
         "scope": "before_palace_preprocessing",
     }
     topology = mesh_stats.get("topology")
-    if topology and problem_type.lower() in {"driven", "eigenmode"}:
+    if topology and problem_type.lower() in _ND_PROBLEMS:
         if (
             isinstance(field_order, bool)
             or not isinstance(field_order, int)
@@ -70,7 +76,7 @@ def update_field_dofs(mesh_stats: dict, *, field_order: int, problem_type: str) 
         )
     else:
         estimate["unavailable_reason"] = (
-            "Requires a purely tetrahedral 3D driven or eigenmode mesh"
+            "Requires a purely tetrahedral 3D driven, eigenmode or magnetostatic mesh"
         )
     mesh_stats["field_dofs"] = estimate
 

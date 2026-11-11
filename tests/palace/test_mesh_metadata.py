@@ -101,6 +101,16 @@ def test_mixed_volume_types_have_no_partial_estimate():
     assert "unavailable_reason" in estimate
 
 
+@pytest.mark.parametrize("problem_type", ["magnetostatic", "Magnetostatic"])
+def test_magnetostatic_solves_for_the_nd_vector_potential(problem_type):
+    estimate = collect_mesh_stats(field_order=2, problem_type=problem_type)[
+        "field_dofs"
+    ]
+
+    assert estimate["estimated_field_dofs"] == 32
+    assert "unavailable_reason" not in estimate
+
+
 @pytest.mark.parametrize("problem_type", ["electrostatic", "boundarymode"])
 def test_other_field_spaces_are_not_reported_as_nd(problem_type):
     assert (

@@ -216,3 +216,59 @@ def test_estimator_settings_validate_and_return_to_automatic(field, value):
     linear.estimator_mg = None
     assert "EstimatorMaxIts" not in linear.to_palace_config()
     assert "EstimatorMG" not in linear.to_palace_config()
+
+
+MAGNETOSTATIC_LINEAR = {
+    "Type": "AMS",
+    "KSPType": "CG",
+    "Tol": 1e-8,
+    "MaxIts": 400,
+    "MGMaxLevels": 100,
+    "PCMatReal": False,
+    "ComplexCoarseSolve": True,
+}
+
+
+def test_magnetostatic_defaults_to_ams_conjugate_gradient():
+    solver = pa.MagnetostaticSolverConfig()
+    assert solver.linear.solver_type == "Default"
+    assert solver.linear.preconditioner == "AMS"
+    assert solver.to_linear_solver_config() == MAGNETOSTATIC_LINEAR
+    assert solver.to_palace_config()["Magnetostatic"] == {"Save": 0}
+
+
+@pytest.mark.parametrize("setter", ["set_solver", "set_numerical"])
+def test_setters_keep_each_class_linear_defaults(setter):
+    simulation = pa.MagnetostaticSim()
+    simulation.solver.linear.preconditioner = "Default"
+    getattr(simulation, setter)(order=1)
+    assert simulation.solver.order == 1
+    assert simulation.solver.to_linear_solver_config() == MAGNETOSTATIC_LINEAR
+    getattr(simulation, setter)(order=1, tolerance=1e-6)
+    assert simulation.solver.to_linear_solver_config()["Tol"] == 1e-6
+    assert simulation.solver.to_linear_solver_config()["Type"] == "AMS"
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"linear": {"max_iterations": 50}},
+        {"linear": pa.LinearSolverConfig(max_iterations=50)},
+        pa.SolverConfig(linear=pa.LinearSolverConfig(max_iterations=50)),
+    ],
+)
+def test_partial_magnetostatic_settings_keep_ams_conjugate_gradient(settings):
+    solver = pa.MagnetostaticSolverConfig.model_validate(settings)
+    assert solver.to_linear_solver_config() == {
+        **MAGNETOSTATIC_LINEAR,
+        "MaxIts": 50,
+    }
+
+
+def test_explicit_magnetostatic_linear_settings_are_kept():
+    solver = pa.MagnetostaticSolverConfig(
+        linear={"solver_type": "MUMPS", "tolerance": 1e-6}
+    )
+    assert solver.linear.solver_type == "MUMPS"
+    assert solver.linear.preconditioner == "AMS"
+    assert solver.linear.tolerance == 1e-6

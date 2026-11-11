@@ -4,6 +4,7 @@ This module contains Pydantic models for port definitions:
 - PortConfig: Single-element lumped port configuration
 - CPWPortConfig: Coplanar waveguide (two-element) port configuration
 - TerminalConfig: Terminal for electrostatic simulations
+- CurrentSourceConfig: Current source for magnetostatic simulations
 - WavePortConfig: Wave port (domain boundary with mode solving)
 """
 
@@ -240,6 +241,40 @@ class TerminalConfig(BaseModel):
         if isinstance(self.region, tuple):
             return box(*self.region)
         return Polygon(self.region)
+
+
+class CurrentSourceConfig(BaseModel):
+    """A current source between two ports on one conductor (magnetostatics).
+
+    gsim bridges the gap between the two port faces with a vertical sheet
+    through the thickness of the conductor layer. A unit current enters the
+    conductor at ``plus_port`` and leaves it at ``minus_port`` (passive sign
+    convention); the drawn metal that joins the two ports is the return path.
+
+    Attributes:
+        name: Source name; it labels the row of the inductance matrix.
+        plus_port: Name of the component port where the current enters.
+        minus_port: Name of the component port where the current leaves.
+        layer: Conductor layer of the sheet; ``None`` infers it from the GDS
+            layer of the ports.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    name: str
+    plus_port: str
+    minus_port: str
+    layer: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_ports(self) -> Self:
+        """Check that the source names two different ports."""
+        if self.plus_port == self.minus_port:
+            raise ValueError(
+                f"Current source '{self.name}': plus_port and minus_port are "
+                f"both {self.plus_port!r}; a source needs two different ports"
+            )
+        return self
 
 
 class ImpedanceBoundaryConfig(BaseModel):
