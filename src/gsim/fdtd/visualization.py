@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from gsim.fdtd.api import PortSource
 from gsim.fdtd.mesh import generate_mesh
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from gsim.common.pdk import ResolvedPassivePcell
     from gsim.fdtd.api import Geometry
     from gsim.fdtd.models import SimulationArtifacts
+    from gsim.fdtd.viz import MeshViewer
 
 
 class VisualizationMixin(RuntimeConfigMixin):
@@ -209,6 +211,33 @@ class VisualizationMixin(RuntimeConfigMixin):
             use_pdk_styles=True,
         )
 
+    @overload
+    def plot_2d(
+        self,
+        *,
+        height: int,
+        zoom_to_cursor: bool | None = None,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+    ) -> MeshViewer: ...
+
+    @overload
+    def plot_2d(
+        self,
+        *,
+        zoom_to_cursor: bool,
+        height: int | None = None,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+    ) -> MeshViewer: ...
+
+    @overload
     def plot_2d(
         self,
         *,
@@ -223,11 +252,62 @@ class VisualizationMixin(RuntimeConfigMixin):
         legend: bool = True,
         aspect: Literal["equal", "auto"] = "equal",
         figsize: tuple[float, float] | None = None,
-    ) -> Axes:
+    ) -> Axes: ...
+
+    def plot_2d(
+        self,
+        *,
+        axis: Axis = "z",
+        position_um: float | None = None,
+        show_mesh: bool = False,
+        outline_only: bool = False,
+        show_groups: Sequence[str] | None = None,
+        hide_groups: Sequence[str] = (),
+        ax: Axes | None = None,
+        cmap: str = "Blues",
+        legend: bool = True,
+        aspect: Literal["equal", "auto"] = "equal",
+        figsize: tuple[float, float] | None = None,
+        height: int | None = None,
+        zoom_to_cursor: bool | None = None,
+    ) -> Axes | MeshViewer:
         """Plot a static Matplotlib cross-section, as with plot_2d_static().
 
         Use plot_2d_interactive() for the HTML viewer with a movable slice.
+        Legacy height or zoom_to_cursor arguments retain the HTML viewer with
+        a DeprecationWarning; they cannot be combined with static-only options.
         """
+        if height is not None or zoom_to_cursor is not None:
+            if (
+                outline_only
+                or ax is not None
+                or cmap != "Blues"
+                or not legend
+                or aspect != "equal"
+                or figsize is not None
+            ):
+                raise TypeError(
+                    "Legacy viewer keywords cannot be combined "
+                    "with static plot options. "
+                    "Use plot_2d_static() or plot_2d_interactive() explicitly."
+                )
+            warnings.warn(
+                "The height and zoom_to_cursor viewer keywords "
+                "on plot_2d() are deprecated. "
+                "Use plot_2d_interactive() for the HTML viewer; "
+                "plot_2d() without viewer keywords now returns a Matplotlib Axes.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return self.plot_2d_interactive(
+                axis=axis,
+                position_um=position_um,
+                show_mesh=show_mesh,
+                show_groups=show_groups,
+                hide_groups=hide_groups,
+                height=600 if height is None else height,
+                zoom_to_cursor=True if zoom_to_cursor is None else zoom_to_cursor,
+            )
         return self.plot_2d_static(
             axis=axis,
             position_um=position_um,

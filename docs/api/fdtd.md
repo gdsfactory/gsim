@@ -399,13 +399,18 @@ backend is authoritative when it constructs the final grid.
 
 The next feature release, 0.10.0, intentionally changes `plot_2d()` from the
 interactive HTML `MeshViewer` to a static Matplotlib `Axes`, making the standard
-2D setup method produce the static preview. It no longer emits a deprecation
+2D setup method produce the static preview. Static calls do not emit a deprecation
 warning. `plot_2d_static()` remains a supported equivalent.
 
-This shortens the transition announced in 0.9.0. Callers using `.html`, `.save()`,
-`height`, or `zoom_to_cursor` must change their call to `plot_2d_interactive()`
-to retain the previous interactive behavior and arguments. The explicit
-interactive method remains supported. For static exports, use
+To make setup examples easier to use, inspect and export, this default changes in
+0.10.0 rather than following the normal two-feature-release, three-month transition.
+Callers using `.html` or `.save()` should change
+their call to `plot_2d_interactive()` to retain the previous interactive behavior.
+Legacy `plot_2d(height=...)` or `plot_2d(zoom_to_cursor=...)` calls continue returning
+the HTML viewer with a `DeprecationWarning`; no removal of that compatibility path
+is scheduled. These viewer keywords cannot be mixed with static-only options
+such as `ax` or `outline_only`. The explicit interactive method remains supported.
+For static exports, use
 `ax.figure.savefig(...)`; `ax`, `cmap`, `legend`, `aspect`, and `figsize` configure
 the static view. This default change is intended for 0.10.0, not a 0.9.x patch.
 

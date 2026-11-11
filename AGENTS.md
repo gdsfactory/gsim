@@ -31,13 +31,15 @@ saved configurations, generated solver inputs, and published notebooks are user-
   and target release.
 - Introduce the replacement before removing the old API. Keep the old path working with a `DeprecationWarning`, and test
   both paths during the transition. Warn in a released version before changing a default.
-- Normally retain a deprecated public API for at least two feature releases and roughly 12 months after the first
+- Normally retain a deprecated public API for at least two feature releases and roughly 3 months after the first
   released warning. Remove it only in a release designated for incompatible changes: a feature release before 1.0, or a
   major release after 1.0. Do not make intentional breaks in patch releases.
 - Announce deprecations and removals in release notes and update documentation and examples. Retain a safe, inexpensive
   compatibility alias longer when it imposes little maintenance cost.
 - If removal is not planned, describe the API as discouraged or soft deprecated without issuing a removal warning.
   Serious correctness or safety problems may justify a shorter transition when the change and migration are documented.
+  An owner-approved change that materially improves usability of customer-facing APIs or documentation may also use a
+  shorter transition, with the rationale, migration steps, and target release documented.
 
 ## Code Review Rules
 
