@@ -200,8 +200,7 @@
         outline: none;
       }
       .gizmo-target circle {
-        stroke: #101216;
-        stroke-width: 2;
+        stroke: none;
       }
       .gizmo-axis-target circle {
         fill: #4f9cff;
@@ -608,8 +607,11 @@
       }
 
       function surfaceGroups(mesh) {
+        // Ports overlay material faces, which must remain when a port is hidden.
         const explicitKeys = new Set(
-          mesh.triangles.map((item) => faceKey(...item.nodes)),
+          mesh.triangles
+            .filter((triangle) => !isPortGroup(mesh, triangle.group))
+            .map((triangle) => faceKey(...triangle.nodes)),
         );
         const faces = new Map();
         const tetFaces = [
@@ -875,6 +877,10 @@
         const opacity =
           style.opacity ?? (isLargestMaterial ? (isSlice ? 0.55 : 0.35) : 1);
         const transparent = opacity < 1;
+        // Separate coplanar groups without moving vertices; keep edges in front.
+        const surfaceOffset = isPortGroup(mesh, group)
+          ? 1
+          : groupRoots.size + 2;
         const material = new THREE.MeshStandardMaterial({
           color,
           roughness: 0.72,
@@ -887,8 +893,8 @@
           opacity,
           depthWrite: !transparent,
           polygonOffset: true,
-          polygonOffsetFactor: 1,
-          polygonOffsetUnits: 1,
+          polygonOffsetFactor: surfaceOffset,
+          polygonOffsetUnits: surfaceOffset,
         });
         const face = new THREE.Mesh(geometry, material);
         const groupRoot = new THREE.Group();
