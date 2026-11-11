@@ -1,0 +1,12 @@
+{
+  "paper_doi": "10.1364/OE.27.037400",
+  "cell_size_nm": 20,
+  "client_version": "0.9.0",
+  "client_source_commit": "67a22925b6e348892b1fa30d1d83e890fe4617c1",
+  "original_result_sha256": "354ac528c723b51bc938a39ffbc390386bdfe34a7636ed113bc1af9eaf99518c",
+  "original_field_sha256": "19f2b7772903b00435e1e0c76fca4d864c276da765b0daaef70ac7204b17c0df",
+  "total_cells": 113992704,
+  "solver_seconds": 121.5508354,
+  "note": "Completed reference run. Saved plane field is compressed losslessly; spectral coefficients are unchanged. No cloud identifiers retained.",
+  "model_code_sha256": "24767c04b85c20805fdbca61429acaadda08529f34e5884fdd53ce57cbaa1ff5"
+}

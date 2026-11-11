@@ -1,5 +1,5 @@
 # Preserve generated release notes and immutable solver/measurement archives verbatim.
-exclude: '^docs/CHANGELOG\.md$|^nbs/data/ihp_validation/(experiments|runs|source)/'
+exclude: '^docs/CHANGELOG\.md$|^nbs/data/ihp_validation/(experiments|runs|source)/|^nbs/data/paper_examples/'
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: "v6.0.0"

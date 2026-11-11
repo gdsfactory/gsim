@@ -49,14 +49,18 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         changed_files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
+        execution_inputs=$(printf '%s\n' "$changed_files" | grep -vE '^scripts/execute_paper_examples\.py$' || true)
         run_all=false
-        if grep -qxE 'pyproject\.toml|uv\.lock|src/.+|scripts/.+' <<< "$changed_files"; then
+        if grep -qxE 'pyproject\.toml|uv\.lock|src/.+|scripts/.+' <<< "$execution_inputs"; then
           run_all=true
           echo "Project code or dependencies changed; all notebooks will be executed"
         fi
         echo "run_all=${run_all}" >> "$GITHUB_OUTPUT"
-        changed=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | tr '\n' ' ')
-        echo "notebooks=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' | jq -Rsc 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+        changed=$(printf '%s\n' "$changed_files" | grep -E '^nbs/[^/]*\.ipynb$' | grep -v '^nbs/_' || true)
+        if grep -qE '^scripts/execute_paper_examples\.py$|^nbs/data/paper_examples/' <<< "$changed_files"; then
+          changed=$(printf '%s\n' "$changed" nbs/fdtd_lu_broadband_coupler.ipynb nbs/fdtd_sattari_suspended_coupler.ipynb nbs/fdtd_romero_visible_mmi.ipynb nbs/fdtd_sacher_visible_mmi.ipynb)
+        fi
+        echo "notebooks=$(printf '%s\n' "$changed" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')" >> "$GITHUB_OUTPUT"
         echo "Changed notebooks: ${changed:-none}"
   execute-notebooks:
     name: Execute ${{ matrix.notebook }}
@@ -118,7 +122,9 @@ jobs:
         NOTEBOOK: ${{ matrix.notebook }}
         FRESH_INDUCTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_inductor }}
       run: |
-        if [[ "$NOTEBOOK" == "nbs/palace_inductor.ipynb" && "$FRESH_INDUCTOR" == "true" ]]; then
+        if [[ "$NOTEBOOK" =~ ^nbs/fdtd_(lu_broadband_coupler|sattari_suspended_coupler|romero_visible_mmi|sacher_visible_mmi)\.ipynb$ ]]; then
+          uv run --no-sync python scripts/execute_paper_examples.py "$NOTEBOOK"
+        elif [[ "$NOTEBOOK" == "nbs/palace_inductor.ipynb" && "$FRESH_INDUCTOR" == "true" ]]; then
           uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim -y 'check_cache: false'
         else
           uv run --no-sync papermill "$NOTEBOOK" "$NOTEBOOK" -k gsim
