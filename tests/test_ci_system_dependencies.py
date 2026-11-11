@@ -105,10 +105,11 @@ def test_success_preserves_packages_and_default_mirrors(run_installer):
 def test_failed_setup_recovers_using_archive_mirrors(run_installer, mode):
     result, calls, mirrors = run_installer(mode)
     assert result.returncode == 0
-    assert "retrying with Ubuntu archive mirrors" in result.stdout
+    assert "retrying with alternate Ubuntu mirrors" in result.stdout
     assert mirrors.read_text().splitlines() == [
-        "https://archive.ubuntu.com/ubuntu/",
-        "https://security.ubuntu.com/ubuntu/",
+        "https://mirrors.edge.kernel.org/ubuntu/\tpriority:1",
+        "https://archive.ubuntu.com/ubuntu/\tpriority:2",
+        "https://security.ubuntu.com/ubuntu/\tpriority:3",
     ]
     assert sum(call[-1] == "update" for call in calls) == 2
     assert calls[-1][-4:] == ["install", "-y", "libglu1-mesa", "xvfb"]

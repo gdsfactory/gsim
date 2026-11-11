@@ -14,9 +14,10 @@ if install_packages "$@"; then
   exit 0
 fi
 
-echo "::warning::APT setup failed; retrying with Ubuntu archive mirrors."
-printf '%s\n' \
-  'https://archive.ubuntu.com/ubuntu/' \
-  'https://security.ubuntu.com/ubuntu/' |
+echo "::warning::APT setup failed; retrying with alternate Ubuntu mirrors."
+printf '%s\tpriority:%s\n' \
+  'https://mirrors.edge.kernel.org/ubuntu/' 1 \
+  'https://archive.ubuntu.com/ubuntu/' 2 \
+  'https://security.ubuntu.com/ubuntu/' 3 |
   sudo tee /etc/apt/apt-mirrors.txt >/dev/null
 install_packages "$@"
