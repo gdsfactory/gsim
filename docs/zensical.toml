@@ -8,6 +8,13 @@ nav = [
     { "Directional Coupler" = "nbs/fdtd_directional_coupler.md" },
     { "Waveguide Crossing" = "nbs/fdtd_waveguide_crossing.md" },
     { "Broadband Directional Coupler" = "nbs/fdtd_broadband_directional_coupler.md" },
+    { "Paper Examples" = [
+      { "Lu Broadband Coupler" = "nbs/fdtd_lu_broadband_coupler.md" },
+      { "Sattari Suspended Coupler" = "nbs/fdtd_sattari_suspended_coupler.md" },
+      { "Romero-García Visible MMI" = "nbs/fdtd_romero_visible_mmi.md" },
+      { "Sacher Visible MMI" = "nbs/fdtd_sacher_visible_mmi.md" }
+    ] },
+    { "FDTD Benchmark" = "fdtd-benchmark.md" },
     { "Meep: 3D Directional Coupler" = "nbs/meep_dc.md" },
     { "Meep: 2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" }
   ] },
