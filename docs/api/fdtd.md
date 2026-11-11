@@ -683,6 +683,9 @@ staggering. The sample includes the result JSON and paired arrays.
 Selecting fewer components or wavelengths reduces the saved field payload.
 Existing result files without complex fields continue to load normally.
 
+The [grating-coupler example](../nbs/fdtd_focusing_grating_coupler_gpdk.md)
+uses a small notebook helper to calculate Gaussian fiber overlap from saved fields.
+
 ## Results
 
 ```python
