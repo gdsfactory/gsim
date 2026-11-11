@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 from gdsfactory.technology import LayerLevel, LayerStack
 
+from gsim.common.stack._layer_utils import classify_layer_type
+from gsim.common.stack.extractor import Layer as GsimLayer
+from gsim.common.stack.extractor import LayerStack as GsimLayerStack
 from gsim.common.stack.visualization import (
     parse_layer_stack,
     plot_stack,
@@ -73,3 +76,73 @@ def test_empty_stack_diagrams_and_plain_layer_names():
     stack = LayerStack(layers={"oxide": LayerLevel(layer=(1, 0), zmin=0, thickness=1)})
     assert "oxide" in print_stack(stack)
     assert "oxide" in print_stack_table(SimpleNamespace(LAYER_STACK=stack))
+
+
+def _gsim_stack() -> GsimLayerStack:
+    """A gsim LayerStack; ``m1_custom`` is named like a metal but typed via."""
+    specifications = [
+        # name, gds_layer, zmin, thickness, material, layer_type
+        ("m1_custom", (5, 2), 0.5, 0.3, "aluminum", "via"),
+        ("passivation", (7, 0), 1.5, 1.2, "sio2", "dielectric"),
+        ("metal1", (8, 0), 0.0, 0.5, "aluminum", "conductor"),
+        ("substrate", (1, 0), -2.0, 2.0, "si", "substrate"),
+    ]
+    return GsimLayerStack(
+        layers={
+            name: GsimLayer(
+                name=name,
+                gds_layer=gds_layer,
+                zmin=zmin,
+                zmax=zmin + thickness,
+                thickness=thickness,
+                material=material,
+                layer_type=layer_type,
+            )
+            for name, gds_layer, zmin, thickness, material, layer_type in specifications
+        }
+    )
+
+
+def test_gsim_layer_stack_keeps_its_own_layer_types_and_dimensions():
+    stack = _gsim_stack()
+    # The name alone would classify as a conductor; the stack says via.
+    assert classify_layer_type("m1_custom") != "via"
+
+    layers = parse_layer_stack(stack)
+    assert [layer.name for layer in layers] == [
+        "substrate",
+        "metal1",
+        "m1_custom",
+        "passivation",
+    ]
+    assert [layer.layer_type for layer in layers] == [
+        "substrate",
+        "conductor",
+        "via",
+        "dielectric",
+    ]
+    assert [layer.gds_layer for layer in layers] == [1, 8, 5, 7]
+    for layer in layers:
+        source = stack.layers[layer.name]
+        assert layer.zmin == source.zmin
+        assert layer.thickness == source.thickness
+        assert layer.zmax == pytest.approx(source.zmin + source.thickness)
+        assert layer.material == source.material
+
+
+def test_gsim_layer_stack_diagrams_and_plot():
+    stack = _gsim_stack()
+    layers = parse_layer_stack(stack)
+
+    assert "m1_custom" in print_stack(stack)
+    table = print_stack_table(stack)
+    assert all(layer.name in table for layer in layers)
+    assert table.index("passivation") < table.index("substrate")
+
+    figure = plot_stack(stack)
+    assert len(figure.data) == len(figure.layout.shapes) == len(layers)
+    for layer, trace in zip(layers, figure.data, strict=True):
+        assert layer.name in trace.hovertext
+    custom = layers.index(next(layer for layer in layers if layer.name == "m1_custom"))
+    assert "Type: via" in figure.data[custom].hovertext
+    assert figure.layout.shapes[custom].fillcolor == "#87CEEB"

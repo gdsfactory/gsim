@@ -47,6 +47,7 @@ from gsim.palace.solver_settings import SolverSettingsMixin
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    import plotly.graph_objects as go
     from gdsfactory.component import Component
 
     from gsim.palace._mesh_fingerprint import PortDeclaration
@@ -1473,10 +1474,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._resolve_stack()
 
         if self.stack is not None:
-            print_stack_table(self.stack)
+            # print_stack_table returns the table; it does not print it.
+            print(print_stack_table(self.stack))  # noqa: T201
 
-    def plot_stack(self) -> None:
+    def plot_stack(self) -> go.Figure | None:
         """Plot the layer stack visualization.
+
+        Returns:
+            The plotly figure, so it displays when it is the value of a
+            notebook cell. ``None`` when there is no stack.
 
         Example:
             >>> sim.plot_stack()
@@ -1487,7 +1493,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._resolve_stack()
 
         if self.stack is not None:
-            plot_stack(self.stack)
+            return plot_stack(self.stack)
+        return None
 
     # -------------------------------------------------------------------------
     # Visualization
