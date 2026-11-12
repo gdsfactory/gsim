@@ -3,8 +3,9 @@
 It runs on synthetic lines, with no cloud job.
 
 Baehr-Jones et al., Opt. Express 20(11) 12014 (2012),
-https://doi.org/10.1364/OE.20.012014. ``nbs/palace_bj2012_electrode.ipynb`` de-embeds a
-200 um section from a 600 um one and fits one passive line to the 400 um remainder.
+https://doi.org/10.1364/OE.20.012014.
+``nbs/palace_bj2012_electrode_details.ipynb`` de-embeds a 200 um section from a
+600 um one and fits one passive line to the 400 um remainder.
 Here the notebook's own cells run, without any cloud job, on S-parameters of the
 paper's metal-only line at 10 GHz (Z = 61 - 5j ohm, R = 4.9 kohm/m, L = 457 nH/m,
 about 3.8 dB/cm) built from ABCD matrices with end fixtures and 1e-3 noise.
@@ -23,15 +24,15 @@ from scipy.constants import speed_of_light
 from gsim.common.transmission_line import section_abcd
 
 NOTEBOOK_DIR = Path(__file__).resolve().parents[2] / "nbs"
+#: The long notebook holds the post-processing; the user notebook only quotes it.
+NOTEBOOK = "palace_bj2012_electrode_details.ipynb"
 FREQ_HZ = 10e9
 
 
 @pytest.fixture(scope="module")
 def functions():
     """Execute the notebook's analysis and synthetic-data cells (no cloud)."""
-    notebook = json.loads(
-        (NOTEBOOK_DIR / "palace_bj2012_electrode.ipynb").read_text(encoding="utf-8")
-    )
+    notebook = json.loads((NOTEBOOK_DIR / NOTEBOOK).read_text(encoding="utf-8"))
     sources = ["".join(cell["source"]) for cell in notebook["cells"]]
     reference = json.loads(
         (NOTEBOOK_DIR / "data" / "bj2012_reference.json").read_text(encoding="utf-8")
@@ -52,9 +53,7 @@ def functions():
 
 
 def _cell_sources():
-    notebook = json.loads(
-        (NOTEBOOK_DIR / "palace_bj2012_electrode.ipynb").read_text(encoding="utf-8")
-    )
+    notebook = json.loads((NOTEBOOK_DIR / NOTEBOOK).read_text(encoding="utf-8"))
     return ["".join(cell["source"]) for cell in notebook["cells"]]
 
 

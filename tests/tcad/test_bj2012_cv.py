@@ -5,9 +5,13 @@ https://doi.org/10.1364/OE.20.012014. The cross-section is the generic one of
 ``nbs/tcad_bj2012_modulator.ipynb``: a 0.5 um wide, 220 nm tall rib on a 90 nm
 slab with 0.95 um slab either side, 2.6 um contact regions and an aluminum
 landing on each, and the calibrated erfc-graded junction (lateral straggle
-0.27 um) of that notebook. The paper's implants are striated (10 um period, 1 um
-gaps), so the capacitance per unit length of device is 0.9 times that of the
-simulated segment; the comparison with Fig. 2d applies that factor.
+0.20 um) of that notebook. The straggle is a calibrated unknown (the paper does not
+give the grading length): the least-squares fit of C(V) to the ten points of Fig. 2d
+on the notebook's mesh gives 0.204 um (see the section "How sigma was fitted" of the
+details notebook and ``nbs/data/rf_benchmark/bj2012_modulator/sigma_fit.json``).
+The paper's implants are striated (10 um period, 1 um gaps), so the capacitance
+per unit length of device is 0.9 times that of the simulated segment; the
+comparison with Fig. 2d applies that factor.
 
 A reduced version of the notebook's sweep, to fit the budget of the
 ``tcad_local`` workflow (about a minute): the coarse notebook mesh, three
@@ -62,7 +66,7 @@ RIB_HALF = GEOMETRY["rib_width_um"] / 2
 SLAB_WIDTH = GEOMETRY["contact_start_from_rib_edge_um"]
 CONTACT_WIDTH = GEOMETRY["rib_edge_to_via_side_um"] - SLAB_WIDTH
 METAL_THICKNESS = GEOMETRY["lower_metal_thickness_um"]
-SIGMA_UM = 0.27  # calibrated lateral straggle of the notebook (um)
+SIGMA_UM = 0.20  # calibrated lateral straggle of the notebook (um), fitted to Fig. 2d
 #: Fraction of the device length that carries a junction (Fig. 1a inset).
 FILL = (
     1 - GEOMETRY["implant_striation_gap_um"] / GEOMETRY["implant_striation_period_um"]
@@ -86,8 +90,19 @@ ELECTRODES = {"n_contact": "cathode_metal", "p_contact": "anode_metal"}
 
 #: Reverse biases (V on the cathode) of the reduced sweep, on Fig. 2d's grid.
 BIASES = [0.0, 1.0, 3.0]
-#: Simulated C (fF/um) of this reduced run, from the run that wrote the test.
-STORED_C_FF_PER_UM = {0.0: 0.2253, 1.0: 0.1837, 3.0: 0.1530}
+#: Simulated C (fF/um) of this reduced run, at sigma = 0.20 um (the refit of
+#: ``nbs/data/rf_benchmark/bj2012_modulator/sigma_fit.json``). History of the stored
+#: values: first 0.2253, 0.1837 and 0.1530 at sigma = 0.27 um; gsim commit 6ef78bc8 (#480,
+#: signed finite-box edge couples) lowered them by 5.8 to 6.4 % to 0.2123, 0.1720 and
+#: 0.1438 (the same case on the sources of the parent commit gives the old values and
+#: with #480 the new ones, and no other commit in between moves C); the refit to
+#: sigma = 0.20 um, which brings the curve back onto Fig. 2d, gives the values below.
+#: DEVSIM's own |cot| couples overweight obtuse triangles (``test_edge_couples.py``
+#: against an independent P1 solve); with the signed ones the 0 V capacitance settles as
+#: the mesh is refined (0.2123, 0.2111, 0.2108, 0.2103 fF/um at 20, 10, 5 and 2.5 nm in
+#: the rib, at sigma = 0.27 um), with the old ones it did not (0.2253 to 0.2162 and back
+#: to 0.2194).
+STORED_C_FF_PER_UM = {0.0: 0.2275, 1.0: 0.1846, 3.0: 0.1540}
 #: 1 F/cm of depth = 1e15 fF / 1e4 um.
 F_PER_CM_TO_FF_PER_UM = 1e11
 

@@ -1,0 +1,217 @@
+{
+  "case": "ihp-l2n0",
+  "title": "IHP SG13G2 L2n0 octagonal inductor: Palace against measurements and openEMS",
+  "status": "reported",
+  "device": {
+    "name": "IHP SG13G2 L2n0, 2-turn octagonal inductor, nominal 2 nH",
+    "picture": "docs/assets/plots/ihp-l2n0-gds-and-palace-mesh.png",
+    "geometry_source": "nbs/data/ihp_validation/source/L_2n0_simplified.gds"
+  },
+  "reference": {
+    "type": "measurement",
+    "citation": "IHP-Open-PDK SG13_Octagon_L2n0 test case (Apache-2.0, commit 943983786b04351feb20e33e8d3d76c0e0d87cce): THRU-de-embedded measurements of two dies and the published IHP openEMS result",
+    "file": "nbs/data/ihp_validation/source/provenance.json"
+  },
+  "rows": [
+    {
+      "id": "s21-mag-rms-x2y7",
+      "status": "reported",
+      "quantity": "S21 magnitude, RMS error against the measured die x2y7",
+      "unit": "dB",
+      "freq_ghz": null,
+      "value": 8.86,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "not-scored",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/CONVERGENCE_AUDIT.md",
+        "cell_id": "first paragraph"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "RMS over 11 frequencies; the value is the error itself, so there is no separate reference value. The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated"
+    },
+    {
+      "id": "s21-phase-rms-x2y7",
+      "status": "reported",
+      "quantity": "S21 phase, RMS error against the measured die x2y7",
+      "unit": "deg",
+      "freq_ghz": null,
+      "value": 44.0,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "not-scored",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/CONVERGENCE_AUDIT.md",
+        "cell_id": "first paragraph"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "RMS over 11 frequencies. The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated"
+    },
+    {
+      "id": "s21-mag-rms-x5y8",
+      "status": "reported",
+      "quantity": "S21 magnitude, RMS error against the measured die x5y8",
+      "unit": "dB",
+      "freq_ghz": null,
+      "value": 8.83,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "not-scored",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/CONVERGENCE_AUDIT.md",
+        "cell_id": "first paragraph"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "RMS over 11 frequencies; the value is the error itself, so there is no separate reference value. The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated"
+    },
+    {
+      "id": "s21-phase-rms-x5y8",
+      "status": "reported",
+      "quantity": "S21 phase, RMS error against the measured die x5y8",
+      "unit": "deg",
+      "freq_ghz": null,
+      "value": 45.4,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "not-scored",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/CONVERGENCE_AUDIT.md",
+        "cell_id": "first paragraph"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "RMS over 11 frequencies. The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated"
+    },
+    {
+      "id": "l-diff-1ghz-x2y7",
+      "status": "reported",
+      "quantity": "differential inductance at 1 GHz against the measured die x2y7",
+      "unit": "nH",
+      "freq_ghz": 1.0,
+      "value": 0.802,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "prediction",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/experiments/README.md",
+        "cell_id": "table"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "Zdiff = Z11 - Z12 - Z21 + Z22; the simulated value is a factor of two low; the setups differ in ground, ports and boundary (audit table). The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated",
+      "reference_value": 1.674,
+      "reference_label": "measured, die x2y7"
+    },
+    {
+      "id": "l-diff-1ghz-x5y8",
+      "status": "reported",
+      "quantity": "differential inductance at 1 GHz against the measured die x5y8",
+      "unit": "nH",
+      "freq_ghz": 1.0,
+      "value": 0.802,
+      "method": "Palace driven sweep, recorded run l2n0_best (ground0_pec), 11 points 1 to 50 GHz",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "prediction",
+      "gsim_version": "0.7.0",
+      "element_order": 2,
+      "mesh": "87,482 tetrahedra, 5 um nominal mesh, MGMaxLevels 100",
+      "convergence": "error indicator about 0.18 against AdaptiveTol 0.02: not converged",
+      "source": {
+        "notebook": "nbs/data/ihp_validation/experiments/README.md",
+        "cell_id": "table"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "note": "Zdiff = Z11 - Z12 - Z21 + Z22; the simulated value is a factor of two low; the setups differ in ground, ports and boundary (audit table). The audit gives the two dies' values as a pair; their order is assumed to be x2y7, x5y8 (not checked against the notebook).",
+      "verdict": "not validated",
+      "reference_value": 1.672,
+      "reference_label": "measured, die x5y8"
+    }
+  ],
+  "curves": [
+    {
+      "file": "nbs/data/ihp_validation/source/die_x2y7.s2p",
+      "kind": "touchstone",
+      "label": "measured, die x2y7"
+    },
+    {
+      "file": "nbs/data/ihp_validation/source/die_x5y8.s2p",
+      "kind": "touchstone",
+      "label": "measured, die x5y8"
+    },
+    {
+      "file": "nbs/data/ihp_validation/source/openems_twoport_1p5um.s2p",
+      "kind": "touchstone",
+      "label": "openEMS, 1.5 um cell (IHP)"
+    },
+    {
+      "file": "nbs/data/ihp_validation/runs/l2n0_best/output/palace/port-S.csv",
+      "kind": "csv",
+      "label": "Palace, recorded run l2n0_best"
+    }
+  ]
+}
