@@ -3255,8 +3255,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 ``use_apptainer``.
                 If None, tries PALACE_EXECUTABLE, then ``./bin/palace``,
                 then ``palace`` on PATH.
-            use_apptainer: If True (default), run via Apptainer using SIF file.
-                If False, run Palace executable directly.
+            use_apptainer: If True, run via Apptainer using SIF file.
+                If False (default), run Palace executable directly.
                 Ignored when ``palace_executable`` is explicitly provided.
             num_processes: Number of MPI processes. If None (default), a
                 problem-size-aware default is chosen: 2D mode-analysis runs
