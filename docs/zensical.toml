@@ -19,6 +19,7 @@ nav = [
     { "Meep: 2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" }
   ] },
   { "FEM for RF" = [
+    { "Getting Started" = "getting_started_palace.md" },
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
@@ -89,7 +90,7 @@ inherited_members = true
 full_output = "llms-full.txt"
 
 [project.plugins.llmstxt.sections]
-"Getting started" = ["index.md"]
+"Getting started" = ["index.md", "getting_started_palace.md"]
 "Guides" = [
   "api/*.md",
   "transmission_line_analysis.md",
