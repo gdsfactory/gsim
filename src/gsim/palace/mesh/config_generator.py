@@ -91,6 +91,50 @@ def _split_hints(
     return extras, deprecated
 
 
+def _solver_block(
+    numerical_config: SolverConfig | NumericalConfig | None,
+    simulation_type: str,
+) -> dict[str, object]:
+    """Build the Palace ``Solver`` block, using the class defaults of the problem.
+
+    Without ``numerical_config`` the defaults are those of the simulation
+    type's solver class, so boundary mode writes ``MGMaxLevels`` 1 (multigrid
+    off). A supplied config keeps what it sets, but a boundary-mode run whose
+    config leaves ``mg_max_levels`` unset also gets 1, not the generic 100.
+    """
+    from gsim.palace.models.numerical import NumericalConfig
+    from gsim.palace.models.solver import (
+        _BOUNDARY_MODE_LINEAR_DEFAULTS,
+        BoundaryModeSolverConfig,
+        EigenmodeSolverConfig,
+        MagnetostaticSolverConfig,
+        SolverConfig,
+    )
+
+    if numerical_config is None:
+        defaults: SolverConfig = (
+            EigenmodeSolverConfig()
+            if simulation_type == "eigenmode"
+            else MagnetostaticSolverConfig()
+            if simulation_type == "magnetostatic"
+            else BoundaryModeSolverConfig()
+            if simulation_type == "boundarymode"
+            else SolverConfig()
+        )
+        return dict(defaults.to_solver_config())
+
+    solver_conf = dict(numerical_config.to_solver_config())
+    if simulation_type == "boundarymode":
+        if isinstance(numerical_config, NumericalConfig):
+            explicit = numerical_config.model_fields_set
+        else:
+            explicit = numerical_config.linear.model_fields_set
+        if "mg_max_levels" not in explicit:
+            linear = cast("dict[str, Any]", solver_conf["Linear"])
+            linear["MGMaxLevels"] = _BOUNDARY_MODE_LINEAR_DEFAULTS["mg_max_levels"]
+    return solver_conf
+
+
 def _resolve_impedance_boundaries(
     raw: list[ImpedanceBoundaryConfig] | None,
     groups: dict,
@@ -662,24 +706,7 @@ def generate_palace_config(
             "Type": "Default",
         }
 
-    solver_conf: dict[str, object]
-    if numerical_config is not None:
-        solver_conf = dict(numerical_config.to_solver_config())
-    else:
-        from gsim.palace.models.solver import (
-            EigenmodeSolverConfig,
-            MagnetostaticSolverConfig,
-            SolverConfig,
-        )
-
-        defaults = (
-            EigenmodeSolverConfig()
-            if simulation_type == "eigenmode"
-            else MagnetostaticSolverConfig()
-            if simulation_type == "magnetostatic"
-            else SolverConfig()
-        )
-        solver_conf = defaults.to_solver_config()
+    solver_conf = _solver_block(numerical_config, simulation_type)
     _resolve_estimator_settings(
         cast("dict[str, Any]", solver_conf["Linear"]), refinement_config
     )

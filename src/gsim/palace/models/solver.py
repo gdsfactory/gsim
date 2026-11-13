@@ -325,6 +325,8 @@ class DrivenSolverConfig(SolverConfig):
 
 
 _EIGENMODE_LINEAR_DEFAULTS: dict[str, Any] = {"tolerance": 1e-9}
+# Multigrid off: it gives wrong 2D boundary-mode losses (awslabs/palace#1177).
+_BOUNDARY_MODE_LINEAR_DEFAULTS: dict[str, Any] = {"mg_max_levels": 1}
 # Palace resolves magnetostatic Default to AMS + CG on the singular curl-curl
 # operator; direct backends are not documented for it.
 _MAGNETOSTATIC_LINEAR_DEFAULTS: dict[str, Any] = {
@@ -352,8 +354,19 @@ class ElectrostaticSolverConfig(SolverConfig):
 
 
 class BoundaryModeSolverConfig(SolverConfig):
-    """Common and cross-section mode settings for BoundaryModeSim."""
+    """Common and cross-section mode settings for BoundaryModeSim.
 
+    ``linear.mg_max_levels`` defaults to 1 (multigrid off), unlike the other
+    simulation types, because Palace's geometric multigrid gives wrong losses
+    for 2D boundary-mode problems with conductivity or impedance boundaries.
+    Set ``linear.mg_max_levels`` explicitly to override it.
+    """
+
+    _linear_defaults: ClassVar[dict[str, Any]] = _BOUNDARY_MODE_LINEAR_DEFAULTS
+
+    linear: LinearSolverConfig = Field(
+        default_factory=lambda: LinearSolverConfig(**_BOUNDARY_MODE_LINEAR_DEFAULTS)
+    )
     boundary_mode: BoundaryModeConfig = Field(default_factory=BoundaryModeConfig)
 
 
