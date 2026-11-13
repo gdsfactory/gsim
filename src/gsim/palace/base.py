@@ -3254,7 +3254,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 If provided, runs Palace directly and overrides
                 ``use_apptainer``.
                 If None, tries PALACE_EXECUTABLE, then ``./bin/palace``,
-                then ``palace`` on PATH.
+                then PALACE_BIN, then ``palace`` on PATH.
             use_apptainer: If True, run via Apptainer using SIF file.
                 If False (default), run Palace executable directly.
                 Ignored when ``palace_executable`` is explicitly provided.
@@ -3304,7 +3304,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             ... )
             >>>
             >>> # Auto-discovery with no options:
-            >>> # PALACE_EXECUTABLE, then local ./bin/palace, then palace on PATH
+            >>> # PALACE_EXECUTABLE, then local ./bin/palace, then PALACE_BIN,
+            >>> # then palace on PATH
             >>> # (a SIF is used only with use_apptainer=True)
             >>> results = sim.run_local()
             >>>
