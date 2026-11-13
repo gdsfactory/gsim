@@ -11,9 +11,9 @@ dev:
 tbump:
     uv tool install tbump
 
-# bump version
+# Prepare a release PR; a tested merge to main tags and publishes it.
 bump version:
-    tbump "{{ version }}"
+    tbump --only-patch "{{ version }}"
 
 uv:
   curl -LsSf https://astral.sh/uv/install.sh | sh

@@ -61,3 +61,28 @@ jobs:
       with:
         use_oidc: true
         fail_ci_if_error: true
+  release_version:
+    name: Publish a version bump
+    needs: [test, test_coverage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-version-${{ github.sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: write
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+    - name: Tag and publish a version bump
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BEFORE_SHA: ${{ github.event.before }}
+        AFTER_SHA: ${{ github.sha }}
+      run: >-
+        python scripts/release_version.py --before "$BEFORE_SHA" --after "$AFTER_SHA" --repository "$GITHUB_REPOSITORY"
