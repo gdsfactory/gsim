@@ -34,6 +34,7 @@ nav = [
   ] },
   { "Modeling & Analysis" = [
     { "EMX Process Files" = "emx_proc_import.md" },
+    { "Conductor Models" = "palace_conductors.md" },
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
     { "Differential Interconnect, Crosstalk and TDR" = "nbs/palace_signal_integrity.md" },
