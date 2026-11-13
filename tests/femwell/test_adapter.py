@@ -164,17 +164,25 @@ class TestConductorIndexBound:
 
     def test_a_weak_conductor_alone_gives_no_bound(self):
         """11.7-12j conducts, but 0.1|sqrt(eps)| = 0.41 is below the light line."""
-        with pytest.warns(UserWarning, match="skipped conductor"):
+        with pytest.warns(UserWarning, match="returns no bound"):
             assert conductor_index_bound({"si": 11.7 - 12j, "oxide": 3.9 + 0j}) is None
 
-    def test_a_weak_conductor_does_not_lower_the_metal_bound(self):
-        """Doped silicon next to aluminium leaves the aluminium bound in place."""
-        eps = {"al": 1.0 - 6.8e8j, "si": 11.7 - 1000j, "oxide": 3.9 + 0j}
-        with pytest.warns(UserWarning, match="skipped conductor"):
-            bound = conductor_index_bound(eps)
-        assert bound == pytest.approx(0.1 * abs(np.sqrt(1.0 - 6.8e8j)))
-        line = 5.13 - 4.68j
-        assert select_line_mode([line, 2.5 - 0.01j], max_index=bound) == line
+    @pytest.mark.parametrize("eps_si", [11.7 - 12j, 11.7 - 1000j])
+    def test_a_weak_conductor_next_to_metal_gives_no_bound(self, eps_si):
+        """The aluminium bound alone would let a doped-silicon Mode through.
+
+        With aluminium, the bound would be about 2608. A Mode confined to
+        silicon at 11.7-1000j, near sqrt(eps_si) = 22.49-22.23j, is under
+        it and slower than the 5.13-4.68j line Mode, so selection would
+        pick it. Returning no bound leaves that choice to the caller.
+        """
+        eps = {"al": 1.0 - 6.8e8j, "si": eps_si, "oxide": 3.9 + 0j}
+        aluminium_bound = 0.1 * abs(np.sqrt(1.0 - 6.8e8j))
+        line, si_mode = 5.13 - 4.68j, 22.49 - 22.23j
+        assert abs(si_mode) < aluminium_bound
+        assert select_line_mode([line, si_mode], max_index=aluminium_bound) == si_mode
+        with pytest.warns(UserWarning, match="returns no bound"):
+            assert conductor_index_bound(eps) is None
 
     def test_the_margin_is_against_the_largest_dielectric_index(self):
         """A conductor clears oxide by 10x but not silicon is skipped."""
@@ -182,7 +190,7 @@ class TestConductorIndexBound:
         assert conductor_index_bound({"c": eps_cond, "ox": 3.9 + 0j}) == (
             pytest.approx(30.0, rel=1e-4)
         )
-        with pytest.warns(UserWarning, match="skipped conductor"):
+        with pytest.warns(UserWarning, match="returns no bound"):
             assert (
                 conductor_index_bound({"c": eps_cond, "si": 11.7 + 0j, "ox": 3.9 + 0j})
                 is None

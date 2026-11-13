@@ -240,10 +240,19 @@ def conductor_index_bound(
     doped silicon, has ``|sqrt(eps)|`` close to the indices a line Mode
     can reach. A conductor sets the bound only when
     ``fraction * |sqrt(eps)|`` is at least *margin* times the largest
-    ``|sqrt(eps)|`` of the other regions (and above the light line);
-    the others are skipped with a warning. A slow-wave line Mode can sit
-    several times above the dielectric index (3.5 times on an aluminium
-    strip in oxide at 1 GHz), hence the default margin of 10.
+    ``|sqrt(eps)|`` of the other regions (and above the light line).
+    A slow-wave line Mode can sit several times above the dielectric
+    index (3.5 times on an aluminium strip in oxide at 1 GHz), hence the
+    default margin of 10.
+
+    When any conductor falls short, no bound is returned, even if a
+    strong conductor is present. A Mode confined to the weak conductor
+    has ``|n_eff|`` near its ``|sqrt(eps)|``, below a strong conductor's
+    bound and possibly above the line Mode's index, so a bound from the
+    strong conductor alone would not reject it; no cap derived from the
+    permittivity alone separates such a Mode from the line Mode. Select
+    the line Mode another way in that case, for example with
+    :func:`field_fraction_outside` or an explicit ``max_index``.
 
     Args:
         epsilon: The permittivity given to :func:`solve_modes`: either
@@ -256,15 +265,15 @@ def conductor_index_bound(
             (default 10).
 
     Returns:
-        The smallest bound over the conductors that count, or ``None``
-        when none does (no bound is then given from this source).
+        The smallest bound over the conductors, or ``None`` when there is
+        no conductor or when any conductor falls short of *margin*.
 
     Raises:
         ValueError: If *fraction* or *margin* is not positive.
 
     Warns:
-        UserWarning: When a conductor is skipped because its bound would
-            not clear the dielectric index by *margin*.
+        UserWarning: When ``None`` is returned because a conductor's
+            bound would not clear the dielectric index by *margin*.
     """
     if fraction <= 0.0:
         raise ValueError(f"fraction must be positive, got {fraction}.")
@@ -286,19 +295,19 @@ def conductor_index_bound(
     bounds = fraction * np.sqrt(np.abs(values[is_conductor]))
     usable = bounds >= floor
     if not usable.all():
-        skipped = np.unique(values[is_conductor][~usable])
-        shown = ", ".join(f"{eps:.4g}" for eps in skipped[:3])
-        more = f" and {skipped.size - 3} more" if skipped.size > 3 else ""
+        weak = np.unique(values[is_conductor][~usable])
+        shown = ", ".join(f"{eps:.4g}" for eps in weak[:3])
+        more = f" and {weak.size - 3} more" if weak.size > 3 else ""
         warnings.warn(
-            f"conductor_index_bound skipped conductor permittivity {shown}{more}: "
-            f"{fraction:g} * |sqrt(eps)| does not reach {margin:g} times the "
-            f"largest dielectric index ({dielectric_index:.4g}), so it cannot "
-            "tell a Mode inside it from the line Mode.",
+            f"conductor_index_bound returns no bound: for conductor permittivity "
+            f"{shown}{more}, {fraction:g} * |sqrt(eps)| does not reach "
+            f"{margin:g} times the largest dielectric index "
+            f"({dielectric_index:.4g}), so no index bound tells a Mode inside "
+            "that conductor from the line Mode.",
             stacklevel=2,
         )
-    if not usable.any():
         return None
-    return float(bounds[usable].min())
+    return float(bounds.min())
 
 
 def solve_modes(
