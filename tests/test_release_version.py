@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,9 @@ script_spec.loader.exec_module(release_version)
 @pytest.fixture
 def repository(tmp_path, monkeypatch):
     """Use real local tags and pushes while replacing GitHub network requests."""
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        pytest.skip("Release integration tests require Git")
     origin = tmp_path / "origin.git"
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -28,7 +32,7 @@ def repository(tmp_path, monkeypatch):
     run = release_version.run
 
     def git(*arguments):
-        return run("git", *arguments)
+        return run(git_executable, *arguments)
 
     git("init", "--bare", str(origin))
     git("init")
@@ -61,7 +65,8 @@ def repository(tmp_path, monkeypatch):
 
     def run_with_fake_github(*command):
         if command[0] != "gh":
-            return run(*command)
+            assert command[0] == "git"
+            return git(*command[1:])
         state.calls.append(command)
         if command[1] == state.failure:
             raise subprocess.CalledProcessError(1, command, stderr="GitHub unavailable")
