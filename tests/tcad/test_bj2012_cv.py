@@ -92,10 +92,10 @@ ELECTRODES = {"n_contact": "cathode_metal", "p_contact": "anode_metal"}
 BIASES = [0.0, 1.0, 3.0]
 #: Simulated C (fF/um) of this reduced run, at sigma = 0.20 um (the refit of
 #: ``nbs/data/rf_benchmark/bj2012_modulator/sigma_fit.json``). History of the stored
-#: values: first 0.2253, 0.1837 and 0.1530 at sigma = 0.27 um; gsim commit 6ef78bc8 (#480,
-#: signed finite-box edge couples) lowered them by 5.8 to 6.4 % to 0.2123, 0.1720 and
-#: 0.1438 (the same case on the sources of the parent commit gives the old values and
-#: with #480 the new ones, and no other commit in between moves C); the refit to
+#: values: first 0.2253, 0.1837 and 0.1530 at sigma = 0.27 um; gsim commit 6ef78bc8
+#: (#480, signed finite-box edge couples) lowered them by 5.8 to 6.4 % to 0.2123, 0.1720
+#: and 0.1438 (the same case on the sources of the parent commit gives the old values
+#: and with #480 the new ones, and no other commit in between moves C); the refit to
 #: sigma = 0.20 um, which brings the curve back onto Fig. 2d, gives the values below.
 #: DEVSIM's own |cot| couples overweight obtuse triangles (``test_edge_couples.py``
 #: against an independent P1 solve); with the signed ones the 0 V capacitance settles as

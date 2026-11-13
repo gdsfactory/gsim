@@ -84,16 +84,9 @@ class TestSharedCells:
 
     def test_tcad_setup_cells_are_copies(self):
         user = _code(TCAD)
-        for cell_id in (
-            "3",
-            "5",
-            "7",
-            "17",
-            "21",
-            "30",
-            "optical-mesh",
-            "optical-mode",
-        ):
+        # Cell ids are positions (the nbstripout hook renumbers them): the mesh helper,
+        # the charge simulation, the doping profiles and the optical mesh and mode.
+        for cell_id in ("3", "5", "7", "20", "24", "41", "43", "45"):
             assert _source(f"{TCAD}_details", cell_id) in user, cell_id
 
 
@@ -194,11 +187,12 @@ def _matches(text, numbers):
     return False
 
 
-# Bold numbers (the result boxes) and values in dB/cm or V cm, which name a stored row.
-# A "±" marks an uncertainty and a "(" after a bold number a journal volume: skipped.
+# Bold numbers (the result boxes) and values in dB/cm, V cm or ohm, which name a stored
+# row. A "±" marks an uncertainty and a "(" after a bold number a journal volume:
+# skipped.
 QUOTED = re.compile(
     r"\*\*(\d+(?:\.\d+)?)(?:\s*(?:dB/cm|V cm))?\*\*(?!\()"
-    r"|(?<![±\d.])(\d+(?:\.\d+)?) (?:dB/cm|V cm)\b"
+    r"|(?<![±\d.])(\d+(?:\.\d+)?) (?:dB/cm|V cm|ohm)\b"
 )
 
 
@@ -267,7 +261,7 @@ class TestStoredResults:
 
     @pytest.mark.parametrize("name", CASES)
     def test_cloud_rows_are_reported_not_published(self, name):
-        """A cloud row lists exactly the provenance fields it lacks (never all filled)."""
+        """A cloud row lists exactly the provenance fields it lacks (never all set)."""
         fields = (
             "solver_version",
             "gsim_version",

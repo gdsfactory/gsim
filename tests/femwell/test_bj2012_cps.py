@@ -34,6 +34,7 @@ patterned layers (it needs them for the 3D runs).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -48,6 +49,7 @@ from gsim.common.stack.extractor import Layer, LayerStack
 from gsim.common.stack.materials import MaterialProperties
 from gsim.common.transmission_line import line_params_from_neff
 from gsim.femwell import epsilon_by_region, line_reading, solve_modes
+from gsim.femwell.adapter import electrode_current
 from gsim.palace import BoundaryModeSim
 from tests._helpers import draw_rectangle
 
@@ -277,37 +279,72 @@ class TestAgainstThePaper:
         assert np.sqrt(3.9) < n < np.sqrt(11.9)
 
 
+def _pure_line_mode(mesh, modes):
+    """The line mode of a degenerate pair: equal and opposite electrode currents.
+
+    In a uniformly filled shielded box the line mode and the wall mode are both TEM
+    and have the same index (n = sqrt(eps)), so the eigensolver returns any
+    combination of the two: which one depends on its start vector and on the
+    linear-algebra library, not on the physics. The line mode is the combination
+    whose two electrodes carry currents that cancel. The currents and fields are
+    linear in the mode, so that combination is ``I_b E_a - I_a E_b`` with
+    ``I = I_signal + I_return`` of each solved mode.
+    """
+    assert len(modes) == 2, f"expected the degenerate pair, got {len(modes)} modes"
+    signal, ground = _conductors("pec")
+    first, second = modes
+    total = [
+        sum(
+            electrode_current(m, frequency_hz=FREQ_HZ, conductor=c, mesh=mesh)
+            for c in (signal, ground)
+        )
+        for m in modes
+    ]
+    return dataclasses.replace(
+        first,
+        E=total[1] * first.E - total[0] * second.E,
+        H=total[1] * first.H - total[0] * second.H,
+    )
+
+
 class TestInductanceIsGeometric:
-    def test_l_does_not_depend_on_a_uniform_dielectric(self, pec):
+    def test_l_does_not_depend_on_a_uniform_dielectric(self, pec, pec_line):
         """Non-magnetic materials: L = Z n / c is the same for a box filled with eps 1
-        or 4.
+        or 4, and is that of the built line.
 
         A uniform filling is exactly TEM, so n scales with sqrt(eps) and Z against it.
-        (A
-        comparison of the built line with the vacuum-filled one is not a useful check:
-        the vacuum impedance of the sharp-cornered strips is not converged on this mesh,
-        126 to 112 ohm between two meshes of the notebook's cross-section.)
+        The line and wall modes are degenerate there, so the line mode is rebuilt from
+        the solved pair (``_pure_line_mode``). Reading the "line" mode of the raw pair
+        gave 343 and 352 nH/m on one machine and 312 and 426 nH/m in CI: the readings of
+        a mixture of the two modes run from 300 to 40000 nH/m.
         """
         inductance = {}
         for eps_r, n_guess in ((1.0, 1.0), (4.0, 2.0)):
             filled = dict.fromkeys(pec["epsilon"], eps_r + 0j)
-            readings = _readings(
-                pec["mesh"],
-                _solve(
-                    pec["mesh"],
-                    filled,
-                    order=2,
-                    n_guess=n_guess,
-                    min_index=0.99,
-                ),
-                "pec",
+            modes = [
+                m
+                for m in _solve(
+                    pec["mesh"], filled, order=2, n_guess=n_guess, min_index=0.99
+                )
+                if abs(m.n_eff.real - np.sqrt(eps_r)) < 1e-3 * np.sqrt(eps_r)
+            ]
+            mode = _pure_line_mode(pec["mesh"], modes)
+            signal, ground = _conductors("pec")
+            reading = line_reading(
+                mode,
+                frequency_hz=FREQ_HZ,
+                mesh=pec["mesh"],
+                signal=signal,
+                return_=ground,
             )
-            _mode, reading = _line(readings)
+            assert reading.wall_mode is False
             assert reading.n_eff.real == pytest.approx(np.sqrt(eps_r), rel=1e-3)
             inductance[eps_r] = reading.z0_ohm.real * reading.n_eff.real / C0
-        # 2.4 % apart on this mesh (343.4 and 351.6 nH/m): the contour-current impedance
-        # is the mesh-sensitive quantity.
-        assert inductance[4.0] == pytest.approx(inductance[1.0], rel=0.04)
+        assert inductance[4.0] == pytest.approx(inductance[1.0], rel=1e-3)
+        # The built line (oxide, silicon, air) has the same L: it is geometric.
+        assert inductance[1.0] * 1e9 == pytest.approx(
+            pec_line["rlgc"]["L"] * 1e9, rel=0.01
+        )
 
 
 def _power_loss_resistance(mode, mesh, signal, ground, sigma_s_per_m):

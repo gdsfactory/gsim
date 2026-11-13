@@ -26,7 +26,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": -0.4,
       "reference_key": "capacitance.c_fF_per_um.0",
@@ -37,12 +37,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "sigma is fitted to Fig. 2d, so agreement shows the fit worked Value with sigma 0.27 um before the 13 Nov re-fit: 0.2568."
+      "note": "sigma is fitted to Fig. 2d, so agreement shows the fit worked Value with sigma 0.27 um before the 12 Nov re-fit: 0.2568."
     },
     {
       "id": "cv-01",
@@ -57,7 +57,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": -0.25,
       "reference_key": "capacitance.c_fF_per_um.1",
@@ -68,12 +68,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.23373."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.23373."
     },
     {
       "id": "cv-02",
@@ -88,7 +88,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 0.0,
       "reference_key": "capacitance.c_fF_per_um.2",
@@ -99,12 +99,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.21106."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.21106."
     },
     {
       "id": "cv-03",
@@ -119,7 +119,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 0.25,
       "reference_key": "capacitance.c_fF_per_um.3",
@@ -130,12 +130,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.19668."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.19668."
     },
     {
       "id": "cv-04",
@@ -150,7 +150,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 0.5,
       "reference_key": "capacitance.c_fF_per_um.4",
@@ -161,12 +161,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.18636."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.18636."
     },
     {
       "id": "cv-05",
@@ -181,7 +181,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 0.75,
       "reference_key": "capacitance.c_fF_per_um.5",
@@ -192,12 +192,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.17839."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.17839."
     },
     {
       "id": "cv-06",
@@ -212,7 +212,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 1.0,
       "reference_key": "capacitance.c_fF_per_um.6",
@@ -223,12 +223,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.17194."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.17194."
     },
     {
       "id": "cv-07",
@@ -243,7 +243,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 2.0,
       "reference_key": "capacitance.c_fF_per_um.7",
@@ -254,12 +254,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.1545."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.1545."
     },
     {
       "id": "cv-08",
@@ -274,7 +274,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 3.0,
       "reference_key": "capacitance.c_fF_per_um.8",
@@ -285,12 +285,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.14346."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.14346."
     },
     {
       "id": "cv-09",
@@ -305,7 +305,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "24"
+        "cell_id": "30"
       },
       "bias_v": 4.0,
       "reference_key": "capacitance.c_fF_per_um.9",
@@ -316,12 +316,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 137.73,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.13529."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.13529."
     },
     {
       "id": "vpil-00",
@@ -336,7 +336,7 @@
       "role": "not-scored",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": -0.4,
       "reference_key": "vpil_V_cm.top_arm.0|vpil_V_cm.bottom_arm.0",
@@ -353,7 +353,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 1.3653."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 1.3653."
     },
     {
       "id": "vpil-01",
@@ -368,7 +368,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": -0.1,
       "reference_key": "vpil_V_cm.top_arm.1|vpil_V_cm.bottom_arm.1",
@@ -384,7 +384,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 1.7553."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 1.7553."
     },
     {
       "id": "vpil-02",
@@ -399,7 +399,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 0.1,
       "reference_key": "vpil_V_cm.top_arm.2|vpil_V_cm.bottom_arm.2",
@@ -415,7 +415,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 1.9501."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 1.9501."
     },
     {
       "id": "vpil-03",
@@ -430,7 +430,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 0.4,
       "reference_key": "vpil_V_cm.top_arm.3|vpil_V_cm.bottom_arm.3",
@@ -446,7 +446,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 2.1972."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 2.1972."
     },
     {
       "id": "vpil-04",
@@ -461,7 +461,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 0.75,
       "reference_key": "vpil_V_cm.top_arm.4|vpil_V_cm.bottom_arm.4",
@@ -477,7 +477,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 2.4482."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 2.4482."
     },
     {
       "id": "vpil-05",
@@ -492,7 +492,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 1.25,
       "reference_key": "vpil_V_cm.top_arm.5|vpil_V_cm.bottom_arm.5",
@@ -508,7 +508,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 2.7776."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 2.7776."
     },
     {
       "id": "vpil-06",
@@ -523,7 +523,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 1.75,
       "reference_key": "vpil_V_cm.top_arm.6|vpil_V_cm.bottom_arm.6",
@@ -539,7 +539,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.0851."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.0851."
     },
     {
       "id": "vpil-07",
@@ -554,7 +554,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 2.5,
       "reference_key": "vpil_V_cm.top_arm.7|vpil_V_cm.bottom_arm.7",
@@ -570,7 +570,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.491."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.491."
     },
     {
       "id": "vpil-08",
@@ -585,7 +585,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 3.5,
       "reference_key": "vpil_V_cm.top_arm.8|vpil_V_cm.bottom_arm.8",
@@ -601,7 +601,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.9977."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.9977."
     },
     {
       "id": "vpil-09",
@@ -616,7 +616,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "32"
+        "cell_id": "51"
       },
       "bias_v": 4.5,
       "reference_key": "vpil_V_cm.top_arm.9|vpil_V_cm.bottom_arm.9",
@@ -632,7 +632,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 4.4753."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 4.4753."
     },
     {
       "id": "n-group",
@@ -647,7 +647,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "35"
+        "cell_id": "57"
       },
       "reference_key": "optical.n_group",
       "reference_value": 3.86,
@@ -662,7 +662,7 @@
       "run_seconds": 7.13,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.897."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.897."
     },
     {
       "id": "loss-sb-0v-mzi",
@@ -677,7 +677,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "31"
+        "cell_id": "47"
       },
       "bias_v": 0.0,
       "reference_key": "optical.implant_loss_dB_per_cm_measured",
@@ -694,7 +694,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 4.1475."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 4.1475."
     },
     {
       "id": "loss-sb-0v-pred",
@@ -709,7 +709,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "31"
+        "cell_id": "47"
       },
       "bias_v": 0.0,
       "reference_key": "optical.implant_loss_dB_per_cm_paper_prediction",
@@ -726,7 +726,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 4.1475."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 4.1475."
     },
     {
       "id": "loss-ned-0v-mzi",
@@ -741,7 +741,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "31"
+        "cell_id": "47"
       },
       "bias_v": 0.0,
       "reference_key": "optical.implant_loss_dB_per_cm_measured",
@@ -758,7 +758,7 @@
       "run_seconds": 133.91,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.2435."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.2435."
     },
     {
       "id": "rs-0v",
@@ -773,7 +773,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "branch"
+        "cell_id": "74"
       },
       "bias_v": 0.0,
       "reference_key": "doping.rib_to_contact_resistance_ohm_cm",
@@ -784,12 +784,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 0.0,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 1.6612."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 1.6612."
     },
     {
       "id": "cj-0v",
@@ -804,7 +804,7 @@
       "role": "calibration",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "branch"
+        "cell_id": "74"
       },
       "bias_v": 0.0,
       "reference_key": "capacitance.c_fF_per_um.2",
@@ -815,12 +815,12 @@
       "gsim_commit": "6cdeab0c",
       "element_order": 1,
       "mesh": "graded cross-section, 20 nm elements and 10 nm in the rib box (cell 7); element count not recorded (linear elements)",
-      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 28); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
+      "convergence": "coarse mesh (0.04 um) against the notebook mesh agree to the two printed digits (cell 35); not otherwise refined. On the coarse test mesh the 0 V capacitance fell from 0.2253 to 0.2123 fF/um (-5.8 %) with gsim commit 6ef78bc8 (#480, signed finite-box edge couples, which replace DEVSIM's |cot| couples that overweight obtuse triangles; tests/tcad/test_edge_couples.py). With #480 the 0 V capacitance converges as the rib mesh is refined (0.2123, 0.2111, 0.2108 and 0.2103 fF/um at 20, 10, 5 and 2.5 nm elements); the old couples gave 0.2253, 0.2220, 0.2162 and 0.2194 and did not settle",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 0.0,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 0.21104."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 0.21104."
     },
     {
       "id": "ll-tcad-z0",
@@ -835,7 +835,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.z0_real_ohm",
       "reference_value": 37.0,
@@ -850,7 +850,7 @@
       "run_seconds": 0.05,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 37.583."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 37.583."
     },
     {
       "id": "ll-tcad-n",
@@ -865,7 +865,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.n_rf",
       "reference_value": 3.75,
@@ -880,7 +880,7 @@
       "run_seconds": 0.05,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 3.6543."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 3.6543."
     },
     {
       "id": "ll-tcad-alpha",
@@ -895,7 +895,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.alpha_dB_per_cm",
       "reference_value": 10.8,
@@ -910,7 +910,7 @@
       "run_seconds": 0.05,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 10.279."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 10.279."
     },
     {
       "id": "ll-quoted-z0",
@@ -925,7 +925,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.z0_real_ohm",
       "reference_value": 37.0,
@@ -954,7 +954,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.n_rf",
       "reference_value": 3.75,
@@ -983,7 +983,7 @@
       "role": "consistency",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "49"
+        "cell_id": "76"
       },
       "reference_key": "loaded_line_10GHz.alpha_dB_per_cm",
       "reference_value": 10.8,
@@ -1012,7 +1012,7 @@
       "role": "prediction",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "52"
+        "cell_id": "80"
       },
       "reference_key": "electro_optic.f_3dB_GHz",
       "reference_value": 10.0,
@@ -1027,7 +1027,7 @@
       "run_seconds": 0.02,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 10.854."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 10.854."
     },
     {
       "id": "eo-f3db-source",
@@ -1042,7 +1042,7 @@
       "role": "not-scored",
       "source": {
         "notebook": "tcad_bj2012_modulator_details.ipynb",
-        "cell_id": "52"
+        "cell_id": "80"
       },
       "verdict": "illustration of the termination; the paper reports no such quantity",
       "solver_version": "gsim.common.transmission_line (gsim 0.9.0) with DEVSIM 2.11.2 junction",
@@ -1055,7 +1055,7 @@
       "run_seconds": 0.02,
       "date": "2026-11-12",
       "provenance_missing": [],
-      "note": "Value with sigma 0.27 um before the 13 Nov re-fit: 19.058."
+      "note": "Value with sigma 0.27 um before the 12 Nov re-fit: 19.058."
     }
   ]
 }

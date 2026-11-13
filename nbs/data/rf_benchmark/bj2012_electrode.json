@@ -583,8 +583,8 @@
       "quantity": "loaded Z0",
       "unit": "ohm",
       "freq_ghz": 10.0,
-      "value": 36.685920546130646,
-      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V (1.66 ohm cm, 0.211 fF/um)",
+      "value": 35.90877557842933,
+      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V, sigma 0.20 um (rows rs-0v and cj-0v of bj2012_modulator.json: 1.5989 ohm cm, 0.22629 fF/um)",
       "solver": "closed form",
       "origin": "local",
       "role": "consistency",
@@ -592,7 +592,7 @@
         "notebook": "palace_bj2012_electrode_details.ipynb",
         "cell_id": "50"
       },
-      "value_imag": -0.6958909763851269,
+      "value_imag": -0.5419226675901199,
       "reference_key": "loaded_line_10GHz.z0_real_ohm",
       "reference_value": 37.0,
       "reference_key_imag": "loaded_line_10GHz.z0_imag_ohm",
@@ -606,8 +606,9 @@
       "convergence": "closed form; no mesh",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 0.0,
-      "date": "2026-11-12",
-      "provenance_missing": []
+      "date": "2026-11-13",
+      "provenance_missing": [],
+      "note": "Value with the junction of the TCAD guide before the 12 Nov re-fit of sigma (0.27 um: 1.66 ohm cm, 0.211 fF/um): 36.686 - 0.696j ohm."
     },
     {
       "id": "ll-tcad-n",
@@ -615,8 +616,8 @@
       "quantity": "loaded RF index",
       "unit": "1",
       "freq_ghz": 10.0,
-      "value": 3.5722264764005436,
-      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V (1.66 ohm cm, 0.211 fF/um)",
+      "value": 3.6475057950960044,
+      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V, sigma 0.20 um (rows rs-0v and cj-0v of bj2012_modulator.json: 1.5989 ohm cm, 0.22629 fF/um)",
       "solver": "closed form",
       "origin": "local",
       "role": "consistency",
@@ -635,8 +636,9 @@
       "convergence": "closed form; no mesh",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 0.0,
-      "date": "2026-11-12",
-      "provenance_missing": []
+      "date": "2026-11-13",
+      "provenance_missing": [],
+      "note": "Value with the junction of the TCAD guide before the 12 Nov re-fit of sigma (0.27 um: 1.66 ohm cm, 0.211 fF/um): 3.5722."
     },
     {
       "id": "ll-tcad-alpha",
@@ -644,8 +646,8 @@
       "quantity": "loaded RF loss",
       "unit": "dB/cm",
       "freq_ghz": 10.0,
-      "value": 10.320033537195098,
-      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V (1.66 ohm cm, 0.211 fF/um)",
+      "value": 10.801535843557712,
+      "method": "femwell metal-only line (fitted conductivity) + junction of the TCAD guide at 0 V, sigma 0.20 um (rows rs-0v and cj-0v of bj2012_modulator.json: 1.5989 ohm cm, 0.22629 fF/um)",
       "solver": "closed form",
       "origin": "local",
       "role": "consistency",
@@ -664,8 +666,9 @@
       "convergence": "closed form; no mesh",
       "hardware": "laptop, Intel64 Family 6 Model 197 Stepping 2, 16 logical cores, Windows 11",
       "run_seconds": 0.0,
-      "date": "2026-11-12",
-      "provenance_missing": []
+      "date": "2026-11-13",
+      "provenance_missing": [],
+      "note": "Value with the junction of the TCAD guide before the 12 Nov re-fit of sigma (0.27 um: 1.66 ohm cm, 0.211 fF/um): 10.320 dB/cm."
     },
     {
       "id": "pal-j1vb-alpha",
@@ -688,11 +691,7 @@
       "element_order": 2,
       "mesh": "J1vb cross-section, 22,380 triangles (current notebook's mesh)",
       "convergence": "MGMaxLevels 1 (multigrid off); the earlier multigrid-on run gave 2.00 dB/cm (awslabs/palace#1177)",
-      "provenance_missing": [
-        "gsim_commit",
-        "hardware",
-        "run_seconds"
-      ],
+      "provenance_missing": ["gsim_commit", "hardware", "run_seconds"],
       "note": "value quoted from an earlier cloud run of this notebook; the stored batch A run of 2026-11-12 (bj2012_electrode/two_d_results.json, Palace 0dd8d015) gives 1.8262 dB/cm, the same to the digits quoted. Version and date are those of the stored run; the cloud run does not record the hardware",
       "solver_version": "0dd8d015 (cloud build of 3 Nov; full hash in bj2012_electrode/provenance.json)",
       "gsim_version": "0.8.0 (installed package metadata, bj2012_electrode/provenance.json)",
@@ -755,11 +754,7 @@
       "mesh": "J1vb cross-section, 22,380 triangles",
       "convergence": "MGMaxLevels 1 (multigrid off, mg_max_levels_2d in provenance.json); the same run gives the loss of pal-j1vb-alpha",
       "date": "2026-11-12",
-      "provenance_missing": [
-        "gsim_commit",
-        "hardware",
-        "run_seconds"
-      ],
+      "provenance_missing": ["gsim_commit", "hardware", "run_seconds"],
       "note": "Computed on the cloud by Palace 0dd8d015, which predates the wave-port Z_PV fix awslabs/palace#1119 (merged 9 Nov); its Z_PV is real-valued, so femwell's -2.19j has no counterpart. |Z| is 2.3 % below femwell's |Z| of 57.38 ohm; the distance in the complex plane, 4.4 %, includes the missing imaginary part. The likely cause is the missing fix, which has not been checked. A rerun with a Palace that has #1119 is pending. Job: J1vb at 10 GHz (jobs_submitted in provenance.json; no cloud job identifier is recorded). The row pal-j1vb-z0 (57.26 - 2.19j) is kept as reported"
     },
     {
@@ -814,11 +809,7 @@
       "element_order": 2,
       "mesh": "J1b cross-section, 13,424 triangles (current notebook's mesh)",
       "convergence": "multigrid off (MGMaxLevels 1, mg_max_levels_2d in provenance.json) in the stored run, which gives 1.3985 dB/cm: the earlier multigrid-on value of 1.40 dB/cm does not move",
-      "provenance_missing": [
-        "gsim_commit",
-        "hardware",
-        "run_seconds"
-      ],
+      "provenance_missing": ["gsim_commit", "hardware", "run_seconds"],
       "note": "value quoted from an earlier cloud run of this notebook (multigrid on); the stored batch A run of 2026-11-12 (bj2012_electrode/two_d_results.json, Palace 0dd8d015) reproduces it with multigrid off. The surface condition is 23 % of femwell's loss short. Version and date are those of the stored run; the cloud run does not record the hardware",
       "solver_version": "0dd8d015 (cloud build of 3 Nov; full hash in bj2012_electrode/provenance.json)",
       "gsim_version": "0.8.0 (installed package metadata, bj2012_electrode/provenance.json)",
@@ -844,11 +835,7 @@
       "reference_label": "femwell",
       "element_order": 2,
       "mesh": "J1 cross-section, 13,424 triangles (current notebook's mesh)",
-      "provenance_missing": [
-        "gsim_commit",
-        "hardware",
-        "run_seconds"
-      ],
+      "provenance_missing": ["gsim_commit", "hardware", "run_seconds"],
       "note": "value quoted from an earlier cloud run of this notebook; the stored batch A run of 2026-11-12 (bj2012_electrode/two_d_results.json, Palace 0dd8d015) gives 3.5879 dB/cm. Version and date are those of the stored run; the cloud run does not record the hardware",
       "solver_version": "0dd8d015 (cloud build of 3 Nov; full hash in bj2012_electrode/provenance.json)",
       "gsim_version": "0.8.0 (installed package metadata, bj2012_electrode/provenance.json)",
