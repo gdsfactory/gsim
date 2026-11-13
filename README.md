@@ -56,17 +56,6 @@ just dev
 
 See the [documentation](https://gdsfactory.github.io/gsim/) for API reference and examples.
 
-## Releasing
-
-On a release branch, run `just bump <version>` (or `tbump --only-patch <version>`) and open a pull request with the
-version changes. After merging into `main`, the Test workflow waits for all platform tests and coverage to pass, checks
-that the package, runtime, README, and tbump versions agree, then creates the version tag and starts the Release
-workflow. That workflow publishes to PyPI and GitHub and refreshes the documentation. No manual tag push is needed.
-
-Ordinary merges with no version change do not publish. To retry a failed automatic tag or dispatch, rerun the failed
-Test workflow job. To retry a failed publication, rerun the Release workflow; already uploaded PyPI files are skipped.
-Manually pushing a version tag continues to start the Release workflow.
-
 ## License
 
 [Apache-2.0](LICENSE)

@@ -66,9 +66,6 @@ jobs:
     needs: [test, test_coverage]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    concurrency:
-      group: release-version-${{ github.sha }}
-      cancel-in-progress: false
     permissions:
       contents: write
       actions: write
@@ -83,6 +80,14 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         BEFORE_SHA: ${{ github.event.before }}
-        AFTER_SHA: ${{ github.sha }}
-      run: >-
-        python .github/scripts/release_version.py --before "$BEFORE_SHA" --after "$AFTER_SHA" --repository "$GITHUB_REPOSITORY"
+      run: |
+        read_version='import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])'
+        previous=$(git show "$BEFORE_SHA:pyproject.toml" | python -c "$read_version")
+        version=$(python -c "$read_version" < pyproject.toml)
+        if [ "$version" = "$previous" ] || git show-ref --verify --quiet "refs/tags/$version"; then
+          exit 0
+        fi
+        git tag "$version" "$GITHUB_SHA"
+        git push origin "refs/tags/$version"
+        # GITHUB_TOKEN tag pushes do not trigger the Release workflow.
+        gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$version"

@@ -4,9 +4,6 @@ on:
     tags:
     - "[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
 jobs:
   build:
     name: Build wheel and sdist
@@ -49,16 +46,13 @@ jobs:
       run: ls dist
     - name: Release PYPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        skip-existing: true
     - name: Find draft release notes
       id: draft
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        RELEASE_TAG: ${{ github.ref_name }}
       run: |
-        draft_json=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" \
-          | jq --arg tag "$RELEASE_TAG" '[.[][] | select(.draft == true and .tag_name == $tag)] | first // empty')
+        draft_json=$(gh api repos/${{ github.repository }}/releases \
+          --jq '[.[] | select(.draft == true)] | first // empty')
 
         if [ -n "$draft_json" ]; then
           body=$(echo "$draft_json" | jq -r '.body // ""')
@@ -68,7 +62,7 @@ jobs:
             echo "$body"
             echo "EOFBODY"
           } >> "$GITHUB_OUTPUT"
-          gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$draft_id"
+          gh api -X DELETE "repos/${{ github.repository }}/releases/$draft_id"
         else
           echo "body=" >> "$GITHUB_OUTPUT"
         fi
