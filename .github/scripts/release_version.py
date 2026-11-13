@@ -1,5 +1,8 @@
 """Tag a tested version bump and dispatch the existing publishing workflow."""
 
+# Standalone workflow command with messages intended for the Actions log.
+# ruff: noqa: INP001, T201
+
 from __future__ import annotations
 
 import argparse

@@ -85,4 +85,4 @@ jobs:
         BEFORE_SHA: ${{ github.event.before }}
         AFTER_SHA: ${{ github.sha }}
       run: >-
-        python scripts/release_version.py --before "$BEFORE_SHA" --after "$AFTER_SHA" --repository "$GITHUB_REPOSITORY"
+        python .github/scripts/release_version.py --before "$BEFORE_SHA" --after "$AFTER_SHA" --repository "$GITHUB_REPOSITORY"

@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from scripts import release_version
+script_path = Path(__file__).parents[1] / ".github/scripts/release_version.py"
+script_spec = importlib.util.spec_from_file_location("release_version", script_path)
+assert script_spec is not None
+assert script_spec.loader is not None
+release_version = importlib.util.module_from_spec(script_spec)
+script_spec.loader.exec_module(release_version)
 
 
 @pytest.fixture
