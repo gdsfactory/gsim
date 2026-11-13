@@ -159,6 +159,11 @@ def _devsim_device(mesh, kind: str) -> tuple[Any, str]:
         mesh=mesh_name, gmsh_name="mid", region0="lower", region1="upper", name="mid"
     )
     devsim.finalize_mesh(mesh=mesh_name)
+    # devsim.solve() solves every device in the process. Devices left by earlier
+    # tests (gsim keeps its devices until they are released) would be solved too,
+    # and one that does not converge fails this test (#523).
+    for other in devsim.get_device_list():
+        devsim.delete_device(device=other)
     devsim.create_device(mesh=mesh_name, device=device)
     if kind == "signed":
         _install_signed_couples(devsim, device, ["lower", "upper"])
