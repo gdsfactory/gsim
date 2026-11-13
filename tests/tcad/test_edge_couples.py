@@ -125,7 +125,7 @@ def _devsim_device(mesh, kind: str) -> tuple[Any, str]:
     """
     from devsim.python_packages import simple_physics as sp
 
-    from gsim.tcad.device import _install_signed_couples
+    from gsim.tcad.device import _install_signed_couples, _release_gsim_devices
     from gsim.tcad.runtime import require_devsim
 
     devsim = require_devsim()
@@ -159,11 +159,10 @@ def _devsim_device(mesh, kind: str) -> tuple[Any, str]:
         mesh=mesh_name, gmsh_name="mid", region0="lower", region1="upper", name="mid"
     )
     devsim.finalize_mesh(mesh=mesh_name)
-    # devsim.solve() solves every device in the process. Devices left by earlier
-    # tests (gsim keeps its devices until they are released) would be solved too,
-    # and one that does not converge fails this test (#523).
-    for other in devsim.get_device_list():
-        devsim.delete_device(device=other)
+    # devsim.solve() solves every device in the process. Devices gsim left alive
+    # in earlier tests would be solved too, and one that does not converge fails
+    # this test (#523). Only gsim's own devices are released: foreign ones stay.
+    _release_gsim_devices(devsim)
     devsim.create_device(mesh=mesh_name, device=device)
     if kind == "signed":
         _install_signed_couples(devsim, device, ["lower", "upper"])
