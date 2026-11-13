@@ -3293,17 +3293,19 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 whether the runtime or the model is at fault.
 
         Example:
-            >>> # Using Apptainer (default)
+            >>> # Using Apptainer with PALACE_SIF
             >>> import os
             >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
-            >>> results = sim.run_local()
+            >>> results = sim.run_local(use_apptainer=True)
             >>>
-            >>> # Using Apptainer with explicit path
-            >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
+            >>> # Using Apptainer with an explicit SIF path
+            >>> results = sim.run_local(
+            ...     use_apptainer=True, palace_sif_path="/path/to/Palace.sif"
+            ... )
             >>>
             >>> # Auto-discovery with no options:
-            >>> # prefers local ./bin/palace if present,
-            >>> # otherwise falls back to local SIF or PATH executable
+            >>> # PALACE_EXECUTABLE, then local ./bin/palace, then palace on PATH
+            >>> # (a SIF is used only with use_apptainer=True)
             >>> results = sim.run_local()
             >>>
             >>> # Using direct Palace with custom executable path
