@@ -100,3 +100,6 @@ venv.bak/
 venv/
 wheelhouse/
 wheels/
+
+tcad-bj2012*/
+palace-sim-bj2012*/

@@ -1,0 +1,192 @@
+{
+  "case": "cpw-gssg-tied",
+  "title": "Coupled GSSG line with terminal wave ports",
+  "status": "reported",
+  "device": {
+    "name": "Two coupled GSSG lines on the generic gpdk (metal3, signal 10 um, gap 6 um, ground 40 um, length 300 um), outer grounds tied by a metal1 plane",
+    "picture": null,
+    "geometry_source": "nbs/palace_terminal_waveport_gssg.ipynb"
+  },
+  "reference": {
+    "type": "self-consistency",
+    "citation": "Uniform line built from Palace's own 2D port solve (lossy conductors); not an independent model. docs/terminal_wave_ports.md section 12.",
+    "file": "docs/terminal_wave_ports.md"
+  },
+  "rows": [
+    {
+      "id": "phase-diff",
+      "status": "reported",
+      "quantity": "S21 phase difference from the uniform line, differential mode",
+      "unit": "deg",
+      "freq_ghz": null,
+      "value": 0.25,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "tolerance 1 deg (notebook TOL_PHASE_DEG)"
+    },
+    {
+      "id": "phase-common",
+      "status": "reported",
+      "quantity": "S21 phase difference from the uniform line, common mode",
+      "unit": "deg",
+      "freq_ghz": null,
+      "value": 0.29,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "tolerance 1 deg (notebook TOL_PHASE_DEG)"
+    },
+    {
+      "id": "ds21-diff",
+      "status": "reported",
+      "quantity": "abs(dS21) from the uniform line, differential mode",
+      "unit": "1",
+      "freq_ghz": null,
+      "value": 0.0044,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "upper bound"
+    },
+    {
+      "id": "ds21-common",
+      "status": "reported",
+      "quantity": "abs(dS21) from the uniform line, common mode",
+      "unit": "1",
+      "freq_ghz": null,
+      "value": 0.0062,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "upper bound"
+    },
+    {
+      "id": "neff-2d-3d",
+      "status": "reported",
+      "quantity": "n_eff, 2D (PEC conductors) against the 3D port, all modes",
+      "unit": "%",
+      "freq_ghz": null,
+      "value": 0.05,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "upper bound, relative difference"
+    },
+    {
+      "id": "half-model-phase",
+      "status": "reported",
+      "quantity": "S21 phase, mixed mode against the PEC and PMC half models",
+      "unit": "deg",
+      "freq_ghz": null,
+      "value": 0.26,
+      "method": "Palace terminal wave ports, G_tied, 1 to 50 GHz, 50 points; worst value over the sweep (an upper bound as quoted)",
+      "solver": "Palace",
+      "origin": "cloud",
+      "role": "consistency",
+      "element_order": 2,
+      "mesh": "145,823 tetrahedra, refined_mesh_size 2 um, max 40 um",
+      "convergence": "not recorded",
+      "source": {
+        "notebook": "docs/terminal_wave_ports.md",
+        "cell_id": "section 12"
+      },
+      "provenance_missing": [
+        "solver_version",
+        "gsim_version",
+        "gsim_commit",
+        "hardware",
+        "run_seconds",
+        "date"
+      ],
+      "verdict": "within the notebook's tolerance",
+      "note": "upper bound"
+    }
+  ],
+  "curves": []
+}

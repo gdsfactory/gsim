@@ -30,7 +30,9 @@ nav = [
     { "Inductor Port Comparison" = "nbs/palace_inductor_port_comparison.md" },
     { "Inductance Matrix (Magnetostatic)" = "nbs/palace_magnetostatic.md" },
     { "CPW Via Transition" = "nbs/palace_cpw_via.md" },
-    { "Field Visualization" = "nbs/palace_cpw_fields.md" }
+    { "Field Visualization" = "nbs/palace_cpw_fields.md" },
+    { "RF electrode of a silicon modulator" = "nbs/palace_bj2012_electrode.md" },
+    { "Phase shifter of a silicon modulator" = "nbs/tcad_bj2012_modulator.md" }
   ] },
   { "Modeling & Analysis" = [
     { "EMX Process Files" = "emx_proc_import.md" },
@@ -42,7 +44,9 @@ nav = [
     { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },
     { "Palace: Checking a Run (solver evidence)" = "palace-validation.md" },
     { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" },
-    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" }
+    { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" },
+    { "RF electrode of a silicon modulator: simulation details" = "nbs/palace_bj2012_electrode_details.md" },
+    { "Phase shifter of a silicon modulator: simulation details" = "nbs/tcad_bj2012_modulator_details.md" }
   ] },
   { "Changelog" = "CHANGELOG.md" },
   { "API Guides" = [
