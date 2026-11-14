@@ -28,7 +28,7 @@ from scipy.constants import speed_of_light as C0  # noqa: N812
 
 from gsim.common.modes import Conductor, select_line_mode
 from gsim.common.transmission_line import line_params_from_neff
-from gsim.femwell import solve_modes, z0_power_current
+from gsim.femwell import conductor_index_bound, solve_modes, z0_power_current
 
 pytest.importorskip("femwell")
 pytest.importorskip("skfem")
@@ -49,11 +49,9 @@ STRIP = Conductor(
 )
 
 
-@pytest.fixture(scope="module")
-def strip_mesh(tmp_path_factory):
+def _write_strip_mesh(path, *, near_um: float, far_um: float):
     import gmsh
 
-    path = tmp_path_factory.mktemp("femwell-series") / "strip.msh"
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
@@ -76,12 +74,12 @@ def strip_mesh(tmp_path_factory):
         # developer ~/.gmsh-options; gsim's own mesh paths pin these.
         gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
         gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeMax", 2.0)
-        # 50 nm elements in and around the strip, 2 um in the far oxide.
+        gmsh.option.setNumber("Mesh.MeshSizeMax", far_um)
+        # near_um elements in and around the strip, far_um in the oxide.
         field = gmsh.model.mesh.field
         near = field.add("Box")
-        field.setNumber(near, "VIn", 0.05)
-        field.setNumber(near, "VOut", 2.0)
+        field.setNumber(near, "VIn", near_um)
+        field.setNumber(near, "VOut", far_um)
         field.setNumber(near, "XMin", -WIDTH_UM / 2 - 0.1)
         field.setNumber(near, "XMax", WIDTH_UM / 2 + 0.1)
         field.setNumber(near, "YMin", -THICKNESS_UM / 2 - 0.1)
@@ -96,21 +94,41 @@ def strip_mesh(tmp_path_factory):
     return path
 
 
-def _series_resistance(mesh_path, **solve_kwargs) -> float:
+@pytest.fixture(scope="module")
+def strip_mesh(tmp_path_factory):
+    """50 nm at the strip, 2 um in the far oxide."""
+    path = tmp_path_factory.mktemp("femwell-series") / "strip.msh"
+    return _write_strip_mesh(path, near_um=0.05, far_um=2.0)
+
+
+@pytest.fixture(scope="module")
+def capped_strip_mesh(tmp_path_factory):
+    """25 nm at the strip, oxide capped at 0.5 um: the mesh of #498."""
+    path = tmp_path_factory.mktemp("femwell-series-capped") / "strip.msh"
+    return _write_strip_mesh(path, near_um=0.025, far_um=0.5)
+
+
+def _epsilon() -> dict[str, complex]:
     omega = 2 * np.pi * FREQ_HZ
+    return {
+        "metal": 1.0 - 1j * SIGMA_AL / (omega * EPS0),
+        "oxide": EPS_OXIDE + 0j,
+    }
+
+
+def _series_resistance(
+    mesh_path, *, num_modes: int = 4, max_index=None, **solve_kwargs
+) -> float:
     modes = solve_modes(
         mesh_path,
-        epsilon={
-            "metal": 1.0 - 1j * SIGMA_AL / (omega * EPS0),
-            "oxide": EPS_OXIDE + 0j,
-        },
+        epsilon=_epsilon(),
         wavelength_um=C0 / FREQ_HZ * 1e6,
-        num_modes=4,
+        num_modes=num_modes,
         metallic_boundaries=True,
         n_guess=3.0,
         **solve_kwargs,
     )
-    mode = select_line_mode(modes)
+    mode = select_line_mode(modes, max_index=max_index)
     z0 = z0_power_current(mode, frequency_hz=FREQ_HZ, conductor=STRIP, mesh=mesh_path)
     params = line_params_from_neff(
         np.array([FREQ_HZ]), [complex(mode.n_eff)], z0_ohm=[z0]
@@ -127,3 +145,21 @@ class TestSeriesResistance:
         """The first-order solve stays callable; on this mesh it is percent low."""
         r_series = _series_resistance(strip_mesh, order=1)
         assert r_series < (1 - 3e-2) * R_DC_OHM_PER_M
+
+
+class TestManyModes:
+    """More Modes than the line needs also bring Modes inside the metal (#498).
+
+    On the capped mesh at order 2, a 12-Mode solve returns Modes with
+    ``|n_eff|`` of 1e4 to 5e4 confined to the strip, some inside the loss
+    bound; the slowest-Mode rule picked one and read R' about 1e9 off. The
+    conductor index bound rejects them and the line Mode is read again.
+    """
+
+    def test_the_bound_selects_the_line_mode(self, capped_strip_mesh):
+        r_series = _series_resistance(
+            capped_strip_mesh,
+            num_modes=12,
+            max_index=conductor_index_bound(_epsilon()),
+        )
+        assert r_series == pytest.approx(R_DC_OHM_PER_M, rel=3e-3)

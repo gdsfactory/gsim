@@ -130,6 +130,45 @@ class TestLossBound:
             select_line_mode([3.0 - 2.0j], max_loss_ratio=0.5)
 
 
+class TestIndexBound:
+    """A Mode living inside a lossy conductor is not the line Mode (#498).
+
+    Asked for 8 to 16 Modes on an aluminium strip in oxide, the solve also
+    returns Modes with ``|n_eff|`` near ``|sqrt(eps_metal)|`` (about 2.6e4
+    at 1 GHz), some inside the loss bound. The slowest-Mode rule then picks
+    one of them over the line Mode, 5.13-4.68j on that geometry.
+    """
+
+    LINE = 5.13 - 4.68j
+    METAL = 23174.0 - 12017.0j  # -Im/Re = 0.52, inside the loss bound
+
+    def test_without_a_bound_the_metal_mode_wins(self):
+        """Unchanged default: the bound is the caller's to give."""
+        assert select_line_mode([mode(self.LINE), mode(self.METAL)]).n_eff == (
+            self.METAL
+        )
+
+    def test_the_bound_drops_the_metal_mode(self):
+        line = mode(self.LINE)
+        picked = select_line_mode([line, mode(self.METAL)], max_index=2.6e3)
+        assert picked is line
+
+    def test_the_bound_reaches_the_candidates(self):
+        assert propagating_modes([self.METAL, self.LINE], max_index=2.6e3) == [
+            self.LINE
+        ]
+
+    def test_the_bound_is_on_the_magnitude(self):
+        """A Mode at the bound stays; one just above it on |n_eff| goes."""
+        at_bound = 4.0 - 3.0j  # |n_eff| = 5, inside the loss bound
+        assert propagating_modes([at_bound], max_index=5.0) == [at_bound]
+        assert propagating_modes([at_bound], max_index=4.99) == []
+
+    def test_a_bound_nothing_survives_is_reported(self):
+        with pytest.raises(NoLineModeError, match="No propagating line mode"):
+            select_line_mode([self.METAL], max_index=2.6e3)
+
+
 class TestGainBound:
     """A Mode that grows along the line is a numerical artefact, not a candidate.
 

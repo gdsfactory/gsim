@@ -24,7 +24,9 @@ the current one conductor carries (:func:`electrode_current`) and the
 Marks-Williams power-current impedance it implies
 (:func:`z0_power_current`), and — for an RF line — the one reading of a
 selected Mode an RF line solve asks for: index, impedance and whether it is
-the wall Mode (:func:`line_reading`). A conductor is named to every
+the wall Mode (:func:`line_reading`). :func:`conductor_index_bound` reads, from the
+permittivity a solve was given, the index above which a Mode lives inside a
+conductor rather than on the line. A conductor is named to every
 current integral the same way, as a
 :class:`~gsim.common.modes.Conductor`.
 
@@ -34,6 +36,7 @@ The sign convention is ``exp(+i omega t)``: lossy media have
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -211,6 +214,102 @@ def elementwise_epsilon(
     return np.asarray(sampled, dtype=np.complex128)
 
 
+def conductor_index_bound(
+    epsilon: dict[str, complex] | ArrayLike,
+    *,
+    fraction: float = 0.1,
+    margin: float = 10.0,
+) -> float | None:
+    """Upper bound on ``|n_eff|`` that rejects Modes living inside a conductor.
+
+    A mode solve asked for more than a few Modes around a lossy
+    conductor also returns Modes confined to the metal, with ``|n_eff|``
+    close to ``|sqrt(eps_metal)|`` (about 2.6e4 for aluminium at 1 GHz).
+    Some lose less per unit length than they advance, so the loss bound
+    keeps them, and the slowest-Mode rule of
+    :func:`~gsim.common.modes.select_line_mode` picks one over the line
+    Mode. The line Mode's index is orders of magnitude lower: over a good
+    conductor ``n_line**2 / eps_metal`` is about
+    ``eps_d R' eps0 / (L' sigma)``, independent of frequency and of
+    order 1e-7 for an aluminium strip in oxide. Pass the bound returned
+    here as ``max_index`` to ``select_line_mode``.
+
+    A region or element is a conductor when conduction dominates its
+    permittivity, ``|Im(eps)| > |Re(eps)|``. That alone does not make
+    it a safe source for the bound: a weak conductor, such as moderately
+    doped silicon, has ``|sqrt(eps)|`` close to the indices a line Mode
+    can reach. A conductor sets the bound only when
+    ``fraction * |sqrt(eps)|`` is at least *margin* times the largest
+    ``|sqrt(eps)|`` of the other regions (and above the light line).
+    A slow-wave line Mode can sit several times above the dielectric
+    index (3.5 times on an aluminium strip in oxide at 1 GHz), hence the
+    default margin of 10.
+
+    When any conductor falls short, no bound is returned, even if a
+    strong conductor is present. A Mode confined to the weak conductor
+    has ``|n_eff|`` near its ``|sqrt(eps)|``, below a strong conductor's
+    bound and possibly above the line Mode's index, so a bound from the
+    strong conductor alone would not reject it; no cap derived from the
+    permittivity alone separates such a Mode from the line Mode. Select
+    the line Mode another way in that case, for example with
+    :func:`field_fraction_outside` or an explicit ``max_index``.
+
+    Args:
+        epsilon: The permittivity given to :func:`solve_modes`: either
+            ``{region_name: eps}`` or per-element values.
+        fraction: Bound as a fraction of a conductor's ``|sqrt(eps)|``
+            (default 0.1; spurious metal Modes have been seen from 0.9
+            times that value up).
+        margin: Smallest ratio between a conductor's bound and the
+            largest non-conductor index for the conductor to count
+            (default 10).
+
+    Returns:
+        The smallest bound over the conductors, or ``None`` when there is
+        no conductor or when any conductor falls short of *margin*.
+
+    Raises:
+        ValueError: If *fraction* or *margin* is not positive.
+
+    Warns:
+        UserWarning: When ``None`` is returned because a conductor's
+            bound would not clear the dielectric index by *margin*.
+    """
+    if fraction <= 0.0:
+        raise ValueError(f"fraction must be positive, got {fraction}.")
+    if margin <= 0.0:
+        raise ValueError(f"margin must be positive, got {margin}.")
+    values = (
+        np.fromiter(epsilon.values(), dtype=np.complex128)
+        if isinstance(epsilon, dict)
+        else np.asarray(epsilon, dtype=np.complex128).ravel()
+    )
+    is_conductor = np.abs(values.imag) > np.abs(values.real)
+    if not is_conductor.any():
+        return None
+    dielectric = values[~is_conductor]
+    dielectric_index = (
+        float(np.sqrt(np.abs(dielectric)).max()) if dielectric.size else 1.0
+    )
+    floor = max(margin * dielectric_index, 1.0)
+    bounds = fraction * np.sqrt(np.abs(values[is_conductor]))
+    usable = bounds >= floor
+    if not usable.all():
+        weak = np.unique(values[is_conductor][~usable])
+        shown = ", ".join(f"{eps:.4g}" for eps in weak[:3])
+        more = f" and {weak.size - 3} more" if weak.size > 3 else ""
+        warnings.warn(
+            f"conductor_index_bound returns no bound: for conductor permittivity "
+            f"{shown}{more}, {fraction:g} * |sqrt(eps)| does not reach "
+            f"{margin:g} times the largest dielectric index "
+            f"({dielectric_index:.4g}), so no index bound tells a Mode inside "
+            "that conductor from the line Mode.",
+            stacklevel=2,
+        )
+        return None
+    return float(bounds.min())
+
+
 def solve_modes(
     msh_path: str | Path,
     *,
@@ -252,6 +351,9 @@ def solve_modes(
             for RF materials with big conductive ``|Im(eps)|`` can put the
             shift far from the physical quasi-TEM mode; pass an explicit
             guess (e.g. the expected slow-wave index) there.
+            Asked for more than a few Modes around a lossy conductor,
+            the solve also returns Modes confined to the metal; select
+            the line Mode with ``max_index=conductor_index_bound(epsilon)``.
 
     Returns:
         The femwell ``Modes`` result (each mode carries ``n_eff``).

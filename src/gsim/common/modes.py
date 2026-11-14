@@ -292,13 +292,15 @@ def propagating_modes[ModeT](
     min_index: float = 1.0,
     max_loss_ratio: float = 1.0,
     max_gain_ratio: float = MAX_GAIN_RATIO,
+    max_index: float | None = None,
 ) -> list[ModeT]:
     """Keep the Modes that propagate, dropping evanescent and spurious ones.
 
     A Mode is kept when it is guided (``Re(n_eff)`` above *min_index*),
     loses no more than *max_loss_ratio* per unit length than it advances
     in phase, and does not grow: ``Im(n_eff)`` positive beyond
-    *max_gain_ratio* is gain, which a passive line cannot have.
+    *max_gain_ratio* is gain, which a passive line cannot have. With
+    *max_index* set, a Mode whose ``|n_eff|`` exceeds it is dropped too.
 
     Args:
         modes: Every solved Mode.
@@ -311,6 +313,13 @@ def propagating_modes[ModeT](
         max_gain_ratio: Upper bound on ``+Im(n_eff) / Re(n_eff)``, the
             room left for a lossless Mode's numerical noise (default:
             :data:`MAX_GAIN_RATIO`).
+        max_index: Upper bound on ``|n_eff|``, or ``None`` for no bound
+            (default). A solve asked for many Modes around a lossy
+            conductor also returns Modes living inside the metal, with
+            ``|n_eff|`` near ``|sqrt(eps_metal)|``, some of them inside
+            the loss bound; the line Mode sits orders of magnitude below.
+            ``gsim.femwell.conductor_index_bound`` derives a bound from
+            the permittivity the solve was given.
 
     Returns:
         The propagating Modes, in the order they were solved.
@@ -321,6 +330,7 @@ def propagating_modes[ModeT](
         if (
             n_eff.real > min_index
             and -max_loss_ratio * n_eff.real < n_eff.imag <= max_gain_ratio * n_eff.real
+            and (max_index is None or abs(n_eff) <= max_index)
         ):
             kept.append(mode)
     return kept
@@ -340,6 +350,7 @@ def select_line_mode[ModeT](
     rule: LineModeRule | None = None,
     min_index: float = 1.0,
     max_loss_ratio: float = 1.0,
+    max_index: float | None = None,
     degeneracy_rtol: float = 0.03,
 ) -> ModeT:
     """Select the physical line Mode from a set of solved Modes.
@@ -365,6 +376,14 @@ def select_line_mode[ModeT](
         min_index: Lower bound on ``Re(n_eff)`` for the default rule.
         max_loss_ratio: Upper bound on ``|Im(n_eff)| / Re(n_eff)`` for
             the default rule.
+        max_index: Upper bound on ``|n_eff|`` for the default rule, or
+            ``None`` for no bound (default). The default rule picks the
+            highest ``Re(n_eff)``, so a spurious Mode inside a lossy
+            conductor, which carries an index near
+            ``|sqrt(eps_metal)|``, wins over the line Mode when the solve
+            returns one; set this when solving more than a few Modes
+            around such a conductor (``gsim.femwell.conductor_index_bound``
+            gives a bound from the solve's permittivity).
         degeneracy_rtol: Relative spread in ``Re(n_eff)`` within which two
             candidates count as ambiguous and a warning is issued.
 
@@ -381,7 +400,12 @@ def select_line_mode[ModeT](
             choice between them is not physically meaningful.
     """
     candidates: Sequence[ModeT] = (
-        propagating_modes(modes, min_index=min_index, max_loss_ratio=max_loss_ratio)
+        propagating_modes(
+            modes,
+            min_index=min_index,
+            max_loss_ratio=max_loss_ratio,
+            max_index=max_index,
+        )
         if rule is None
         else list(rule(modes))
     )

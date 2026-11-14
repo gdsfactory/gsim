@@ -6,9 +6,11 @@ import meshio
 import numpy as np
 import pytest
 
+from gsim.common.modes import select_line_mode
 from gsim.common.stack.extractor import Layer, LayerStack
 from gsim.common.stack.materials import MaterialProperties
 from gsim.femwell.adapter import (
+    conductor_index_bound,
     elementwise_epsilon,
     epsilon_by_region,
 )
@@ -144,3 +146,74 @@ class TestOverrides:
             overrides={"si": MaterialProperties(permittivity=9.0)},
         )
         assert eps["core"].real == pytest.approx(9.0)
+
+
+class TestConductorIndexBound:
+    """The |n_eff| above which a Mode lives inside a conductor (#498)."""
+
+    def test_a_tenth_of_the_metal_index(self):
+        eps_metal = 1.0 - 6.8e8j  # aluminium at 1 GHz
+        bound = conductor_index_bound({"metal": eps_metal, "oxide": 3.9 + 0j})
+        assert bound == pytest.approx(0.1 * abs(np.sqrt(eps_metal)))
+
+    def test_the_least_conductive_strong_conductor_sets_it(self):
+        bound = conductor_index_bound(
+            {"al": 1.0 - 6.8e8j, "w": 1.0 - 3.3e8j, "oxide": 3.9 + 0j}
+        )
+        assert bound == pytest.approx(0.1 * abs(np.sqrt(1.0 - 3.3e8j)))
+
+    def test_a_weak_conductor_alone_gives_no_bound(self):
+        """11.7-12j conducts, but 0.1|sqrt(eps)| = 0.41 is below the light line."""
+        with pytest.warns(UserWarning, match="returns no bound"):
+            assert conductor_index_bound({"si": 11.7 - 12j, "oxide": 3.9 + 0j}) is None
+
+    @pytest.mark.parametrize("eps_si", [11.7 - 12j, 11.7 - 1000j])
+    def test_a_weak_conductor_next_to_metal_gives_no_bound(self, eps_si):
+        """The aluminium bound alone would let a doped-silicon Mode through.
+
+        With aluminium, the bound would be about 2608. A Mode confined to
+        silicon at 11.7-1000j, near sqrt(eps_si) = 22.49-22.23j, is under
+        it and slower than the 5.13-4.68j line Mode, so selection would
+        pick it. Returning no bound leaves that choice to the caller.
+        """
+        eps = {"al": 1.0 - 6.8e8j, "si": eps_si, "oxide": 3.9 + 0j}
+        aluminium_bound = 0.1 * abs(np.sqrt(1.0 - 6.8e8j))
+        line, si_mode = 5.13 - 4.68j, 22.49 - 22.23j
+        assert abs(si_mode) < aluminium_bound
+        assert select_line_mode([line, si_mode], max_index=aluminium_bound) == si_mode
+        with pytest.warns(UserWarning, match="returns no bound"):
+            assert conductor_index_bound(eps) is None
+
+    def test_the_margin_is_against_the_largest_dielectric_index(self):
+        """A conductor clears oxide by 10x but not silicon is skipped."""
+        eps_cond = 1.0 - 9e4j  # 0.1|sqrt(eps)| = 30
+        assert conductor_index_bound({"c": eps_cond, "ox": 3.9 + 0j}) == (
+            pytest.approx(30.0, rel=1e-4)
+        )
+        with pytest.warns(UserWarning, match="returns no bound"):
+            assert (
+                conductor_index_bound({"c": eps_cond, "si": 11.7 + 0j, "ox": 3.9 + 0j})
+                is None
+            )
+
+    def test_per_element_values(self):
+        eps = np.array([3.9, 3.9, 1.0 - 6.8e8j, 3.9], dtype=complex)
+        assert conductor_index_bound(eps) == pytest.approx(
+            0.1 * abs(np.sqrt(1.0 - 6.8e8j))
+        )
+
+    def test_a_lossy_dielectric_is_not_a_conductor(self):
+        """Loss below the real permittivity leaves the Mode free to sit there."""
+        assert conductor_index_bound({"si": 11.7 - 5.0j, "oxide": 3.9 + 0j}) is None
+
+    def test_the_fraction_is_a_parameter(self):
+        eps = {"metal": 1.0 - 6.8e8j}
+        default = conductor_index_bound(eps)
+        assert default is not None
+        assert conductor_index_bound(eps, fraction=0.5) == pytest.approx(5 * default)
+
+    def test_the_fraction_and_margin_must_be_positive(self):
+        with pytest.raises(ValueError, match="fraction"):
+            conductor_index_bound({"metal": 1.0 - 6.8e8j}, fraction=0.0)
+        with pytest.raises(ValueError, match="margin"):
+            conductor_index_bound({"metal": 1.0 - 6.8e8j}, margin=0.0)
