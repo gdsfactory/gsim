@@ -15,6 +15,14 @@ come from (5), how the 2D modes are matched to Palace's port modes (6), the choi
 cells. [Coupled lines with terminal wave ports](nbs/palace_terminal_waveport_gssg.md) runs it end to end on a
 coupled GSSG line and checks the result against a uniform line built from the 2D port solve.
 
+!!! tip "Start here"
+    This is the deep page for **terminal** S-parameters. If you are new to wave ports, read
+    [Wave ports in Palace](palace_wave_ports.md) first: lumped versus wave port, the PEC outer wall, `waveport_boundary`,
+    multimode and stacked ports. You need terminal S-parameters only when one port face holds two or more signal conductors,
+    or when a circuit tool wants one port per conductor. One signal over one reference (a microstrip, or a CPW whose
+    grounds are tied) has one mode: stay with modal S, as the
+    [coupled-lines notebook](nbs/palace_terminal_waveport_gssg.md) advises. If you do need terminal S, continue with section 1.
+
 ## 1. Why modal S is not terminal S
 
 Take a pair of coupled signal lines over a common ground. A two-end simulation with one wave port per end and two modes
@@ -382,7 +390,11 @@ print("|S_dd21| at 50 GHz:", abs(mm.s[20, 1, 0]), " |S_cc21|:", abs(mm.s[20, 3, 
 Two coupled GSSG lines on the generic gdsfactory PDK (`metal3`, signal width 10 um, gap 6 um, edge-to-edge signal spacing
 20 um, ground width 40 um, length 300 um, 1 to 50 GHz, 50 points): `G_float` with floating outer grounds (terminals G1, S1,
 S2; reference G2; three modes) and `G_tied` with the outer grounds tied by a `metal1` plane and continuous via walls
-(terminals S1, S2; reference the plane; two modes). The notebook builds both.
+(terminals S1, S2; reference the plane; two modes). The validation runs behind the tables below used both lines. The
+[coupled-lines notebook](nbs/palace_terminal_waveport_gssg.md) builds only `G_tied`, with a shorter sweep (10 to 50 GHz in 5
+points, the 2D solve at 30 GHz) and a coarser far mesh (`refined_mesh_size=2 um`, `max_mesh_size=60 um`, not 40 um as in
+the first table). Its 3D mesh has 144,771 tetrahedra on the machine this was checked on, against 145,823 in the 40 um row
+below.
 
 Checked locally:
 
@@ -394,10 +406,15 @@ Checked locally:
 | triangles of the 2D cross-section (1 um near metal)         | 2,628     | 3,049    |
 | Palace `WavePort` entries per run (single run)              | 6         | 4        |
 
+The `G_tied` column was rebuilt from the notebook's geometry for this page (gsim 0.9.0, a Windows laptop, local meshing
+only): 145,823 tetrahedra at 2 um and 40 um, 46,169 with the `default` preset, 3,049 triangles in the 2D cross-section at
+the notebook's 2D settings (1 um near metal, 20 um maximum), and 4 `WavePort` entries, as in the table. The `G_float`
+column and the half-model row are not built by the notebook and were not rebuilt.
+
 The generated `config.json` of every variant validates against Palace's JSON schema (0 errors), `validate_config()` passes,
 the port surface of every variant is one physical group per face, and the pilot paths lie on the port face.
 
-Measured on the cloud (Palace, order 2, 1 to 50 GHz, 50 points):
+Measured on the cloud (Palace, order 2, 1 to 50 GHz, 50 points; not re-run for this page):
 
 | check                                                            | `G_float`     | `G_tied`                              |
 | ---------------------------------------------------------------- | ------------- | ------------------------------------- |

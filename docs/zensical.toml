@@ -21,6 +21,7 @@ nav = [
   { "FEM for RF" = [
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
+    { "Wave Ports: Overview" = "palace_wave_ports.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },
@@ -95,6 +96,7 @@ full_output = "llms-full.txt"
   "transmission_line_analysis.md",
   "emx_proc_import.md",
   "palace-validation.md",
+  "palace_wave_ports.md",
   "materials.md"
 ]
 "Tutorials" = ["nbs/*.md"]
