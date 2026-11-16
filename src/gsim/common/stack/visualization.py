@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 from gdsfactory.technology import LayerStack as GfLayerStack
 
 from gsim.common.stack._layer_utils import classify_layer_type, get_gds_layer_tuple
+from gsim.common.stack.extractor import Layer, LayerStack
 
 
 @dataclass
@@ -27,11 +28,16 @@ class StackLayer:
     layer_type: str = "conductor"  # conductor, via, dielectric, substrate
 
 
-def parse_layer_stack(layer_stack: GfLayerStack) -> list[StackLayer]:
-    """Parse a gdsfactory LayerStack into a list of StackLayer objects.
+def parse_layer_stack(layer_stack: GfLayerStack | LayerStack) -> list[StackLayer]:
+    """Parse a gdsfactory or gsim LayerStack into a list of StackLayer objects.
+
+    A gsim ``LayerStack`` (``gsim.common.stack.extractor.LayerStack``, what
+    ``sim.stack`` holds) is read as is: each layer keeps its own ``zmin``,
+    ``zmax``, ``layer_type`` and ``gds_layer``. For a gdsfactory ``LayerStack``
+    the layer type is classified from the layer name.
 
     Args:
-        layer_stack: gdsfactory LayerStack object
+        layer_stack: gdsfactory or gsim LayerStack object
 
     Returns:
         List of StackLayer objects sorted by zmin (ascending)
@@ -39,6 +45,20 @@ def parse_layer_stack(layer_stack: GfLayerStack) -> list[StackLayer]:
     layers = []
 
     for name, level in layer_stack.layers.items():
+        if isinstance(level, Layer):
+            layers.append(
+                StackLayer(
+                    name=name,
+                    zmin=level.zmin,
+                    zmax=level.zmax,
+                    thickness=level.thickness,
+                    material=level.material or None,
+                    gds_layer=level.gds_layer[0],
+                    layer_type=level.layer_type,
+                )
+            )
+            continue
+
         zmin = level.zmin if level.zmin is not None else 0.0
         thickness = level.thickness if level.thickness is not None else 0.0
         zmax = zmin + thickness
