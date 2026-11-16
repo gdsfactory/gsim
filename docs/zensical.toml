@@ -41,6 +41,7 @@ nav = [
     { "Terminal Wave Ports in Palace" = "nbs/palace_terminal_waveport.md" },
     { "Coupled Lines with Terminal Wave Ports" = "nbs/palace_terminal_waveport_gssg.md" },
     { "Palace: Checking a Run (solver evidence)" = "palace-validation.md" },
+    { "Palace, femwell, TCAD: Benchmarks" = "palace_benchmarks.md" },
     { "TCAD: PN Junction C(V)" = "nbs/tcad_pn_junction.md" },
     { "TCAD: Travelling-wave MZM" = "nbs/tcad_twmzm.md" }
   ] },
@@ -95,6 +96,7 @@ full_output = "llms-full.txt"
   "transmission_line_analysis.md",
   "emx_proc_import.md",
   "palace-validation.md",
+  "palace_benchmarks.md",
   "materials.md"
 ]
 "Tutorials" = ["nbs/*.md"]
