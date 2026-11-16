@@ -386,6 +386,27 @@ def test_the_solver_rejects_an_unsupported_degree():
         Solver(degree=4)  # type: ignore[arg-type]
 
 
+# --------------------------------------------------------------- optical order
+
+
+def test_the_optical_mode_solve_defaults_to_order_2():
+    assert Solver().optical_order == 2
+
+
+def test_the_solver_rejects_an_optical_order_femwell_lacks():
+    with pytest.raises(ValueError, match="optical_order"):
+        Solver(optical_order=3)  # type: ignore[arg-type]
+
+
+def test_changing_the_optical_order_re_solves_and_agrees_on_p_pi(canonical):
+    sim, result, _step = canonical
+    with solver_settings(sim, optical_order=1):
+        linear = sim.solve(wavelength_um=WAVELENGTH)
+    assert linear is not result
+    assert linear.p_pi_mw != result.p_pi_mw
+    assert linear.p_pi_mw == pytest.approx(result.p_pi_mw, rel=0.03)
+
+
 # --------------------------------------------------------------- transient
 
 

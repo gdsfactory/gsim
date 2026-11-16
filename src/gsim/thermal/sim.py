@@ -726,6 +726,7 @@ class Simulation:
             wavelength_um=wavelength,
             polarization=shifter.polarization,
             n_guess=_core_index(optical),
+            order=self.solver.optical_order,
         )
         slope = shift.delta_neff.real / reference  # per W/m
         if slope == 0:
@@ -747,6 +748,7 @@ class Simulation:
                 wavelength_um=wavelength,
                 polarization=wg.polarization,
                 n_guess=_core_index(victim),
+                order=self.solver.optical_order,
             )
             slopes[wg.name] = vshift.delta_neff.real / drive_pi
             first_order[wg.name] = vshift.delta_neff_first_order.real / drive_pi

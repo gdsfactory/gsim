@@ -282,6 +282,7 @@ def solve_thermo_optic_shift(
     mode_order: int = 0,
     num_modes: int = 4,
     n_guess: float | None = None,
+    order: Literal[1, 2] = 2,
 ) -> ModeShift:
     """Effective-index shift of one Mode under a temperature rise.
 
@@ -311,6 +312,10 @@ def solve_thermo_optic_shift(
             Modes around, e.g. the waveguide core's index; ``None`` uses
             femwell's default (just above the largest index in the
             Window).
+        order: Finite element order of both Mode solves, 1 or 2 (the
+            only orders femwell implements). Order 2, the default as in
+            :func:`gsim.femwell.adapter.solve_modes`, converges faster
+            under mesh refinement and costs more per solve.
 
     Returns:
         The two indices, the first-order estimate and both Modes.
@@ -335,7 +340,12 @@ def solve_thermo_optic_shift(
     # per-element array is element i of the basis.
     basis0 = skfem.Basis(optical_mesh.mesh, skfem.ElementTriP0())
     modes0 = compute_modes(
-        basis0, eps0, wavelength=wavelength_um, num_modes=num_modes, n_guess=n_guess
+        basis0,
+        eps0,
+        wavelength=wavelength_um,
+        num_modes=num_modes,
+        order=order,
+        n_guess=n_guess,
     )
     mode0 = _select(modes0, polarization, mode_order)
     modes = compute_modes(
@@ -343,6 +353,7 @@ def solve_thermo_optic_shift(
         eps,
         wavelength=wavelength_um,
         num_modes=num_modes,
+        order=order,
         n_guess=complex(mode0.n_eff).real,
     )
     overlaps = [abs(complex(mode0.calculate_overlap(m))) for m in modes]

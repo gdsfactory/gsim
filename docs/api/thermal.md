@@ -92,7 +92,7 @@ given power.
   (case-insensitive). The fields are `thermal_conductivity`, `specific_heat`, `mass_density`, `dn_dT`, `conductivity`
   (electrical), `permittivity` and `loss_tangent`.
 - `boundary(...)`: `top` and `sides`, `"adiabatic"` (default) or `"convective"`; `heat_transfer_coefficient` (10 W/m²/K).
-- `solver(...)`: `precision`, `mesh_size_um`, `degree`, `time_steps` and `theta` (see below).
+- `solver(...)`: `precision`, `mesh_size_um`, `degree`, `optical_order`, `time_steps` and `theta` (see below).
 
 The cut must be vertical and cross the heater and the waveguides. Two parameters belong to the model, not to the
 device, and are worth a convergence check:
@@ -117,7 +117,10 @@ the default boundary.
   transient time steps. `mesh_size_um` caps the element size per region, and `time_steps` overrides the step count.
   `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh, degree 2 cuts
   the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The optical Mode solve
-  does not depend on it. `theta` picks the time scheme: 1 (backward Euler, default) or 0.5 (Crank-Nicolson).
+  does not depend on it. `optical_order=1 | 2` sets the finite element order of the optical Mode solves (default 2, as
+  in the femwell adapter). On femwell's TiN heater, P_π at order 2 moves by 0.02 % from `"fast"` to `"accurate"`
+  precision, against 0.6 % at order 1, for about 3 times the solve time. `theta` picks the time scheme: 1 (backward
+  Euler, default) or 0.5 (Crank-Nicolson).
 
 ## Results
 

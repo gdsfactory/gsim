@@ -58,7 +58,7 @@ _PRECISION: dict[str, tuple[float, int]] = {
 
 #: The Solver fields the steady solve and the meshes depend on; the others
 #: set only the transient's time stepping.
-STEADY_FIELDS = ("precision", "mesh_size_um", "degree")
+STEADY_FIELDS = ("precision", "mesh_size_um", "degree", "optical_order")
 
 
 class Geometry(MutableModel):
@@ -381,6 +381,9 @@ class Solver(MutableModel):
         degree: Lagrange element degree of the heat solve: 1 (linear), 2
             (quadratic) or 3. A higher degree reaches a given accuracy on a
             coarser mesh; the optical Mode solve is unaffected.
+        optical_order: Finite element order of the optical Mode solves:
+            1 or 2. Order 2 converges faster under mesh refinement; order 1
+            is cheaper per solve.
         time_steps: Number of constant transient time steps, overriding
             the precision.
         theta: Time scheme of the transient: 1.0 backward Euler (robust
@@ -390,6 +393,7 @@ class Solver(MutableModel):
     precision: Literal["fast", "default", "accurate"] = "default"
     mesh_size_um: dict[str, PositiveFloat] = Field(default_factory=dict)
     degree: Literal[1, 2, 3] = 2
+    optical_order: Literal[1, 2] = 2
     time_steps: PositiveInt | None = None
     theta: float = Field(default=1.0, ge=0.5, le=1.0)
 
