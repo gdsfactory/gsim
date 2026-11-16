@@ -129,6 +129,22 @@ def test_invalid_component_pair_does_not_fall_back_to_a_scalar_alias(tmp_path):
     assert results.characteristic_impedance() is None
 
 
+def test_complex_current_impedance_sign_does_not_discard_forward_power(tmp_path):
+    (tmp_path / "mode-Z.csv").write_text(
+        "m,Re{Z_PV[1]} (Ohm),Im{Z_PV[1]} (Ohm),"
+        "Re{Z_VI[1]} (Ohm),Im{Z_VI[1]} (Ohm)\n"
+        "1,10,50,-20,30\n"
+    )
+    results = load_text_results(tmp_path)
+
+    reading = native_line_impedance(results, index=1, mode_id=1, n_eff=2.0)
+
+    # 1300 / (10 - 50j) = 5 + 25j has positive forward active power.
+    assert reading is not None
+    assert reading.z0_ohm == pytest.approx(5 + 25j)
+    assert reading.wall_mode is False
+
+
 def test_complex_impedance_keeps_the_wall_mode_diagnostic(tmp_path):
     results = write_complex_results(tmp_path, real="1e-6", imaginary="-1e-7")
 

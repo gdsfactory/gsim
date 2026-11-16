@@ -240,7 +240,11 @@ def native_line_impedance(
     z_vi = results.complex_characteristic_impedance(
         index=index, mode=mode_id, quantity="Z_VI"
     )
-    if z_pv is None or z_vi is None or z_pv.real <= 0.0 or z_vi.real <= 0.0:
+    if z_pv is None or z_vi is None or z_pv.real <= 0.0:
+        return None
+    # The current-loop sign cancels in |Z_VI|. A complex Z_VI can have a
+    # negative real part even when it is oriented with the complex mode power.
+    if z_vi.imag == 0.0 and z_vi.real <= 0.0:
         return None
     z_pi = abs(z_vi) ** 2 / z_pv.conjugate()
     voltage_power_ratio = abs(z_pv) / abs(z_pi)
