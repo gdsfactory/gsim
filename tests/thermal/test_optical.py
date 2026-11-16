@@ -204,9 +204,12 @@ def test_the_unperturbed_index_matches_the_femwell_adapter_on_the_same_mesh(
     optical_mesh, stack, heated_10k
 ):
     # The adapter loads the msh on its own and fills epsilon by Region
-    # name, so agreement means both loaders see one element order.
+    # name, so agreement means both loaders see one element order. The
+    # thermal path solves with order 1 elements; the adapter defaults to 2.
     eps = epsilon_by_region(optical_mesh.msh_path, stack, wavelength_um=WAVELENGTH_UM)
-    modes = solve_modes(optical_mesh.msh_path, epsilon=eps, wavelength_um=WAVELENGTH_UM)
+    modes = solve_modes(
+        optical_mesh.msh_path, epsilon=eps, wavelength_um=WAVELENGTH_UM, order=1
+    )
     assert heated_10k.neff0 == pytest.approx(complex(modes[0].n_eff), rel=1e-9)
 
 
