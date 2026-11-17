@@ -13,6 +13,7 @@ without them; only ``solve_modes`` needs the runtime.
 
 from gsim.femwell.adapter import (
     boundary_field_ratio,
+    conductor_index_bound,
     electrode_current,
     elementwise_epsilon,
     epsilon_by_region,
@@ -25,6 +26,7 @@ from gsim.femwell.runtime import require_femwell, require_skfem
 
 __all__ = [
     "boundary_field_ratio",
+    "conductor_index_bound",
     "electrode_current",
     "elementwise_epsilon",
     "epsilon_by_region",
