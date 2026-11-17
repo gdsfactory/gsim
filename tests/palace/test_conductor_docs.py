@@ -140,13 +140,17 @@ def _python_blocks() -> list[str]:
 @pytest.fixture(scope="module")
 def snippet_namespace(tmp_path_factory) -> dict:
     blocks = _python_blocks()
-    assert len(blocks) == 1
-    assert ".run(" not in blocks[0], "the snippet must not call the cloud"
+    assert len(blocks) == 2  # the line, then the conductive-volume route
+    assert all(".run(" not in block for block in blocks), (
+        "the snippets must not call the cloud"
+    )
     workdir = tmp_path_factory.mktemp("conductor-docs")
     namespace: dict = {"__name__": "docs_conductors"}
     with pytest.MonkeyPatch.context() as patch:
         patch.chdir(workdir)
-        exec(compile(blocks[0], PAGE.name, "exec"), namespace)  # noqa: S102
+        # the second block continues the first one: same namespace
+        for block in blocks:
+            exec(compile(block, PAGE.name, "exec"), namespace)  # noqa: S102
     return namespace
 
 
@@ -165,6 +169,50 @@ def test_snippet_sheet_has_pec_and_no_conductivity_entries(snippet_namespace):
     sheet = snippet_namespace["sheet"]
     assert sheet["Conductivity"] == []
     assert len(sheet["PEC"]["Attributes"]) == 1
+
+
+def test_snippet_volume_metal_has_conductivity_and_no_surface_boundary(
+    snippet_namespace,
+):
+    """metal1 classified as a dielectric: a conductive volume, no shell, no sheet."""
+    sim = snippet_namespace["sim"]
+    volume = snippet_namespace["volume"]
+    metal1 = sim.mesh_groups["volumes"]["metal1"]
+    assert metal1["is_shaped_dielectric"] is True
+    entries = [
+        m for m in volume["materials"] if metal1["phys_group"] in m["Attributes"]
+    ]
+    assert len(entries) == 1
+    assert entries[0]["Conductivity"] == SIGMA_AL
+    assert "Thickness" not in entries[0]
+    assert volume["conductivity"] == []  # no surface-conductivity boundary
+    assert "PEC" not in snippet_namespace["config"]["Boundaries"]
+    assert not sim.mesh_groups["conductor_surfaces"]
+
+
+def test_a_covering_bulk_region_of_the_same_material_hides_the_layer(
+    snippet_namespace,  # noqa: ARG001 - activates the gpdk PDK
+):
+    """The page's caveat: a bulk region of the layer's material over it, no volume."""
+    from types import SimpleNamespace
+
+    from gsim.common.stack import get_stack
+    from gsim.palace.mesh.geometry import _detect_shaped_dielectric_layers
+
+    stack = get_stack(substrate_thickness=2.0)
+    layer = stack.layers["metal1"]
+    layer.layer_type = "dielectric"
+    drawn = SimpleNamespace(polygons=[(layer.gds_layer[0], [])])
+    assert _detect_shaped_dielectric_layers(drawn, stack) == {"metal1"}
+    stack.dielectrics.append(
+        {
+            "name": "cover",
+            "material": layer.material,
+            "zmin": layer.zmin,
+            "zmax": layer.zmax,
+        }
+    )
+    assert _detect_shaped_dielectric_layers(drawn, stack) == set()
 
 
 # ---------------------------------------------------------------------------

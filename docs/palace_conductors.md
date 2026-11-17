@@ -4,8 +4,8 @@ This page says what gsim writes into `config.json` for a metal layer, and when e
 What Palace does with a key once it reads it is described in Palace's own configuration reference, which this page does not
 reproduce. Statements that were not checked are marked *not verified*, and the list is repeated at the end.
 
-Every number below comes from the gpdk CPW line in the snippet on this page (coarse preset), from the gsim source, or from the
-tests named in the text. Nothing on this page was solved: the snippet stops at `write_config()`.
+Every number below comes from the gpdk CPW line in the snippets on this page (coarse preset), from the gsim source, or from the
+tests named in the text. Nothing on this page was solved: the snippets stop at `write_config()`.
 
 ## What gsim writes for a conductor
 
@@ -27,8 +27,8 @@ What is meshed and written:
 Details that follow from the code:
 
 - A via layer with no conductivity is meshed as a PEC sheet, and gsim logs a warning. A via thinner than 0.02 um is a PEC sheet too.
-- A conductor layer is never meshed as a volume, whatever its conductivity. See
-  [Meshing a conductor as a lossy volume](#meshing-a-conductor-as-a-lossy-volume).
+- A layer classified as a conductor is never meshed as a volume, whatever its conductivity. A drawn metal layer classified as a dielectric
+  is; see [Meshing a conductor as a lossy volume](#meshing-a-conductor-as-a-lossy-volume).
 - `add_pec(gds_layer=, from_layer=, to_layer=)` adds a PEC block, a drawn polygon extruded between two stack layers and treated as a
   PEC boundary (its docstring). It is separate from the layer models above.
 - `planar_conductors=True` is refused for a magnetostatic simulation, whose current-source sheets must end on metal volumes. The
@@ -140,24 +140,66 @@ For a `BoundaryModeSim`, `sim.conductor_boundary = "pec"` moves the conductor at
 
 ## When to use a PEC sheet
 
-- The metal is superconducting, or its loss does not matter for the question.
+- The loss of the metal does not matter for the question, and neither do its reactive effects. Negligible dissipation, or
+  superconductivity, does not mean that the surface, internal or kinetic inductance of the metal is negligible: a metal surface has a
+  reactive surface impedance, and a superconducting film adds a kinetic inductance that grows as the film gets thin (textbook statements,
+  not measured here). A PEC sheet has none of these. Use it only if the phase, the impedance or the resonant frequency you want does not
+  depend on them.
 - A fast check of the geometry, ports and mesh. A PEC sheet has no elements inside the metal and no `Thickness`, so it is cheaper (7,897
   against 6,074 tetrahedra above).
 - The layer is thinner than 0.02 um. gsim makes it a PEC sheet on its own.
 
 The planar qubit-chip notebook (`palace_qpdk_filled_qubit_test_chip`) is built this way: its text says "planar PEC metal on silicon" and it
-meshes with `planar_conductors=True`. A PEC sheet has no conductor loss at all, so it cannot be used to read conductor loss.
+meshes with `planar_conductors=True`. Whether neglecting the reactive effects is justified for the frequencies that notebook reads is not
+checked here. A PEC sheet has no conductor loss at all, so it cannot be used to read conductor loss.
 
 ## Meshing a conductor as a lossy volume
 
-Main has no public switch for this. In the code, `Domains.Materials` gets a `Conductivity` only for vias and for polygon dielectrics, and a
-conductor layer goes through the shell or the sheet path whatever its material.
+Main has no dedicated switch for this. In the code, `Domains.Materials` gets a `Conductivity` for vias and for polygon dielectrics, and a
+layer classified as a conductor goes through the shell or the sheet path whatever its material. A meshed-metal reference can still be
+built through the public API by classifying the drawn metal layer as a dielectric:
 
-One public-API attempt was made for this page: redeclare `metal1` as a `"via"` layer in a `LayerStack` and pass it to `set_stack()`. For
-the CPW above, `mesh()` then stops with `Mesh validation failed: No conductor surfaces in mesh`. So this is not a route.
+```python
+from gsim.common.stack import get_stack
 
-Work on a route is in [gsim PR #522](https://github.com/gdsfactory/gsim/pull/522), a branch that is not on main. Until it lands, a
-meshed-metal reference for a Palace conductor is not available from main alone.
+stack = get_stack(substrate_thickness=2.0)  # the stack that set_stack(substrate_thickness=2.0) builds above
+stack.layers["metal1"].layer_type = "dielectric"  # the material stays Aluminum, 3.77e7 S/m
+
+sim = DrivenSim()
+sim.set_output_dir("conductor-volume")
+sim.set_geometry(gsg_line())
+sim.set_stack(stack)  # a LayerStack object, not substrate_thickness=
+sim.set_airbox(margin_x=0, margin_y=50.0, z_above=100.0, z_below=100.0)
+sim.add_cpw_port("o1", layer="metal1", s_width=10, gap_width=6, length=5.0)
+sim.add_cpw_port("o2", layer="metal1", s_width=10, gap_width=6, length=5.0)
+sim.set_driven(fmin=1e9, fmax=100e9, num_points=5)
+sim.mesh(preset="coarse")
+config = json.loads(Path(sim.write_config()).read_text())  # nothing is solved or submitted
+volume = {"materials": config["Domains"]["Materials"], "conductivity": config["Boundaries"]["Conductivity"]}
+print(volume)
+```
+
+It continues the first snippet (it reuses `gsg_line` and the imports). For the same CPW line, `metal1` becomes a meshed volume group with its
+own `Domains.Materials` entry: `Conductivity` 3.77e7, `Permittivity` 1.0, and no `Thickness`. `Boundaries.Conductivity` is an empty list
+and there is no `Boundaries.PEC`. Test: `test_snippet_volume_metal_has_conductivity_and_no_surface_boundary`.
+
+Caveats:
+
+- The stack must not hold a bulk region of the same material over the layer. A dielectric layer whose material and z-range are covered by an
+  entry of `stack.dielectrics` is taken as a placeholder for that region and is not extruded (`_is_covered_by_dielectric_box` in
+  `gsim/palace/mesh/geometry.py`; test: `test_a_covering_bulk_region_of_the_same_material_hides_the_layer`). The gpdk stack has only an
+  oxide region, so `metal1` is not covered.
+- The layer needs polygons on its GDS layer, and anything that looks for a conductor layer no longer sees it. The gap-type lumped port
+  raises "requires a conductor layer" for it (`gsim/palace/ports/config.py`). Only the CPW ports above were tried.
+- Which other features read the layer type (nets, wave-port boundaries, current sources) was not checked here.
+- Only the config was written. Nothing was solved, so how Palace treats the conductive volume, and whether the coarse preset above resolves
+  the skin depth inside the metal (see the next section), is *not verified*.
+
+One other public-API attempt was made: redeclare `metal1` as a `"via"` layer. For the CPW above, `mesh()` then stops with
+`Mesh validation failed: No conductor surfaces in mesh`. That rules out the `"via"` classification, not the dielectric one.
+
+Work on a further route is in [gsim PR #522](https://github.com/gdsfactory/gsim/pull/522), a branch that is not on main; it is not
+described here.
 
 ## Validity versus skin depth
 
@@ -190,7 +232,7 @@ Reading the table:
   ([CPW length sweep and de-embedding](nbs/palace_cpw_deembedding.md)).
 
 How large the error of the surface condition is for a given t / delta is not shown on this page. No comparison with a meshed-metal run
-is stored in the repository, and main cannot make one (see the previous section), so no number is given.
+is stored in the repository (the previous section only writes its config), so no number is given.
 
 ## Not verified
 
@@ -198,5 +240,7 @@ is stored in the repository, and main cannot make one (see the previous section)
   whether the cloud runtime reads `Crack`.
 - The claim that Palace 0.19 reads an interior `Conductivity` boundary as a thin film comes from gsim's code comments and tests.
 - The check that `set_material` is case-sensitive was made on the gpdk stack only.
-- The `"via"` re-declaration was tried on one CPW with lumped ports.
+- The `"via"` re-declaration was tried on one CPW with lumped ports. The dielectric classification was tried on the same line only, and
+  only as far as `write_config()`.
+- That PEC is adequate for a phase, an impedance or a resonant frequency: the page gives the textbook reason to check, not a measurement.
 - The numbers in the line table were produced on one Windows machine with the coarse preset; the tetrahedron counts depend on the mesher.
