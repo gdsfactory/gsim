@@ -51,6 +51,7 @@ nav = [
     { "GDSFactory FDTD" = "api/fdtd.md" },
     { "Palace" = "api/palace.md" },
     { "TCAD" = "api/tcad.md" },
+    { "femwell" = "api/femwell.md" },
     { "Meep" = "api/meep.md" },
     { "Common" = "api/common.md" },
     { "Cloud" = "api/cloud.md" }
