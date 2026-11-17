@@ -108,14 +108,15 @@ def _generate(
 class TestWavePortPEC:
     def test_inherit_keeps_all_physical_boundaries(self, tmp_path):
         impedance = [ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)]
-        default = _generate(
+        sim = DrivenSim()
+        sim.set_driven(waveport_boundary="pec")
+        pec = _generate(
             tmp_path,
             _groups(),
             _wave_ports(),
             impedance_boundaries=impedance,
-            driven=DrivenConfig(),
+            driven=sim.driven,
         )
-        sim = DrivenSim()
         sim.set_driven(waveport_boundary="inherit")
         inherited = _generate(
             tmp_path,
@@ -124,11 +125,40 @@ class TestWavePortPEC:
             impedance_boundaries=impedance,
             driven=sim.driven,
         )
-        assert default["Boundaries"].pop("WavePortPEC") == {
-            "Attributes": [4, 5, 8, 12, 20]
-        }
-        assert inherited == default
+        assert pec["Boundaries"].pop("WavePortPEC") == {"Attributes": [4, 5, 8, 12, 20]}
+        assert inherited == pec
         assert "waveport_boundary" not in inherited["Solver"]["Driven"]
+
+    def test_default_is_inherit(self, tmp_path):
+        """Since 0.11.0 a driven run keeps the physical boundaries in the
+        port eigenproblem unless it asks for "pec"."""
+        assert DrivenConfig().waveport_boundary == "inherit"
+        sim = DrivenSim()
+        sim.set_driven(fmin=1e9, fmax=10e9)
+        assert sim.driven.waveport_boundary == "inherit"
+        config = _generate(tmp_path, _groups(), _wave_ports(), driven=sim.driven)
+        assert config["Boundaries"]["WavePort"]
+        assert config["Boundaries"]["Conductivity"]
+        assert "WavePortPEC" not in config["Boundaries"]
+
+    def test_pec_restores_the_old_default(self, tmp_path):
+        config = _generate(
+            tmp_path,
+            _groups(),
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
+        assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
+
+    def test_without_driven_settings_the_port_solve_stays_pec(self, tmp_path):
+        """Runs with no driven settings (eigenmode) cannot choose a policy,
+        so their wave ports keep the PEC approximation."""
+        config = _generate(tmp_path, _groups(), _wave_ports(), driven=None)
+        assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
+
+    def test_a_saved_pec_setting_still_loads_as_pec(self):
+        saved = '{"waveport_boundary": "pec"}'
+        assert DrivenConfig.model_validate_json(saved).waveport_boundary == "pec"
 
     @pytest.mark.parametrize("policy", ["pec", "inherit"])
     def test_policy_preserved_by_serialization(self, policy):
@@ -181,7 +211,12 @@ class TestWavePortPEC:
         groups = _groups(
             conductors=source == "conductivity", absorbing=source == "absorbing"
         )
-        default = _generate(tmp_path, groups, _wave_ports(), driven=DrivenConfig())
+        pec = _generate(
+            tmp_path,
+            groups,
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         inherited = _generate(
             tmp_path,
             groups,
@@ -189,8 +224,8 @@ class TestWavePortPEC:
             driven=DrivenConfig(waveport_boundary="inherit"),
         )
         expected = [8, 12] if source == "absorbing" else [4, 5]
-        assert default["Boundaries"].pop("WavePortPEC") == {"Attributes": expected}
-        assert inherited == default
+        assert pec["Boundaries"].pop("WavePortPEC") == {"Attributes": expected}
+        assert inherited == pec
 
     def test_inherit_does_not_change_lumped_ports(self, tmp_path):
         default = _generate(tmp_path, _groups(), _lumped_ports(), driven=DrivenConfig())

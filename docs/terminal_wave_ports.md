@@ -208,10 +208,11 @@ The pilot terminal of a mode is known after the 2D solve, so the order is: 2D so
 runs with the matching `VoltagePath`. A degenerate port is refused by default (`allow_degenerate=True` accepts it at the
 cost of the basis); the validation geometries are chosen with distinct `n_eff`.
 
-**The 2D solve must share the port eigenproblem's conductors.** With `waveport_boundary="pec"` (the default) the port
-eigenproblem makes the outer boundary *and every finite-conductivity conductor surface* perfect conductors: the attributes
-of `Boundaries.Conductivity` (and of the absorbing and impedance boundaries) are listed under `WavePortPEC`. The 2D solve
-with `metallic_boundaries=True` does the same for the outer wall only. Its conductors stay Robin surface-impedance
+**The 2D solve must share the port eigenproblem's conductors.** The terminal-S method runs its 3D simulations with
+`set_driven(waveport_boundary="pec")`, which must be passed explicitly since gsim 0.11.0 (the default is now
+`"inherit"`). That port eigenproblem makes the outer boundary *and every finite-conductivity conductor surface* perfect
+conductors: the attributes of `Boundaries.Conductivity` (and of the absorbing and impedance boundaries) are listed under
+`WavePortPEC`. The 2D solve with `metallic_boundaries=True` does the same for the outer wall only. Its conductors stay Robin surface-impedance
 conditions, so its modes are lossy, with a complex and frequency-dependent `n_eff`, and they are not the modes the port
 solver finds. On the floating-ground validation line the difference was 12 % at 1 GHz, 3.9 % at 20 GHz and 2.7 % at
 50 GHz for mode 1 (2D `n_eff` 1.713 - 0.44j, 1.584, 1.566 against 1.5244 in the port solve, which is flat to 0.04 % from

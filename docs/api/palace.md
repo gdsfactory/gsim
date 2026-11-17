@@ -267,19 +267,33 @@ provenance checks.
 
 ## Numeric wave-port boundaries
 
-The default `waveport_boundary="pec"` approximates finite conductivity, impedance
-and absorbing boundaries as PEC **inside the port eigenproblem**. Choose
-`"inherit"` to retain those physical conditions when solving the port mode:
+The default `waveport_boundary="inherit"` keeps finite conductivity, impedance
+and absorbing boundaries in the port eigenproblem, so the port mode carries the
+same loss as the 3D line. Choose `"pec"` to approximate those boundaries as PEC
+**inside the port eigenproblem**:
 
 ```python
 from gsim.palace import DrivenSim
 
 sim = DrivenSim()
-sim.set_driven(f=50e9, waveport_boundary="inherit")
+sim.set_driven(f=50e9, waveport_boundary="pec")
 # After geometry/ports are configured and the mesh is generated:
 # config = json.loads(sim.write_config().read_text())
-# "WavePortPEC" not in config["Boundaries"]
+# config["Boundaries"]["WavePortPEC"] lists those attributes
 ```
+
+**Changed in gsim 0.11.0.** Before 0.11.0 the default was `"pec"`. With a lossy
+3D line, a PEC port mode is a small impedance mismatch at each port: on the CPW
+wave-port example it added a reflection floor of up to −35 dB that the lossy
+port solve does not have, while transmission agreed to 0.002 dB (measurements in
+[Wave ports in Palace](../palace_wave_ports.md#4-the-port-eigenproblem-waveport_boundary)).
+Driven wave-port runs with conductivity, impedance or absorbing boundaries are
+affected: their S-parameters, mostly the reflections, change slightly, the
+port solve takes longer (about twice the run time on that example), and their
+configuration differs, so earlier cached cloud results are not reused. To keep
+the old behaviour, pass `waveport_boundary="pec"` to `set_driven()`. Saved
+driven settings that store `"pec"` keep it. Eigenmode runs with wave ports have
+no driven settings and keep the PEC approximation.
 
 Only the generated `Boundaries.WavePortPEC` override changes. The physical 3D
 conductivity, impedance and absorbing boundaries remain identical. Lumped ports
@@ -289,7 +303,7 @@ port fields and solver convergence for the chosen Palace runtime.
 
 The policies differ only when absorbing, conductivity or impedance boundaries
 exist; without these Robin terms, both omit `WavePortPEC`. A later `set_driven()`
-call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
+call rebuilds the driven settings, so repeat `waveport_boundary="pec"` when
 updating other sweep options if you want to retain it.
 
 With wave ports, `DrivenSim` makes the outer wall of the 3D domain PEC

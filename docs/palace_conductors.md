@@ -130,13 +130,15 @@ gsim's own comments and tests say this; Palace's release notes were not read:
 
 ## Wave ports and the conductor
 
-With wave ports, the default `waveport_boundary="pec"` lists the conductor attributes, together with the absorbing and impedance
-attributes, under `Boundaries.WavePortPEC`. In the port's 2D mode solve the metal is then a perfect conductor, while the 3D problem keeps
-its `Conductivity` boundaries. `waveport_boundary="inherit"` writes no `WavePortPEC`, so the port mode sees the same surface impedance.
+With wave ports, the default `waveport_boundary="inherit"` (since gsim 0.11.0) writes no `WavePortPEC`, so the port mode sees the same
+surface impedance as the 3D problem. `waveport_boundary="pec"`, the default before 0.11.0, lists the conductor attributes, together with
+the absorbing and impedance attributes, under `Boundaries.WavePortPEC`. In the port's 2D mode solve the metal is then a perfect
+conductor, while the 3D problem keeps its `Conductivity` boundaries.
 Test: `test_wave_port_case_with_waveport_pec`. Details and the outer-wall rule are in the [Palace guide](api/palace.md).
 
 For a `BoundaryModeSim`, `sim.conductor_boundary = "pec"` moves the conductor attributes from `Boundaries.Conductivity` to
-`Boundaries.PEC`, so that the 2D modes are comparable with the port modes above. The default, `"conductivity"`, keeps them lossy.
+`Boundaries.PEC`, so that the 2D modes are comparable with the port modes of `waveport_boundary="pec"`. The default,
+`"conductivity"`, keeps them lossy, like the port modes of the default `waveport_boundary="inherit"`.
 
 ## When to use a PEC sheet
 

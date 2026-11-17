@@ -198,6 +198,8 @@ def sync_port_settings(
             port.eigensolver_ksp_tol = cfg.eigensolver_ksp_tol
             port.eigensolver_max_size = cfg.eigensolver_max_size
             port.eigensolver_verbose = cfg.eigensolver_verbose
+            port.eigensolver_max_its = cfg.eigensolver_max_its
+            port.eigensolver_complex_coarse_solve = cfg.eigensolver_complex_coarse_solve
             port.modes = tuple(int(m) for m in cfg.modes)
             port.excite_modes = cfg.excite_modes
             port.pilot_paths = {
