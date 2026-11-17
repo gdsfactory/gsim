@@ -156,7 +156,7 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 ### Boundary-mode path integration
 
 Starting with gsim **0.9.0**, coordinate-path voltage and impedance postprocessing
-omits `NSamples`. The cloud runtime uses Palace commit
+omits `NSamples`. Element-wise integration was introduced in the cloud runtime with Palace commit
 `0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5`, which provides element-wise line
 integration and contains
 [the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
@@ -220,6 +220,29 @@ from gsim.palace import BoundaryModeSim
 sim = BoundaryModeSim()
 sim.solver.linear.mg_max_levels = 100  # the pre-0.11.0 value
 ```
+
+### Complex boundary-mode impedance output
+
+Palace [PR #1119](https://github.com/awslabs/palace/pull/1119) replaces the scalar
+`Z_PV[i]` and `Z_VI[i]` columns in `mode-Z.csv` with real and imaginary components.
+`load_text_results` reads both formats. Existing `characteristic_impedance(...)`
+calls still return a float: the legacy scalar, or the real part of a newer value.
+Use `complex_characteristic_impedance(...)` to retain the full complex value:
+
+```python
+from gsim.palace.results import load_text_results
+
+results = load_text_results("path/to/palace/output")
+z_pv = results.complex_characteristic_impedance(index=1, mode=1, quantity="Z_PV")
+z_vi = results.complex_characteristic_impedance(index=1, mode=1, quantity="Z_VI")
+```
+
+Both components must be finite; missing or invalid components return `None`.
+Legacy files return a complex number with zero imaginary part; their missing
+phase cannot be recovered. Per-unit-length L/C columns remain real. New output
+uses corrected lossy impedance definitions, so old lossy values are not numerical
+equality references. The line-impedance workflow keeps using saved fields for
+lossy conductors, and reads the complex tables for its mode diagnostic.
 
 ### MUMPS behavior change
 
@@ -302,19 +325,19 @@ call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
 updating other sweep options if you want to retain it.
 
 With wave ports, `DrivenSim` makes the outer wall of the 3D domain PEC
-(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself.
-Palace solves the port mode with PEC outer edges, so an absorbing wall makes the
-domain and the port mode disagree, which shows up as fake loss, reflection and
-mode conversion. To keep the absorbing wall, pass `absorbing_boundary=True`.
-Lumped-port-only runs stay absorbing by default. This applies to wave ports
-added with `add_wave_port()` and to those declared through
-`configure_wave_port()` component metadata.
+(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself;
+pass `absorbing_boundary=True` to keep the absorbing wall. Lumped-port-only runs
+stay absorbing by default.
 
 !!! note "Default change in 0.9.0"
     Earlier releases left an unset `absorbing_boundary` absorbing even with wave
     ports. The PEC default starts with 0.9.0. Saved
     configurations and notebooks that relied on the old behavior should pass
     `absorbing_boundary=True`.
+
+The reason, the table of what each `absorbing_boundary` and `metallic_boundaries`
+setting writes, and the other wave-port options are on
+[Wave ports in Palace](../palace_wave_ports.md).
 
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 

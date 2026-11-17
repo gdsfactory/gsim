@@ -148,7 +148,7 @@ def test_outside_slice_has_clear_error(tmp_path, position):
         _tetrahedron_view(tmp_path, axis="z", position_um=position)
 
 
-@pytest.mark.parametrize("method", ["plot_2d_static", "plot_2d_interactive"])
+@pytest.mark.parametrize("method", ["plot_2d", "plot_2d_static", "plot_2d_interactive"])
 @pytest.mark.parametrize(
     "kwargs",
     [{"axis": "bad"}, {"position_um": float("nan")}, {"position_um": float("inf")}],
@@ -158,13 +158,14 @@ def test_invalid_slice_is_rejected_before_geometry(method, kwargs):
         getattr(fdtd.Simulation(), method)(**kwargs)
 
 
+@pytest.mark.parametrize("method", ["plot_2d", "plot_2d_static"])
 def test_public_static_workflow_tracks_geometry_and_material_edits(
-    tmp_path, fdtd_pdk_module
+    tmp_path, fdtd_pdk_module, method
 ):
     simulation = fdtd.Simulation(pdk=fdtd_pdk_module, mesh_size_nm=750)
     simulation.geometry("straight")
     # A preview should work before choosing a source port or writing a job.
-    ax = simulation.plot_2d_static()
+    ax = getattr(simulation, method)()
     assert isinstance(ax, Axes)
     assert "z = 0.11 µm" in ax.get_title()
     assert simulation._last_artifacts is None
@@ -174,7 +175,7 @@ def test_public_static_workflow_tracks_geometry_and_material_edits(
     simulation.materials(overrides={"Si": {"refractive_index": 2.5}})
     simulation.geometry("straight", settings={"length": 3})
     simulation.add_monitors(xy_name="field_xy")
-    updated = simulation.plot_2d_static(show_mesh=True)
+    updated = getattr(simulation, method)(show_mesh=True)
     assert simulation._last_artifacts is artifacts
     assert updated.get_xlim()[1] == pytest.approx(3 + 32 * 0.06)
     assert {text.get_text() for text in updated.texts} >= {
@@ -219,20 +220,23 @@ def test_material_priority_controls_overlapping_sections(tmp_path, monkeypatch):
     simulation = fdtd.Simulation()
     cast(Any, simulation)._resolved = SimpleNamespace(ports={}, layers={})
     high = MeshGroup("high", 2, "Si", 2)
-    low = replace(high, name="low", physical_tag=3, priority=1)
+    low = replace(high, name="low", physical_tag=3, priority=1, material="Oxide")
     manifest = MeshManifest(
         {}, {"high": high, "low": low}, {}, (0, 0, 0), (1000, 1000, 1000)
     )
     ax = plot_mesh_slice(
         _write_mesh(tmp_path / "mesh.msh"),
         manifest,
-        {"Si": cast(Any, SimpleNamespace(refractive_index=3.5))},
+        {
+            "Si": cast(Any, SimpleNamespace(refractive_index=3.5)),
+            "Oxide": cast(Any, SimpleNamespace(refractive_index=1.5)),
+        },
         simulation,
         axis="z",
         position_um=0.25,
     )
     assert [collection.get_label() for collection in ax.collections] == [
-        "low (Si)",
+        "low (Oxide)",
         "high (Si)",
     ]
 

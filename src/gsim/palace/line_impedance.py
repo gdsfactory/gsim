@@ -69,7 +69,7 @@ PATH_CLEARANCE_FRACTION: float = 1e-3
 #: Name of the postprocessing port the line's paths are declared under.
 IMPEDANCE_PORT: str = "line"
 
-#: Below this ``Z_PV / Z_PI`` — which is ``(|V| |I| / 2P)^2`` — the voltage
+#: Below this ``|Z_PV / Z_PI|`` — which is ``(|V| |I| / |2P|)^2`` — the voltage
 #: across the gap carries none of the Mode's power, and the Mode is not
 #: the line Mode between the two electrodes. A quasi-TEM line Mode has
 #: ``|V| |I| ~ 2P``; a lossy one sits within a factor of a few of it; a
@@ -207,37 +207,21 @@ def native_line_impedance(
 ) -> LineReading | None:
     """One Mode's reading off Palace's own ``mode-Z.csv``.
 
-    Palace reports two magnitudes per entry: ``Z_PV = |V|^2 / 2P`` from
-    the voltage path alone, and ``Z_VI = |V| / |I|`` once a current path
-    is declared. Their ratio ``Z_VI^2 / Z_PV = 2P / |I|^2`` is the
-    power-current impedance the field integral computes too, so that is
-    what is read; a table carrying ``Z_PV`` alone is a different
-    definition, not a nearer answer, and is declined the same as no
-    table.
+    New Palace outputs report ``Z_PV = |V|^2 / (2 conj(P))`` and
+    ``Z_VI = V / I`` as complex values. Their combination
+    ``|Z_VI|^2 / conj(Z_PV) = 2P / |I|^2`` is the power-current
+    impedance the field integral computes too. Both quantities are required.
+    Legacy scalar tables retain the old ``Z_VI^2 / Z_PV`` reading, with
+    zero imaginary part; their lost phase cannot be recovered.
 
     The voltage cancels out of that ratio, so it is read on its own for
     the wall-Mode diagnostic: a Mode whose gap voltage carries almost
     none of its power is not running between the two electrodes.
 
-    The reading is real-only, because the tables carry magnitudes. With
-    perfect conductors that costs nothing: it sits 0.15% from what
-    :func:`field_line_impedance` reads on the same solve (2.83% against
-    femwell, versus 2.98%). With lossy conductors it is wrong, not merely
-    real: ``V``, ``I`` and ``P`` then carry phases that ``|V|/|I|`` and
-    ``|V|^2/2P`` lose, and the ratio stops being the power-current
-    impedance at all. On a 10/6 um aluminium CPW at 10 GHz the tables
-    give 85.3 ohm where the fields give 74.6 - 8.3j ohm (femwell 74.0 -
-    8.4j), 14.5% off, against 4% between all three with PEC electrodes.
-    So this is read for a ``"pec"`` conductor only; :func:`palace_line_impedance`
-    keeps it for the wall-Mode diagnostic alone when the conductor is
-    lossy, and the impedance comes off the fields.
-
-    Palace also tabulates ``L_PV`` and ``C_PV``, and they are no second
-    opinion: they are ``Z_PV`` divided and multiplied by the phase
-    velocity, so ``sqrt(L_PV / C_PV)`` returns ``Z_PV`` exactly, and
-    they carry no ``R`` and no ``G``. The ``Z_PV``/``Z_PI`` ratio this
-    function already computes for the wall-Mode diagnostic is therefore
-    the cross-check the tables afford; there is no other one to add.
+    :func:`palace_line_impedance` retains its existing policy of using
+    saved fields for lossy conductors and keeping this table reading
+    for the wall-Mode diagnostic. Legacy magnitude-only outputs are
+    insufficient to recover a lossy line's complex impedance.
 
     Args:
         results: The run's text results.
@@ -246,26 +230,35 @@ def native_line_impedance(
         n_eff: That Mode's effective index, carried into the reading.
 
     Returns:
-        The reading — its impedance real — or ``None`` when the tables
+        The reading, complex for new outputs, or ``None`` when the tables
         are absent, carry no current path, no current (a loop enclosing
         none), or not this Mode.
     """
-    z_pv = results.characteristic_impedance(index=index, mode=mode_id, quantity="Z_PV")
-    z_vi = results.characteristic_impedance(index=index, mode=mode_id, quantity="Z_VI")
-    if z_pv is None or z_vi is None or z_pv <= 0.0 or z_vi <= 0.0:
+    z_pv = results.complex_characteristic_impedance(
+        index=index, mode=mode_id, quantity="Z_PV"
+    )
+    z_vi = results.complex_characteristic_impedance(
+        index=index, mode=mode_id, quantity="Z_VI"
+    )
+    if z_pv is None or z_vi is None or z_pv.real <= 0.0:
         return None
-    z_pi = z_vi * z_vi / z_pv
-    wall_mode = z_pv < MIN_VOLTAGE_POWER_RATIO * z_pi
+    # The current-loop sign cancels in |Z_VI|. A complex Z_VI can have a
+    # negative real part even when it is oriented with the complex mode power.
+    if z_vi.imag == 0.0 and z_vi.real <= 0.0:
+        return None
+    z_pi = abs(z_vi) ** 2 / z_pv.conjugate()
+    voltage_power_ratio = abs(z_pv) / abs(z_pi)
+    wall_mode = voltage_power_ratio < MIN_VOLTAGE_POWER_RATIO
     if wall_mode:
         diagnostic = (
-            f"whose voltage across the gap carries {z_pv / z_pi:.2g} of the "
+            f"whose voltage across the gap carries {voltage_power_ratio:.2g} of the "
             "power its current implies: the two electrodes sit at one "
             "potential, so this is a mode between them and the window wall "
             "rather than the line mode between them"
         )
     else:
         diagnostic = (
-            f"whose voltage across the gap carries {z_pv / z_pi:.2g} of the "
+            f"whose voltage across the gap carries {voltage_power_ratio:.2g} of the "
             "power its current implies: the line mode between the electrodes"
         )
     return LineReading(
@@ -347,11 +340,10 @@ def palace_line_impedance(
     power-current impedance its postprocessing paths measured
     (:func:`native_line_impedance`), read off this run's tables under the
     index the path was declared at, with the wall-Mode diagnostic the
-    gap voltage gives. With a lossy (``"volume"``) one the tables'
-    magnitudes do not combine into the complex impedance — see
-    :func:`native_line_impedance` for the numbers — so the impedance is
+    gap voltage gives. With a lossy (``"volume"``) one the impedance is
     integrated off the saved fields (:func:`field_line_impedance`) and
-    the tables keep the wall-Mode diagnostic alone. A run without the
+    the tables keep the wall-Mode diagnostic alone. This policy also
+    supports legacy tables, which do not retain phase. A run without the
     tables — a solve that declared no path, or an older Palace — falls
     back to the saved fields either way, whose NaN contract stands and
     which say nothing about which Mode this is.
@@ -369,7 +361,7 @@ def palace_line_impedance(
         context: Who is asking, opening the field reader's warning.
 
     Returns:
-        The reading: impedance real off the tables for a perfect
+        The reading: impedance off the tables for a perfect
         conductor, complex off the fields otherwise, NaN when the fields
         were wanted and could not be read.
     """
@@ -395,8 +387,7 @@ def palace_line_impedance(
             z0_ohm=z0,
             wall_mode=native.wall_mode,
             diagnostic=f"{native.diagnostic}; the impedance itself was read off "
-            "the saved fields, since the tables carry magnitudes only and a "
-            "lossy conductor's Z_VI^2 / Z_PV is not the power-current impedance",
+            "the saved fields for the lossy conductor",
         )
     return LineReading(
         n_eff=complex(n_eff),

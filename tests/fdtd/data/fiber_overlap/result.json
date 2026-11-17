@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "excitation_type": "eigenmode",
+  "excited_port": "o1",
+  "ports": ["o1"],
+  "convergence": {
+    "converged": true,
+    "timesteps_run": 19712,
+    "stop_reason": "converged",
+    "peak_energy": 31551.09046,
+    "final_energy": 0.1141054905,
+    "final_energy_ratio": 3.616530802e-6,
+    "last_s_parameter_max_delta": 7.400092987e-5,
+    "convergence_checks": 77,
+    "s_parameter_checks": 42,
+    "s_parameter_energy_gate_blocked": false,
+    "s_parameter_gate_evaluated": true,
+    "energy_nonfinite": false,
+    "first_nonfinite_energy_step": null,
+    "first_nonfinite_energy_block": null
+  },
+  "grid": {
+    "num_cells": [671, 454, 128],
+    "total_cells": 38993152,
+    "cell_size_nm": [50, 50, 50],
+    "dt": 27.42413712
+  },
+  "config_resolved": {
+    "source_type": "eigenmode",
+    "port_mode": {
+      "kind": "fundamental",
+      "mode_order": 1,
+      "te_axis": "x",
+      "num_candidate_modes": 4,
+      "min_polarization_fraction": 0.5
+    },
+    "nanometers_per_cell": 50,
+    "pml_cells": 16,
+    "center_wavelength": 1554,
+    "wavelength_halfspan": 50,
+    "source_wavelength_halfspan": 50,
+    "monitor_wavelength_halfspan": 50,
+    "num_wavelengths": 101,
+    "waveform": "pulse",
+    "energy_decay_fraction": 0.0004,
+    "auto_source_factor": 3,
+    "auto_quality_factor": 10
+  },
+  "frequencies": {
+    "wavelength_nm": [1554],
+    "hz": [192916639600000.0],
+    "below_noise_floor": [false]
+  },
+  "s_parameters": {
+    "S(o1,o1)": [
+      {
+        "re": -0.006409761335,
+        "im": -0.004309549596,
+        "mag": 0.007723811112,
+        "mag_db": -42.24336711,
+        "phase_deg": -146.0854155
+      }
+    ]
+  },
+  "plane_monitors": {
+    "radiation": {
+      "normal_axis": "z",
+      "normal_sign": 1,
+      "u_axis": "x",
+      "v_axis": "y",
+      "plane_position_nm": 1050,
+      "u_extent_nm": [8500, 28500],
+      "v_extent_nm": [-10000, 10000],
+      "shape": [101, 101],
+      "wavelength_nm": [1554],
+      "flux": [250311423.2],
+      "field_coordinates": {
+        "u": [
+          8471, 8671, 8871, 9071, 9271, 9471, 9671, 9871, 10071, 10271, 10471,
+          10671, 10871, 11071, 11271, 11471, 11671, 11871, 12071, 12271, 12471,
+          12671, 12871, 13071, 13271, 13471, 13671, 13871, 14071, 14271, 14471,
+          14671, 14871, 15071, 15271, 15471, 15671, 15871, 16071, 16271, 16471,
+          16671, 16871, 17071, 17271, 17471, 17671, 17871, 18071, 18271, 18471,
+          18671, 18871, 19071, 19271, 19471, 19671, 19871, 20071, 20271, 20471,
+          20671, 20871, 21071, 21271, 21471, 21671, 21871, 22071, 22271, 22471,
+          22671, 22871, 23071, 23271, 23471, 23671, 23871, 24071, 24271, 24471,
+          24671, 24871, 25071, 25271, 25471, 25671, 25871, 26071, 26271, 26471,
+          26671, 26871, 27071, 27271, 27471, 27671, 27871, 28071, 28271, 28471
+        ],
+        "v": [
+          -10000, -9800, -9600, -9400, -9200, -9000, -8800, -8600, -8400, -8200,
+          -8000, -7800, -7600, -7400, -7200, -7000, -6800, -6600, -6400, -6200,
+          -6000, -5800, -5600, -5400, -5200, -5000, -4800, -4600, -4400, -4200,
+          -4000, -3800, -3600, -3400, -3200, -3000, -2800, -2600, -2400, -2200,
+          -2000, -1800, -1600, -1400, -1200, -1000, -800, -600, -400, -200, 0,
+          200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400,
+          2600, 2800, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600,
+          4800, 5000, 5200, 5400, 5600, 5800, 6000, 6200, 6400, 6600, 6800,
+          7000, 7200, 7400, 7600, 7800, 8000, 8200, 8400, 8600, 8800, 9000,
+          9200, 9400, 9600, 9800, 9950
+        ],
+        "normal_position": 1050,
+        "units": "nm",
+        "axis_order": ["v", "u"],
+        "grid_location": "primal"
+      },
+      "fields": [
+        {
+          "component": "ex",
+          "wavelength_nm": 1554,
+          "frequency_hz": 192916639639639.62,
+          "shape": [101, 101],
+          "real_file": "ex_real.npy",
+          "imag_file": "ex_imag.npy",
+          "dtype": "float32",
+          "normalization": "raw_dft",
+          "dft_convention": "exp(-i*omega*t)",
+          "phase_reference": "simulation_t0",
+          "colocated": true,
+          "field_unit_system": "solver_normalized",
+          "solver_time_unit_seconds": 3.3356409519815207e-18,
+          "boundary_interpolation": "one_sided_clamp"
+        },
+        {
+          "component": "ey",
+          "wavelength_nm": 1554,
+          "frequency_hz": 192916639639639.62,
+          "shape": [101, 101],
+          "real_file": "ey_real.npy",
+          "imag_file": "ey_imag.npy",
+          "dtype": "float32",
+          "normalization": "raw_dft",
+          "dft_convention": "exp(-i*omega*t)",
+          "phase_reference": "simulation_t0",
+          "colocated": true,
+          "field_unit_system": "solver_normalized",
+          "solver_time_unit_seconds": 3.3356409519815207e-18,
+          "boundary_interpolation": "one_sided_clamp"
+        },
+        {
+          "component": "hx",
+          "wavelength_nm": 1554,
+          "frequency_hz": 192916639639639.62,
+          "shape": [101, 101],
+          "real_file": "hx_real.npy",
+          "imag_file": "hx_imag.npy",
+          "dtype": "float32",
+          "normalization": "raw_dft",
+          "dft_convention": "exp(-i*omega*t)",
+          "phase_reference": "simulation_t0",
+          "colocated": true,
+          "field_unit_system": "solver_normalized",
+          "solver_time_unit_seconds": 3.3356409519815207e-18,
+          "boundary_interpolation": "one_sided_clamp"
+        },
+        {
+          "component": "hy",
+          "wavelength_nm": 1554,
+          "frequency_hz": 192916639639639.62,
+          "shape": [101, 101],
+          "real_file": "hy_real.npy",
+          "imag_file": "hy_imag.npy",
+          "dtype": "float32",
+          "normalization": "raw_dft",
+          "dft_convention": "exp(-i*omega*t)",
+          "phase_reference": "simulation_t0",
+          "colocated": true,
+          "field_unit_system": "solver_normalized",
+          "solver_time_unit_seconds": 3.3356409519815207e-18,
+          "boundary_interpolation": "one_sided_clamp"
+        }
+      ]
+    },
+    "input_power": {
+      "normal_axis": "x",
+      "normal_sign": 1,
+      "u_axis": "y",
+      "v_axis": "z",
+      "plane_position_nm": -1329,
+      "u_extent_nm": [-1500, 1500],
+      "v_extent_nm": [-1000, 1550],
+      "shape": [60, 51],
+      "wavelength_nm": [1554],
+      "flux": [515839597.9]
+    },
+    "native_diagnostic": {
+      "normal_axis": "z",
+      "normal_sign": 1,
+      "u_axis": "x",
+      "v_axis": "y",
+      "plane_position_nm": 1050,
+      "u_extent_nm": [8500, 28500],
+      "v_extent_nm": [-10000, 10000],
+      "shape": [401, 400],
+      "wavelength_nm": [1554],
+      "flux": [250311423.2],
+      "coupling_efficiency": [
+        {
+          "re": -0.06269360238,
+          "im": 0.559754039,
+          "mag": 0.563254003,
+          "mag_db": -4.985914261,
+          "phase_deg": 96.39061157
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "propagation_direction": [0.25881904510252074, 0.0, 0.9659258262890683],
+  "e_polarization": [0.0, 1.0, 0.0],
+  "focal_point_um": [18.5, 0.0, 0.22],
+  "waist_radius_um": 5.0,
+  "refractive_index": 1.443
+}
