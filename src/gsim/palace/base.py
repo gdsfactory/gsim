@@ -47,6 +47,7 @@ from gsim.palace.solver_settings import SolverSettingsMixin
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    import plotly.graph_objects as go
     from gdsfactory.component import Component
 
     from gsim.palace._mesh_fingerprint import PortDeclaration
@@ -1473,10 +1474,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._resolve_stack()
 
         if self.stack is not None:
-            print_stack_table(self.stack)
+            # print_stack_table returns the table; it does not print it.
+            print(print_stack_table(self.stack))  # noqa: T201
 
-    def plot_stack(self) -> None:
+    def plot_stack(self) -> go.Figure | None:
         """Plot the layer stack visualization.
+
+        Returns:
+            The plotly figure, so it displays when it is the value of a
+            notebook cell. ``None`` when there is no stack.
 
         Example:
             >>> sim.plot_stack()
@@ -1487,7 +1493,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             self._resolve_stack()
 
         if self.stack is not None:
-            plot_stack(self.stack)
+            return plot_stack(self.stack)
+        return None
 
     # -------------------------------------------------------------------------
     # Visualization
@@ -3254,9 +3261,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 If provided, runs Palace directly and overrides
                 ``use_apptainer``.
                 If None, tries PALACE_EXECUTABLE, then ``./bin/palace``,
-                then ``palace`` on PATH.
-            use_apptainer: If True (default), run via Apptainer using SIF file.
-                If False, run Palace executable directly.
+                then PALACE_BIN, then ``palace`` on PATH.
+            use_apptainer: If True, run via Apptainer using SIF file.
+                If False (default), run Palace executable directly.
                 Ignored when ``palace_executable`` is explicitly provided.
             num_processes: Number of MPI processes. If None (default), a
                 problem-size-aware default is chosen: 2D mode-analysis runs
@@ -3293,17 +3300,20 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 whether the runtime or the model is at fault.
 
         Example:
-            >>> # Using Apptainer (default)
+            >>> # Using Apptainer with PALACE_SIF
             >>> import os
             >>> os.environ["PALACE_SIF"] = "/path/to/Palace.sif"
-            >>> results = sim.run_local()
+            >>> results = sim.run_local(use_apptainer=True)
             >>>
-            >>> # Using Apptainer with explicit path
-            >>> results = sim.run_local(palace_sif_path="/path/to/Palace.sif")
+            >>> # Using Apptainer with an explicit SIF path
+            >>> results = sim.run_local(
+            ...     use_apptainer=True, palace_sif_path="/path/to/Palace.sif"
+            ... )
             >>>
             >>> # Auto-discovery with no options:
-            >>> # prefers local ./bin/palace if present,
-            >>> # otherwise falls back to local SIF or PATH executable
+            >>> # PALACE_EXECUTABLE, then local ./bin/palace, then PALACE_BIN,
+            >>> # then palace on PATH
+            >>> # (a SIF is used only with use_apptainer=True)
             >>> results = sim.run_local()
             >>>
             >>> # Using direct Palace with custom executable path

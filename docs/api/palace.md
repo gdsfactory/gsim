@@ -270,19 +270,19 @@ call rebuilds the driven settings, so repeat `waveport_boundary="inherit"` when
 updating other sweep options if you want to retain it.
 
 With wave ports, `DrivenSim` makes the outer wall of the 3D domain PEC
-(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself.
-Palace solves the port mode with PEC outer edges, so an absorbing wall makes the
-domain and the port mode disagree, which shows up as fake loss, reflection and
-mode conversion. To keep the absorbing wall, pass `absorbing_boundary=True`.
-Lumped-port-only runs stay absorbing by default. This applies to wave ports
-added with `add_wave_port()` and to those declared through
-`configure_wave_port()` component metadata.
+(`Boundaries.PEC`, no `Absorbing`) unless you set `absorbing_boundary` yourself;
+pass `absorbing_boundary=True` to keep the absorbing wall. Lumped-port-only runs
+stay absorbing by default.
 
 !!! note "Default change in 0.9.0"
     Earlier releases left an unset `absorbing_boundary` absorbing even with wave
     ports. The PEC default starts with 0.9.0. Saved
     configurations and notebooks that relied on the old behavior should pass
     `absorbing_boundary=True`.
+
+The reason, the table of what each `absorbing_boundary` and `metallic_boundaries`
+setting writes, and the other wave-port options are on
+[Wave ports in Palace](../palace_wave_ports.md).
 
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
