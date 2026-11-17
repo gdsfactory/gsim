@@ -151,7 +151,7 @@ inputs still load; simulation serialization uses the grouped `solver` field.
 ### Boundary-mode path integration
 
 Starting with gsim **0.9.0**, coordinate-path voltage and impedance postprocessing
-omits `NSamples`. The cloud runtime uses Palace commit
+omits `NSamples`. Element-wise integration was introduced in the cloud runtime with Palace commit
 `0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5`, which provides element-wise line
 integration and contains
 [the removal](https://github.com/awslabs/palace/commit/565658498048fbca9499c80d54b56b6683fcdb25):
@@ -188,6 +188,29 @@ version-dependent configuration switch.
 The `nsamples` settings on local field-integration routines such as
 `voltage_line_integral` remain available; they control Python-side quadrature,
 which is separate from Palace's path declarations.
+
+### Complex boundary-mode impedance output
+
+Palace [PR #1119](https://github.com/awslabs/palace/pull/1119) replaces the scalar
+`Z_PV[i]` and `Z_VI[i]` columns in `mode-Z.csv` with real and imaginary components.
+`load_text_results` reads both formats. Existing `characteristic_impedance(...)`
+calls still return a float: the legacy scalar, or the real part of a newer value.
+Use `complex_characteristic_impedance(...)` to retain the full complex value:
+
+```python
+from gsim.palace.results import load_text_results
+
+results = load_text_results("path/to/palace/output")
+z_pv = results.complex_characteristic_impedance(index=1, mode=1, quantity="Z_PV")
+z_vi = results.complex_characteristic_impedance(index=1, mode=1, quantity="Z_VI")
+```
+
+Both components must be finite; missing or invalid components return `None`.
+Legacy files return a complex number with zero imaginary part; their missing
+phase cannot be recovered. Per-unit-length L/C columns remain real. New output
+uses corrected lossy impedance definitions, so old lossy values are not numerical
+equality references. The line-impedance workflow keeps using saved fields for
+lossy conductors, and reads the complex tables for its mode diagnostic.
 
 ### MUMPS behavior change
 
