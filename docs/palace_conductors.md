@@ -231,13 +231,33 @@ Reading the table:
   2.6 um at 1 GHz (the table gives 2.59 um), and fits only from 5 GHz up
   ([CPW length sweep and de-embedding](nbs/palace_cpw_deembedding.md)).
 
-How large the error of the surface condition is for a given t / delta is not shown on this page. No comparison with a meshed-metal run
-is stored in the repository (the previous section only writes its config), so no number is given.
+## Surface model versus volume metal on a CPW
+
+The comparison below is not stored in this repository; it comes from cloud runs of Palace 295645f (a main build after 0.19) on one case
+([#539](https://github.com/gdsfactory/gsim/issues/539)). Case: shielded CPW on gpdk `metal3`, aluminum, 2 um thick, sigma = 3.77e7 S/m, 2D
+boundary-mode solve. The reference is the same line with the metal meshed as a lossy volume, which agrees with femwell to about 3e-6 in
+n_eff.
+
+| Frequency (GHz) | delta, Al (um) | t / delta | Surface model / volume, attenuation |
+| --- | --- | --- | --- |
+| 10 | 0.82 | 2.4 | 0.71 |
+| 25 | 0.52 | 3.8 | 0.74 |
+| 50 | 0.37 | 5.4 | 0.80 |
+
+At 25 GHz the surface model gives 26 % less loss than the volume metal. The settings barely move it: without `Thickness` or with `Thickness`
+100 um the loss rises by 6 % and is still 22 % low, and field order 3 or a 0.075 um edge mesh change nothing. The deficit follows the skin
+depth: with sigma = 1e10 S/m (delta 0.03 um) it disappears, and with sigma / 4 (delta 1.04 um) it grows. 73 % of the conductor loss on the
+outline sits within 0.5 um of the 90 degree edges, where the field varies on the scale of delta and a local surface impedance is not exact.
+At 1 GHz (t / delta 0.8) no surface setting matches the volume result, in loss or in the effective permittivity.
+
+For conductor loss on a CPW or any line with edges comparable to delta, mesh the metal as a lossy volume ([Meshing a conductor as a lossy
+volume](#meshing-a-conductor-as-a-lossy-volume)). The surface model is cheaper and fine for the phase: on this case its eps_eff is within 1
+% of the volume result at 25 and 50 GHz and 3 % low at 10 GHz.
 
 ## Not verified
 
-- Anything Palace does with these keys: no solver was run for this page. In particular what `Thickness` does on a cracked boundary, and
-  whether the cloud runtime reads `Crack`.
+- Anything Palace does with these keys, except the surface-versus-volume comparison above (one case, cloud runs). In particular
+  what `Thickness` does on a cracked boundary, and whether the cloud runtime reads `Crack`.
 - The claim that Palace 0.19 reads an interior `Conductivity` boundary as a thin film comes from gsim's code comments and tests.
 - The check that `set_material` is case-sensitive was made on the gpdk stack only.
 - The `"via"` re-declaration was tried on one CPW with lumped ports. The dielectric classification was tried on the same line only, and
