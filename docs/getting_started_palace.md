@@ -204,9 +204,15 @@ results = sim.run_local(log_path="palace.log")
 ```
 
 `run_local()` needs `mesh()` and `write_config()` first. Without `config.json` it raises `FileNotFoundError` and tells you
-to call `write_config()`, so call it again after you change a setting. Palace writes its tables to
-`<output directory>/output/palace/` (`palace` is the default `model_name` of `mesh()`). `log_path` keeps the solver log
-even when the run fails; hand its text to
+to call `write_config()`. What you call again after a change depends on what you changed:
+
+- **Solver settings** (for example the frequency sweep from `set_driven()`): call `write_config()` again.
+- **Geometry, stack or airbox, or ports** (including a port's `impedance`, `length` or `offset`): call `mesh()` again,
+  then `write_config()`. `mesh()` captures the mesh and the ports, and `write_config()` writes `config.json` from that
+  capture, so `write_config()` alone keeps the old mesh and the old port values.
+
+Palace writes its tables to `<output directory>/output/palace/` (`palace` is the default `model_name` of `mesh()`).
+`log_path` keeps the solver log even when the run fails; hand its text to
 [`validate_solution`](palace-validation.md) as in step 7.
 
 ### Which Palace runs
@@ -230,8 +236,12 @@ The download is the part that is easy to trip over:
 - On **Windows** and **macOS** gsim downloads nothing. With no Palace found, `run_local()` raises a `FileNotFoundError`
   that starts "Palace executable not found", as it does on a Windows machine with nothing installed.
 - **On Windows, use WSL2**: install gsim in a Python 3.12 environment inside a WSL2 Linux distribution and run your
-  script there. That is the Linux x86_64 path, with the download above. The authors have not run these WSL2 steps; the
-  code path is the one any Linux x86_64 machine takes.
+  script there. On an x86_64 distribution that is the Linux x86_64 path, with the download above. The authors have not
+  run these WSL2 steps; the code path is the one any Linux x86_64 machine takes.
+- **Windows on ARM** normally runs an aarch64 WSL2 distribution. There `platform.machine()` is `aarch64`, gsim's check
+  for Linux on x86_64 (`_is_linux_x86_64()` in `gsim/palace/runtime.py`) fails and nothing is downloaded. Install or
+  build Palace yourself and point `palace_executable=` or `PALACE_EXECUTABLE` at it, as in the next item. Run `uname -m`
+  in the distribution to see which you have.
 - To use a Palace you built or installed, pass `palace_executable=` or set `PALACE_EXECUTABLE`. gsim starts it as
   `palace -np <ranks> [-nt <threads>] config.json`, so it must accept the Palace launcher's arguments.
 
