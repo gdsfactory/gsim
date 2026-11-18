@@ -5,7 +5,8 @@ What Palace does with a key once it reads it is described in Palace's own config
 reproduce. Statements that were not checked are marked *not verified*, and the list is repeated at the end.
 
 Every number below comes from the gpdk CPW line in the snippets on this page (coarse preset), from the gsim source, or from the
-tests named in the text. Nothing on this page was solved: the snippets stop at `write_config()`.
+tests named in the text. The snippets stop at `write_config()`. The only solved results are the cloud runs in
+[Surface model versus volume metal on a CPW](#surface-model-versus-volume-metal-on-a-cpw).
 
 ## What gsim writes for a conductor
 
