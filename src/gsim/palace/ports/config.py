@@ -84,7 +84,7 @@ class PalacePort:
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
     # Waveport 2D eigensolver controls (Palace SolverType/EigenTol/KSPTol/
-    # MaxSize/Verbose/MaxIts/ComplexCoarseSolve) - unrelated to max_size
+    # MaxSize/Verbose) - unrelated to max_size
     # above, which sizes geometry.
     # None for any of these lets Palace use its own default.
     eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None
@@ -92,8 +92,6 @@ class PalacePort:
     eigensolver_ksp_tol: float | None = None
     eigensolver_max_size: int | None = None
     eigensolver_verbose: int | None = None
-    eigensolver_max_its: int | None = None
-    eigensolver_complex_coarse_solve: bool | None = None
 
     # Multimode waveport: the Palace modes followed on this face (empty for
     # an ordinary waveport), which one terminates the face (``mode``), which
@@ -101,6 +99,11 @@ class PalacePort:
     modes: tuple[int, ...] = ()
     excite_modes: Literal["active", "all"] = "active"
     pilot_paths: dict[int, list[list[float]]] = field(default_factory=dict)
+
+    # Further port eigensolver controls (Palace MaxIts/ComplexCoarseSolve),
+    # declared last so positional construction of earlier fields is unchanged.
+    eigensolver_max_its: int | None = None
+    eigensolver_complex_coarse_solve: bool | None = None
 
     @property
     def direction(self) -> str:

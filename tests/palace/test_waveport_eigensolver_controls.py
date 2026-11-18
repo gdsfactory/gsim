@@ -219,3 +219,41 @@ class TestMaxItsAndComplexCoarseSolve:
         (wp,) = sim.wave_ports
         assert wp.eigensolver_max_its == 300
         assert wp.eigensolver_complex_coarse_solve is False
+
+    def test_reuse_mesh_sync_writes_them_into_the_extracted_port(self) -> None:
+        """``reuse_mesh`` copies the receiver's declarations into the source
+        mesh's ports; the new controls must follow, and a later unset
+        declaration must clear them."""
+        from gsim.palace._mesh_reuse import sync_port_settings
+
+        port = PalacePort(name="o1", port_type=PortType.WAVEPORT, layer="m1")
+        declared = WavePortConfig(
+            name="o1",
+            layer="m1",
+            eigensolver_max_its=400,
+            eigensolver_complex_coarse_solve=True,
+        )
+        sync_port_settings([port], [], [declared], simulation_type="driven")
+        assert port.eigensolver_max_its == 400
+        assert port.eigensolver_complex_coarse_solve is True
+
+        sync_port_settings(
+            [port],
+            [],
+            [WavePortConfig(name="o1", layer="m1")],
+            simulation_type="driven",
+        )
+        assert port.eigensolver_max_its is None
+        assert port.eigensolver_complex_coarse_solve is None
+
+    def test_palace_port_keeps_its_positional_fields(self) -> None:
+        """The new fields come after the earlier ones, so a positional
+        PalacePort construction from before them still fills ``modes``."""
+        import dataclasses
+
+        names = [f.name for f in dataclasses.fields(PalacePort)]
+        assert names[-2:] == [
+            "eigensolver_max_its",
+            "eigensolver_complex_coarse_solve",
+        ]
+        assert names.index("pilot_paths") < names.index("eigensolver_max_its")

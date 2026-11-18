@@ -562,6 +562,9 @@ def generate_palace_config(
         driven_config: Optional DrivenConfig for frequency sweep settings.
             When provided, material dispersion is evaluated at the center
             frequency ``(fmin + fmax) / 2`` of the sweep band.
+            Its ``waveport_boundary`` sets the numeric wave-port policy; a
+            driven run without it uses ``"inherit"``, the ``DrivenConfig``
+            default, and other run types keep the PEC approximation.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
@@ -1203,13 +1206,17 @@ def generate_palace_config(
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
 
     # Driven runs follow set_driven(waveport_boundary=...), "inherit" by
-    # default: the port eigenproblem keeps its physical Robin terms, including
-    # conductor loss. Runs without driven settings (eigenmode) have no way to
-    # choose, so they keep the PEC approximation they always had. This policy
-    # never changes the 3D problem's boundary conditions.
-    port_boundary = (
-        driven_config.waveport_boundary if driven_config is not None else "pec"
-    )
+    # default, also when no DrivenConfig is passed: the port eigenproblem keeps
+    # its physical Robin terms, including conductor loss. Other run types
+    # (eigenmode) have no way to choose, so they keep the PEC approximation
+    # they always had. This policy never changes the 3D problem's boundary
+    # conditions.
+    if driven_config is not None:
+        port_boundary = driven_config.waveport_boundary
+    elif simulation_type == "driven":
+        port_boundary = "inherit"
+    else:
+        port_boundary = "pec"
     if boundaries.get("WavePort") and port_boundary == "pec":
         waveport_pec_attrs: set[int] = set()
         absorbing_entry = boundaries.get("Absorbing")
@@ -1503,6 +1510,9 @@ def write_config(
         driven_config: Optional DrivenConfig for frequency sweep settings.
             When provided, material dispersion is evaluated at the center
             frequency of the sweep band.
+            Its ``waveport_boundary`` sets the numeric wave-port policy; a
+            driven run without it uses ``"inherit"``, the ``DrivenConfig``
+            default, and other run types keep the PEC approximation.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition

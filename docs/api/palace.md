@@ -284,16 +284,20 @@ sim.set_driven(f=50e9, waveport_boundary="pec")
 
 **Changed in gsim 0.11.0.** Before 0.11.0 the default was `"pec"`. With a lossy
 3D line, a PEC port mode is a small impedance mismatch at each port: on the CPW
-wave-port example it added a reflection floor of up to −35 dB that the lossy
-port solve does not have, while transmission agreed to 0.002 dB (measurements in
+wave-port example it raised the largest reflection over the band to −35 dB,
+against −42 dB with the lossy port solve, while transmission agreed to 0.002 dB (measurements in
 [Wave ports in Palace](../palace_wave_ports.md#4-the-port-eigenproblem-waveport_boundary)).
 Driven wave-port runs with conductivity, impedance or absorbing boundaries are
 affected: their S-parameters, mostly the reflections, change slightly, the
 port solve takes longer (about twice the run time on that example), and their
 configuration differs, so earlier cached cloud results are not reused. To keep
 the old behaviour, pass `waveport_boundary="pec"` to `set_driven()`. Saved
-driven settings that store `"pec"` keep it. Eigenmode runs with wave ports have
-no driven settings and keep the PEC approximation.
+driven settings that store `"pec"` keep it; saved driven settings written
+before the option existed have no `waveport_boundary` key and now load as
+`"inherit"`, so add `"waveport_boundary": "pec"` to them to keep the old
+results. A driven `write_config()` call without a `DrivenConfig` also uses
+`"inherit"`. Eigenmode runs with wave ports have no driven settings and keep
+the PEC approximation.
 
 Only the generated `Boundaries.WavePortPEC` override changes. The physical 3D
 conductivity, impedance and absorbing boundaries remain identical. Lumped ports

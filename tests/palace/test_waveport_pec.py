@@ -1,10 +1,11 @@
 """Tests for WavePortPEC emission with numeric wave ports.
 
-By default a model with numeric wave ports lists every
+With ``waveport_boundary="pec"`` a model with numeric wave ports lists every
 boundary attribute that would otherwise contribute a Robin term to the 2D
 port eigenproblem (absorbing walls, finite-conductivity conductors, and
-impedance boundaries) under ``Boundaries.WavePortPEC``.
-The explicit "inherit" policy keeps those physical port boundaries.
+impedance boundaries) under ``Boundaries.WavePortPEC``. The default
+"inherit" policy keeps those physical port boundaries, and so does a driven
+run without a DrivenConfig. Eigenmode runs keep the PEC approximation.
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ def _generate(
     impedance_boundaries=None,
     absorbing_boundary=True,
     driven=None,
+    simulation_type="driven",
 ):
     config_path = generate_palace_config(
         groups=groups,
@@ -97,7 +99,7 @@ def _generate(
         output_path=tmp_path,
         model_name="palace",
         fmax=100e9,
-        simulation_type="driven",
+        simulation_type=simulation_type,
         absorbing_boundary=absorbing_boundary,
         driven_config=driven,
         impedance_boundaries=impedance_boundaries,
@@ -150,15 +152,28 @@ class TestWavePortPEC:
         )
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
 
-    def test_without_driven_settings_the_port_solve_stays_pec(self, tmp_path):
-        """Runs with no driven settings (eigenmode) cannot choose a policy,
-        so their wave ports keep the PEC approximation."""
+    def test_driven_without_driven_settings_is_inherit(self, tmp_path):
+        """The low-level config writers use the DrivenConfig default when a
+        driven run passes no DrivenConfig."""
         config = _generate(tmp_path, _groups(), _wave_ports(), driven=None)
+        assert config["Boundaries"]["WavePort"]
+        assert "WavePortPEC" not in config["Boundaries"]
+
+    def test_eigenmode_port_solve_stays_pec(self, tmp_path):
+        """Eigenmode runs have no driven settings and cannot choose a policy,
+        so their wave ports keep the PEC approximation."""
+        config = _generate(
+            tmp_path, _groups(), _wave_ports(), simulation_type="eigenmode"
+        )
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
 
     def test_a_saved_pec_setting_still_loads_as_pec(self):
         saved = '{"waveport_boundary": "pec"}'
         assert DrivenConfig.model_validate_json(saved).waveport_boundary == "pec"
+
+    def test_saved_settings_without_the_key_load_as_inherit(self):
+        """Settings saved before the option existed take the new default."""
+        assert DrivenConfig.model_validate_json("{}").waveport_boundary == "inherit"
 
     @pytest.mark.parametrize("policy", ["pec", "inherit"])
     def test_policy_preserved_by_serialization(self, policy):
@@ -171,17 +186,32 @@ class TestWavePortPEC:
             DrivenSim().set_driven(waveport_boundary="automatic")
 
     def test_union_of_absorbing_and_conductivity(self, tmp_path):
-        config = _generate(tmp_path, _groups(), _wave_ports())
+        config = _generate(
+            tmp_path,
+            _groups(),
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         boundaries = config["Boundaries"]
         assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
 
     def test_not_emitted_without_wave_ports(self, tmp_path):
-        config = _generate(tmp_path, _groups(wave_ports=False), _lumped_ports())
+        config = _generate(
+            tmp_path,
+            _groups(wave_ports=False),
+            _lumped_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         assert "WavePortPEC" not in config["Boundaries"]
 
     def test_not_emitted_for_lumped_ports(self, tmp_path):
         groups = _groups()
-        config = _generate(tmp_path, groups, _lumped_ports())
+        config = _generate(
+            tmp_path,
+            groups,
+            _lumped_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         assert config["Boundaries"]["LumpedPort"]
         assert not config["Boundaries"]["WavePort"]
         assert "WavePortPEC" not in config["Boundaries"]
@@ -189,13 +219,23 @@ class TestWavePortPEC:
     def test_includes_impedance_attributes(self, tmp_path):
         impedance = [ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)]
         config = _generate(
-            tmp_path, _groups(), _wave_ports(), impedance_boundaries=impedance
+            tmp_path,
+            _groups(),
+            _wave_ports(),
+            impedance_boundaries=impedance,
+            driven=DrivenConfig(waveport_boundary="pec"),
         )
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8, 12, 20]}
 
     def test_not_emitted_when_no_robin_boundaries(self, tmp_path):
         groups = _groups(conductors=False, absorbing=False)
-        config = _generate(tmp_path, groups, _wave_ports(), absorbing_boundary=False)
+        config = _generate(
+            tmp_path,
+            groups,
+            _wave_ports(),
+            absorbing_boundary=False,
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         boundaries = config["Boundaries"]
         assert boundaries["WavePort"]
         assert "WavePortPEC" not in boundaries
@@ -203,7 +243,12 @@ class TestWavePortPEC:
     def test_absorbing_scalar_phys_group(self, tmp_path):
         groups = _groups()
         groups["boundary_surfaces"] = {"absorbing": {"phys_group": 8}}
-        config = _generate(tmp_path, groups, _wave_ports())
+        config = _generate(
+            tmp_path,
+            groups,
+            _wave_ports(),
+            driven=DrivenConfig(waveport_boundary="pec"),
+        )
         assert config["Boundaries"]["WavePortPEC"] == {"Attributes": [4, 5, 8]}
 
     @pytest.mark.parametrize("source", ["absorbing", "conductivity"])
