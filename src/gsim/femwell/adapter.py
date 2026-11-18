@@ -816,6 +816,10 @@ def path_voltage(
     field component (the part of ``E_t`` along a path crossing a
     dielectric interface) jumps.
 
+    The voltage is ``V = integral of E_t . dl`` from *start* to *end*, so a
+    path from the signal conductor to its return gives the potential of
+    the signal relative to the return.
+
     Mesh coordinates are um, so the path integral is in the same
     um-coordinate scale as :func:`electrode_current`: with SI fields
     ``1e6`` times the voltage in volts, the scale that makes
@@ -863,7 +867,7 @@ def path_voltage(
         shape_k = basis_t.elem.gbasis(basis_t.mapping, local, k, tind=point_cells)[0]
         field += e_t[basis_t.element_dofs[k, point_cells]][None, :] * shape_k[:, :, 0]
     along = d[0] * field[0] + d[1] * field[1]
-    return complex(-np.sum(t_weights.ravel() * along))
+    return complex(np.sum(t_weights.ravel() * along))
 
 
 def z0_power_voltage(mode: Any, *, voltage_path: VoltagePath) -> complex:
