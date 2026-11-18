@@ -22,11 +22,11 @@ How to read the numbers:
 | Coax, copper core, 100 GHz | femwell | analytic Z0 | 3.2 % high (limit 8 %) | `tests/femwell/test_z0_extraction.py:100-104` |
 | Coax, perfect core, order 2 | femwell | analytic Z0 | limit 1 % | `tests/femwell/test_z0_extraction.py:192-204` |
 | Same mesh and materials | Palace BoundaryMode, femwell | each other | 4.1e-5, 2.9e-4 (limit 1e-3) | `tests/femwell/test_cross_validation.py:40-45` |
-| Terminal S, synthetic coupled lines | gsim post-processing | chain matrix | at most 3.4e-14 | `docs/terminal_wave_ports.md:62-70` |
-| Two coupled GSSG lines | Palace (cloud) | 2D port solve, uniform line | n_eff 0.05 %; S21 phase 0.29 deg | `docs/terminal_wave_ports.md:400-411` |
+| Terminal S, synthetic coupled lines | gsim post-processing | chain matrix | at most 3.4e-14 | `docs/terminal_wave_ports.md:70-78` |
+| Two coupled GSSG lines | Palace (cloud) | 2D port solve, uniform line | n_eff 0.05 %; S21 phase 0.29 deg | `docs/terminal_wave_ports.md:416-427` |
 | CPW de-embedding fit | scikit-rf, gsim fit | synthetic line | L, C, Rs limit 1e-3 | `tests/palace/test_cpw_notebook_validation.py:249-251` |
 | PN junction C(V) | DEVSIM | depletion approximation | limit 35 % | `tests/tcad/test_solve_runtime.py:92-100` |
-| Capacitor on an obtuse mesh | DEVSIM | scikit-fem P1 solve | limit 1e-9 | `tests/tcad/test_edge_couples.py:223-225` |
+| Capacitor on an obtuse mesh | DEVSIM | scikit-fem P1 solve | limit 1e-9 | `tests/tcad/test_edge_couples.py:227-229` |
 | MIM capacitor | Palace electrostatic | IHP compact model | no number stored | `nbs/palace_electrostatic.ipynb:402-413` |
 | IHP SG13G2 L2n0 inductor | Palace | measured S2P, openEMS | **not validated**, see below | `nbs/data/ihp_validation/CONVERGENCE_AUDIT.md:3-6` |
 
@@ -63,7 +63,7 @@ with `pytest -m palace_local` and needs a Palace binary. The comment records 4.1
 case and 2.9e-4 on the complex n_eff with RF materials, and 9e-3 for femwell at order 1.
 
 **Terminal S on synthetic lines.** Largest difference of the terminal S against an independent chain-matrix solution,
-over the four cases of the table in `docs/terminal_wave_ports.md:65-70`. The page documents these figures; no test
+over the four cases of the table in `docs/terminal_wave_ports.md:73-78`. The page documents these figures; no test
 asserts that bound.
 
 **Two coupled GSSG lines.** The values are the cloud measurements printed on the terminal wave-port page, not re-run for

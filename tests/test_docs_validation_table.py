@@ -124,15 +124,15 @@ def test_the_cited_figures_are_in_the_cited_sources():
     cross = lines("tests/femwell/test_cross_validation.py", 40, 45)
     for figure in ("4.1e-5", "2.9e-4", "9e-3", "N_EFF_RTOL = 1e-3"):
         assert figure in cross
-    terminal = lines("docs/terminal_wave_ports.md", 62, 70)
+    terminal = lines("docs/terminal_wave_ports.md", 70, 78)
     assert "3.4e-14" in terminal
-    gssg = lines("docs/terminal_wave_ports.md", 400, 411)
+    gssg = lines("docs/terminal_wave_ports.md", 416, 427)
     for figure in ("0.05 %", "0.29 deg"):
         assert figure in gssg
     fit = lines("tests/palace/test_cpw_notebook_validation.py", 249, 251)
     assert fit.count("rel=1e-3") == 3
     assert "within(0.35)" in lines("tests/tcad/test_solve_runtime.py", 92, 100)
-    assert "rel=1e-9" in lines("tests/tcad/test_edge_couples.py", 223, 225)
+    assert "rel=1e-9" in lines("tests/tcad/test_edge_couples.py", 227, 229)
     assert "1e-14" in lines("docs/api/tcad.md", 233, 234)
 
 
