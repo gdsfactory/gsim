@@ -8,6 +8,7 @@ import pytest
 
 from gsim.common.stack.extractor import Layer, LayerStack
 from gsim.palace.mesh.config_generator import generate_palace_config
+from gsim.palace.models import DrivenConfig
 from gsim.palace.models.ports import ImpedanceBoundaryConfig
 from gsim.palace.ports.config import PalacePort, PortType
 
@@ -72,6 +73,11 @@ def _lumped_ports() -> list[PalacePort]:
     ]
 
 
+# WavePortPEC is written only for the "pec" port-solve policy, which is no
+# longer the driven default.
+_PEC_PORT_SOLVE = DrivenConfig(waveport_boundary="pec")
+
+
 def _generate(
     tmp_path,
     groups,
@@ -81,6 +87,7 @@ def _generate(
     impedance_boundaries=None,
     absorbing_boundary=True,
     port_info=None,
+    driven_config=None,
 ):
     """Write a config and return it as a dict."""
     config_path = generate_palace_config(
@@ -94,6 +101,7 @@ def _generate(
         simulation_type=simulation_type,
         absorbing_boundary=absorbing_boundary,
         impedance_boundaries=impedance_boundaries,
+        driven_config=driven_config,
     )
     return json.loads(config_path.read_text())
 
@@ -108,7 +116,9 @@ def test_pmc_plane_writes_pmc(tmp_path):
 
 def test_pmc_plane_stays_out_of_waveport_pec(tmp_path):
     """The port solve keeps a PMC plane natural; Robin attributes stay listed."""
-    boundaries = _generate(tmp_path, _groups("pmc"), _wave_ports())["Boundaries"]
+    boundaries = _generate(
+        tmp_path, _groups("pmc"), _wave_ports(), driven_config=_PEC_PORT_SOLVE
+    )["Boundaries"]
     assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8, 12]}
 
 
@@ -125,6 +135,7 @@ def test_pmc_plane_never_enters_waveport_pec_via_other_lists(tmp_path):
         impedance_boundaries=[
             ImpedanceBoundaryConfig(attributes=[PLANE_PG, 20], resistance=1.0)
         ],
+        driven_config=_PEC_PORT_SOLVE,
     )["Boundaries"]
     assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8, 12, 20]}
 
@@ -153,7 +164,9 @@ def test_pec_plane_not_in_waveport_pec(tmp_path):
 
     Documents the decision; see SYMMETRY.md for the unverified Palace behaviour.
     """
-    boundaries = _generate(tmp_path, _groups("pec"), _wave_ports())["Boundaries"]
+    boundaries = _generate(
+        tmp_path, _groups("pec"), _wave_ports(), driven_config=_PEC_PORT_SOLVE
+    )["Boundaries"]
     assert PLANE_PG not in boundaries["WavePortPEC"]["Attributes"]
 
 
