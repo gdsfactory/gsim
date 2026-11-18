@@ -19,8 +19,11 @@ from gsim.femwell.adapter import (
     epsilon_by_region,
     field_fraction_outside,
     line_reading,
+    path_voltage,
     solve_modes,
     z0_power_current,
+    z0_power_voltage,
+    z0_voltage_current,
 )
 from gsim.femwell.runtime import require_femwell, require_skfem
 
@@ -32,8 +35,11 @@ __all__ = [
     "epsilon_by_region",
     "field_fraction_outside",
     "line_reading",
+    "path_voltage",
     "require_femwell",
     "require_skfem",
     "solve_modes",
     "z0_power_current",
+    "z0_power_voltage",
+    "z0_voltage_current",
 ]
