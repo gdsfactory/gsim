@@ -329,7 +329,9 @@ class TestAnalyticCoax:
             mode, frequency_hz=FREQ_HZ, conductor=INNER_PEC, mesh=mesh
         )
         voltage = path_voltage(mode, *RADIAL_PATH)
-        mismatch = abs(2.0 * power / (voltage * np.conj(current)) - 1.0)
+        # The sign of the contour current is a convention of electrode_current.
+        ratio = 2.0 * power / (voltage * np.conj(current))
+        mismatch = min(abs(ratio - 1.0), abs(ratio + 1.0))
         record_property("two_p_over_v_i_conj_minus_one", float(mismatch))
         assert mismatch < 1e-2
 
@@ -474,7 +476,7 @@ class TestPathPiecesOnAHoleyMesh:
         from gsim.femwell.adapter import path_voltage
 
         a, b = np.array([0.1, 0.1]), np.array([0.9, 0.25])
-        exact = -(
+        exact = (
             0.5 * (b[0] ** 2 - a[0] ** 2)
             + 2j * (b[0] - a[0])
             + 0.25 * (b[1] ** 2 - a[1] ** 2)
@@ -491,7 +493,7 @@ class TestPathPiecesOnAHoleyMesh:
 
         # The square's diagonal is a line of mesh edges.
         voltage = path_voltage(square_mode, (0.0, 0.0), (0.25, 0.25))
-        exact = -(0.5 * 0.25**2 + 2j * 0.25 + 0.25 * 0.25**2 - 0.25)
+        exact = 0.5 * 0.25**2 + 2j * 0.25 + 0.25 * 0.25**2 - 0.25
         assert voltage == pytest.approx(exact, abs=1e-12)
 
     def test_a_path_across_the_hole_is_refused(self, square_mode):

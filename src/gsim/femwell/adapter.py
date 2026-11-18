@@ -796,7 +796,7 @@ def path_voltage(
     *,
     points_per_element: int = 3,
 ) -> complex:
-    """Voltage of a Mode along a straight path, ``V = -integral E_t . dl``.
+    """Voltage of a Mode along a straight path, ``V = integral E_t . dl``.
 
     The path runs from *start*, on the signal conductor, to *end*, on the
     return. With the integral taken in that direction the voltage is the
@@ -815,10 +815,6 @@ def path_voltage(
     the quadrature points off the element interfaces, where the normal
     field component (the part of ``E_t`` along a path crossing a
     dielectric interface) jumps.
-
-    The voltage is ``V = integral of E_t . dl`` from *start* to *end*, so a
-    path from the signal conductor to its return gives the potential of
-    the signal relative to the return.
 
     Mesh coordinates are um, so the path integral is in the same
     um-coordinate scale as :func:`electrode_current`: with SI fields
