@@ -8,7 +8,7 @@ Parts, in order:
    London equation over the rectangular cells of the conductors, with the
    sheet and the hollow-shell surface models compared with it. These are
    physics checks of the choice of formula for each conductor model. They are
-   not checks of Palace, which was not run.
+   not checks of Palace; the cloud runs are listed in the docs.
 3. The ``Boundaries.Impedance`` entries from hand-made mesh groups.
 4. The same on real coarse meshes (generic PDK, no solver, nothing submitted).
 """

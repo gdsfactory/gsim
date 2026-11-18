@@ -388,14 +388,22 @@ eigenmode shell with t < lambda (the hollow interior may hold spurious slow-wave
 A two-fluid loss term (`Rs`) is deferred: the same face and sheet conversion applies to it, but the quasi-particle conductivity would need a
 published source for its value. The default is lossless.
 
-### Cloud cases (not run)
+### Cloud runs
 
-No Palace run has been made for this feature. Two kinds of run would settle what Palace does with `Ls`: a 2D boundary-mode coplanar line
-on sapphire with a PEC conductor and with two London depths, whose mode index should rise by sqrt(1 + alpha) with alpha from the table
-above (1.0993 and 1.0332 from the hollow-shell values of the first two rows, 1.1031 and 1.0359 from the full London values; the Palace
-domain differs from the open reference by a few percent in L_geo, which mostly cancels in the ratio); and 3D eigenmode runs whose
-frequency ratio f_sc / f_0 = 1 / sqrt(1 + alpha) shows whether Palace applies an interior `Impedance` once. Until they are run, how
-Palace reads `Ls` is an assumption.
+Runs on Palace 295645f, on a coplanar line on sapphire (strip 10 um, gaps 6 um, film 0.1 um). `alpha` is the kinetic over the geometric
+inductance of the line. It is measured from the rise of the mode index in 2D and from the fall of the resonance frequency of a 1 mm
+half-wave resonator in 3D, each against the PEC case of the same mesh. The expected values are the quasi-static London reference of this
+section, which has no substrate.
+
+| Case | lambda (um) | alpha measured | alpha expected |
+| --- | --- | --- | --- |
+| 2D boundary mode | 0.2 | 0.212 | 0.209 |
+| 2D boundary mode | 0.1 | 0.069 | 0.067 |
+| 3D resonator, planar sheet | 0.2 | 0.211 | 0.214 |
+| 3D resonator, shell | 0.2 | 0.202 | 0.209 |
+
+These runs are not stored in this repository. The 3D sheet result shows that Palace applies an interior `Impedance` once: applied on both
+sides, alpha would be about half. In the 3D runs the lowest mode was taken as the coplanar mode without checking its fields.
 
 ## Not verified
 

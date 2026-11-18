@@ -352,7 +352,7 @@ face of a 3D shell or of a 2D boundary-mode conductor gets `mu0 lambda coth(t / 
 lambda and the shell for a film at least 4 lambda thick; in between, neither is validated. `sim.superconductors.pop("metal1")` makes the
 layer normal metal again. The derivation, the comparison with a quasi-static London reference, the interaction with wave ports and
 what was not verified are on [Conductor models in Palace](../palace_conductors.md#superconducting-layers-london-penetration-depth).
-Palace itself was not run for this feature.
+The same page lists the cloud runs that check the values against Palace.
 
 - [`SuperconductorConfig`][gsim.palace.SuperconductorConfig]
 

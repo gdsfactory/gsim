@@ -950,7 +950,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
           ``Ls = mu0 lambda coth(t / 2 lambda)``. Use it for ``t >= 4 lambda``.
         - boundary-mode (2D) conductor: each face as for the shell.
 
-        Both tend to ``mu0 lambda^2 / t`` for a thin film. Between ``t = lambda``
+        For a thin film the sheet tends to ``mu0 lambda^2 / t`` and each face to
+        twice that, so the two faces in parallel give the same film. Between
+        ``t = lambda``
         and ``t = 4 lambda`` neither model is validated and errors may reach
         about 20 %.
 
