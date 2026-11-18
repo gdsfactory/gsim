@@ -19,8 +19,10 @@ nav = [
     { "Meep: 2D Grating Coupler" = "nbs/meep_2d_xz_gc.md" }
   ] },
   { "FEM for RF" = [
+    { "Getting Started" = "getting_started_palace.md" },
     { "CPW (Lumped Ports)" = "nbs/palace_cpw_lumped.md" },
     { "CPW (Wave Ports)" = "nbs/palace_cpw_waveport.md" },
+    { "Wave Ports: Overview" = "palace_wave_ports.md" },
     { "Microstrip" = "nbs/palace_microstrip.md" },
     { "Branch Line Coupler" = "nbs/palace_branch_line_coupler.md" },
     { "Parallel Simulations: Width Sweep" = "nbs/palace_width_sweep.md" },
@@ -34,6 +36,7 @@ nav = [
   ] },
   { "Modeling & Analysis" = [
     { "EMX Process Files" = "emx_proc_import.md" },
+    { "Conductor Models" = "palace_conductors.md" },
     { "Transmission-line Analysis with scikit-rf" = "transmission_line_analysis.md" },
     { "CPW Length Sweep and De-embedding" = "nbs/palace_cpw_deembedding.md" },
     { "Differential Interconnect, Crosstalk and TDR" = "nbs/palace_signal_integrity.md" },
@@ -90,12 +93,13 @@ inherited_members = true
 full_output = "llms-full.txt"
 
 [project.plugins.llmstxt.sections]
-"Getting started" = ["index.md"]
+"Getting started" = ["index.md", "getting_started_palace.md"]
 "Guides" = [
   "api/*.md",
   "transmission_line_analysis.md",
   "emx_proc_import.md",
   "palace-validation.md",
+  "palace_wave_ports.md",
   "palace_benchmarks.md",
   "materials.md"
 ]

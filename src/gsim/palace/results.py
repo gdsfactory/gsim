@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Literal, TypedDict, overload
 import matplotlib.pyplot as plt
 import numpy as np
 
+from gsim.palace._mode_impedance import complex_mode_impedance, parse_mode_impedances
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -44,7 +46,6 @@ class ModeMetrics(TypedDict):
     eta_eff: complex
 
 
-_MODE_Z_COL_RE = re.compile(r"^(Z_PV|Z_VI|L_PV|C_PV|L_VI|C_VI)\[(\d+)\]")
 _MODE_V_RE_COL_RE = re.compile(r"^Re\{V\[(\d+)\]\}")
 _MODE_V_IM_COL_RE = re.compile(r"^Im\{V\[(\d+)\]\}")
 
@@ -156,33 +157,10 @@ class PalaceTextResults:
     def _parse_mode_impedance(self) -> dict[int, dict[int, dict[str, float]]]:
         """Parse ``mode-Z.csv`` into ``{index: {mode: metrics}}``.
 
-        Palace writes one row per mode with columns such as
-        ``Z_PV[1] (Ohm)``, ``Z_VI[1] (Ohm)``, ``L_PV[1] (H/m)`` and
-        ``C_PV[1] (F/m)`` for each postprocessing impedance index.
+        Both legacy scalar impedances and newer Re/Im columns are supported.
+        New complex columns retain scalar aliases for their real parts.
         """
-        rows = self.csv_tables.get("mode-Z.csv", [])
-        result: dict[int, dict[int, dict[str, float]]] = {}
-
-        for idx, raw_row in enumerate(rows, start=1):
-            row = {
-                str(k).strip(): str(v).strip()
-                for k, v in raw_row.items()
-                if k is not None
-            }
-            mode_id_raw = self._to_float(row.get("m"))
-            mode_id = int(mode_id_raw) if np.isfinite(mode_id_raw) else idx
-
-            for column, raw_value in row.items():
-                match = _MODE_Z_COL_RE.match(column)
-                if match is None:
-                    continue
-                quantity, index = match.group(1), int(match.group(2))
-                value = self._to_float(raw_value)
-                if not np.isfinite(value):
-                    continue
-                result.setdefault(index, {}).setdefault(mode_id, {})[quantity] = value
-
-        return result
+        return parse_mode_impedances(self.csv_tables.get("mode-Z.csv", []))
 
     def _parse_mode_voltages(self) -> dict[int, dict[int, complex]]:
         """Parse ``mode-V.csv`` into ``{index: {mode: complex voltage}}``."""
@@ -229,9 +207,34 @@ class PalaceTextResults:
                 ``"L_VI"``, ``"C_VI"``.
 
         Returns:
-            The value, or ``None`` when unavailable.
+            The scalar value, or ``None`` when unavailable. For newer complex
+            impedance columns, returns the real part; use
+            :meth:`complex_characteristic_impedance` to retain the imaginary part.
         """
         return self.mode_impedance.get(index, {}).get(mode, {}).get(quantity)
+
+    def complex_characteristic_impedance(
+        self,
+        *,
+        index: int = 1,
+        mode: int = 1,
+        quantity: Literal["Z_PV", "Z_VI"] = "Z_PV",
+    ) -> complex | None:
+        """Return a complex boundary-mode impedance from ``mode-Z.csv``.
+
+        Args:
+            index: Postprocessing impedance path index.
+            mode: Mode number (the ``m`` column).
+            quantity: ``"Z_PV"`` for power-voltage or ``"Z_VI"`` for voltage-current
+                impedance, in ohms, as reported by Palace.
+
+        Returns:
+            The complex value when both components are finite, or ``None`` for
+            missing or incomplete values. Legacy scalar columns return a complex
+            number with zero imaginary part; their missing phase is not recovered.
+        """
+        metrics = self.mode_impedance.get(index, {}).get(mode, {})
+        return complex_mode_impedance(metrics, quantity)
 
     def mode_voltage(self, *, index: int = 1, mode: int = 1) -> complex | None:
         """Return the complex mode voltage from ``mode-V.csv``."""
