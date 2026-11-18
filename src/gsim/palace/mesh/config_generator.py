@@ -759,12 +759,17 @@ def generate_palace_config(
         str(name).lower(): props for name, props in stack_materials.items()
     }
 
-    def _lookup_material(name: str) -> dict[str, object]:
+    def _raw_material(name: str) -> dict[str, object]:
+        """The stack's entry for a material: the exact name, else ignoring case."""
         props = stack_materials.get(name)
         if not isinstance(props, dict):
             props = _materials_by_lower.get(str(name).lower())
         if not isinstance(props, dict):
             return {}
+        return props
+
+    def _lookup_material(name: str) -> dict[str, object]:
+        props = _raw_material(name)
         if section_axis is not None:
             return _to_section_frame(props, section_axis)
         return props
@@ -865,7 +870,8 @@ def generate_palace_config(
         layer_name = name.rsplit("_", 1)[0] if name.endswith(("_xy", "_z")) else name
         layer = stack.layers.get(layer_name)
         if layer:
-            mat_props = stack_materials.get(layer.material, {})
+            # Not _lookup_material: no section-frame transform, as before.
+            mat_props = _raw_material(layer.material)
             conductor: dict[str, object] = {
                 "Attributes": [info["phys_group"]],
                 "Conductivity": mat_props.get("conductivity", 5.8e7),

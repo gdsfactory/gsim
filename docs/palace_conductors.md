@@ -105,10 +105,9 @@ For each shell entry gsim writes:
   height before the volume is removed, so there is no separate knob for it; change the stack layer.
 - `Crack`: see the next section.
 
-To change the conductivity, use `sim.set_material(name, material_type="conductor", conductivity=...)` with the name exactly as the stack
-spells it. In the check behind this page, `set_material("Aluminum", conductivity=1e7)` changed both entries to 1e7, and
-`set_material("aluminum", conductivity=1e7)` left them at 3.77e7 without a message. Read the spelling from
-`sim.stack.layers["metal1"].material` after `mesh()`.
+To change the conductivity, use `sim.set_material(name, material_type="conductor", conductivity=...)`. The name matches the stack's
+materials ignoring case, so `set_material("Aluminum", conductivity=1e7)` and `set_material("aluminum", conductivity=1e7)` both change the
+entries to 1e7. A name that matches no material of the stack leaves them unchanged and logs a warning that lists the stack's materials.
 
 What Palace does with `Thickness` on a cracked boundary, and whether the conductivity enters through a finite-thickness impedance or the
 semi-infinite one, is *not verified* here. Read Palace's description of the `Conductivity` boundary for the runtime you use.
@@ -239,7 +238,6 @@ is stored in the repository (the previous section only writes its config), so no
 - Anything Palace does with these keys: no solver was run for this page. In particular what `Thickness` does on a cracked boundary, and
   whether the cloud runtime reads `Crack`.
 - The claim that Palace 0.19 reads an interior `Conductivity` boundary as a thin film comes from gsim's code comments and tests.
-- The check that `set_material` is case-sensitive was made on the gpdk stack only.
 - The `"via"` re-declaration was tried on one CPW with lumped ports. The dielectric classification was tried on the same line only, and
   only as far as `write_config()`.
 - That PEC is adequate for a phase, an impedance or a resonant frequency: the page gives the textbook reason to check, not a measurement.
