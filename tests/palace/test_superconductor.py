@@ -1396,22 +1396,17 @@ class TestDocs:
             computed.append(100 * (c * (c + u) / (2 * c + u) / coth(u) - 1))
         assert quoted == pytest.approx(computed, abs=0.06)
 
-    def test_the_conductor_page_quotes_the_expected_mode_index_rise(self):
-        import re
-
+    def test_the_conductor_page_lists_the_cloud_runs(self):
         text = (DOCS / "palace_conductors.md").read_text(encoding="utf-8")
-        found = re.search(
-            r"\(([\d.]+) and ([\d.]+) from the hollow-shell values of the first two "
-            r"rows, ([\d.]+) and ([\d.]+) from the full London values",
-            text,
-        )
-        assert found
-        model_1, model_2, full_1, full_2 = (float(g) for g in found.groups())
-        # alpha of the first two rows of the reference table
-        assert model_1 == pytest.approx(math.sqrt(1 + 0.2085), abs=1e-4)
-        assert model_2 == pytest.approx(math.sqrt(1 + 0.0674), abs=1e-4)
-        assert full_1 == pytest.approx(math.sqrt(1 + 0.2168), abs=1e-4)
-        assert full_2 == pytest.approx(math.sqrt(1 + 0.0731), abs=1e-4)
+        assert "### Cloud runs" in text
+        assert "No Palace run has been made" not in text
+        for row in (
+            "| 2D boundary mode | 0.2 | 0.212 | 0.209 |",
+            "| 2D boundary mode | 0.1 | 0.069 | 0.067 |",
+            "| 3D resonator, planar sheet | 0.2 | 0.211 | 0.214 |",
+            "| 3D resonator, shell | 0.2 | 0.202 | 0.209 |",
+        ):
+            assert row in text
 
     def test_the_page_uses_text_fences_for_the_new_section(self):
         """Only the two executed snippets are python blocks (test_conductor_docs)."""
