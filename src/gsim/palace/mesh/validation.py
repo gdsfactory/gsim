@@ -470,7 +470,13 @@ def _sheet_contacts(boundaries: dict, mesh_path: Path) -> dict[int, int]:
     conductor_attributes = set(boundaries.get("PEC", {}).get("Attributes", []))
     for boundary in boundaries.get("Conductivity", []):
         conductor_attributes.update(boundary.get("Attributes", []))
-    if not conductor_attributes:
+    # Impedance attributes are conductors only when they are conductor
+    # surfaces (superconducting layers); an interface impedance is not one.
+    # The mesh names tell them apart, so they are checked against it below.
+    impedance_attributes: set[int] = set()
+    for boundary in boundaries.get("Impedance", []):
+        impedance_attributes.update(boundary.get("Attributes", []))
+    if not conductor_attributes and not impedance_attributes:
         raise ValueError("config.json has no conductor surface attributes")
 
     import gmsh
@@ -492,7 +498,11 @@ def _sheet_contacts(boundaries: dict, mesh_path: Path) -> dict[int, int]:
 
         conductor_nodes: set[int] = set()
         for name, tag in groups.items():
-            if tag in conductor_attributes or name.endswith("_pec"):
+            if (
+                tag in conductor_attributes
+                or name.endswith("_pec")
+                or (tag in impedance_attributes and name.endswith(("_xy", "_z")))
+            ):
                 conductor_nodes.update(nodes(tag))
 
         contacts: dict[int, int] = {}
@@ -664,11 +674,17 @@ def validate_mesh(sim) -> ValidationResult:
             try:
                 config = json.loads(config_path.read_text())
                 boundaries = config.get("Boundaries", {})
+                # A superconducting layer is an Impedance entry, so a chip
+                # whose conductors are all superconducting has no other.
                 has_conductor_bounds = (
                     boundaries.get("Conductivity")
                     or boundaries.get("PEC")
                     or boundaries.get("Terminal")
                     or boundaries.get("Ground")
+                    or (
+                        getattr(sim, "superconductors", None)
+                        and boundaries.get("Impedance")
+                    )
                 )
                 if not has_conductor_bounds and not has_shaped_dielectrics:
                     errors.append("config.json has no Conductivity or PEC boundaries.")

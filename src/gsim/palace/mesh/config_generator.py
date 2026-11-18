@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import gmsh
 import numpy as np
 
+from gsim.palace._superconductor import superconductor_boundaries
 from gsim.palace.mesh.floquet import periodic_boundary_config
 from gsim.palace.mesh.gmsh_utils import gmsh_options, mesh_hash
 from gsim.palace.mesh.metadata import (
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from gsim.common.stack import LayerStack
+    from gsim.palace._superconductor import SuperconductorConfig
     from gsim.palace.models import (
         BoundaryModeConfig,
         DrivenConfig,
@@ -176,6 +178,58 @@ def _resolve_impedance_boundaries(
         entries.append(entry)
 
     return entries
+
+
+def _section_attributes(section: object) -> set[int]:
+    """Every integer under an ``Attributes`` key of a section, at any depth."""
+    found: set[int] = set()
+    if isinstance(section, dict):
+        for key, value in section.items():
+            if key == "Attributes" and isinstance(value, list):
+                found.update(int(a) for a in value if isinstance(a, int))
+            else:
+                found.update(_section_attributes(value))
+    elif isinstance(section, list):
+        for item in section:
+            found.update(_section_attributes(item))
+    return found
+
+
+def _check_superconductor_overlap(
+    boundaries: dict[str, Any],
+    user_impedance: list[dict[str, object]],
+    attributes: set[int],
+    *,
+    moved_to_pec: set[int],
+) -> None:
+    """Refuse a superconducting surface that another boundary also claims.
+
+    Palace takes one boundary condition per surface attribute. The attributes
+    of the superconducting layers were taken out of ``Conductivity`` and
+    ``PEC``; what is left to overlap is a user ``Impedance`` entry or an
+    attribute claimed by a port, a wall or a plane.
+
+    Args:
+        boundaries: The boundary sections built so far.
+        user_impedance: The interface or attribute ``Impedance`` entries.
+        attributes: The attributes of the superconducting layers.
+        moved_to_pec: Superconducting attributes put in ``PEC`` on purpose
+            (a boundary-mode run with perfect-conductor conductors).
+
+    Raises:
+        ValueError: If an attribute is claimed twice.
+    """
+    for key, section in [*boundaries.items(), ("Impedance", user_impedance)]:
+        claimed = _section_attributes(section)
+        if key == "PEC":
+            claimed -= moved_to_pec
+        if overlap := claimed & attributes:
+            raise ValueError(
+                f"The surface attributes {sorted(overlap)} of a superconducting "
+                f"layer also appear under Boundaries.{key}. A surface takes one "
+                "boundary condition: remove the other entry or "
+                "the superconductor setting."
+            )
 
 
 def _electrostatic_net_boundaries(
@@ -540,6 +594,7 @@ def generate_palace_config(
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
     magnetostatic_config: MagnetostaticConfig | None = None,
+    superconductors: Mapping[str, SuperconductorConfig] | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -579,9 +634,21 @@ def generate_palace_config(
             where they replace ``terminals``.
         magnetostatic_config: Optional MagnetostaticConfig for the
             magnetostatic problem settings; ``Save: 0`` without it.
+        superconductors: Superconducting layers by stack layer name. Each
+            layer's surfaces get a lossless ``Impedance`` entry with the London
+            surface inductance ``Ls`` in place of their ``Conductivity`` or
+            ``PEC`` entry (a boundary-mode run with
+            ``conductor_boundary="pec"`` keeps them perfect conductors). Not
+            for electrostatic or magnetostatic problems.
 
     Returns:
         Path to the generated config.json
+
+    Raises:
+        ValueError: For an unsupported simulation type, or when a
+            superconducting layer is not a conductor of the stack, has no
+            thickness, is used with an electrostatic or magnetostatic problem,
+            or shares a surface with another boundary entry.
     """
     from gsim.palace.models import RefinementConfig
     from gsim.palace.ports.config import PortGeometry
@@ -612,6 +679,17 @@ def generate_palace_config(
         "magnetostatic",
     ):
         raise ValueError(f"Unsupported simulation type: {simulation_type}")
+
+    if superconductors and simulation_type in (
+        "electrostatic",
+        "electrostatics",
+        "magnetostatic",
+    ):
+        raise ValueError(
+            "Superconducting layers (London surface inductance) apply to driven, "
+            "eigenmode and boundary-mode simulations, not "
+            f"{simulation_type!r}: Palace has no surface impedance there."
+        )
 
     sym = groups.get("boundary_surfaces", {}).get("symmetry")
     if sym is not None and simulation_type not in ("driven", "eigenmode"):
@@ -859,7 +937,24 @@ def generate_palace_config(
     # boundary is exterior and takes no key.
     crack_conductors = simulation_type in ("driven", "eigenmode")
 
+    # Superconducting layers: their surfaces get a lossless Impedance entry
+    # (London surface inductance) instead of a Conductivity or PEC entry.
+    sc_entries, sc_attrs = superconductor_boundaries(
+        superconductors, groups, stack, simulation_type
+    )
+    sc_as_pec = simulation_type == "boundarymode" and conductor_boundary == "pec"
+    if sc_attrs and sc_as_pec:
+        logger.warning(
+            "conductor_boundary='pec': the superconducting layers %s are "
+            "perfect conductors in this boundary-mode run, so the London "
+            "inductance is not in the modes (the 3D wave-port eigenproblem "
+            "treats them the same way).",
+            sorted(superconductors or {}),
+        )
+
     for name, info in groups["conductor_surfaces"].items():
+        if info["phys_group"] in sc_attrs:
+            continue
         # Extract layer name from "layer_xy" / "layer_z" (3D) or use
         # the raw key directly for native 2D conductor boundaries.
         layer_name = name.rsplit("_", 1)[0] if name.endswith(("_xy", "_z")) else name
@@ -878,7 +973,9 @@ def generate_palace_config(
 
     # Handle PEC surfaces (planar conductors + PEC blocks)
     pec_attrs: list[int] = [
-        info["phys_group"] for info in groups.get("pec_surfaces", {}).values()
+        info["phys_group"]
+        for info in groups.get("pec_surfaces", {}).values()
+        if info["phys_group"] not in sc_attrs
     ]
     boundaries: dict[str, Any]
     mode_rows: list[PortModeEntry] = []
@@ -983,6 +1080,8 @@ def generate_palace_config(
         boundary_pec = set(pec_attrs)
         if conductors_as_pec:
             boundary_pec.update(conductor_attrs)
+            # A superconducting layer is a perfect conductor in the same sense
+            boundary_pec.update(sc_attrs)
         if boundary_pec:
             boundaries["PEC"] = {"Attributes": sorted(boundary_pec)}
         # Postprocessing-only voltage/impedance paths (mode-V.csv / mode-Z.csv).
@@ -1185,8 +1284,20 @@ def generate_palace_config(
 
     # Process impedance boundaries (interface-based or attribute-based)
     impedance_entries = _resolve_impedance_boundaries(impedance_boundaries, groups)
+    if sc_attrs:
+        _check_superconductor_overlap(
+            boundaries,
+            impedance_entries,
+            sc_attrs,
+            moved_to_pec=sc_attrs if sc_as_pec else set(),
+        )
     if impedance_entries:
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
+    # London surface inductance: per square already, so no curve-length
+    # division, and no Crack (see _superconductor). Before WavePortPEC below,
+    # which lists every Impedance attribute.
+    if sc_entries and not sc_as_pec:
+        boundaries.setdefault("Impedance", []).extend(sc_entries)
 
     # Preserve the default PEC approximation in the numeric port eigenproblem.
     # Explicit "inherit" keeps its physical Robin terms, including conductor
@@ -1475,6 +1586,7 @@ def write_config(
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
     magnetostatic_config: MagnetostaticConfig | None = None,
+    superconductors: Mapping[str, SuperconductorConfig] | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -1507,6 +1619,8 @@ def write_config(
             mesh with one physical group per net
         magnetostatic_config: Optional MagnetostaticConfig for the
             magnetostatic problem settings
+        superconductors: Superconducting layers by stack layer name; see
+            :func:`generate_palace_config`
 
     Returns:
         Path to the generated config.json
@@ -1551,6 +1665,7 @@ def write_config(
         mode_postprocessing=mode_postprocessing,
         cross_section_axis=cross_section_axis,
         magnetostatic_config=magnetostatic_config,
+        superconductors=superconductors,
     )
 
     # Update the mesh_result with the config path

@@ -17,6 +17,7 @@ Submodules:
 
 from __future__ import annotations
 
+from gsim.palace._superconductor import SuperconductorConfig
 from gsim.palace.models.cross_section import (
     ContactSpec,
     CrossSectionPlaneConfig,
@@ -84,6 +85,7 @@ __all__ = [
     "RefinementConfig",
     "SimulationResult",
     "SolverConfig",
+    "SuperconductorConfig",
     "SymmetryPlaneConfig",
     "TerminalConfig",
     "TransientConfig",

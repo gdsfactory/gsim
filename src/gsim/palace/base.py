@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from gsim.common import Geometry, LayerStack
 from gsim.common.cloud import CloudJobMixin
 from gsim.palace._mesh_reuse import PORT_LISTS
+from gsim.palace._superconductor import SuperconductorConfig
 from gsim.palace.models import (
     CPWPortConfig,
     ImpedanceBoundaryConfig,
@@ -378,6 +379,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         geometry: Geometry | None
         stack: LayerStack | None
         materials: dict[str, MaterialConfig]
+        superconductors: dict[str, SuperconductorConfig]
         refinement: RefinementConfig
         mesh_config: MeshConfig
         simulation_type: Literal[
@@ -386,6 +388,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         absorbing_boundary: bool | None
         absorbing_order: Literal[1, 2]
         _pec_default_noted: bool
+        _superconductor_warned: set[str]
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
@@ -918,6 +921,73 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 inductance=inductance,
                 name=name,
             )
+        )
+
+    def set_superconductor(
+        self,
+        layer: str,
+        *,
+        london_depth: float,
+        thickness: float | None = None,
+    ) -> None:
+        """Make a conductor layer superconducting, by its London penetration depth.
+
+        ``write_config()`` then writes a lossless ``Boundaries.Impedance``
+        entry with the surface inductance ``Ls`` [H per square] on the layer's
+        surfaces, in place of the layer's ``Conductivity`` or ``PEC`` entry.
+        Nothing about Palace's reading of these entries was verified; the
+        model and its limits are in ``docs/palace_conductors.md``.
+
+        The value depends on how the layer is meshed, with the film thickness
+        ``t`` and the London depth ``lambda`` (``coth`` is the hyperbolic
+        cotangent, ``mu0`` the vacuum permeability):
+
+        - planar conductor (``planar_conductors=True``, or a layer thinner than
+          0.02 um): one sheet carrying the whole current,
+          ``Ls = mu0 (lambda / 2) coth(t / 2 lambda)``. Use it for
+          ``t <= lambda``.
+        - 3D conductor shell (the default): each face gets
+          ``Ls = mu0 lambda coth(t / 2 lambda)``. Use it for ``t >= 4 lambda``.
+        - boundary-mode (2D) conductor: each face as for the shell.
+
+        Both tend to ``mu0 lambda^2 / t`` for a thin film. Between ``t = lambda``
+        and ``t = 4 lambda`` neither model is validated and errors may reach
+        about 20 %.
+
+        The conductors are the ones the stack names: a layer that is not a
+        conductor, or a zero-thickness layer with no ``thickness`` here, is
+        refused when the configuration is written. To make a layer normal
+        metal again, remove it with ``sim.superconductors.pop(layer)``.
+
+        Args:
+            layer: Name of a conductor layer of the stack.
+            london_depth: London penetration depth lambda [um], from a cited
+                source for the material, film and temperature. gsim has no
+                table of values. Values below 1e-4 um are refused: they are
+                meters.
+            thickness: Film thickness [um]. ``None`` (the default) takes the
+                layer's thickness in the stack.
+
+        Raises:
+            ValueError: For an electrostatic or magnetostatic simulation,
+                where Palace has no surface impedance, or for a London depth
+                or thickness that is not positive or is given in meters.
+
+        Example:
+            >>> sim.set_superconductor("metal1", london_depth=0.1)
+            >>> sim.set_superconductor("metal1", london_depth=0.2, thickness=0.1)
+        """
+        if self.simulation_type in ("electrostatic", "magnetostatic"):
+            raise ValueError(
+                "Superconducting layers do not apply to "
+                f"{self.simulation_type} simulations: Palace has no surface "
+                "impedance there. Use a driven, eigenmode or boundary-mode "
+                "simulation."
+            )
+        if not isinstance(layer, str) or not layer:
+            raise ValueError("layer must be the name of a stack layer")
+        self.superconductors[layer] = SuperconductorConfig(
+            london_depth=london_depth, thickness=thickness
         )
 
     def set_pn_junction(
@@ -2665,7 +2735,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         Copied from the source, as independent copies that replace what this
         simulation had: the geometry, the stack and its settings, the
-        material overrides, the airbox, the PEC blocks, the symmetry plane,
+        material overrides, the superconducting layers (``set_superconductor``;
+        they are a property of the layers, like the material overrides, and
+        not an input of the mesh, so changing one never invalidates the mesh;
+        a warning is logged when this replaces a different setting of this
+        simulation), the airbox, the PEC blocks, the symmetry plane,
         the mesh settings the source's mesh was made with (as
         ``mesh_config``, after presets and auto-sizing) and the port
         declarations. The geometry copy is flat:
@@ -2839,6 +2913,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         stack = None if source.stack is None else source.stack.model_copy(deep=True)
         stack_kwargs = copy.deepcopy(source._stack_kwargs)
         materials = {k: v.model_copy(deep=True) for k, v in source.materials.items()}
+        superconductors = {
+            k: v.model_copy(deep=True) for k, v in source.superconductors.items()
+        }
         airbox_config = copy.deepcopy(source._airbox_config)
         # The settings the source's mesh was made with, so ``mesh_config``
         # shows the receiver the sizes of the mesh it holds
@@ -2935,9 +3012,19 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         )
 
         # 5. One assignment block; every value is a validated model already
+        if self.superconductors and self.superconductors != superconductors:
+            logger.warning(
+                "reuse_mesh: the superconducting layers %s of this %s are "
+                "replaced by those of the source %s (%s).",
+                sorted(self.superconductors),
+                name,
+                source_name,
+                sorted(superconductors) or "none",
+            )
         self.geometry = geometry
         self.stack = stack
         self.materials = materials
+        self.superconductors = superconductors
         self.mesh_config = mesh_config
         self._last_mesh_config = mesh_config.model_copy(deep=True)
         for kind, cfgs in ports.items():
@@ -3090,6 +3177,44 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         """Keyword arguments only this problem type gives the config generator."""
         return {}
 
+    def _warn_superconductors(self, stack: LayerStack) -> None:
+        """Log what a superconducting layer's model does not cover, once each.
+
+        ``write_config()`` runs more than once per simulation (validation
+        writes it again), so each message is remembered by a key that holds the
+        layer and its settings: a changed setting is logged again.
+
+        Args:
+            stack: The resolved layer stack.
+        """
+        if not self.superconductors or self._last_mesh_result is None:
+            return
+        from gsim.palace._superconductor import (
+            resolve_superconductors,
+            superconductor_messages,
+        )
+
+        uses = resolve_superconductors(
+            self.superconductors,
+            self._last_mesh_result.groups or {},
+            stack,
+            self.simulation_type,
+        )
+        driven = self._get_problem_settings("driven")
+        wave_ports = bool(getattr(self, "wave_ports", None)) or any(
+            p.port_type == PortType.WAVEPORT for p in self._last_ports
+        )
+        messages = superconductor_messages(
+            uses,
+            simulation_type=self.simulation_type,
+            wave_ports=wave_ports,
+            waveport_boundary=driven.waveport_boundary if driven is not None else "pec",
+        )
+        for key, message in messages.items():
+            if key not in self._superconductor_warned:
+                self._superconductor_warned.add(key)
+                logger.warning("%s", message)
+
     def write_config(
         self,
         *,
@@ -3191,7 +3316,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             metallic_boundaries=metallic,
             **self._config_options(),
             magnetostatic_config=self._get_problem_settings("magnetostatic"),
+            superconductors=self.superconductors,
         )
+        self._warn_superconductors(stack)
 
         # Validate mesh and config unless this is a photonic workflow.
         if not photonic and validate_mesh:
@@ -3418,11 +3545,21 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         run_config = config_path
         local_config = None
         config_text = config_path.read_text()
-        if '"Crack"' in config_text:
+        has_crack = '"Crack"' in config_text
+        # The version is asked for only when something depends on it.
+        version = launch_version(launch) if has_crack or self.superconductors else None
+        if has_crack:
             config = json.loads(config_text)
-            stripped = strip_crack(config, launch_version(launch))
+            stripped = strip_crack(config, version)
             if stripped is not config:
                 local_config = stripped
+        if self.superconductors and json.loads(config_text).get("Boundaries", {}).get(
+            "Impedance"
+        ):
+            from gsim.palace._superconductor import version_warning
+
+            if message := version_warning(version):
+                logger.warning("%s", message)
 
         try:
             if local_config is not None:
@@ -3853,6 +3990,14 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     geometry: Geometry | None = None
     stack: LayerStack | None = None
     materials: dict[str, MaterialConfig] = Field(default_factory=dict)
+    superconductors: dict[str, SuperconductorConfig] = Field(
+        default_factory=dict,
+        description=(
+            "Superconducting conductor layers by stack layer name, set with "
+            "``set_superconductor``. A public field, so it survives saved "
+            "settings (``model_dump_json`` / ``model_validate``)."
+        ),
+    )
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     # Defaults set by each problem class
     simulation_type: Literal[
@@ -3885,6 +4030,8 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
     _pec_default_noted: bool = PrivateAttr(default=False)
+    # Keys of the superconducting-layer warnings already logged
+    _superconductor_warned: set[str] = PrivateAttr(default_factory=set)
     _last_mesh_result: Any = PrivateAttr(default=None)
     # The mesh settings the last mesh was made with, after presets and
     # auto-sizing; ``mesh_config`` holds only what the user set

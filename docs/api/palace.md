@@ -309,6 +309,53 @@ setting writes, and the other wave-port options are on
 
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
+## Superconducting layers
+
+`set_superconductor(layer, london_depth=..., thickness=None)` makes a conductor layer superconducting. Lengths are in um. `write_config()`
+then writes a lossless `Boundaries.Impedance` entry with the London surface inductance `Ls` (H per square) on the layer's surfaces, in
+place of its `Conductivity` or `PEC` entry. It applies to driven, eigenmode and boundary-mode simulations; electrostatic and
+magnetostatic ones refuse it. `thickness` defaults to the thickness of the layer in the stack, and a layer with zero thickness in the
+stack needs it. gsim has no table of London depths: use a value from a cited source. The depth in the example is only illustrative.
+
+```python
+import json
+from pathlib import Path
+
+import gdsfactory as gf
+from gsim.palace import DrivenSim
+
+gf.gpdk.PDK.activate()
+layer = gf.gpdk.LAYER.M1
+line = gf.Component()
+for y, width in ((0.0, 10.0), (31.0, 40.0), (-31.0, 40.0)):  # signal, two grounds (gap 6 um)
+    strip = line << gf.c.rectangle((300, width), centered=True, layer=layer)
+    strip.move((0, y))
+for name, x, orientation in (("o1", -150, 180), ("o2", 150, 0)):
+    line.add_port(name=name, center=(x, 0), width=10, orientation=orientation, port_type="electrical", layer=layer)
+
+sim = DrivenSim()
+sim.set_output_dir("superconducting-cpw")
+sim.set_geometry(line)
+sim.set_stack(substrate_thickness=2.0)
+sim.set_airbox(margin_x=0, margin_y=50.0, z_above=100.0, z_below=100.0)
+sim.add_cpw_port("o1", layer="metal1", s_width=10, gap_width=6, length=5.0)
+sim.add_cpw_port("o2", layer="metal1", s_width=10, gap_width=6, length=5.0)
+sim.set_driven(fmin=1e9, fmax=100e9, num_points=5)
+sim.set_superconductor("metal1", london_depth=0.1)  # lambda = 0.1 um, thickness from the stack
+sim.mesh(preset="coarse")
+config = json.loads(Path(sim.write_config()).read_text())  # nothing is solved or submitted
+print(config["Boundaries"]["Impedance"])  # one entry per face group, "Ls" in H per square
+```
+
+The value depends on how the layer is meshed: a planar sheet (`planar_conductors=True`) gets `mu0 (lambda / 2) coth(t / 2 lambda)`, each
+face of a 3D shell or of a 2D boundary-mode conductor gets `mu0 lambda coth(t / 2 lambda)`. Use the sheet for a film no thicker than
+lambda and the shell for a film at least 4 lambda thick; in between, neither is validated. `sim.superconductors.pop("metal1")` makes the
+layer normal metal again. The derivation, the comparison with a quasi-static London reference, the interaction with wave ports and
+what was not verified are on [Conductor models in Palace](../palace_conductors.md#superconducting-layers-london-penetration-depth).
+Palace itself was not run for this feature.
+
+- [`SuperconductorConfig`][gsim.palace.SuperconductorConfig]
+
 ## Result validation
 
 - [`validation`][gsim.palace.validation]
@@ -662,7 +709,11 @@ for port in ("o1", "o2"):
 ```
 
 The receiver copies the source's geometry, stack, airbox, PEC blocks, symmetry
-plane and port declarations. A port it declares itself, with the source's
+plane and port declarations. It also takes the source's superconducting layers
+(`set_superconductor`) as independent copies, like the material overrides; a
+different setting of its own is replaced, with a logged warning. They are not a
+mesh input, so changing them afterwards on either simulation never raises the
+mesh-changed error. A port it declares itself, with the source's
 geometry, keeps its own excitation, impedance and R/L/C; the other ports keep
 the source's settings but are not excited, whatever the source excites. A
 driven receiver needs at least one port it excites itself, declared with
