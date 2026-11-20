@@ -250,6 +250,10 @@ def test_local_links_resolve():
         assert anchor in slugs, anchor
 
 
-def test_the_page_carries_no_unsourced_loss_error_number():
-    """No metal-loss error in percent until its source is committed."""
-    assert not re.search(r"\b26\s?%", _page())
+def test_the_loss_error_number_carries_its_source():
+    """The measured metal-loss error appears only in its section, next to its source."""
+    page = _page()
+    section = _section(page, "## Surface model versus volume metal on a CPW")
+    assert re.search(r"\b26\s?%", section)
+    assert "gsim/issues/539" in section
+    assert not re.search(r"\b26\s?%", page.replace(section, ""))
