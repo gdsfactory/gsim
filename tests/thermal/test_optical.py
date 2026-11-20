@@ -211,7 +211,7 @@ def test_the_unperturbed_index_matches_the_femwell_adapter_on_the_same_mesh(
     assert heated_10k.neff0 == pytest.approx(complex(modes[0].n_eff), rel=1e-9)
 
 
-def test_order_1_matches_the_adapter_at_order_1_and_shifts_alike(
+def test_order_1_matches_the_adapter_at_order_1_in_index_and_shift(
     optical_mesh, stack, heated_10k
 ):
     eps0, dn_dt = _optical_inputs(optical_mesh, stack)
@@ -228,6 +228,18 @@ def test_order_1_matches_the_adapter_at_order_1_and_shifts_alike(
         optical_mesh.msh_path, epsilon=eps, wavelength_um=WAVELENGTH_UM, order=1
     )
     assert linear.neff0 == pytest.approx(complex(modes[0].n_eff), rel=1e-9)
+    # The adapter's own re-solve with the heated permittivity, per element,
+    # gives the same shift.
+    heated = solve_modes(
+        optical_mesh.msh_path,
+        epsilon=thermo_optic_permittivity(
+            np.sqrt(eps0), dn_dt, np.full(eps0.size, 10.0)
+        ),
+        wavelength_um=WAVELENGTH_UM,
+        order=1,
+    )
+    adapter_shift = complex(heated[0].n_eff) - complex(modes[0].n_eff)
+    assert linear.delta_neff == pytest.approx(adapter_shift, rel=1e-6)
     # The orders discretise differently, so the indices differ, but the
     # shift is a difference on one mesh and agrees closely.
     assert linear.neff0 != pytest.approx(heated_10k.neff0, rel=1e-6)
