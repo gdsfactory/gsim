@@ -1464,7 +1464,9 @@ def generate_mesh(
         interface_specs: Named semiconductor-semiconductor layer pairs whose
             shared curves are tagged the same way, recorded apart from the
             contacts (native BoundaryMode only)
-        write_config: Whether to write config.json (default True)
+        write_config: Whether to write config.json (default True). That
+            config has no impedance boundaries and no superconducting layers;
+            ``sim.write_config()`` adds them.
         pec_blocks: PEC configuration
         planar_conductors: If True, treat conductors as 2D PEC surfaces.
             Refused for magnetostatic: a current-source sheet must end on
