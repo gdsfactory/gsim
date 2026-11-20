@@ -2,6 +2,15 @@
 docs_dir = "."
 nav = [
   { "Home" = "index.md" },
+  { "Simulation guide" = [
+    { "Overview" = "guide/index.md" },
+    { "Choosing a solver" = "guide/choosing-a-solver.md" },
+    { "Couplers and MMIs" = "guide/couplers-and-mmis.md" },
+    { "Phase shifters" = "guide/phase-shifters.md" },
+    { "Superconducting resonators" = "guide/superconducting-resonators.md" },
+    { "Thermal tuning" = "guide/thermal-tuning.md" },
+    { "Validation and benchmarks" = "guide/validation.md" }
+  ] },
   { "Photonic FDTD" = [
     { "MMI Quickstart" = "nbs/fdtd_mmi_gpdk.md" },
     { "3D Grating Coupler" = "nbs/fdtd_focusing_grating_coupler_gpdk.md" },
@@ -94,6 +103,7 @@ full_output = "llms-full.txt"
 [project.plugins.llmstxt.sections]
 "Getting started" = ["index.md", "getting_started_palace.md"]
 "Guides" = [
+  "guide/*.md",
   "api/*.md",
   "transmission_line_analysis.md",
   "emx_proc_import.md",
