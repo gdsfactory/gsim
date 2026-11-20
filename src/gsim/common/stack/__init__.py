@@ -43,12 +43,14 @@ from gsim.common.stack.materials import (
     MaterialProperties,
     ResolvedMaterial,
     SellmeierTerm,
+    ThermalProperties,
     ValidityRange,
     get_material_properties,
     make_doped_material,
     make_doped_materials,
     resolve_material_at_wavelength,
     should_enable_dispersion,
+    thermal_properties,
 )
 from gsim.common.stack.overlays import (
     load_overlay,
@@ -198,6 +200,7 @@ __all__ = [
     "ResolvedMaterial",
     "SellmeierTerm",
     "StackLayer",
+    "ThermalProperties",
     "ValidationResult",
     "ValidityRange",
     "built_in_voltage",
@@ -222,4 +225,5 @@ __all__ = [
     "print_stack_table",
     "resolve_material_at_wavelength",
     "should_enable_dispersion",
+    "thermal_properties",
 ]

@@ -14,11 +14,12 @@ with minimal boilerplate.
 
 ## Solvers
 
-| Module        | Solver                                      | Method | Use Case                                               |
-| ------------- | ------------------------------------------- | ------ | ------------------------------------------------------ |
-| `gsim.fdtd`   | GDSFactory FDTD                             | FDTD   | PDK-native mesh and runtime configuration generation   |
-| `gsim.palace` | [Palace](https://awslabs.github.io/palace/) | FEM    | RF/microwave, impedance extraction, driven simulations |
-| `gsim.meep`   | [Meep](https://meep.readthedocs.io/)        | FDTD   | Photonic components, S-parameters, mode propagation    |
+| Module         | Solver                                                          | Method | Use Case                                               |
+| -------------- | --------------------------------------------------------------- | ------ | ------------------------------------------------------ |
+| `gsim.fdtd`    | GDSFactory FDTD                                                 | FDTD   | PDK-native mesh and runtime configuration generation   |
+| `gsim.palace`  | [Palace](https://awslabs.github.io/palace/)                     | FEM    | RF/microwave, impedance extraction, driven simulations |
+| `gsim.meep`    | [Meep](https://meep.readthedocs.io/)                            | FDTD   | Photonic components, S-parameters, mode propagation    |
+| `gsim.thermal` | [femwell](https://helgegehring.github.io/femwell/) + scikit-fem | 2D FEM | Thermo-optic heaters: P_π, switching time, crosstalk   |
 
 ## Features
 
@@ -32,6 +33,12 @@ with minimal boilerplate.
 
 ```bash
 pip install gsim
+```
+
+The thermal solver needs the `femwell` extra:
+
+```bash
+pip install "gsim[femwell]"
 ```
 
 For local Palace execution on Linux x86_64, gsim can auto-download and cache a prebuilt Palace CPU binary on first use.
