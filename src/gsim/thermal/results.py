@@ -226,7 +226,7 @@ class StepResponse:
             (rad), from first-order perturbation scaled so that its
             steady value matches the steady mode re-solve.
         steady_phase_rad: Steady-state phase shift at ``power_mw`` (rad).
-        temperature_k: Temperature rise at each waveguide's core centre
+        temperature_rise_k: Temperature rise at each waveguide's core centre
             over time (K), by waveguide name.
         tau_us: 10-90 % rise time of the phase (us), the usual measured
             switching time.
@@ -242,7 +242,7 @@ class StepResponse:
     phase_shifter: str
     phase_rad: NDArray[np.float64] = field(repr=False)
     steady_phase_rad: float
-    temperature_k: dict[str, NDArray[np.float64]] = field(repr=False)
+    temperature_rise_k: dict[str, NDArray[np.float64]] = field(repr=False)
     tau_us: float
     tau_1e_us: float
 
@@ -297,7 +297,7 @@ class HeaterReport:
         efficiency_rad_per_mw: Phase per power, pi / P_pi (rad/mW).
         resistance_ohm: Heater resistance over its length (ohm).
         v_pi_v: Voltage for a pi phase shift (V).
-        peak_temperature_k: Peak temperature rise in the heater at P_pi (K).
+        peak_temperature_rise_k: Peak temperature rise in the heater at P_pi (K).
         crosstalk_rad: Phase on each victim waveguide at P_pi (rad).
         crosstalk_ratio: Victim phase over phase-shifter phase, by
             victim waveguide.
@@ -313,7 +313,7 @@ class HeaterReport:
     efficiency_rad_per_mw: float
     resistance_ohm: float
     v_pi_v: float
-    peak_temperature_k: float
+    peak_temperature_rise_k: float
     crosstalk_rad: dict[str, float]
     crosstalk_ratio: dict[str, float]
     thermal_resistance_k_per_mw: dict[str, float]
@@ -333,7 +333,7 @@ class HeaterReport:
             ("Efficiency (rad/mW)", f"{self.efficiency_rad_per_mw:.4g}"),
             ("Resistance (ohm)", f"{self.resistance_ohm:.4g}"),
             ("V_pi (V)", f"{self.v_pi_v:.4g}"),
-            ("Peak heater rise at P_pi (K)", f"{self.peak_temperature_k:.4g}"),
+            ("Peak heater rise at P_pi (K)", f"{self.peak_temperature_rise_k:.4g}"),
         ]
         rows += [
             (f"Thermal resistance, {name} (K/mW)", f"{value:.4g}")
@@ -495,7 +495,7 @@ class ThermalResult:
         return per_length * length_m / _MW_TO_W
 
     @property
-    def peak_temperature_k(self) -> float:
+    def peak_temperature_rise_k(self) -> float:
         """Peak temperature rise in the heater at P_pi (K).
 
         Taken over the heater layers drawn in the cut; a heater layer the
@@ -522,7 +522,7 @@ class ThermalResult:
             efficiency_rad_per_mw=self.efficiency_rad_per_mw,
             resistance_ohm=self.resistance_ohm,
             v_pi_v=self.v_pi_v,
-            peak_temperature_k=self.peak_temperature_k,
+            peak_temperature_rise_k=self.peak_temperature_rise_k,
             crosstalk_rad=dict(self.crosstalk_rad),
             crosstalk_ratio=dict(self.crosstalk_ratio),
             thermal_resistance_k_per_mw=dict(self.thermal_resistance_k_per_mw),

@@ -35,7 +35,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import meshio
 import numpy as np
@@ -129,6 +129,66 @@ class CrossSectionMesh:
             )
         return np.asarray(self.element_region == name, dtype=np.bool_)
 
+    def plot(
+        self,
+        ax: Any = None,
+        *,
+        xlim: tuple[float, float] | None = None,
+        zlim: tuple[float, float] | None = None,
+    ) -> Any:
+        """Draw the triangles, coloured by Region, with a legend.
+
+        Args:
+            ax: Matplotlib axes to draw on; a new figure when ``None``.
+            xlim: In-plane range ``(min, max)`` to show (um), e.g. to zoom
+                on the heater; the whole Window when ``None``.
+            zlim: Height range ``(min, max)`` to show (um); the whole
+                Window when ``None``.
+
+        Returns:
+            The matplotlib axes.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Patch
+        from matplotlib.tri import Triangulation
+
+        if ax is None:
+            _, ax = plt.subplots()
+        regions = self.regions
+        index = {name: i for i, name in enumerate(regions)}
+        colours = plt.get_cmap("tab20", max(len(regions), 1))
+        p, t = self.mesh.p, self.mesh.t
+        triangulation = Triangulation(p[0], p[1], t.T)
+        codes = np.array([index[name] for name in self.element_region])
+        ax.tripcolor(
+            triangulation,
+            facecolors=codes,
+            cmap=colours,
+            vmin=-0.5,
+            vmax=len(regions) - 0.5,
+            edgecolors="k",
+            linewidth=0.1,
+        )
+        ax.legend(
+            handles=[
+                Patch(color=colours(i), label=f"{name} ({self.region_material[name]})")
+                for name, i in index.items()
+            ],
+            loc="upper left",
+            bbox_to_anchor=(1.0, 1.0),
+            fontsize="small",
+        )
+        in_plane = "y" if self.plane.strip().lower().startswith("x") else "x"
+        ax.set_xlabel(f"{in_plane} (µm)")
+        ax.set_ylabel("z (µm)")
+        ax.set_title(f"Mesh at {self.plane}: {t.shape[1]} triangles")
+        ax.set_aspect("equal")
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        if zlim is not None:
+            ax.set_ylim(*zlim)
+        return ax
+
     def region_area(self, name: str) -> float:
         """Total area of one Region in um^2.
 
@@ -194,6 +254,7 @@ def build_cross_section_mesh(
     default_max_size: float | None = None,
     background: str = "air",
     output: Path | None = None,
+    verbose: bool = False,
 ) -> CrossSectionMesh:
     """Mesh a Cross-section of a component for a 2D thermal (or optical) solve.
 
@@ -223,6 +284,7 @@ def build_cross_section_mesh(
             or slab claims.
         output: Path of the msh 2.2 file to write. Defaults to a file in a
             new temporary directory.
+        verbose: Print gmsh's meshing progress.
 
     Returns:
         The loaded mesh with its Regions, materials and Window edges.
@@ -309,7 +371,9 @@ def build_cross_section_mesh(
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    _mesh_with_gmsh(rects, window, z_range, sizes, coarse, background, output)
+    _mesh_with_gmsh(
+        rects, window, z_range, sizes, coarse, background, output, verbose=verbose
+    )
 
     region_material = {r.group: r.material for r in rects}
     return _load(skfem, output, plane, window, z_range, region_material)
@@ -408,6 +472,8 @@ def _mesh_with_gmsh(
     coarse: float,
     background: str,
     output: Path,
+    *,
+    verbose: bool = False,
 ) -> None:
     """Fragment the rectangles, name groups, grade sizes, write msh 2.2."""
     import gmsh
@@ -418,7 +484,7 @@ def _mesh_with_gmsh(
         gmsh.initialize(readConfigFiles=False)
     model_name = "gsim_thermal_cross_section"
     try:
-        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.option.setNumber("General.Terminal", 1 if verbose else 0)
         if model_name in gmsh.model.list():
             gmsh.model.setCurrent(model_name)
             gmsh.model.remove()

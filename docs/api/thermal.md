@@ -28,10 +28,12 @@ xs = gf.cross_section.strip_heater_metal(width=0.5, heater_width=2.0)
 component = gf.components.straight(length=320.0, cross_section=xs)
 
 sim = thermal.Simulation()
-sim.geometry(component, stack=stack)  # a gsim LayerStack: heights and materials of every layer
+sim.geometry(component)  # the active PDK's stack; or stack=a gsim LayerStack or a stack YAML path
 sim.domain(plane="x=160", window=(-30.0, 30.0))
 sim.heater(layers="heater", length_um=320.0)
 sim.waveguides.add(name="arm", position_um=0.0)
+
+sim.mesh().plot()  # optional: look at the cut and its mesh first
 
 result = sim.solve(wavelength_um=1.55)
 step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
@@ -43,7 +45,7 @@ It then compares the result with the paper's simulations and measurements, and c
 
 Calling a concern applies several settings at once and validates them together; a failed call changes nothing. Single
 attributes can also be assigned, `sim.heater.length_um = 640.0`, and a whole concern replaced by a model or a mapping,
-`sim.solver = {"precision": "fast"}`. The constructor takes the same concerns as keyword arguments:
+`sim.solver = {"mesh_preset": "coarse"}`. The constructor takes the same concerns as keyword arguments:
 
 ```python
 sim = thermal.Simulation(
@@ -51,13 +53,14 @@ sim = thermal.Simulation(
     domain={"plane": "x=160", "window": (-30.0, 30.0)},
     heater={"layers": "heater", "length_um": 320.0},
     waveguides=[{"name": "arm", "position_um": 0.0}],
-    solver={"precision": "fast"},
+    solver={"mesh_preset": "coarse"},
 )
 ```
 
-The meshes are built on the first solve and kept, with the steady solve, until an input they depend on changes. Editing
-a concern, the stack or the component in place is enough: the next solve starts again from it. A change to the
-transient's time stepping alone keeps the steady solve.
+The meshes are built on the first solve, or by `sim.mesh()`, and kept, with the steady solve, until an input they depend
+on changes. Editing a concern, the stack or the component in place is enough: the next call starts again from it. A
+change to the transient's time stepping alone keeps the steady solve. `mesh`, `solve` and `solve_transient` take
+`verbose=True` to print gmsh's meshing progress.
 
 ## Units and conventions
 
@@ -72,8 +75,9 @@ transient's time stepping alone keeps the steady solve.
 | Material properties (`materials`)    | SI: W/m/K, J/kg/K, kg/m³, 1/K, S/m |
 | Heat transfer coefficient            | W/m²/K                             |
 
-Field and argument names carry their unit: `length_um`, `power_mw`, `p_pi_mw`, `tau_us`. Material properties and the
-heat transfer coefficient are SI, like the stack's material records.
+Field and argument names carry their unit: `length_um`, `power_mw`, `p_pi_mw`, `tau_us`,
+`heat_transfer_coefficient_w_per_m2k`. A temperature rise above ambient says so: `temperature_rise_k`,
+`peak_temperature_rise_k`. Material overrides take the stack's own SI field names (`thermal_conductivity`, ...).
 
 The model is linear in power, because k, ρc_p and dn/dT do not depend on temperature. One solve therefore gives every
 power. P_π does not depend on the heater length in 2D. The length only sets the resistance, V_π and the phase at a
@@ -81,7 +85,10 @@ given power.
 
 ## Concerns
 
-- `geometry(component, *, stack=...)`: the gdsfactory component (heater and waveguides) and its gsim `LayerStack`.
+- `geometry(component, *, stack=...)`: the gdsfactory component (heater and waveguides) and its stack, as in
+  `gsim.tcad`: a gsim `LayerStack`, a stack YAML path, or `None` (the default) for the active PDK. The
+  active PDK's stack is taken with its silicon substrate, 100 µm deep, because the substrate is the heat sink:
+  `get_stack(include_substrate=True, substrate_thickness=100.0)`. The RF default of `get_stack()` omits it.
 - `domain(...)`: `plane`, the cut (`"x=<um>"` or `"y=<um>"`), across the heater and the waveguides; `window`, the
   in-plane `(min, max)` extent of the thermal Window in µm; `depth_um`, the Modelled depth.
 - `heater(...)`: `layers`, the stack layer name(s) of the heater conductors; `length_um`, the heater length.
@@ -91,8 +98,9 @@ given power.
 - `materials`: per-run overrides, `sim.materials["tin"] = {"conductivity": 1.6e6}`, keyed on the material name
   (case-insensitive). The fields are `thermal_conductivity`, `specific_heat`, `mass_density`, `dn_dT`, `conductivity`
   (electrical), `permittivity` and `loss_tangent`.
-- `boundary(...)`: `top` and `sides`, `"adiabatic"` (default) or `"convective"`; `heat_transfer_coefficient` (10 W/m²/K).
-- `solver(...)`: `precision`, `mesh_size_um`, `degree`, `optical_order`, `time_steps` and `theta` (see below).
+- `boundary(...)`: `top` and `sides`, `"adiabatic"` (default) or `"convective"`; `heat_transfer_coefficient_w_per_m2k` (10).
+- `solver(...)`: `mesh_preset`, `refined_mesh_size_um`, `max_mesh_size_um`, `region_mesh_size_um`, `degree`,
+  `optical_order`, `time_steps` and `theta` (see below).
 
 The cut must be vertical and cross the heater and the waveguides. Two parameters belong to the model, not to the
 device, and are worth a convergence check:
@@ -113,13 +121,16 @@ the default boundary.
 
 ## Numerical settings
 
-- [`Solver`][gsim.thermal.Solver]: `precision="fast" | "default" | "accurate"` scales the mesh and sets the number of
-  transient time steps. `mesh_size_um` caps the element size per region, and `time_steps` overrides the step count.
+- [`Solver`][gsim.thermal.Solver]: the mesh settings use `gsim.tcad.Solver`'s names.
+  `mesh_preset="coarse" | "default" | "fine"` scales the mesh and sets the number of transient time steps (200, 400,
+  1000). `refined_mesh_size_um` sets the element size in the heater conductors and the waveguide cores,
+  `max_mesh_size_um` caps it everywhere, and `region_mesh_size_um` sets it per region, winning over both.
+  `time_steps` overrides the step count.
   `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh, degree 2 cuts
   the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The optical Mode solve
   does not depend on it. `optical_order=1 | 2` sets the finite element order of the optical Mode solves (default 2, as
-  in the femwell adapter). On femwell's TiN heater, P_π at order 2 moves by 0.02 % from `"fast"` to `"accurate"`
-  precision, against 0.6 % at order 1, for about 3 times the solve time. `theta` picks the time scheme: 1 (backward
+  in the femwell adapter). On femwell's TiN heater, P_π at order 2 moves by 0.02 % from the `"coarse"` to the `"fine"`
+  mesh preset, against 0.6 % at order 1, for about 3 times the solve time. `theta` picks the time scheme: 1 (backward
   Euler, default) or 0.5 (Crank-Nicolson). Backward Euler delays the step response by about half a time step
   (`duration_us / time_steps / 2`), so its `tau_us` and `tau_1e_us` read long by that much: 0.125 µs at the default 400
   steps over 100 µs. Crank-Nicolson removes that bias; more steps shrink it.
@@ -134,7 +145,7 @@ the default boundary.
   `peak(layer)` and `plot(xlim=, zlim=)`. Pass `ambient_k=` (e.g. 293.15) to `at` or `peak` for an absolute
   temperature instead of the rise.
 - [`StepResponse`][gsim.thermal.StepResponse]: the phase over time after the heater is switched on (`time_us`,
-  `phase_rad`, `temperature_k` at each core). It gives `tau_us` (the 10–90 % rise time) and `tau_1e_us` (the time to
+  `phase_rad`, `temperature_rise_k` at each core). It gives `tau_us` (the 10–90 % rise time) and `tau_1e_us` (the time to
   reach 1 − 1/e, about 63 %). In this linear model the fall time equals the rise time.
 - [`HeaterReport`][gsim.thermal.HeaterReport]: the figures of merit in one table. It prints as text and renders as
   HTML in notebooks.

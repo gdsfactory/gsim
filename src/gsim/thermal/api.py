@@ -16,6 +16,7 @@ are.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal, Self
 
 from pydantic import (
@@ -49,16 +50,23 @@ __all__ = [
 #: Marks an argument left out, where None is a value of its own.
 _UNSET: Any = object()
 
-# Per precision: mesh-size factor on the mesher's defaults, transient steps.
-_PRECISION: dict[str, tuple[float, int]] = {
-    "fast": (1.0, 200),
+# Per mesh preset: mesh-size factor on the mesher's defaults, transient steps.
+_MESH_PRESETS: dict[str, tuple[float, int]] = {
+    "coarse": (1.0, 200),
     "default": (0.6, 400),
-    "accurate": (0.35, 1000),
+    "fine": (0.35, 1000),
 }
 
 #: The Solver fields the steady solve and the meshes depend on; the others
 #: set only the transient's time stepping.
-STEADY_FIELDS = ("precision", "mesh_size_um", "degree", "optical_order")
+STEADY_FIELDS = (
+    "mesh_preset",
+    "refined_mesh_size_um",
+    "max_mesh_size_um",
+    "region_mesh_size_um",
+    "degree",
+    "optical_order",
+)
 
 
 class Geometry(MutableModel):
@@ -67,7 +75,12 @@ class Geometry(MutableModel):
     Attributes:
         component: The gdsfactory component: the heater and the waveguides.
         stack: A gsim ``LayerStack`` (layer heights, materials and slabs),
-            e.g. from :func:`gsim.common.stack.get_stack`.
+            the path of a stack YAML file, or ``None`` to extract the stack
+            of the active PDK. The active PDK's stack is taken with its
+            silicon substrate down to 100 um below z = 0
+            (``get_stack(include_substrate=True, substrate_thickness=100.0)``):
+            the substrate is the heat sink, so the RF default without it
+            would change the physics.
     """
 
     model_config = ConfigDict(
@@ -80,20 +93,20 @@ class Geometry(MutableModel):
     @field_validator("stack")
     @classmethod
     def validate_stack(cls, value: Any) -> Any:
-        """Accept a LayerStack or None."""
+        """Accept a LayerStack, a YAML path, or None."""
         from gsim.common.stack import LayerStack
 
-        if value is None or isinstance(value, LayerStack):
+        if value is None or isinstance(value, (LayerStack, str, Path)):
             return value
         raise ValueError(
-            f"stack must be a gsim LayerStack; got {type(value).__name__}. "
-            "Build one with gsim.common.stack.get_stack()."
+            "stack must be a gsim LayerStack, a stack YAML path, or None "
+            f"for the active PDK; got {type(value).__name__}"
         )
 
     def __call__(  # ty: ignore[invalid-method-override]
         self, component: Any | None = None, *, stack: Any = _UNSET
     ) -> Self:
-        """Set the component and, when given, its stack."""
+        """Set the component and, when given, its stack (None: active PDK)."""
         updates: dict[str, Any] = {}
         if component is not None:
             updates["component"] = component
@@ -347,18 +360,18 @@ class Boundary(MutableModel):
     Attributes:
         top: Condition on the top of the stack.
         sides: Condition on the two sides of the thermal Window.
-        heat_transfer_coefficient: h in W/m^2/K, shared by every
+        heat_transfer_coefficient_w_per_m2k: h in W/m^2/K, shared by every
             convective edge.
     """
 
     top: Literal["adiabatic", "convective"] = "adiabatic"
     sides: Literal["adiabatic", "convective"] = "adiabatic"
-    heat_transfer_coefficient: NonNegativeFloat = 10.0
+    heat_transfer_coefficient_w_per_m2k: NonNegativeFloat = 10.0
 
     def convective_edges(self) -> dict[str, float]:
         """H on every convective edge of the Window, by edge name."""
         edges: dict[str, float] = {}
-        h = float(self.heat_transfer_coefficient)
+        h = float(self.heat_transfer_coefficient_w_per_m2k)
         if self.top == "convective":
             edges["top"] = h
         if self.sides == "convective":
@@ -370,14 +383,21 @@ class Boundary(MutableModel):
 class Solver(MutableModel):
     """Numerical settings; the defaults converge for a strip heater.
 
+    The mesh settings follow :class:`gsim.tcad.Solver`: a preset, then
+    explicit sizes that override it.
+
     Attributes:
-        precision: ``"fast"``, ``"default"`` or ``"accurate"``: scales the
+        mesh_preset: ``"coarse"``, ``"default"`` or ``"fine"``: scales the
             mesh size everywhere (x1, x0.6, x0.35 of the mesher's
             defaults) and sets the transient's time steps (200, 400,
             1000).
-        mesh_size_um: Maximum element size in um per Region name (a stack
-            layer, or a slab by its material), overriding the precision on
-            both the thermal and the optical meshes.
+        refined_mesh_size_um: Element size in um in the heater
+            conductors and the waveguide cores, overriding the preset.
+        max_mesh_size_um: Largest element size in um anywhere, overriding
+            the preset.
+        region_mesh_size_um: Element size in um per Region name (a stack
+            layer, or a slab by its material). It wins over every other
+            size setting, on both the thermal and the optical meshes.
         degree: Lagrange element degree of the heat solve: 1 (linear), 2
             (quadratic) or 3. A higher degree reaches a given accuracy on a
             coarser mesh; the optical Mode solve is unaffected.
@@ -385,7 +405,7 @@ class Solver(MutableModel):
             1 or 2. Order 2 converges faster under mesh refinement; order 1
             is cheaper per solve.
         time_steps: Number of constant transient time steps, overriding
-            the precision.
+            the preset.
         theta: Time scheme of the transient: 1.0 backward Euler (robust
             for a step drive), 0.5 Crank-Nicolson. Backward Euler reads
             time constants long by about half a time step
@@ -393,8 +413,10 @@ class Solver(MutableModel):
             first-order bias.
     """
 
-    precision: Literal["fast", "default", "accurate"] = "default"
-    mesh_size_um: dict[str, PositiveFloat] = Field(default_factory=dict)
+    mesh_preset: Literal["coarse", "default", "fine"] = "default"
+    refined_mesh_size_um: PositiveFloat | None = None
+    max_mesh_size_um: PositiveFloat | None = None
+    region_mesh_size_um: dict[str, PositiveFloat] = Field(default_factory=dict)
     degree: Literal[1, 2, 3] = 2
     optical_order: Literal[1, 2] = 2
     time_steps: PositiveInt | None = None
@@ -403,11 +425,11 @@ class Solver(MutableModel):
     @property
     def size_factor(self) -> float:
         """Factor on the mesher's default element sizes."""
-        return _PRECISION[self.precision][0]
+        return _MESH_PRESETS[self.mesh_preset][0]
 
     @property
     def steps(self) -> int:
         """Number of transient time steps."""
         if self.time_steps is not None:
             return int(self.time_steps)
-        return _PRECISION[self.precision][1]
+        return _MESH_PRESETS[self.mesh_preset][1]

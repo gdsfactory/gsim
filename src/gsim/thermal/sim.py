@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Iterable, Mapping
+from collections.abc import Generator, Iterable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -96,6 +98,11 @@ _COARSE_DIVISIONS = 10.0
 _SETTLED_FRACTION = 0.99
 _EPS0 = 8.8541878128e-12
 _C0 = 299792458.0
+
+# Depth below z = 0 of the silicon substrate taken from the active PDK.
+_PDK_SUBSTRATE_DEPTH_UM = 100.0
+# Warnings point at the user's call, past every frame of this package.
+_SKIP_FRAMES = (str(Path(__file__).parent),)
 
 # The override field for a ThermalProperties field, where they differ.
 _OVERRIDE_NAME = {"electrical_conductivity": "conductivity"}
@@ -174,9 +181,10 @@ class Simulation:
 
     :meth:`solve` gives the steady figures (P_pi, crosstalk, resistance,
     V_pi, temperature field) and :meth:`solve_transient` the switching
-    time. The meshes are built on the first solve and kept, with the
-    steady solve, until an input they depend on changes: a concern can be
-    edited at any time and the next solve starts again from it.
+    time; :meth:`mesh` builds the thermal mesh alone, to inspect it
+    before a solve. The meshes are built on the first call and kept, with
+    the steady solve, until an input they depend on changes: a concern
+    can be edited at any time and the next call starts again from it.
 
     Units: lengths in um, power in mW, temperature rise in K, time in us.
     """
@@ -211,15 +219,40 @@ class Simulation:
         self._cache: dict[tuple[Any, ...], Any] = {}
         self._warned: set[str] = set()
         self._fingerprint: Any = None
+        self._resolved_stack: Any = None
+        self._verbose = False
 
     def __repr__(self) -> str:
         """Show the concerns."""
         concerns = ", ".join(f"{name}={getattr(self, name)!r}" for name in _CONCERNS)
         return f"Simulation({concerns})"
 
+    # ------------------------------------------------------------------ mesh
+
+    def mesh(self, *, verbose: bool = False) -> CrossSectionMesh:
+        """Build the thermal mesh of the cut, or return the kept one.
+
+        The solves build the same mesh on their own; call this to look at
+        it first, e.g. ``sim.mesh().plot()``. Resolution comes from the
+        ``solver`` concern.
+
+        Args:
+            verbose: Print gmsh's meshing progress.
+
+        Returns:
+            The :class:`~gsim.thermal.CrossSectionMesh` of the thermal
+            Window.
+        """
+        require_skfem()
+        self._sync()
+        with self._verbosity(verbose):
+            return self._thermal_mesh()
+
     # ------------------------------------------------------------------ solves
 
-    def solve(self, *, wavelength_um: float = 1.55) -> ThermalResult:
+    def solve(
+        self, *, wavelength_um: float = 1.55, verbose: bool = False
+    ) -> ThermalResult:
         """Steady heater solve: P_pi, crosstalk, resistance and temperature.
 
         One heat solve at a unit power per length gives the temperature
@@ -230,12 +263,15 @@ class Simulation:
 
         Args:
             wavelength_um: Vacuum wavelength in um.
+            verbose: Print gmsh's meshing progress (silent by default).
 
         Returns:
             The :class:`~gsim.thermal.ThermalResult`.
         """
+        wavelength = _positive(wavelength_um, "wavelength_um", "um")
         self._sync()
-        return self._steady(_positive(wavelength_um, "wavelength_um", "um")).result
+        with self._verbosity(verbose):
+            return self._steady(wavelength).result
 
     def solve_transient(
         self,
@@ -243,6 +279,7 @@ class Simulation:
         power_mw: float,
         duration_us: float,
         wavelength_um: float = 1.55,
+        verbose: bool = False,
     ) -> StepResponse:
         """Switch-on response to a heater power stepped on at t = 0.
 
@@ -259,15 +296,18 @@ class Simulation:
             duration_us: Simulated time (us); long enough to settle (the
                 result warns otherwise).
             wavelength_um: Vacuum wavelength in um.
+            verbose: Print gmsh's meshing progress (silent by default).
 
         Returns:
             The :class:`~gsim.thermal.StepResponse`.
         """
         power = _positive(power_mw, "power_mw", "mW")
         duration = _positive(duration_us, "duration_us", "us")
+        wavelength = _positive(wavelength_um, "wavelength_um", "um")
         self._sync()
-        steady = self._steady(_positive(wavelength_um, "wavelength_um", "um"))
-        thermal = self._thermal()
+        with self._verbosity(verbose):
+            steady = self._steady(wavelength)
+            thermal = self._thermal()
         solver = self.solver
         result = steady.result
         shifter = result.phase_shifter
@@ -328,7 +368,7 @@ class Simulation:
             phase_shifter=shifter,
             phase_rad=phase,
             steady_phase_rad=steady_phase,
-            temperature_k={
+            temperature_rise_k={
                 name: history.values[:, i + 1] for i, name in enumerate(strips)
             },
             tau_us=rise_time_10_90(history.time_us, phase),
@@ -337,6 +377,28 @@ class Simulation:
 
     # ------------------------------------------------------------------ internals
 
+    @contextmanager
+    def _verbosity(self, verbose: bool) -> Generator[None]:
+        """Let the meshes built inside print gmsh's progress."""
+        self._verbose = bool(verbose)
+        try:
+            yield
+        finally:
+            self._verbose = False
+
+    def _resolve_stack(self) -> Any:
+        """The geometry's stack as a LayerStack, read from a path or the PDK."""
+        from gsim.common.stack import LayerStack, get_stack
+
+        stack = self.geometry.stack
+        if isinstance(stack, LayerStack):
+            return stack
+        if stack is None:
+            return get_stack(
+                include_substrate=True, substrate_thickness=_PDK_SUBSTRATE_DEPTH_UM
+            )
+        return get_stack(yaml_path=stack)
+
     def _steady_inputs(self) -> Any:
         """Snapshot of everything the meshes and the steady solve use."""
         component = self.geometry.component
@@ -344,7 +406,7 @@ class Simulation:
             (
                 Same(component),
                 component_digest(component),
-                self.geometry.stack,
+                self._resolved_stack,
                 self.domain,
                 self.heater,
                 list(self.waveguides),
@@ -357,6 +419,7 @@ class Simulation:
     def _sync(self) -> None:
         """Check the setup; forget the kept solves if an input changed."""
         self._require_setup()
+        self._resolved_stack = self._resolve_stack()
         inputs = self._steady_inputs()
         if inputs != self._fingerprint:
             self._cache.clear()
@@ -367,7 +430,6 @@ class Simulation:
         """Raise naming the first concern a solve still needs."""
         missing = [
             (self.geometry.component is None, "sim.geometry(component, stack=stack)"),
-            (self.geometry.stack is None, "sim.geometry(stack=stack)"),
             (self.domain.plane is None, "sim.domain(plane='x=<um>')"),
             (not self.heater.layers, "sim.heater(layers=..., length_um=...)"),
             (self.heater.length_um is None, "sim.heater(length_um=...)"),
@@ -388,8 +450,8 @@ class Simulation:
 
     @property
     def _stack(self) -> Any:
-        """The stack, once :meth:`_require_setup` has seen it."""
-        return self.geometry.stack
+        """The resolved stack, once :meth:`_sync` has read it."""
+        return self._resolved_stack
 
     def _section(self) -> list[Any]:
         """The drawn rectangles of the cut, one per layer interval."""
@@ -460,21 +522,34 @@ class Simulation:
     def _mesh_sizes(
         self, rects: list[Any], extent: float
     ) -> tuple[dict[str, float], float]:
-        """Per-Region and coarse element sizes for the solver's precision."""
-        f = self.solver.size_factor
+        """Per-Region and coarse element sizes for the solver's settings.
+
+        The preset scales the defaults; ``max_mesh_size_um`` caps every
+        size, ``refined_mesh_size_um`` sets the heater conductors and the
+        waveguide cores, and ``region_mesh_size_um`` wins over both.
+        """
+        solver = self.solver
+        f = solver.size_factor
         coarse = f * extent / _COARSE_DIVISIONS
+        if solver.max_mesh_size_um is not None:
+            coarse = min(coarse, float(solver.max_mesh_size_um))
         sizes: dict[str, float] = {}
         for r in rects:
             own = f * min(r.h1 - r.h0, r.v1 - r.v0) / _FEATURE_DIVISIONS
             sizes[r.group] = min(sizes.get(r.group, coarse), own, coarse)
-        sizes.update(self.solver.mesh_size_um)
+        if solver.refined_mesh_size_um is not None:
+            fine = {*self.heater.layers, *(s.layer for s in self._strips().values())}
+            refined = float(solver.refined_mesh_size_um)
+            for group in fine & set(sizes):
+                sizes[group] = refined
+        sizes.update(solver.region_mesh_size_um)
         return sizes, coarse
 
-    def _thermal(self) -> _Thermal:
-        """The thermal mesh and its rise per unit power per length (kept)."""
-        key = ("thermal",)
+    def _thermal_mesh(self) -> CrossSectionMesh:
+        """The thermal mesh of the cut (kept)."""
+        key = ("mesh",)
         if key in self._cache:
-            return cast("_Thermal", self._cache[key])
+            return cast("CrossSectionMesh", self._cache[key])
         rects = self._section()
         drawn = {r.group for r in rects}
         absent = [name for name in self.heater.layers if name not in drawn]
@@ -490,7 +565,7 @@ class Simulation:
                 f"{sorted(set(self.heater.layers) - set(absent))} "
                 "carry the heater current there.",
                 UserWarning,
-                stacklevel=4,
+                skip_file_prefixes=_SKIP_FRAMES,
             )
         h0 = min(r.h0 for r in rects)
         h1 = max(r.h1 for r in rects)
@@ -505,7 +580,17 @@ class Simulation:
             depth=self.domain.depth_um,
             max_size=sizes,
             default_max_size=coarse,
+            verbose=self._verbose,
         )
+        self._cache[key] = mesh
+        return mesh
+
+    def _thermal(self) -> _Thermal:
+        """The thermal mesh and its rise per unit power per length (kept)."""
+        key = ("thermal",)
+        if key in self._cache:
+            return cast("_Thermal", self._cache[key])
+        mesh = self._thermal_mesh()
         regions = mesh.element_region
         k_by_region: dict[str, float] = {}
         sigma_by_region: dict[str, float] = {}
@@ -653,6 +738,7 @@ class Simulation:
             z_range=z_range,
             max_size=sizes,
             default_max_size=coarse,
+            verbose=self._verbose,
         )
         eps = epsilon_by_region(
             mesh.msh_path,
@@ -715,7 +801,7 @@ class Simulation:
             "independent of temperature. Set it with sim.materials[name] = "
             "{'dn_dT': ...} if they carry optical field.",
             UserWarning,
-            stacklevel=5,
+            skip_file_prefixes=_SKIP_FRAMES,
         )
 
     def _heat_capacity(self, mesh: CrossSectionMesh) -> NDArray[np.float64]:
