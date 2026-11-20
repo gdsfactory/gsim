@@ -1,6 +1,6 @@
-# Carrier-depletion phase shifters: V<sub>π</sub>L and loss
+# Carrier-depletion phase shifters: VπL and loss
 
-How to get the modulation efficiency V<sub>π</sub>L and the free-carrier loss of a lateral PN-junction phase shifter, and
+How to get the modulation efficiency VπL and the free-carrier loss of a lateral PN-junction phase shifter, and
 what to check before quoting them.
 
 ## When to use / solver and why
@@ -12,8 +12,8 @@ This workflow is a chain of cross-section solves. All of them run locally and no
 2. **Carriers to material properties.** Closed-form plasma-dispersion and mobility models in `gsim.common.carriers` turn each
    carrier map into an index shift Δn, an absorption Δα and an RF conductivity.
 3. **Optical mode against bias.** `gsim.femwell`, a local finite-element mode solver, solves the guided mode on a mesh with
-   the carrier-dependent permittivity, giving a complex n<sub>eff</sub> per bias. It has no API guide page yet.
-4. **Figures of merit.** `gsim.common.twmzm.vpi_length_vcm` turns n<sub>eff</sub>(V) into V<sub>π</sub>L. The
+   the carrier-dependent permittivity, giving a complex n_eff per bias. It has no API guide page yet.
+4. **Figures of merit.** `gsim.common.twmzm.vpi_length_vcm` turns n_eff(V) into VπL. The
    travelling-wave modulator report in `gsim.common.twmzm_report` adds the RF line.
 
 TCAD and the mode solver are optional extras: `pip install "gsim[tcad,femwell]"`. A thermal phase shifter is a different
@@ -133,23 +133,23 @@ Without mesh grading, the mesh refines along every internal curve, and the eleme
    Running the PN junction notebook's setup and sweep cells in this checkout (gsim 0.10.0, DEVSIM, five biases from 0 to 2 V)
    gave a largest relative deviation of 2.8 %, at 0 V, and 0.5 % to 1.0 % at the other four biases. This was measured while
    writing this page, on one Windows machine, and is not a stored result. Rerun it before quoting it.
-2. **Direction of the effect.** C(V) must fall and n<sub>eff</sub> must rise with reverse bias. The notebook reports that
-   carriers leave the centre of the mode, so n<sub>eff</sub> rises and the loss falls with bias. `carrier_index_shift` returns
+2. **Direction of the effect.** C(V) must fall and n_eff must rise with reverse bias. The notebook reports that
+   carriers leave the centre of the mode, so n_eff rises and the loss falls with bias. `carrier_index_shift` returns
    a negative Δn for positive carrier densities (`gsim.common.carriers`).
 3. **Is the window large enough?** `boundary_field_ratio(mode)` is the peak boundary field over the peak field. The notebook
    asserts it is below 0.01. A larger value means the window truncates the mode.
 4. **Depletion edge resolution.** Hold the mesh fine over the strip the depletion edges sweep, using a refinement box, and
-   repeat the sweep with a finer box. If C(V) or Δn<sub>eff</sub> moves, the mesh was too coarse. Δn<sub>eff</sub> is a small
+   repeat the sweep with a finer box. If C(V) or Δn_eff moves, the mesh was too coarse. Δn_eff is a small
    difference of two large numbers, so the carrier map must be resolved, not averaged. As an illustration, the same five-bias
    sweep without the refinement box above gave capacitances between 2.5 % below and 6.9 % above the boxed run, with the sign
    changing along the sweep (two local runs while writing this page, same caveat as in check 1).
-5. **Mesh independence of n<sub>eff</sub>.** Repeat the mode solve on a second optical mesh. The femwell order is 2 by default;
-   at order 1 the femwell and Palace n<sub>eff</sub> differed by about 9e-3 on the same mesh in the project's cross-check
+5. **Mesh independence of n_eff.** Repeat the mode solve on a second optical mesh. The femwell order is 2 by default;
+   at order 1 the femwell and Palace n_eff differed by about 9e-3 on the same mesh in the project's cross-check
    (see [validation](validation.md)).
-6. **Units of the figures of merit.** V<sub>π</sub>L = λ / (2 |dΔn<sub>eff</sub>/dV|), divided by 10<sup>4</sup> to turn V·µm
-   into V·cm (`vpi_length_vcm`). Power loss is 4π |Im n<sub>eff</sub>| / λ per unit length, or 10 log<sub>10</sub>(e) times that
-   in dB. Under femwell's exp(+iωt) convention a lossy mode has Im n<sub>eff</sub> < 0, so use the magnitude. As an
-   arithmetic check, a slope of 1e-5 per volt at 1.55 µm gives 7.75 V·cm, and |Im n<sub>eff</sub>| = 1e-4 at 1.55 µm gives
+6. **Units of the figures of merit.** VπL = λ / (2 |dΔn_eff/dV|), divided by 10⁴ to turn V·µm
+   into V·cm (`vpi_length_vcm`). Power loss is 4π |Im n_eff| / λ per unit length, or 10 log₁₀(e) times that
+   in dB. Under femwell's exp(+iωt) convention a lossy mode has Im n_eff < 0, so use the magnitude. As an
+   arithmetic check, a slope of 1e-5 per volt at 1.55 µm gives 7.75 V·cm, and |Im n_eff| = 1e-4 at 1.55 µm gives
    8.1 cm⁻¹, or 35.2 dB/cm. `vpi_length_vcm` reproduced the first number, and the loss formula in the notebook matches the
    second, in a local check.
 
@@ -170,7 +170,7 @@ Without mesh grading, the mesh refines along every internal curve, and the eleme
 - **Regions must be declared.** Contacts, interfaces and insulators are declared, never inferred from the stack. Two touching
   doped regions without an interface are refused.
 - **Window wall.** The optical window wall is a perfect conductor in the notebook. A window that is too small changes
-  n<sub>eff</sub> without an error. Check the boundary field ratio.
+  n_eff without an error. Check the boundary field ratio.
 
 ## Examples
 

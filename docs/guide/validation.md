@@ -9,20 +9,58 @@ one.
 
 ## 1. One solver against another
 
-| Evidence | Compared | Stated result | Does not show |
-| --- | --- | --- | --- |
-| [FDTD benchmark](../fdtd-benchmark.md) | GDSFactory FDTD, a commercial CPU solver, a commercial GPU solver and Meep on a 20 µm silicon directional coupler with a 236 nm gap and SiO<sub>2</sub> cladding (geometry from a published study) | At 1550 nm, 39.1 % cross and 60.9 % through transmission, each within 0.7 percentage points of the commercial CPU result | Agreement with a measurement. The solver outputs and scripts behind the charts are not in this repository, only the charts and the page text. One device, one wavelength is quoted |
-| `tests/femwell/test_cross_validation.py` | femwell against Palace `BoundaryModeSim` on the same mesh and the same materials: n<sub>eff</sub> of a silicon strip at 1.55 µm, and the complex n<sub>eff</sub> with a conductive core | Test bound 1e-3 relative. The test's comments record 4.1e-5 (optical) and 2.9e-4 (conductive core) as measured on that mesh, and 9e-3 for femwell at order 1 | Agreement with the drawn device: both solvers get the same mesh and materials, so a shared mesh error cancels. It needs a Palace binary and femwell, carries the `palace_local` marker, is excluded from the default test run, and no workflow in `.github/workflows` selects it |
+Each entry gives what was compared, the result it states, and what it does not show.
+
+- **[FDTD benchmark](../fdtd-benchmark.md)**
+  - *Compared:* GDSFactory FDTD, a commercial CPU solver, a commercial GPU solver and Meep on a 20 µm silicon directional
+    coupler with a 236 nm gap and SiO₂ cladding (geometry from a published study).
+  - *Stated result:* At 1550 nm, 39.1 % cross and 60.9 % through transmission, each within 0.7 percentage points of the
+    commercial CPU result.
+  - *Does not show:* Agreement with a measurement. The solver outputs and scripts behind the charts are not in this
+    repository, only the charts and the page text. One device, one wavelength is quoted.
+- **`tests/femwell/test_cross_validation.py`**
+  - *Compared:* femwell against Palace `BoundaryModeSim` on the same mesh and the same materials: n_eff of a silicon strip at
+    1.55 µm, and the complex n_eff with a conductive core.
+  - *Stated result:* Test bound 1e-3 relative. The test's comments record 4.1e-5 (optical) and 2.9e-4 (conductive core) as
+    measured on that mesh, and 9e-3 for femwell at order 1.
+  - *Does not show:* Agreement with the drawn device: both solvers get the same mesh and materials, so a shared mesh error
+    cancels. It needs a Palace binary and femwell, carries the `palace_local` marker, is excluded from the default test run,
+    and no workflow in `.github/workflows` selects it.
 
 ## 2. A solver against an analytic reference
 
-| Evidence | Compared | Stated result | Does not show |
-| --- | --- | --- | --- |
-| [Magnetostatic inductance notebook](../nbs/palace_magnetostatic.md) | Palace `MagnetostaticSim` against closed-form self and mutual inductance of two concentric rings, and against a ribbon-bundle reference computed without finite elements | The notebook asserts agreement with the closed forms within 2 % and states agreement with the ribbon bundle within 1 %. It says the 1 % bound was set after the runs, so it acts as a regression gate. Run with Palace v0.18.1 at order 2 | Thin rings only. A 2 % bound is the test tolerance, not the observed error. The notebook states the errors shrink with mesh refinement, and come from below |
-| `tests/tcad/test_solve_runtime.py` (marker `tcad_local`; run by the TCAD workflow) | TCAD small-signal C(V) against the abrupt-junction depletion approximation (Sze), on a 1e18 / 1e18 cm<sup>-3</sup> junction at 0, 0.5 and 1 V | The test accepts a largest relative deviation of 0.35 | A tight match. 0.35 is a loose bound that allows for oxide fringing. A separate test checks that C scales as the square root of the permittivity |
-| [PN junction notebook](../nbs/tcad_pn_junction.md) | The same comparison on its own device, five biases from 0 to 2 V, no oxide in the Poisson solve | Not stored. Running its setup and sweep cells while writing this guide gave a largest deviation of 2.8 % (at 0 V) and 0.5 % to 1.0 % at the other biases, with gsim 0.10.0 on one Windows machine | A converged result. A coarser mesh without the notebook's refinement box moved the capacitance by up to 6.9 % in the same check. Rerun to confirm |
-| `tests/femwell/test_z0_extraction.py` | femwell power-current Z<sub>0</sub> against the analytic impedance of a coaxial line, copper inner conductor and perfect inner conductor | Test bounds 8 % (copper, measured 3.2 % high per the test comment) and 1 % (perfect conductor). The comments say order 1 reads 8 % to 29 % high on the perfect-conductor mesh, against within 0.4 % at order 2 | A planar line such as a CPW. The check is on a coax |
-| Time convention of the FDTD export ([FDTD guide](../api/fdtd.md#export-to-sax-and-touchstone)) | Phase of a 10 µm silicon straight waveguide against a separate mode solver | A delay of 139 fs against 137 fs from the group index | One device. The guide says so, and `s_matrix` warns when a negative group delay appears |
+Each entry gives what was compared, the result it states, and what it does not show.
+
+- **[Magnetostatic inductance notebook](../nbs/palace_magnetostatic.md)**
+  - *Compared:* Palace `MagnetostaticSim` against closed-form self and mutual inductance of two concentric rings, and
+    against a ribbon-bundle reference computed without finite elements.
+  - *Stated result:* The notebook asserts agreement with the closed forms within 2 % and states agreement with the ribbon
+    bundle within 1 %. It says the 1 % bound was set after the runs, so it acts as a regression gate. Run with Palace v0.18.1
+    at order 2.
+  - *Does not show:* Anything beyond thin rings. A 2 % bound is the test tolerance, not the observed error. The notebook
+    states the errors shrink with mesh refinement, and come from below.
+- **`tests/tcad/test_solve_runtime.py`** (marker `tcad_local`; run by the TCAD workflow)
+  - *Compared:* TCAD small-signal C(V) against the abrupt-junction depletion approximation (Sze), on a 1e18 / 1e18 cm⁻³
+    junction at 0, 0.5 and 1 V.
+  - *Stated result:* The test accepts a largest relative deviation of 0.35.
+  - *Does not show:* A tight match. 0.35 is a loose bound that allows for oxide fringing. A separate test checks that C
+    scales as the square root of the permittivity.
+- **[PN junction notebook](../nbs/tcad_pn_junction.md)**
+  - *Compared:* The same comparison on its own device, five biases from 0 to 2 V, no oxide in the Poisson solve.
+  - *Stated result:* Not stored. Running its setup and sweep cells while writing this guide gave a largest deviation of
+    2.8 % (at 0 V) and 0.5 % to 1.0 % at the other biases, with gsim 0.10.0 on one Windows machine.
+  - *Does not show:* A converged result. A coarser mesh without the notebook's refinement box moved the capacitance by up to
+    6.9 % in the same check. Rerun to confirm.
+- **`tests/femwell/test_z0_extraction.py`**
+  - *Compared:* femwell power-current Z₀ against the analytic impedance of a coaxial line, copper inner conductor and
+    perfect inner conductor.
+  - *Stated result:* Test bounds 8 % (copper, measured 3.2 % high per the test comment) and 1 % (perfect conductor). The
+    comments say order 1 reads 8 % to 29 % high on the perfect-conductor mesh, against within 0.4 % at order 2.
+  - *Does not show:* A planar line such as a CPW. The check is on a coax.
+- **Time convention of the FDTD export** ([FDTD guide](../api/fdtd.md#export-to-sax-and-touchstone))
+  - *Compared:* Phase of a 10 µm silicon straight waveguide against a separate mode solver.
+  - *Stated result:* A delay of 139 fs against 137 fs from the group index.
+  - *Does not show:* More than one device. The guide says so, and `s_matrix` warns when a negative group delay appears.
 
 ## 3. Checks of post-processing, not of the solver
 
@@ -64,7 +102,7 @@ and the notebook that reads it (`nbs/ihp_l2n0_openems_validation.ipynb`) is not 
 - Waveguide group index and loss from femwell against a measurement or an analytic waveguide.
 - CPW and microstrip impedance and loss from Palace against a closed-form line or a measurement.
 - Resonant frequency and Q of superconducting resonators against a measurement or an analytic resonator.
-- Free-carrier effects (n<sub>eff</sub> shift, V<sub>π</sub>L) against measured modulators. The TCAD checks above cover capacitance
+- Free-carrier effects (n_eff shift, VπL) against measured modulators. The TCAD checks above cover capacitance
   only.
 - Thermal effects. gsim has no thermal solver; see [thermal tuning](thermal-tuning.md).
 

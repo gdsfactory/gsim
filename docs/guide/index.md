@@ -11,7 +11,7 @@ Start with [choosing a solver](choosing-a-solver.md) if you do not yet know whic
 | Task | Solver | Page |
 | --- | --- | --- |
 | S-parameters of a directional coupler, MMI or Y-branch | GDSFactory FDTD | [Couplers and MMIs](couplers-and-mmis.md) |
-| Carrier-depletion phase shifter: V<sub>π</sub>L and loss | TCAD (DEVSIM) and femwell | [Phase shifters](phase-shifters.md) |
+| Carrier-depletion phase shifter: VπL and loss | TCAD (DEVSIM) and femwell | [Phase shifters](phase-shifters.md) |
 | Frequency and Q of a superconducting coplanar resonator | Palace eigenmode and driven | [Superconducting resonators](superconducting-resonators.md) |
 | Thermal tuning | Not covered | [Thermal tuning](thermal-tuning.md) |
 
@@ -24,7 +24,7 @@ Start with [choosing a solver](choosing-a-solver.md) if you do not yet know whic
 
 These have no guide page. The existing material is:
 
-- **Waveguide mode, n<sub>eff</sub> and loss.** The local mode solver `gsim.femwell` is used in step 3 of the
+- **Waveguide mode, n_eff and loss.** The local mode solver `gsim.femwell` is used in step 3 of the
   [travelling-wave MZM notebook](../nbs/tcad_twmzm.md). It has no API guide page yet.
 - **Ring resonators.** No example exists. The S-matrix export that a ring model would use is described in the
   [FDTD guide](../api/fdtd.md#export-to-sax-and-touchstone).
