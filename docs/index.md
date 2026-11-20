@@ -119,8 +119,8 @@ pip install "gsim[femwell]"  # femwell and scikit-fem, for the mode solver
 
 ## API guides
 
-[GDSFactory FDTD](api/fdtd.md) · [Meep](api/meep.md) · [Palace](api/palace.md) · [TCAD](api/tcad.md) · [Common](api/common.md) ·
-[Cloud](api/cloud.md)
+[GDSFactory FDTD](api/fdtd.md) · [Meep](api/meep.md) · [Palace](api/palace.md) · [TCAD](api/tcad.md) · [femwell](api/femwell.md) ·
+[Common](api/common.md) · [Cloud](api/cloud.md)
 
 ## API reference
 
