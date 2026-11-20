@@ -18,7 +18,7 @@ Example::
     sim.heater(layers="heater", length_um=320.0)
     sim.waveguides.add(name="arm", position_um=0.0)
     result = sim.solve(wavelength_um=1.55)
-    step = sim.solve_transient(power_mw=result.p_pi, duration_us=60.0)
+    step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
 
 Underneath is a pure functional core, public for custom pipelines:
 :func:`build_cross_section_mesh`, :func:`solve_steady`,

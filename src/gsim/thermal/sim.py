@@ -249,7 +249,10 @@ class Simulation:
         The phase over time comes from first-order perturbation of the
         phase shifter's Mode by the temperature history, scaled so that
         its steady value matches the steady Mode re-solve. The ``solver``
-        concern sets the time stepping.
+        concern sets the time stepping: ``duration_us / steps`` is the time
+        step, and the default backward Euler scheme reads ``tau_us`` and
+        ``tau_1e_us`` long by about half of it (``theta=0.5`` removes that
+        bias).
 
         Args:
             power_mw: Total heater power stepped on (mW).

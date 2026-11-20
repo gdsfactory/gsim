@@ -657,7 +657,9 @@ def solve_transient(
         steps: Number of time steps, >= 1.
         theta: 1.0 for backward Euler (default, robust for a step
             drive), 0.5 for Crank-Nicolson (second order, may ring at
-            the step); must lie in [0.5, 1].
+            the step); must lie in [0.5, 1]. Backward Euler is first
+            order: it delays a step response by about ``dt / 2``, so a
+            time constant read from it is long by about that much.
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0.
         convective: Facet group name -> h (W/(m²·K)) of a Robin condition.

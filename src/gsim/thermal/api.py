@@ -387,7 +387,10 @@ class Solver(MutableModel):
         time_steps: Number of constant transient time steps, overriding
             the precision.
         theta: Time scheme of the transient: 1.0 backward Euler (robust
-            for a step drive), 0.5 Crank-Nicolson.
+            for a step drive), 0.5 Crank-Nicolson. Backward Euler reads
+            time constants long by about half a time step
+            (``duration_us / steps / 2``); Crank-Nicolson has no such
+            first-order bias.
     """
 
     precision: Literal["fast", "default", "accurate"] = "default"

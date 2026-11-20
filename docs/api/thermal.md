@@ -120,7 +120,9 @@ the default boundary.
   does not depend on it. `optical_order=1 | 2` sets the finite element order of the optical Mode solves (default 2, as
   in the femwell adapter). On femwell's TiN heater, P_π at order 2 moves by 0.02 % from `"fast"` to `"accurate"`
   precision, against 0.6 % at order 1, for about 3 times the solve time. `theta` picks the time scheme: 1 (backward
-  Euler, default) or 0.5 (Crank-Nicolson).
+  Euler, default) or 0.5 (Crank-Nicolson). Backward Euler delays the step response by about half a time step
+  (`duration_us / time_steps / 2`), so its `tau_us` and `tau_1e_us` read long by that much: 0.125 µs at the default 400
+  steps over 100 µs. Crank-Nicolson removes that bias; more steps shrink it.
 
 ## Results
 

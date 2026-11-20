@@ -230,8 +230,11 @@ class StepResponse:
             over time (K), by waveguide name.
         tau_us: 10-90 % rise time of the phase (us), the usual measured
             switching time.
-        tau_1e_us: Time to reach 1 - 1/e (63 %) of the steady phase (us),
-            for comparison with papers that quote a 1/e time constant.
+        tau_1e_us: Time for the phase to cover 1 - 1/e (63 %) of its
+            change from the first to the last sample (us), for comparison
+            with papers that quote a 1/e time constant. The last sample,
+            not ``steady_phase_rad``, is the 100 % mark, so a step that
+            has not settled reads short (``solve_transient`` warns).
     """
 
     time_us: NDArray[np.float64] = field(repr=False)
