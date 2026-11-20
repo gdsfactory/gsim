@@ -38,12 +38,16 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_magnetostatic.ipynb",
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
+    "nbs/palace_bj2012_electrode.ipynb",
+    "nbs/tcad_bj2012_modulator.ipynb",
     "nbs/palace_cpw_deembedding.ipynb",
     "nbs/palace_signal_integrity.ipynb",
     "nbs/palace_terminal_waveport.ipynb",
     "nbs/palace_terminal_waveport_gssg.ipynb",
     "nbs/tcad_pn_junction.ipynb",
     "nbs/tcad_twmzm.ipynb",
+    "nbs/palace_bj2012_electrode_details.ipynb",
+    "nbs/tcad_bj2012_modulator_details.ipynb",
 ]
 
 

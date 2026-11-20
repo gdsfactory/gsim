@@ -1,0 +1,27 @@
+{
+  "case": "cst-cpw",
+  "title": "Palace against CST on a public coplanar waveguide",
+  "status": "planned",
+  "device": {
+    "name": "a public CPW, to be chosen",
+    "picture": null,
+    "geometry_source": null
+  },
+  "reference": {
+    "type": "solver",
+    "citation": "CST Studio Suite, same geometry and stack",
+    "file": null
+  },
+  "planned": {
+    "owner": "CST runs via Vahid; Palace runs by the gsim team",
+    "device": "to be agreed with Vahid (a public coplanar waveguide on an open PDK stack)",
+    "quantities": [
+      "S21 magnitude, 1 to 50 GHz",
+      "S21 phase, 1 to 50 GHz",
+      "Z0",
+      "effective permittivity"
+    ],
+    "note": "No runs yet. Rows are added with full provenance (versions, mesh, hardware)."
+  },
+  "rows": []
+}
