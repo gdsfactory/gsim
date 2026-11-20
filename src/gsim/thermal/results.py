@@ -54,17 +54,17 @@ _UM_TO_M = 1e-6
 _MW_TO_W = 1e-3
 
 
-def power_per_length(power_mW: float, length_um: float) -> float:
+def power_per_length(power_mw: float, length_um: float) -> float:
     """Heater power per unit length (W/m) of a total power over a length.
 
     Args:
-        power_mW: Total heater power (mW).
+        power_mw: Total heater power (mW).
         length_um: Heater length (um).
 
     Returns:
         P / L in W/m.
     """
-    return power_mW * _MW_TO_W / (length_um * _UM_TO_M)
+    return power_mw * _MW_TO_W / (length_um * _UM_TO_M)
 
 
 def _absolute(ambient_k: float | None) -> float:
@@ -485,8 +485,8 @@ class ThermalResult:
         length_m = self.length_um * _UM_TO_M
         per_length = drive_power_per_length(
             self.resistance_ohm / length_m,
-            voltage_V=voltage_v,
-            current_A=current_a,
+            voltage_v=voltage_v,
+            current_a=current_a,
             length_um=self.length_um,
         )
         return per_length * length_m / _MW_TO_W

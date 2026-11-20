@@ -657,7 +657,7 @@ def test_drive_power_from_a_voltage_or_a_current(femwell_result):
 def test_drive_power_per_length_is_public():
     from gsim.thermal import drive_power_per_length
 
-    assert drive_power_per_length(1.0, current_A=2.0) == pytest.approx(4.0)
+    assert drive_power_per_length(1.0, current_a=2.0) == pytest.approx(4.0)
 
 
 # --------------------------------------------------------------- materials

@@ -520,7 +520,7 @@ class Simulation:
         sigma = np.array([sigma_by_region[r] for r in regions])
         heater_mask = np.isin(regions, self.heater.layers)
         joule = joule_heat_density(
-            sigma, heater_mask, _element_areas(mesh), power_per_length_W_per_m=1.0
+            sigma, heater_mask, _element_areas(mesh), power_per_length_w_per_m=1.0
         )
         convective = self.boundary.convective_edges()
         operator = HeatOperator(

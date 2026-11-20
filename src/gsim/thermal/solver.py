@@ -225,11 +225,11 @@ def _element_array(name: str, values: ArrayLike, n: int | None) -> NDArray:
 
 
 def joule_heat_density(
-    conductivity_S_per_m: ArrayLike,
+    conductivity_s_per_m: ArrayLike,
     heater_mask: ArrayLike,
     element_area_um2: ArrayLike,
     *,
-    power_per_length_W_per_m: float,
+    power_per_length_w_per_m: float,
 ) -> JouleSource:
     """Spread a heater's power per length over its conductors.
 
@@ -241,11 +241,11 @@ def joule_heat_density(
     their conductance.
 
     Args:
-        conductivity_S_per_m: Electrical conductivity per element (S/m).
+        conductivity_s_per_m: Electrical conductivity per element (S/m).
             Only elements in ``heater_mask`` are used.
         heater_mask: Boolean per element, True on the heater conductors.
         element_area_um2: Area of each element (µm²).
-        power_per_length_W_per_m: Dissipated power per unit heater
+        power_per_length_w_per_m: Dissipated power per unit heater
             length (W/m), >= 0.
 
     Returns:
@@ -256,14 +256,14 @@ def joule_heat_density(
         ValueError: On shape mismatches, a negative power or area, or a
             heater with no positive conductance.
     """
-    sigma = _element_array("conductivity_S_per_m", conductivity_S_per_m, None)
+    sigma = _element_array("conductivity_s_per_m", conductivity_s_per_m, None)
     n = sigma.shape[0]
     mask = _element_array("heater_mask", heater_mask, n).astype(bool)
     area = _element_array("element_area_um2", element_area_um2, n).astype(float)
-    if not np.isfinite(power_per_length_W_per_m) or power_per_length_W_per_m < 0:
+    if not np.isfinite(power_per_length_w_per_m) or power_per_length_w_per_m < 0:
         raise ValueError(
-            f"power_per_length_W_per_m must be finite and >= 0, "
-            f"got {power_per_length_W_per_m}"
+            f"power_per_length_w_per_m must be finite and >= 0, "
+            f"got {power_per_length_w_per_m}"
         )
     if np.any(area < 0) or np.any(sigma[mask] < 0):
         raise ValueError("element areas and heater conductivities must be >= 0")
@@ -273,7 +273,7 @@ def joule_heat_density(
             "heater has no conductance: the heater mask selects no element "
             "with positive conductivity and area"
         )
-    field = float(np.sqrt(power_per_length_W_per_m / conductance))
+    field = float(np.sqrt(power_per_length_w_per_m / conductance))
     q = np.where(mask, sigma * field**2, 0.0).astype(float)
     return JouleSource(
         heat_density=q,
@@ -285,10 +285,10 @@ def joule_heat_density(
 def drive_power_per_length(
     resistance_per_length_ohm_per_m: float,
     *,
-    power_per_length_W_per_m: float | None = None,
-    power_W: float | None = None,
-    voltage_V: float | None = None,
-    current_A: float | None = None,
+    power_per_length_w_per_m: float | None = None,
+    power_w: float | None = None,
+    voltage_v: float | None = None,
+    current_a: float | None = None,
     length_um: float | None = None,
 ) -> float:
     """Convert one heater drive into dissipated power per length (W/m).
@@ -299,10 +299,10 @@ def drive_power_per_length(
     Args:
         resistance_per_length_ohm_per_m: Heater R' (ohm/m), e.g. from
             :func:`joule_heat_density`.
-        power_per_length_W_per_m: Drive given directly as P/L (W/m).
-        power_W: Total dissipated power (W); needs ``length_um``.
-        voltage_V: Voltage across the heater (V); needs ``length_um``.
-        current_A: Current through the heater (A).
+        power_per_length_w_per_m: Drive given directly as P/L (W/m).
+        power_w: Total dissipated power (W); needs ``length_um``.
+        voltage_v: Voltage across the heater (V); needs ``length_um``.
+        current_a: Current through the heater (A).
         length_um: Heater length (µm).
 
     Returns:
@@ -313,10 +313,10 @@ def drive_power_per_length(
             that needs ``length_um`` lacks a positive one.
     """
     drives = {
-        "power_per_length_W_per_m": power_per_length_W_per_m,
-        "power_W": power_W,
-        "voltage_V": voltage_V,
-        "current_A": current_A,
+        "power_per_length_w_per_m": power_per_length_w_per_m,
+        "power_w": power_w,
+        "voltage_v": voltage_v,
+        "current_a": current_a,
     }
     given = [name for name, value in drives.items() if value is not None]
     if len(given) != 1:
@@ -325,17 +325,17 @@ def drive_power_per_length(
         )
     if not resistance_per_length_ohm_per_m > 0:
         raise ValueError("resistance_per_length_ohm_per_m must be > 0")
-    if power_per_length_W_per_m is not None:
-        return float(power_per_length_W_per_m)
-    if current_A is not None:
-        return float(current_A**2 * resistance_per_length_ohm_per_m)
+    if power_per_length_w_per_m is not None:
+        return float(power_per_length_w_per_m)
+    if current_a is not None:
+        return float(current_a**2 * resistance_per_length_ohm_per_m)
     if length_um is None or not length_um > 0:
         raise ValueError(f"drive {given[0]} needs a positive length_um")
     length_m = length_um * 1e-6
-    if power_W is not None:
-        return float(power_W / length_m)
+    if power_w is not None:
+        return float(power_w / length_m)
     return float(
-        cast("float", voltage_V) ** 2 / (resistance_per_length_ohm_per_m * length_m**2)
+        cast("float", voltage_v) ** 2 / (resistance_per_length_ohm_per_m * length_m**2)
     )
 
 
@@ -388,7 +388,7 @@ class HeatOperator:
 
     Args:
         mesh: Triangle mesh, coordinates in µm.
-        conductivity_W_per_mK: Thermal conductivity per element
+        conductivity_w_per_mk: Thermal conductivity per element
             (W/(m·K)), > 0.
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0 (heat sink).
@@ -409,7 +409,7 @@ class HeatOperator:
     def __init__(
         self,
         mesh: MeshTri,
-        conductivity_W_per_mK: ArrayLike,
+        conductivity_w_per_mk: ArrayLike,
         *,
         boundary_facets: Mapping[str, ArrayLike],
         sink: str | Sequence[str] = "bottom",
@@ -426,10 +426,10 @@ class HeatOperator:
         self.degree = degree
         self.n_elements = int(mesh.t.shape[1])
         k = _element_array(
-            "conductivity_W_per_mK", conductivity_W_per_mK, self.n_elements
+            "conductivity_w_per_mk", conductivity_w_per_mk, self.n_elements
         ).astype(float)
         if not np.all(np.isfinite(k)) or np.any(k <= 0):
-            raise ValueError("conductivity_W_per_mK must be finite and > 0")
+            raise ValueError("conductivity_w_per_mk must be finite and > 0")
 
         n_facets = int(mesh.facets.shape[1])
         sink_facets = [
@@ -502,13 +502,13 @@ class HeatOperator:
         """
         return matrix[self.free_dofs][:, self.free_dofs].tocsc()
 
-    def mass_matrix(self, heat_capacity_J_per_m3K: ArrayLike) -> Any:
+    def mass_matrix(self, heat_capacity_j_per_m3k: ArrayLike) -> Any:
         """Assemble the consistent heat-capacity matrix.
 
         The matrix is ``integral of rho*c_p phi_i phi_j``.
 
         Args:
-            heat_capacity_J_per_m3K: Volumetric heat capacity rho*c_p per
+            heat_capacity_j_per_m3k: Volumetric heat capacity rho*c_p per
                 element (J/(m³·K)), > 0.
 
         Returns:
@@ -518,19 +518,19 @@ class HeatOperator:
             ValueError: On a shape mismatch or a non-positive value.
         """
         rho_cp = _element_array(
-            "heat_capacity_J_per_m3K", heat_capacity_J_per_m3K, self.n_elements
+            "heat_capacity_j_per_m3k", heat_capacity_j_per_m3k, self.n_elements
         ).astype(float)
         if not np.all(np.isfinite(rho_cp)) or np.any(rho_cp <= 0):
-            raise ValueError("heat_capacity_J_per_m3K must be finite and > 0")
+            raise ValueError("heat_capacity_j_per_m3k must be finite and > 0")
         return self._mass_form.assemble(
             self._basis, c=self._p0_basis.interpolate(rho_cp * _RHOCP_SI_TO_UM)
         ).tocsr()
 
-    def load_vector(self, heat_W_per_m3: ArrayLike) -> NDArray[np.float64]:
+    def load_vector(self, heat_w_per_m3: ArrayLike) -> NDArray[np.float64]:
         """Assemble the load ``integral of q phi_j`` (W/µm) of a per-element q.
 
         Args:
-            heat_W_per_m3: Volumetric heat per element (W/m³).
+            heat_w_per_m3: Volumetric heat per element (W/m³).
 
         Returns:
             The load vector, one entry per DOF, in the internal µm units.
@@ -538,17 +538,17 @@ class HeatOperator:
         Raises:
             ValueError: On a shape mismatch or non-finite values.
         """
-        q = _element_array("heat_W_per_m3", heat_W_per_m3, self.n_elements)
+        q = _element_array("heat_w_per_m3", heat_w_per_m3, self.n_elements)
         q = q.astype(float)
         if not np.all(np.isfinite(q)):
-            raise ValueError("heat_W_per_m3 must be finite")
+            raise ValueError("heat_w_per_m3 must be finite")
         return self._load @ (q * _Q_SI_TO_UM)
 
-    def solve(self, heat_W_per_m3: ArrayLike) -> NDArray[np.float64]:
+    def solve(self, heat_w_per_m3: ArrayLike) -> NDArray[np.float64]:
         """Steady temperature rise for one heat source.
 
         Args:
-            heat_W_per_m3: Volumetric heat per element (W/m³), e.g.
+            heat_w_per_m3: Volumetric heat per element (W/m³), e.g.
                 :attr:`JouleSource.heat_density`.
 
         Returns:
@@ -556,7 +556,7 @@ class HeatOperator:
             vertex values, aligned with the columns of ``mesh.p``.
             Exactly zero on the sink DOFs.
         """
-        load = self.load_vector(heat_W_per_m3)
+        load = self.load_vector(heat_w_per_m3)
         if self._lu is None:
             self._lu = _factorise(self.restrict(self.stiffness))
         rise = np.zeros(self.n_dofs)
@@ -566,8 +566,8 @@ class HeatOperator:
 
 def solve_steady(
     mesh: MeshTri,
-    conductivity_W_per_mK: ArrayLike,
-    heat_W_per_m3: ArrayLike,
+    conductivity_w_per_mk: ArrayLike,
+    heat_w_per_m3: ArrayLike,
     *,
     boundary_facets: Mapping[str, ArrayLike],
     sink: str | Sequence[str] = "bottom",
@@ -581,8 +581,8 @@ def solve_steady(
 
     Args:
         mesh: Triangle mesh, coordinates in µm.
-        conductivity_W_per_mK: Thermal conductivity per element (W/(m·K)).
-        heat_W_per_m3: Volumetric heat per element (W/m³).
+        conductivity_w_per_mk: Thermal conductivity per element (W/(m·K)).
+        heat_w_per_m3: Volumetric heat per element (W/m³).
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0.
         convective: Facet group name -> h (W/(m²·K)) of a Robin condition.
@@ -594,13 +594,13 @@ def solve_steady(
     """
     operator = HeatOperator(
         mesh,
-        conductivity_W_per_mK,
+        conductivity_w_per_mk,
         boundary_facets=boundary_facets,
         sink=sink,
         convective=convective,
         degree=degree,
     )
-    return operator.solve(heat_W_per_m3)
+    return operator.solve(heat_w_per_m3)
 
 
 # --- Transient solve ----------------------------------------------------------
@@ -624,9 +624,9 @@ class TransientHistory:
 
 def solve_transient(
     mesh: MeshTri,
-    conductivity_W_per_mK: ArrayLike,
-    heat_capacity_J_per_m3K: ArrayLike,
-    heat_W_per_m3: ArrayLike,
+    conductivity_w_per_mk: ArrayLike,
+    heat_capacity_j_per_m3k: ArrayLike,
+    heat_w_per_m3: ArrayLike,
     *,
     duration_us: float,
     steps: int,
@@ -649,10 +649,10 @@ def solve_transient(
 
     Args:
         mesh: Triangle mesh, coordinates in µm.
-        conductivity_W_per_mK: Thermal conductivity per element (W/(m·K)).
-        heat_capacity_J_per_m3K: Volumetric heat capacity rho*c_p per
+        conductivity_w_per_mk: Thermal conductivity per element (W/(m·K)).
+        heat_capacity_j_per_m3k: Volumetric heat capacity rho*c_p per
             element (J/(m³·K)).
-        heat_W_per_m3: Volumetric heat per element while on (W/m³).
+        heat_w_per_m3: Volumetric heat per element while on (W/m³).
         duration_us: Simulated time (µs), > 0.
         steps: Number of time steps, >= 1.
         theta: 1.0 for backward Euler (default, robust for a step
@@ -683,14 +683,14 @@ def solve_transient(
         raise ValueError(f"theta must lie in [0.5, 1] (0.5 = CN, 1 = BE), got {theta}")
     operator = HeatOperator(
         mesh,
-        conductivity_W_per_mK,
+        conductivity_w_per_mk,
         boundary_facets=boundary_facets,
         sink=sink,
         convective=convective,
         degree=degree,
     )
-    mass = operator.mass_matrix(heat_capacity_J_per_m3K)
-    load = operator.load_vector(heat_W_per_m3)[operator.free_dofs]
+    mass = operator.mass_matrix(heat_capacity_j_per_m3k)
+    load = operator.load_vector(heat_w_per_m3)[operator.free_dofs]
     record = _sampler(sample, operator.n_dofs)
 
     dt_s = duration_us * 1e-6 / steps

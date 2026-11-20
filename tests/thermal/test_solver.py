@@ -18,7 +18,7 @@ def test_joule_single_tin_strip_matches_femwell_example_resistance():
     sigma = np.array([2.3e6, 0.0])
     mask = np.array([True, False])
     area = np.array([0.28, 5.0])
-    src = joule_heat_density(sigma, mask, area, power_per_length_W_per_m=85.0)
+    src = joule_heat_density(sigma, mask, area, power_per_length_w_per_m=85.0)
     assert src.resistance_per_length * 320e-6 == pytest.approx(497, rel=2e-3)
     # Heat per length integrates back to the drive; nothing outside the heater.
     assert np.sum(src.heat_density * area * 1e-12) == pytest.approx(85.0, rel=1e-12)
@@ -32,7 +32,7 @@ def test_joule_two_conductors_split_power_by_conductance():
     sigma = np.array([1e6, 3e6, 3e6, 1e3])
     mask = np.array([True, True, True, False])
     area = np.array([1.0, 1.0, 1.0, 4.0])
-    src = joule_heat_density(sigma, mask, area, power_per_length_W_per_m=70.0)
+    src = joule_heat_density(sigma, mask, area, power_per_length_w_per_m=70.0)
     power_a = src.heat_density[0] * 1e-12
     power_b = np.sum(src.heat_density[1:3]) * 1e-12
     assert power_a == pytest.approx(10.0)
@@ -46,41 +46,41 @@ def test_joule_two_conductors_split_power_by_conductance():
 def test_drive_conversions_to_power_per_length():
     r_per_len = 1e6  # ohm/m ; L = 100 um -> R = 100 ohm
     assert drive_power_per_length(
-        r_per_len, power_W=0.02, length_um=100.0
+        r_per_len, power_w=0.02, length_um=100.0
     ) == pytest.approx(200.0)
     # V = 1 V over 100 ohm -> 10 mW over 100 um -> 100 W/m.
     assert drive_power_per_length(
-        r_per_len, voltage_V=1.0, length_um=100.0
+        r_per_len, voltage_v=1.0, length_um=100.0
     ) == pytest.approx(100.0)
     # I = 10 mA: P/L = I^2 R' = 1e-4 * 1e6 = 100 W/m (no length needed).
-    assert drive_power_per_length(r_per_len, current_A=0.01) == pytest.approx(100.0)
+    assert drive_power_per_length(r_per_len, current_a=0.01) == pytest.approx(100.0)
     assert drive_power_per_length(
-        r_per_len, power_per_length_W_per_m=5.0
+        r_per_len, power_per_length_w_per_m=5.0
     ) == pytest.approx(5.0)
 
 
 def test_drive_requires_exactly_one_drive_and_a_length_where_needed():
     with pytest.raises(ValueError, match="exactly one"):
-        drive_power_per_length(1e6, power_W=1.0, current_A=1.0, length_um=1.0)
+        drive_power_per_length(1e6, power_w=1.0, current_a=1.0, length_um=1.0)
     with pytest.raises(ValueError, match="exactly one"):
         drive_power_per_length(1e6)
     with pytest.raises(ValueError, match="length_um"):
-        drive_power_per_length(1e6, voltage_V=1.0)
+        drive_power_per_length(1e6, voltage_v=1.0)
 
 
 def test_joule_rejects_bad_inputs():
     area = np.ones(2)
     with pytest.raises(ValueError, match="shape"):
         joule_heat_density(
-            np.ones(3), np.ones(2, bool), area, power_per_length_W_per_m=1.0
+            np.ones(3), np.ones(2, bool), area, power_per_length_w_per_m=1.0
         )
     with pytest.raises(ValueError, match="conductance"):
         joule_heat_density(
-            np.zeros(2), np.ones(2, bool), area, power_per_length_W_per_m=1.0
+            np.zeros(2), np.ones(2, bool), area, power_per_length_w_per_m=1.0
         )
     with pytest.raises(ValueError, match="power"):
         joule_heat_density(
-            np.ones(2), np.ones(2, bool), area, power_per_length_W_per_m=-1.0
+            np.ones(2), np.ones(2, bool), area, power_per_length_w_per_m=-1.0
         )
 
 
