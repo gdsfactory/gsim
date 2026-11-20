@@ -62,6 +62,7 @@ from gsim.common.modes import z0_power_current as common_z0
 from gsim.common.stack.materials import (
     MaterialProperties,
     ResolvedMaterial,
+    _normalize_material_keys,
     region_material_map,
     resolve_stack_material,
 )
@@ -126,6 +127,10 @@ def epsilon_by_region(
         frequency_hz: Target frequency in Hz (RF). Exactly one of
             ``wavelength_um`` / ``frequency_hz`` must be given.
         overrides: Optional material-property overrides by material name.
+            Names match the stack's materials ignoring case; if two
+            overrides differ only in case the last one wins. A name that
+            matches no region's material warns once, listing the names
+            in use.
 
     Returns:
         ``{region_name: complex_relative_permittivity}`` for every dim-2
@@ -148,12 +153,27 @@ def epsilon_by_region(
         raise ValueError("Mesh has no 2D physical groups.")
 
     materials = region_material_map(stack, regions)
-    stack_materials = dict(stack.materials or {})
+
+    # Material names match ignoring case and surrounding whitespace, as in the
+    # Palace and meep paths: an override spelled "aluminum" reaches a stack
+    # material named "Aluminum". Two overrides differing only in case: the
+    # last one wins (with a warning); an override naming no region material
+    # warns once, listing the names in use.
+    overrides_by_name = _normalize_material_keys(
+        dict(overrides or {}),
+        used_names=set(materials.values()),
+        label="overrides",
+    )
+    stack_by_name = {
+        str(name).lower().strip(): entry
+        for name, entry in (stack.materials or {}).items()
+    }
 
     result: dict[str, complex] = {}
     for region in regions:
         material = materials[region]
-        entry = (overrides or {}).get(material, stack_materials.get(material))
+        key = material.lower().strip()
+        entry = overrides_by_name.get(key, stack_by_name.get(key))
         resolved = resolve_stack_material(material, entry, wavelength)
         if resolved is None:
             raise ValueError(
