@@ -139,7 +139,7 @@ def solver_settings(sim: Simulation, **settings):
 
 @pytest.fixture(scope="module")
 def canonical():
-    """The canonical script of ticket 06, on a TiN heater with a neighbour."""
+    """The documented end-to-end script, on a TiN heater with a neighbour."""
     sim = Simulation()
     sim.geometry(heater_over_strip(neighbour=5.0), stack=femwell_stack())
     sim.domain(plane="x=0", window=(-15.0, 15.0))
