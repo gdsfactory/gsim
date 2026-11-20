@@ -36,7 +36,7 @@ sim.waveguides.add(name="arm", position_um=0.0)
 sim.mesh().plot()  # optional: look at the cut and its mesh first
 
 result = sim.solve(wavelength_um=1.55)
-step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
+step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=300.0)
 result.report(step)  # P_pi, efficiency, R, V_pi, peak heater rise, tau
 ```
 
@@ -92,9 +92,12 @@ given power.
 - `domain(...)`: `plane`, the cut (`"x=<um>"` or `"y=<um>"`), across the heater and the waveguides; `window`, the
   in-plane `(min, max)` extent of the thermal Window in µm; `depth_um`, the Modelled depth.
 - `heater(...)`: `layers`, the stack layer name(s) of the heater conductors; `length_um`, the heater length.
-- `waveguides`: `add(name=, position_um=, layer=None, window=None, polarization="TE")`, `remove(name)`,
-  `sim.waveguides[name]`, iteration. The first waveguide added is the phase shifter (`waveguides.phase_shifter`); every
-  other one is a crosstalk victim. Each gets its own optical window around its drawn core.
+- `waveguides`: `add(name=, position_um=, layer=None, window=None, z_range=None, polarization="TE")`,
+  `remove(name)`, `sim.waveguides[name]`, iteration. The first waveguide added is the phase shifter
+  (`waveguides.phase_shifter`); every other one is a crosstalk victim. Each gets its own optical window around its
+  drawn core: by default 1.5 µm beyond the core at each side and 2 µm above and below. `window` and `z_range` set its
+  lateral and vertical extent, for a Mode that reaches further (a warning names the Window when the Mode's field at
+  its edge is too strong).
 - `materials`: per-run overrides, `sim.materials["tin"] = {"conductivity": 1.6e6}`, keyed on the material name
   (case-insensitive). The fields are `thermal_conductivity`, `specific_heat`, `mass_density`, `dn_dT`, `conductivity`
   (electrical), `permittivity` and `loss_tangent`.
@@ -108,9 +111,13 @@ device, and are worth a convergence check:
 - **Window** (`domain.window`): the in-plane extent. Its sides are adiabatic, so make the half-width at least five times
   the oxide thickness between the heater and the substrate.
 - **Modelled depth** (`domain.depth_um`): how much substrate lies under the stack. Its bottom is the heat sink, at
-  ambient. A 2D section has no steady state without a sink at a finite distance. The temperature rise also grows slowly
-  (as a logarithm) with depth, because a 2D model cannot spread heat along the heater the way the real chip does. The
-  default is the stack's substrate thickness.
+  ambient. A 2D section has no steady state without a sink at a finite distance, and a 2D model cannot spread heat
+  along the heater the way the real chip does, so the temperature rise keeps growing with depth. How fast depends on
+  the Window. While the Window is wider than the depth, heat spreads sideways and the rise grows as a logarithm of the
+  depth, slowly. Once the depth exceeds the Window, the adiabatic sides confine the heat to a column and the rise grows
+  in proportion to the depth. P_π therefore depends on the Window and the depth together: on the default PDK stack
+  (100 µm of substrate), a Window of ±30 µm gives 17.41 mW and ±120 µm gives 17.84 mW. The default depth is the
+  stack's substrate thickness; check P_π against both.
 
 A material override keys on the material name, so every layer made of that material changes. To give the 220 nm core a
 thin-film conductivity without changing the bulk substrate, give the core its own material name in the stack. The
@@ -125,15 +132,17 @@ the default boundary.
   `mesh_preset="coarse" | "default" | "fine"` scales the mesh and sets the number of transient time steps (200, 400,
   1000). `refined_mesh_size_um` sets the element size in the heater conductors and the waveguide cores,
   `max_mesh_size_um` caps it everywhere, and `region_mesh_size_um` sets it per region, winning over both.
-  `time_steps` overrides the step count.
+  `time_steps` overrides the step count. The steps are graded: short after switch-on, where the response changes
+  fastest, and doubling in length over eight equal blocks, so one setting serves any duration long enough to settle.
   `degree=1 | 2 | 3` sets the Lagrange element degree of the heat solve (default 2). On the same mesh, degree 2 cuts
   the temperature error of degree 1 by about two orders of magnitude for a similar solve time. The optical Mode solve
   does not depend on it. `optical_order=1 | 2` sets the finite element order of the optical Mode solves (default 2, as
   in the femwell adapter). On femwell's TiN heater, P_π at order 2 moves by 0.02 % from the `"coarse"` to the `"fine"`
   mesh preset, against 0.6 % at order 1, for about 3 times the solve time. `theta` picks the time scheme: 1 (backward
-  Euler, default) or 0.5 (Crank-Nicolson). Backward Euler delays the step response by about half a time step
-  (`duration_us / time_steps / 2`), so its `tau_us` and `tau_1e_us` read long by that much: 0.125 µs at the default 400
-  steps over 100 µs. Crank-Nicolson removes that bias; more steps shrink it.
+  Euler, default) or 0.5 (Crank-Nicolson). Backward Euler delays the step response by about half the time step in use,
+  so its `tau_us` and `tau_1e_us` read long by that much: on the quick-start heater over 300 µs, `tau_1e_us` is
+  14.44 µs, against 14.39 µs with Crank-Nicolson. `solve_transient` warns when the delay exceeds 2 % of `tau_1e_us`;
+  more steps, a shorter duration or Crank-Nicolson shrink it.
 
 ## Results
 
@@ -163,8 +172,8 @@ These lower-level building blocks are public for custom pipelines. They work on 
 
 - [`build_cross_section_mesh`][gsim.thermal.build_cross_section_mesh] and
   [`CrossSectionMesh`][gsim.thermal.CrossSectionMesh]
-- [`solve_steady`][gsim.thermal.solve_steady], [`solve_transient`][gsim.thermal.solve_transient] and
-  [`HeatOperator`][gsim.thermal.HeatOperator]
+- [`solve_steady`][gsim.thermal.solve_steady], [`solve_transient`][gsim.thermal.solve_transient],
+  [`graded_times`][gsim.thermal.graded_times] and [`HeatOperator`][gsim.thermal.HeatOperator]
 - [`joule_heat_density`][gsim.thermal.joule_heat_density] and
   [`drive_power_per_length`][gsim.thermal.drive_power_per_length]
 - [`thermo_optic_permittivity`][gsim.thermal.thermo_optic_permittivity],

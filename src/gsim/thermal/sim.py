@@ -81,6 +81,7 @@ from gsim.thermal.results import (
 from gsim.thermal.solver import (
     HeatOperator,
     JouleSource,
+    graded_times,
     joule_heat_density,
     rise_time_10_90,
     solve_transient,
@@ -90,12 +91,15 @@ from gsim.thermal.solver import (
 __all__ = ["Simulation"]
 
 # Optical Window around a waveguide: enough oxide for a 500 x 220 nm Si
-# strip's TE0 tail to fall below MAX_BOUNDARY_RATIO at its edges.
+# strip's TE0 and TM0 tails to fall below MAX_BOUNDARY_RATIO at its edges
+# (TM0 reaches further above and below the core than TE0).
 _OPTICAL_MARGIN_LATERAL_UM = 1.5
-_OPTICAL_MARGIN_VERTICAL_UM = 1.0
+_OPTICAL_MARGIN_VERTICAL_UM = 2.0
 _FEATURE_DIVISIONS = 4.0
 _COARSE_DIVISIONS = 10.0
 _SETTLED_FRACTION = 0.99
+# Largest backward Euler delay, as a fraction of tau_1e, solved without a warning.
+_MAX_TIME_STEP_BIAS = 0.02
 _EPS0 = 8.8541878128e-12
 _C0 = 299792458.0
 
@@ -177,7 +181,7 @@ class Simulation:
         >>> sim.heater(layers="heater", length_um=320.0)
         >>> sim.waveguides.add(name="arm", position_um=0.0)
         >>> result = sim.solve(wavelength_um=1.55)
-        >>> step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
+        >>> step = sim.solve_transient(power_mw=result.p_pi_mw, duration_us=300.0)
 
     :meth:`solve` gives the steady figures (P_pi, crosstalk, resistance,
     V_pi, temperature field) and :meth:`solve_transient` the switching
@@ -286,10 +290,13 @@ class Simulation:
         The phase over time comes from first-order perturbation of the
         phase shifter's Mode by the temperature history, scaled so that
         its steady value matches the steady Mode re-solve. The ``solver``
-        concern sets the time stepping: ``duration_us / steps`` is the time
-        step, and the default backward Euler scheme reads ``tau_us`` and
-        ``tau_1e_us`` long by about half of it (``theta=0.5`` removes that
-        bias).
+        concern sets the number of time steps; they are graded
+        (:func:`~gsim.thermal.graded_times`): short after switch-on, where
+        the response changes fastest, and doubling in length seven times
+        towards ``duration_us``. The default backward Euler scheme reads
+        ``tau_us`` and ``tau_1e_us`` long by about half the step in use at
+        that time; the result warns when that exceeds 2 % of ``tau_1e_us``
+        (``theta=0.5`` removes the bias).
 
         Args:
             power_mw: Total heater power stepped on (mW).
@@ -333,8 +340,7 @@ class Simulation:
             thermal.conductivity,
             self._heat_capacity(thermal.mesh),
             thermal.joule.heat_density * drive,
-            duration_us=duration,
-            steps=solver.steps,
+            time_us=graded_times(duration, solver.steps),
             theta=solver.theta,
             boundary_facets=thermal.mesh.boundary_facets,
             sink="bottom",
@@ -362,6 +368,8 @@ class Simulation:
                 UserWarning,
                 stacklevel=2,
             )
+        tau_1e = time_constant_1e(history.time_us, phase)
+        self._warn_time_step_bias(history.time_us, tau_1e)
         return StepResponse(
             time_us=history.time_us,
             power_mw=power,
@@ -372,8 +380,23 @@ class Simulation:
                 name: history.values[:, i + 1] for i, name in enumerate(strips)
             },
             tau_us=rise_time_10_90(history.time_us, phase),
-            tau_1e_us=time_constant_1e(history.time_us, phase),
+            tau_1e_us=tau_1e,
         )
+
+    def _warn_time_step_bias(self, time_us: NDArray[np.float64], tau_1e: float) -> None:
+        """Warn when backward Euler's delay of half a step biases tau_1e."""
+        theta = self.solver.theta
+        step = float(np.diff(time_us)[np.searchsorted(time_us, tau_1e) - 1])
+        bias = (theta - 0.5) * step
+        if bias > _MAX_TIME_STEP_BIAS * tau_1e:
+            warnings.warn(
+                f"The time step near tau_1e ({step:.3g} us) delays the step "
+                f"response by about {bias:.2g} us, {bias / tau_1e:.1%} of "
+                f"tau_1e: raise solver.time_steps, shorten duration_us, or set "
+                "solver.theta=0.5.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     # ------------------------------------------------------------------ internals
 
@@ -697,7 +720,7 @@ class Simulation:
             strip.h0 - _OPTICAL_MARGIN_LATERAL_UM,
             strip.h1 + _OPTICAL_MARGIN_LATERAL_UM,
         )
-        vertical = (
+        vertical = spec.z_range or (
             strip.v0 - _OPTICAL_MARGIN_VERTICAL_UM,
             strip.v1 + _OPTICAL_MARGIN_VERTICAL_UM,
         )

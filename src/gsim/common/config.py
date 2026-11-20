@@ -160,7 +160,7 @@ def component_digest(component: Any) -> Any:
     """The drawn polygons of a component, so an edit in place is seen."""
     try:
         polygons = component.get_polygons_points(by="tuple")
-    except Exception:
+    except AttributeError:  # not a gdsfactory component: compared by identity
         return None
     digest = hashlib.sha256()
     for layer in sorted(polygons, key=repr):

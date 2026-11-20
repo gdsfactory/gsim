@@ -628,8 +628,9 @@ def solve_transient(
     heat_capacity_j_per_m3k: ArrayLike,
     heat_w_per_m3: ArrayLike,
     *,
-    duration_us: float,
-    steps: int,
+    duration_us: float | None = None,
+    steps: int | None = None,
+    time_us: ArrayLike | None = None,
     theta: float = 1.0,
     boundary_facets: Mapping[str, ArrayLike],
     sink: str | Sequence[str] = "bottom",
@@ -640,9 +641,11 @@ def solve_transient(
     """Temperature-rise response to a heat source stepped on at t = 0.
 
     Theta-scheme on ``M d(dT)/dt + K dT = F`` from dT = 0, with F constant for
-    t > 0 and a constant step ``dt = duration / steps``, so one
-    ``splu`` factorisation of ``M/dt + theta*K`` serves every step:
-    ``(M/dt + theta*K) dT_next = (M/dt - (1-theta)K) dT + F``. Boundary conditions
+    t > 0: ``(M/dt + theta*K) dT_next = (M/dt - (1-theta)K) dT + F``. The
+    time grid is either ``steps`` constant steps over ``duration_us`` or
+    the given ``time_us`` (e.g. :func:`graded_times`); one ``splu``
+    factorisation of ``M/dt + theta*K`` serves every step of the same
+    length. Boundary conditions
     are those of :class:`HeatOperator`. In this linear model the fall
     response after switching off from steady state is the complement of
     the rise, so one run gives both.
@@ -653,13 +656,16 @@ def solve_transient(
         heat_capacity_j_per_m3k: Volumetric heat capacity rho*c_p per
             element (J/(m³·K)).
         heat_w_per_m3: Volumetric heat per element while on (W/m³).
-        duration_us: Simulated time (µs), > 0.
-        steps: Number of time steps, >= 1.
+        duration_us: Simulated time (µs), > 0, with ``steps``.
+        steps: Number of constant time steps, >= 1, with ``duration_us``.
+        time_us: Sample times (µs) instead of ``duration_us`` and
+            ``steps``: strictly increasing, from 0.
         theta: 1.0 for backward Euler (default, robust for a step
             drive), 0.5 for Crank-Nicolson (second order, may ring at
             the step); must lie in [0.5, 1]. Backward Euler is first
             order: it delays a step response by about ``dt / 2``, so a
-            time constant read from it is long by about that much.
+            time constant read from it is long by about half the step
+            in use at that time.
         boundary_facets: Named facet groups, indices into ``mesh.facets``.
         sink: Facet group name(s) held at dT = 0.
         convective: Facet group name -> h (W/(m²·K)) of a Robin condition.
@@ -674,13 +680,9 @@ def solve_transient(
 
     Raises:
         ValueError: On invalid materials, boundaries (see
-            :class:`HeatOperator`), duration, steps, theta or sample
-            weights.
+            :class:`HeatOperator`), time grid, theta or sample weights.
     """
-    if not np.isfinite(duration_us) or duration_us <= 0:
-        raise ValueError(f"duration_us must be finite and > 0, got {duration_us}")
-    if int(steps) != steps or steps < 1:
-        raise ValueError(f"steps must be an integer >= 1, got {steps}")
+    times = _time_grid(duration_us, steps, time_us)
     if not 0.5 <= theta <= 1.0:
         raise ValueError(f"theta must lie in [0.5, 1] (0.5 = CN, 1 = BE), got {theta}")
     operator = HeatOperator(
@@ -695,23 +697,94 @@ def solve_transient(
     load = operator.load_vector(heat_w_per_m3)[operator.free_dofs]
     record = _sampler(sample, operator.n_dofs)
 
-    dt_s = duration_us * 1e-6 / steps
-    mass_free = operator.restrict(mass) / dt_s
+    mass_free = operator.restrict(mass)
     stiff_free = operator.restrict(operator.stiffness)
-    lu = _factorise((mass_free + theta * stiff_free).tocsc())
-    explicit = (mass_free - (1.0 - theta) * stiff_free).tocsr()
+    steppers: dict[float, tuple[Any, Any]] = {}
+
+    def stepper(dt_us: float) -> tuple[Any, Any]:
+        """The factorised implicit and the explicit matrix for one step length."""
+        if dt_us not in steppers:
+            m = mass_free / (dt_us * 1e-6)
+            steppers[dt_us] = (
+                _factorise((m + theta * stiff_free).tocsc()),
+                (m - (1.0 - theta) * stiff_free).tocsr(),
+            )
+        return steppers[dt_us]
 
     rise = np.zeros(operator.n_dofs)
     free = np.zeros(operator.free_dofs.size)
     history = [record(rise)]
-    for _ in range(int(steps)):
+    for dt_us in np.diff(times):
+        lu, explicit = stepper(float(dt_us))
         free = lu.solve(explicit @ free + load)
         rise[operator.free_dofs] = free
         history.append(record(rise))
-    return TransientHistory(
-        time_us=np.linspace(0.0, duration_us, int(steps) + 1, dtype=np.float64),
-        values=np.asarray(history, dtype=float),
-    )
+    return TransientHistory(time_us=times, values=np.asarray(history, dtype=float))
+
+
+def _time_grid(
+    duration_us: float | None, steps: int | None, time_us: ArrayLike | None
+) -> NDArray[np.float64]:
+    """The transient's sample times from either form of the time grid."""
+    if time_us is not None:
+        if duration_us is not None or steps is not None:
+            raise ValueError("give either time_us or duration_us and steps, not both")
+        times = np.asarray(time_us, dtype=np.float64)
+        if (
+            times.ndim != 1
+            or times.size < 2
+            or times[0] != 0.0
+            or not np.all(np.isfinite(times))
+            or np.any(np.diff(times) <= 0)
+        ):
+            raise ValueError(
+                "time_us must be a 1D array of at least 2 finite, strictly "
+                "increasing times starting at 0"
+            )
+        return times
+    if duration_us is None or steps is None:
+        raise ValueError("give duration_us and steps, or time_us")
+    if not np.isfinite(duration_us) or duration_us <= 0:
+        raise ValueError(f"duration_us must be finite and > 0, got {duration_us}")
+    if int(steps) != steps or steps < 1:
+        raise ValueError(f"steps must be an integer >= 1, got {steps}")
+    return np.linspace(0.0, duration_us, int(steps) + 1, dtype=np.float64)
+
+
+def graded_times(
+    duration_us: float, steps: int, *, blocks: int = 8
+) -> NDArray[np.float64]:
+    """Step-response sample times that start fine and coarsen as it settles.
+
+    ``steps`` time steps over ``duration_us`` in ``blocks`` blocks of
+    equal step count; the step length doubles from one block to the
+    next. A step response changes fastest just after switch-on, so the
+    early steps set the accuracy of its time constants, and one grid
+    then serves any duration long enough to settle. Each block costs one
+    factorisation in :func:`solve_transient`.
+
+    Args:
+        duration_us: Simulated time (µs), > 0.
+        steps: Number of time steps, >= ``blocks``.
+        blocks: Number of blocks, >= 1; 1 gives constant steps.
+
+    Returns:
+        ``steps + 1`` times from 0 to ``duration_us``.
+
+    Raises:
+        ValueError: On a non-positive duration or too few steps.
+    """
+    if not np.isfinite(duration_us) or duration_us <= 0:
+        raise ValueError(f"duration_us must be finite and > 0, got {duration_us}")
+    if int(blocks) != blocks or blocks < 1:
+        raise ValueError(f"blocks must be an integer >= 1, got {blocks}")
+    if int(steps) != steps or steps < blocks:
+        raise ValueError(f"steps must be an integer >= blocks ({blocks}), got {steps}")
+    counts = np.full(int(blocks), int(steps) // int(blocks))
+    counts[: int(steps) % int(blocks)] += 1
+    lengths = np.repeat(2.0 ** np.arange(int(blocks)), counts)
+    times = np.concatenate([[0.0], np.cumsum(lengths)])
+    return times * (duration_us / times[-1])
 
 
 def _sampler(
@@ -730,6 +803,30 @@ def _sampler(
             f"got {weights.shape}"
         )
     return lambda rise: float(weights @ rise)
+
+
+def step_crossing_time(t: ArrayLike, y: ArrayLike, level: float) -> float:
+    """First time a step response covers a fraction of its change.
+
+    The response is rescaled to run from 0 at its first sample to 1 at its
+    last; the crossing is linearly interpolated between samples.
+
+    Args:
+        t: Sample times (any unit; the result has the same unit).
+        y: Response values, same length as ``t``.
+        level: Fraction of the change, in [0, 1].
+
+    Returns:
+        The first time the rescaled response reaches ``level``.
+
+    Raises:
+        ValueError: On mismatched shapes, a response with no net change or
+            a level outside [0, 1].
+    """
+    if not 0.0 <= level <= 1.0:
+        raise ValueError(f"level must lie in [0, 1], got {level}")
+    t_arr, s = _normalised_step(t, y)
+    return _crossing_time(t_arr, s, level)
 
 
 def _crossing_time(t: NDArray, s: NDArray, level: float) -> float:

@@ -366,7 +366,8 @@ def solve_thermo_optic_shift(
             f"The Mode's field at the optical Window edge is {ratio:.2g} of "
             f"its peak (above {MAX_BOUNDARY_RATIO:g}): the optical Window "
             f"(window {optical_mesh.window}, z_range {optical_mesh.z_range}) "
-            "is too small for the Mode and truncates it. Enlarge it.",
+            "is too small for the Mode and truncates it. Enlarge it (in "
+            "thermal.Simulation: the waveguide's window and z_range).",
             UserWarning,
             stacklevel=2,
         )

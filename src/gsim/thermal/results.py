@@ -32,12 +32,11 @@ from numpy.typing import ArrayLike, NDArray
 
 from gsim.thermal.optical import sample_temperature
 from gsim.thermal.solver import (
-    _crossing_time,
-    _normalised_step,
     drive_power_per_length,
     element_dofs,
     lagrange_degree,
     piecewise_linear,
+    step_crossing_time,
 )
 
 if TYPE_CHECKING:
@@ -259,13 +258,15 @@ class StepResponse:
 
         if ax is None:
             _, ax = plt.subplots()
-        t, s = _normalised_step(self.time_us, self.phase_rad)
         start, span = self.phase_rad[0], self.phase_rad[-1] - self.phase_rad[0]
         levels = np.array([0.1, 0.9])
         ax.plot(self.time_us, self.phase_rad, label=self.phase_shifter)
         ax.axhline(self.steady_phase_rad, color="0.6", linestyle=":", label="steady")
         ax.plot(
-            [_crossing_time(t, s, level) for level in levels],
+            [
+                step_crossing_time(self.time_us, self.phase_rad, level)
+                for level in levels
+            ],
             start + levels * span,
             "o",
             color="C1",

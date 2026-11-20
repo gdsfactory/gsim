@@ -357,6 +357,76 @@ def test_transient_rejects_bad_inputs(kwargs, match):
         )
 
 
+def test_graded_times_double_the_step_per_block_and_end_at_the_duration():
+    from gsim.thermal.solver import graded_times
+
+    t = graded_times(255.0, 16, blocks=8)
+    assert t.shape == (17,)
+    assert t[0] == 0.0
+    assert t[-1] == pytest.approx(255.0)
+    np.testing.assert_allclose(np.diff(t), np.repeat(2.0 ** np.arange(8), 2) / 2)
+    np.testing.assert_allclose(
+        graded_times(10.0, 5, blocks=1), np.linspace(0.0, 10.0, 6)
+    )
+    with pytest.raises(ValueError, match="steps"):
+        graded_times(1.0, 3, blocks=8)
+
+
+def test_a_graded_grid_keeps_tau_1e_when_the_duration_is_far_too_long():
+    pytest.importorskip("skfem")
+    from gsim.thermal.solver import graded_times, solve_transient, time_constant_1e
+
+    mesh, facets, k, rc, q, top = _slab_problem()
+
+    def tau_1e(**grid):
+        hist = solve_transient(
+            mesh, k, rc, q, boundary_facets=facets, sample=top, **grid
+        )
+        return time_constant_1e(hist.time_us, hist.values)
+
+    reference = tau_1e(duration_us=6 * _TAU1_US, steps=800)
+    long = 30 * _TAU1_US
+    assert tau_1e(time_us=graded_times(long, 200)) == pytest.approx(reference, rel=0.02)
+    # The same 200 steps, constant, drift by about half a step (7 % here).
+    assert tau_1e(duration_us=long, steps=200) > 1.05 * reference
+
+
+@pytest.mark.parametrize(
+    ("grid", "match"),
+    [
+        ({"time_us": [0.0, 1.0], "steps": 2}, "not both"),
+        ({"time_us": [0.5, 1.0]}, "time_us"),
+        ({"time_us": [0.0, 1.0, 1.0]}, "time_us"),
+        ({}, "duration_us and steps"),
+    ],
+)
+def test_transient_rejects_an_ambiguous_or_bad_time_grid(grid, match):
+    pytest.importorskip("skfem")
+    from gsim.thermal.solver import solve_transient
+
+    mesh, facets = _slab(2.0, 2.0, 2, 2)
+    n = mesh.t.shape[1]
+    with pytest.raises(ValueError, match=match):
+        solve_transient(
+            mesh,
+            np.ones(n),
+            np.full(n, 1e6),
+            np.zeros(n),
+            boundary_facets=facets,
+            **grid,
+        )
+
+
+def test_step_crossing_time_interpolates_the_normalised_response():
+    from gsim.thermal.solver import step_crossing_time
+
+    t = np.array([0.0, 1.0, 2.0])
+    y = np.array([2.0, 4.0, 6.0])
+    assert step_crossing_time(t, y, 0.25) == pytest.approx(0.5)
+    with pytest.raises(ValueError, match="level"):
+        step_crossing_time(t, y, 1.5)
+
+
 # --- Element degree -----------------------------------------------------------
 
 

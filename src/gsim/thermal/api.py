@@ -195,7 +195,10 @@ class Waveguide(BaseModel):
             non-heater layers are drawn at ``position_um``.
         window: In-plane ``(min, max)`` extent of the optical Window in
             um. ``None`` takes the core's drawn rectangle plus 1.5 um each
-            side (and 1 um above and below), clipped to the thermal Window.
+            side, clipped to the thermal Window.
+        z_range: Vertical ``(min, max)`` extent of the optical Window in
+            um. ``None`` takes the core's drawn rectangle plus 2 um above
+            and below, clipped to the thermal Window.
         polarization: ``"TE"`` or ``"TM"`` fundamental Mode.
     """
 
@@ -205,6 +208,7 @@ class Waveguide(BaseModel):
     position_um: float
     layer: str | None = None
     window: AscendingInterval | None = None
+    z_range: AscendingInterval | None = None
     polarization: Literal["TE", "TM"] = "TE"
 
 
@@ -225,6 +229,7 @@ class Waveguides(NamedModels[Waveguide]):
         position_um: float,
         layer: str | None = None,
         window: tuple[float, float] | None = None,
+        z_range: tuple[float, float] | None = None,
         polarization: Literal["TE", "TM"] = "TE",
     ) -> Waveguide:
         """Add a waveguide at an in-plane position of the cut."""
@@ -234,6 +239,7 @@ class Waveguides(NamedModels[Waveguide]):
                 position_um=position_um,
                 layer=layer,
                 window=window,
+                z_range=z_range,
                 polarization=polarization,
             )
         )
@@ -404,13 +410,13 @@ class Solver(MutableModel):
         optical_order: Finite element order of the optical Mode solves:
             1 or 2. Order 2 converges faster under mesh refinement; order 1
             is cheaper per solve.
-        time_steps: Number of constant transient time steps, overriding
-            the preset.
+        time_steps: Number of transient time steps, overriding the
+            preset. The steps are graded: short after switch-on, doubling
+            in length over eight equal blocks.
         theta: Time scheme of the transient: 1.0 backward Euler (robust
             for a step drive), 0.5 Crank-Nicolson. Backward Euler reads
-            time constants long by about half a time step
-            (``duration_us / steps / 2``); Crank-Nicolson has no such
-            first-order bias.
+            time constants long by about half the time step in use at
+            that time; Crank-Nicolson has no such first-order bias.
     """
 
     mesh_preset: Literal["coarse", "default", "fine"] = "default"

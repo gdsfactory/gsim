@@ -259,8 +259,12 @@ K_OX = 1.38
 STRIP_W = 0.4
 
 
-def uniform_oxide_sim() -> Simulation:
-    """Uniform-k oxide over a sink, a thin strip heater on its top surface."""
+def uniform_oxide_sim(*, mirrored: bool = False) -> Simulation:
+    """Uniform-k oxide over a sink, a thin strip heater on its top surface.
+
+    ``mirrored`` adds a second core and waveguide, ``mirror``, at the
+    mirror image of the probe across the heater's centre line.
+    """
     gf.gpdk.PDK.activate()
     uniform = {"thermal_conductivity": K_OX, **_OX}
     materials = {
@@ -289,14 +293,18 @@ def uniform_oxide_sim() -> Simulation:
     sim.domain(plane="x=0", window=(-8 * H_OX, 8 * H_OX))
     sim.heater(layers="heater", length_um=100.0)
     sim.waveguides.add(name="probe", position_um=-6.0)
+    if mirrored:
+        _rect(c, 6.0, CORE_W, (1, 0))
+        sim.waveguides.add(name="mirror", position_um=6.0)
     return sim
 
 
 def strip_on_surface(x: float, power_per_length: float) -> float:
     """Surface rise of a strip heater on an adiabatic top over a sink.
 
-    The line-source result (P'/pi k) ln coth(pi x / 4H) of research/03
-    section 2.2, averaged over the strip width.
+    The line-source result (P'/pi k) ln coth(pi x / 4H), from the method of
+    images (a row of alternating images with period 4H) for an adiabatic top
+    a depth H above an isothermal sink, averaged over the strip width.
     """
 
     def line(s: float) -> float:
@@ -309,9 +317,64 @@ def strip_on_surface(x: float, power_per_length: float) -> float:
 
 
 @pytest.fixture(scope="module")
-def uniform_result() -> ThermalResult:
-    """The uniform-oxide sim solved at the default mesh preset."""
-    return uniform_oxide_sim().solve(wavelength_um=WAVELENGTH)
+def uniform_sim() -> Simulation:
+    """The uniform-oxide sim, solved at the default mesh preset."""
+    sim = uniform_oxide_sim()
+    sim.solve(wavelength_um=WAVELENGTH)
+    return sim
+
+
+@pytest.fixture(scope="module")
+def uniform_result(uniform_sim) -> ThermalResult:
+    """The uniform-oxide sim's result at the default mesh preset."""
+    return uniform_sim.solve(wavelength_um=WAVELENGTH)
+
+
+def test_the_heat_through_the_sink_is_the_heat_the_heater_injects(uniform_sim):
+    """Energy balance in SI units: every watt the heater injects leaves by the sink.
+
+    The top and sides are adiabatic, so the conductive flux k dT/dz across the
+    bottom, integrated along it from the gradient of the solved rise, must equal
+    the injected heat per length. Both are per unit drive (1 W/m), so this
+    checks the unit factors of the heat source, the conductivity and the mesh
+    lengths together.
+    """
+    import skfem
+
+    thermal = uniform_sim._thermal()
+    mesh = thermal.mesh
+    p, t = mesh.mesh.p, mesh.mesh.t
+    e1, e2 = p[:, t[1]] - p[:, t[0]], p[:, t[2]] - p[:, t[0]]
+    areas_um2 = np.abs(e1[0] * e2[1] - e1[1] * e2[0]) / 2.0
+    injected_w_per_m = float(np.sum(thermal.joule.heat_density * areas_um2)) * 1e-12
+    assert injected_w_per_m == pytest.approx(1.0, rel=1e-9)
+
+    basis = skfem.FacetBasis(
+        mesh.mesh,
+        skfem.ElementTriP2(),
+        facets=np.asarray(mesh.boundary_facets["bottom"]),
+    )
+
+    @skfem.Functional
+    def downward_flux(w):
+        return K_OX * w.u.grad[1]
+
+    # k in W/(m K) times dT/dz in K/um times a length in um: W/m.
+    sunk_w_per_m = downward_flux.assemble(basis, u=basis.interpolate(thermal.unit_rise))
+    assert sunk_w_per_m == pytest.approx(injected_w_per_m, rel=1e-3)
+
+
+def test_a_mirror_image_waveguide_sees_the_same_heating():
+    """The heater's centre line is a mirror plane of the section and its heat."""
+    sim = uniform_oxide_sim(mirrored=True)
+    result = sim.solve(wavelength_um=WAVELENGTH)
+    assert result.crosstalk_ratio["mirror"] == pytest.approx(1.0, rel=2e-3)
+    tmap = result.temperature(power_mw=1.0)
+    x = np.array([0.5, 1.0, 3.0, 6.0, 12.0])
+    for z in (1.0, 2.0, H_OX):
+        np.testing.assert_allclose(
+            tmap.at(x, np.full_like(x, z)), tmap.at(-x, np.full_like(x, z)), rtol=2e-3
+        )
 
 
 def test_surface_rise_matches_the_ln_coth_strip_solution(uniform_result):
@@ -429,6 +492,38 @@ def test_tau_is_stable_under_the_mesh_preset(canonical):
     with solver_settings(sim, mesh_preset="default"):
         finer = sim.solve_transient(power_mw=20.0, duration_us=60.0)
     assert finer.tau_us == pytest.approx(step.tau_us, rel=0.03)
+
+
+def test_tau_does_not_depend_on_a_duration_long_enough_to_settle(canonical):
+    sim, result, _step = canonical
+    taus = [
+        sim.solve_transient(power_mw=result.p_pi_mw, duration_us=d).tau_1e_us
+        for d in (60.0, 600.0)
+    ]
+    assert taus[1] == pytest.approx(taus[0], rel=0.01)
+
+
+def test_a_coarse_time_step_near_tau_warns_with_the_remedies(canonical):
+    sim, result, _step = canonical
+    sim.solver(time_steps=8)
+    try:
+        with pytest.warns(UserWarning, match=r"time_steps.*theta=0\.5"):
+            sim.solve_transient(power_mw=result.p_pi_mw, duration_us=60.0)
+    finally:
+        sim.solver(time_steps=None)
+
+
+def test_a_waveguide_s_z_range_sets_the_vertical_extent_of_its_optical_window(
+    canonical,
+):
+    sim, _result, _step = canonical
+    thermal = sim._thermal()
+    sim.waveguides.add(name="tall", position_um=0.0, z_range=(-0.5, 1.5))
+    try:
+        optical = sim._optical(sim.waveguides["tall"], thermal, WAVELENGTH)
+        assert optical.mesh.z_range == pytest.approx((-0.5, 1.5))
+    finally:
+        sim.waveguides.remove("tall")
 
 
 def test_a_too_short_transient_warns_to_lengthen_it(canonical):
