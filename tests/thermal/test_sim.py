@@ -526,6 +526,35 @@ def test_a_waveguide_s_z_range_sets_the_vertical_extent_of_its_optical_window(
         sim.waveguides.remove("tall")
 
 
+def thin_box_sim(box: float = 1.0) -> Simulation:
+    """The femwell TiN case on a BOX only ``box`` um thick, coarse mesh."""
+    sim = femwell_sim()
+    substrate, oxide = stack_of(sim).dielectrics[:2]
+    substrate.update(zmin=-box - 0.5, zmax=-box)
+    oxide.update(zmin=-box)
+    sim.solver(mesh_preset="coarse")
+    sim.mesh()  # resolves the stack and component the internals below read
+    return sim
+
+
+def test_the_default_optical_window_stops_at_a_substrate_under_a_thin_box():
+    sim = thin_box_sim(1.0)
+    optical = sim._optical(sim.waveguides["arm"], sim._thermal(), WAVELENGTH)
+    assert optical.mesh.z_range[0] == pytest.approx(-1.0)
+    assert optical.bounded_by == ("si_wafer",)
+    # The substrate's own Mode would give about 0.9 W; the strip's is tens of mW.
+    assert 30.0 < sim.solve(wavelength_um=WAVELENGTH).p_pi_mw < 45.0
+
+
+def test_a_z_range_reaching_a_high_index_substrate_warns():
+    sim = thin_box_sim(1.0)
+    sim.waveguides.remove("arm")
+    sim.waveguides.add(name="arm", position_um=0.0, z_range=(-1.3, 2.0))
+    sim.mesh()
+    with pytest.warns(UserWarning, match="si_wafer.*keep z_range inside"):
+        sim._optical(sim.waveguides["arm"], sim._thermal(), WAVELENGTH)
+
+
 def test_a_too_short_transient_warns_to_lengthen_it(canonical):
     sim, _result, _step = canonical
     with pytest.warns(UserWarning, match="duration"):

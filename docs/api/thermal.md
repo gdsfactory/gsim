@@ -97,7 +97,9 @@ given power.
   (`waveguides.phase_shifter`); every other one is a crosstalk victim. Each gets its own optical window around its
   drawn core: by default 1.5 µm beyond the core at each side and 2 µm above and below. `window` and `z_range` set its
   lateral and vertical extent, for a Mode that reaches further (a warning names the Window when the Mode's field at
-  its edge is too strong).
+  its edge is too strong). The default extent stops at a layer above or below the core whose index is at least the
+  core's, such as the silicon substrate under a thin BOX: a Mode solve that included it would find that layer's
+  Mode. A Mode that still reaches that edge leaks into the layer, which the model ignores, and the warning says so.
 - `materials`: per-run overrides, `sim.materials["tin"] = {"conductivity": 1.6e6}`, keyed on the material name
   (case-insensitive). The fields are `thermal_conductivity`, `specific_heat`, `mass_density`, `dn_dT`, `conductivity`
   (electrical), `permittivity` and `loss_tangent`.

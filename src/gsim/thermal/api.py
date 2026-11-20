@@ -198,7 +198,9 @@ class Waveguide(BaseModel):
             side, clipped to the thermal Window.
         z_range: Vertical ``(min, max)`` extent of the optical Window in
             um. ``None`` takes the core's drawn rectangle plus 2 um above
-            and below, clipped to the thermal Window.
+            and below, clipped to the thermal Window and stopped at any
+            layer above or below the core whose index is at least the
+            core's (a substrate under a thin BOX).
         polarization: ``"TE"`` or ``"TM"`` fundamental Mode.
     """
 

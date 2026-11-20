@@ -159,6 +159,7 @@ class _Optical:
     epsilon0: NDArray[np.complex128]
     dn_dt: NDArray[np.float64]
     unit_rise: NDArray[np.float64]
+    bounded_by: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -745,30 +746,60 @@ class Simulation:
         strip = self._locate_strip(spec)
         self._check_waveguide_inside(spec, strip, thermal.mesh.window)
         window, z_range = self._optical_window(spec, strip, thermal)
-        rects = [
-            r
-            for r in self._section()
-            if r.h1 > window[0] and r.h0 < window[1] and r.v1 > z_range[0]
-        ]
-        sizes, coarse = self._mesh_sizes(
-            rects, max(window[1] - window[0], z_range[1] - z_range[0])
-        )
-        mesh = build_cross_section_mesh(
-            self._component,
-            self._stack,
-            str(self.domain.plane),
-            window=window,
-            z_range=z_range,
-            max_size=sizes,
-            default_max_size=coarse,
-            verbose=self._verbose,
-        )
-        eps = epsilon_by_region(
-            mesh.msh_path,
-            self._stack,
-            wavelength_um=wavelength,
-            overrides=self._optical_overrides(mesh),
-        )
+
+        def build(z: tuple[float, float]) -> tuple[CrossSectionMesh, dict[str, Any]]:
+            """The optical mesh over a vertical extent, and its permittivity."""
+            rects = [
+                r
+                for r in self._section()
+                if r.h1 > window[0] and r.h0 < window[1] and r.v1 > z[0]
+            ]
+            sizes, coarse = self._mesh_sizes(
+                rects, max(window[1] - window[0], z[1] - z[0])
+            )
+            mesh = build_cross_section_mesh(
+                self._component,
+                self._stack,
+                str(self.domain.plane),
+                window=window,
+                z_range=z,
+                max_size=sizes,
+                default_max_size=coarse,
+                verbose=self._verbose,
+            )
+            eps = epsilon_by_region(
+                mesh.msh_path,
+                self._stack,
+                wavelength_um=wavelength,
+                overrides=self._optical_overrides(mesh),
+            )
+            return mesh, eps
+
+        mesh, eps = build(z_range)
+        rivals = _high_index_beyond_core(mesh, eps, strip)
+        bounded_by: tuple[str, ...] = ()
+        if rivals and spec.z_range is None:
+            # Stop the default extent at the nearest one: a Mode solve that
+            # includes it finds that region's own Mode, not the waveguide's.
+            below = [face for face, side, _ in rivals if side == "below"]
+            above = [face for face, side, _ in rivals if side == "above"]
+            z_range = (
+                max([z_range[0], *below]),
+                min([z_range[1], *above]),
+            )
+            mesh, eps = build(z_range)
+            bounded_by = tuple(sorted({name for _, _, name in rivals}))
+        elif rivals:
+            names = ", ".join(sorted({name for _, _, name in rivals}))
+            warnings.warn(
+                f"Waveguide {spec.name!r}: its optical Window (z_range "
+                f"{z_range}) includes {names}, at least as high in index as the "
+                "core, above or below it. The Mode solve may find that region's "
+                "Mode instead of the waveguide's; keep z_range inside the "
+                "cladding.",
+                UserWarning,
+                stacklevel=4,
+            )
         core = self._thermal_props(strip.material, strip.layer, ())
         if core.dn_dT is None or core.dn_dT == 0:
             raise ValueError(
@@ -793,6 +824,7 @@ class Simulation:
             unit_rise=sample_temperature(
                 thermal.mesh, thermal.unit_rise, element_centroids(mesh)
             ),
+            bounded_by=bounded_by,
         )
         self._cache[key] = optical
         return optical
@@ -872,7 +904,8 @@ class Simulation:
         )
         guess = abs(float(core.dn_dT or 0.0) * core_rise)
         reference = wavelength_m / (2.0 * length_m * guess) if guess > 0 else 1.0
-        shift = solve_thermo_optic_shift(
+        shift = _shift_of(
+            optical,
             optical.mesh,
             optical.epsilon0,
             optical.dn_dt,
@@ -894,7 +927,8 @@ class Simulation:
         drive_pi = p_pi_w / length_m
         for wg in waveguides[1:]:
             victim = optics[wg.name]
-            vshift = solve_thermo_optic_shift(
+            vshift = _shift_of(
+                victim,
                 victim.mesh,
                 victim.epsilon0,
                 victim.dn_dt,
@@ -976,6 +1010,59 @@ def _describe(rects: Any) -> str:
     """Name and in-plane extent of drawn rectangles, for error messages."""
     items = [f"{r.group} [{r.h0:g}, {r.h1:g}] um" for r in rects]
     return ", ".join(items) if items else "none"
+
+
+def _shift_of(optical: _Optical, *args: Any, **kwargs: Any) -> Any:
+    """``solve_thermo_optic_shift``, explaining a truncation it cannot fix.
+
+    When the optical Window stops at a high-index region next to the core,
+    a Mode that reaches that edge leaks into the region; enlarging the
+    Window, which the solver's warning suggests, would not help.
+    """
+    if not optical.bounded_by:
+        return solve_thermo_optic_shift(*args, **kwargs)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        shift = solve_thermo_optic_shift(*args, **kwargs)
+    names = ", ".join(optical.bounded_by)
+    for warning in caught:
+        message = str(warning.message)
+        if "optical Window edge" in message:
+            message = (
+                f"{message.split(':')[0]}: the optical Window stops at {names}, "
+                f"next to waveguide core {optical.strip.layer!r}, because a Mode "
+                "solve that includes it finds that region's Mode. The waveguide's "
+                f"Mode reaches {names} and leaks into it, which this model "
+                "ignores; a thicker cladding between them removes the leak."
+            )
+        warnings.warn(message, warning.category, stacklevel=4)
+    return shift
+
+
+def _high_index_beyond_core(
+    mesh: CrossSectionMesh, eps: Mapping[str, complex], strip: _Strip
+) -> list[tuple[float, str, str]]:
+    """Regions wholly above or below the core with an index at least the core's.
+
+    Returns ``(face, side, region)`` per such region: ``side`` is
+    ``"below"`` or ``"above"`` the core, and ``face`` is the region's
+    z nearest the core (um).
+    """
+    core = eps[strip.layer].real
+    z = mesh.mesh.p[1][mesh.mesh.t]  # (3, n_elements) vertex heights
+    found: list[tuple[float, str, str]] = []
+    for region, value in eps.items():
+        if region == strip.layer or value.real < core:
+            continue
+        mask = mesh.region_mask(region)
+        if not mask.any():
+            continue
+        top, bottom = float(z[:, mask].max()), float(z[:, mask].min())
+        if top <= strip.v0:
+            found.append((top, "below", region))
+        elif bottom >= strip.v1:
+            found.append((bottom, "above", region))
+    return found
 
 
 def _core_index(optical: _Optical) -> float:
