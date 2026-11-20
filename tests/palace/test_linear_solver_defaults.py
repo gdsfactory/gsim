@@ -25,7 +25,8 @@ def test_complex_mumps_multigrid_default(simulation_class, tolerance):
         "KSPType": "GMRES",
         "Tol": tolerance,
         "MaxIts": 400,
-        "MGMaxLevels": 100,
+        # Boundary mode runs without multigrid (awslabs/palace#1177).
+        "MGMaxLevels": 1 if simulation_class is pa.BoundaryModeSim else 100,
         "PCMatReal": False,
         "ComplexCoarseSolve": True,
     }
