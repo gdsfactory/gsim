@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import json
 
+import gdsfactory as gf
+import pytest
+from pydantic import ValidationError
+
 from gsim.common.stack.extractor import Layer, LayerStack
+from gsim.palace import DrivenSim
 from gsim.palace.mesh.config_generator import generate_palace_config
 from gsim.palace.models.ports import WavePortConfig
-from gsim.palace.ports.config import PalacePort, PortType
+from gsim.palace.ports.config import PalacePort, PortType, extract_ports
 
 
 def _stack_with_metal() -> LayerStack:
@@ -147,3 +152,108 @@ class TestWavePortEigensolverControlsInConfig:
         assert "MaxSize" not in by_index[1]
         assert by_index[2]["SolverType"] == "ARPACK"
         assert by_index[2]["MaxSize"] == 64
+
+
+class TestMaxItsAndComplexCoarseSolve:
+    """Palace's per-port MaxIts and ComplexCoarseSolve reach the WavePort entry.
+
+    MaxIts bounds the GMRES solve inside the port eigensolver (Palace's default
+    is 45, too few for some lossy port solves). ComplexCoarseSolve overrides,
+    for this port's mode solve only, the coarse-solve setting the port would
+    otherwise inherit from ``Solver.Linear``; Palace accepts it from v0.19 on,
+    so it must be written only when set.
+    """
+
+    def test_defaults_are_none_and_bad_values_are_refused(self) -> None:
+        wp = WavePortConfig(name="o1", layer="metal")
+        assert wp.eigensolver_max_its is None
+        assert wp.eigensolver_complex_coarse_solve is None
+        with pytest.raises(ValidationError):
+            WavePortConfig(name="o1", layer="metal", eigensolver_max_its=0)
+
+    def test_written_when_set(self, tmp_path) -> None:
+        ports = [
+            PalacePort(
+                name="o1",
+                port_type=PortType.WAVEPORT,
+                layer="metal",
+                eigensolver_max_its=400,
+                eigensolver_complex_coarse_solve=False,
+            ),
+        ]
+        entry = _generate(tmp_path, ports)["Boundaries"]["WavePort"][0]
+        assert entry["MaxIts"] == 400
+        assert entry["ComplexCoarseSolve"] is False
+
+    def test_absent_when_unset(self, tmp_path) -> None:
+        ports = [PalacePort(name="o1", port_type=PortType.WAVEPORT, layer="metal")]
+        entry = _generate(tmp_path, ports)["Boundaries"]["WavePort"][0]
+        assert "MaxIts" not in entry
+        assert "ComplexCoarseSolve" not in entry
+
+    def test_driven_sim_carries_them_to_the_extracted_port(self, port_stack) -> None:
+        component = gf.Component()
+        component.add_port("o1", center=(0, 0), orientation=180, width=2, layer=(1, 0))
+        sim = DrivenSim()
+        sim.set_geometry(component)
+        sim.add_wave_port(
+            "o1",
+            layer="m1",
+            eigensolver_max_its=400,
+            eigensolver_complex_coarse_solve=True,
+        )
+        sim._configure_ports_on_component(port_stack)
+        (port,) = extract_ports(component, port_stack)
+        assert port.eigensolver_max_its == 400
+        assert port.eigensolver_complex_coarse_solve is True
+
+    def test_multimode_port_stores_them(self) -> None:
+        sim = DrivenSim()
+        sim.add_multimode_wave_port(
+            "o1",
+            layer="m1",
+            modes=(1, 2),
+            eigensolver_max_its=300,
+            eigensolver_complex_coarse_solve=False,
+        )
+        (wp,) = sim.wave_ports
+        assert wp.eigensolver_max_its == 300
+        assert wp.eigensolver_complex_coarse_solve is False
+
+    def test_reuse_mesh_sync_writes_them_into_the_extracted_port(self) -> None:
+        """``reuse_mesh`` copies the receiver's declarations into the source
+        mesh's ports; the new controls must follow, and a later unset
+        declaration must clear them."""
+        from gsim.palace._mesh_reuse import sync_port_settings
+
+        port = PalacePort(name="o1", port_type=PortType.WAVEPORT, layer="m1")
+        declared = WavePortConfig(
+            name="o1",
+            layer="m1",
+            eigensolver_max_its=400,
+            eigensolver_complex_coarse_solve=True,
+        )
+        sync_port_settings([port], [], [declared], simulation_type="driven")
+        assert port.eigensolver_max_its == 400
+        assert port.eigensolver_complex_coarse_solve is True
+
+        sync_port_settings(
+            [port],
+            [],
+            [WavePortConfig(name="o1", layer="m1")],
+            simulation_type="driven",
+        )
+        assert port.eigensolver_max_its is None
+        assert port.eigensolver_complex_coarse_solve is None
+
+    def test_palace_port_keeps_its_positional_fields(self) -> None:
+        """The new fields come after the earlier ones, so a positional
+        PalacePort construction from before them still fills ``modes``."""
+        import dataclasses
+
+        names = [f.name for f in dataclasses.fields(PalacePort)]
+        assert names[-2:] == [
+            "eigensolver_max_its",
+            "eigensolver_complex_coarse_solve",
+        ]
+        assert names.index("pilot_paths") < names.index("eigensolver_max_its")

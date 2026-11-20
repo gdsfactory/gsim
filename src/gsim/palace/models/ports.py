@@ -358,6 +358,14 @@ class WavePortConfig(BaseModel):
             its own default (max(2 x Mode, Mode + 15)).
         eigensolver_verbose: Palace Verbose level for this port's mode
             solve. None uses Palace's own default.
+        eigensolver_max_its: Palace MaxIts (GMRES iteration limit of the
+            linear solve inside the eigenvalue iteration) for this port's
+            mode solve. None uses Palace's own default (45).
+        eigensolver_complex_coarse_solve: Palace ComplexCoarseSolve for
+            this port's mode solve: True factorizes the complex system
+            exactly, False uses a real-valued approximation. None inherits
+            the simulation's linear-solver setting. Needs Palace v0.19 or
+            later.
         modes: Palace mode numbers followed on this port's face, for a
             multimode wave port. Empty (the default) is an ordinary wave
             port that follows ``mode`` only.
@@ -410,6 +418,15 @@ class WavePortConfig(BaseModel):
         default=None,
         ge=0,
         description="Palace Verbose level for this port's mode solve",
+    )
+    eigensolver_max_its: int | None = Field(
+        default=None,
+        gt=0,
+        description="Palace MaxIts for this port's mode solve",
+    )
+    eigensolver_complex_coarse_solve: bool | None = Field(
+        default=None,
+        description="Palace ComplexCoarseSolve for this port's mode solve",
     )
     modes: tuple[int, ...] = Field(
         default=(),

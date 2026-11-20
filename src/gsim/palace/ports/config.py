@@ -84,7 +84,8 @@ class PalacePort:
     offset: float = 0.0  # Offset distance used for scattering parameter de-embedding.
 
     # Waveport 2D eigensolver controls (Palace SolverType/EigenTol/KSPTol/
-    # MaxSize/Verbose) - unrelated to max_size above, which sizes geometry.
+    # MaxSize/Verbose) - unrelated to max_size
+    # above, which sizes geometry.
     # None for any of these lets Palace use its own default.
     eigensolver_type: Literal["Default", "SLEPc", "ARPACK"] | None = None
     eigensolver_tol: float | None = None
@@ -98,6 +99,11 @@ class PalacePort:
     modes: tuple[int, ...] = ()
     excite_modes: Literal["active", "all"] = "active"
     pilot_paths: dict[int, list[list[float]]] = field(default_factory=dict)
+
+    # Further port eigensolver controls (Palace MaxIts/ComplexCoarseSolve),
+    # declared last so positional construction of earlier fields is unchanged.
+    eigensolver_max_its: int | None = None
+    eigensolver_complex_coarse_solve: bool | None = None
 
     @property
     def direction(self) -> str:
@@ -406,6 +412,8 @@ def configure_wave_port(
     modes: Sequence[int] = (),
     excite_modes: Literal["active", "all"] = "active",
     pilot_paths: Mapping[int, Sequence[Sequence[float]]] | None = None,
+    eigensolver_max_its: int | None = None,
+    eigensolver_complex_coarse_solve: bool | None = None,
 ):
     """Configure gdsfactory port(s) as wave ports for Palace simulation.
 
@@ -434,6 +442,12 @@ def configure_wave_port(
             its own default.
         eigensolver_verbose: Palace Verbose level for this port's mode
             solve. None uses Palace's own default.
+        eigensolver_max_its: Palace MaxIts (GMRES iteration limit of the
+            linear solve inside the eigenvalue iteration) for this port's
+            mode solve. None uses Palace's own default (45).
+        eigensolver_complex_coarse_solve: Palace ComplexCoarseSolve for
+            this port's mode solve. None inherits the simulation's
+            linear-solver setting. Needs Palace v0.19 or later.
         modes: Palace modes followed on the port's face (multimode wave
             port); empty for an ordinary wave port. ``mode`` is the active
             one and must be in the list.
@@ -489,6 +503,8 @@ def configure_wave_port(
         port.info["eigensolver_ksp_tol"] = eigensolver_ksp_tol
         port.info["eigensolver_max_size"] = eigensolver_max_size
         port.info["eigensolver_verbose"] = eigensolver_verbose
+        port.info["eigensolver_max_its"] = eigensolver_max_its
+        port.info["eigensolver_complex_coarse_solve"] = eigensolver_complex_coarse_solve
         port.info["modes"] = list(mode_list)
         port.info["excite_modes"] = excite_modes
         port.info["pilot_paths"] = [
@@ -725,6 +741,10 @@ def extract_ports(component, stack: LayerStack) -> list[PalacePort]:
             eigensolver_ksp_tol=info.get("eigensolver_ksp_tol"),
             eigensolver_max_size=info.get("eigensolver_max_size"),
             eigensolver_verbose=info.get("eigensolver_verbose"),
+            eigensolver_max_its=info.get("eigensolver_max_its"),
+            eigensolver_complex_coarse_solve=info.get(
+                "eigensolver_complex_coarse_solve"
+            ),
             modes=tuple(int(m) for m in info.get("modes") or ()),
             excite_modes=info.get("excite_modes", "active"),
             pilot_paths={

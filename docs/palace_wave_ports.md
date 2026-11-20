@@ -99,7 +99,7 @@ print(result.port_info)  # the face of every port: xmin, xmax, ymin, ymax, zmin,
 | `mode` | The Palace mode number, counted from 1, that this port drives and terminates. |
 | `offset` | Written as the Palace `Offset` of the port, the de-embedding distance in um (default 0). |
 | `excited` | Whether this port is excited. Both ports of a line are excited in separate solves to get all four S-parameters. |
-| `eigensolver_*` | Settings of this port's 2D mode solve (`SolverType`, `EigenTol`, `KSPTol`, `MaxSize`, `Verbose`). `None`: Palace's default. |
+| `eigensolver_*` | Port mode solve: `SolverType`, `EigenTol`, `KSPTol`, `MaxSize`, `Verbose`, `MaxIts`, `ComplexCoarseSolve`. `None`: default. |
 
 A port that faces along x gives a face in a plane of constant x, and one that faces along y a face of constant y. The height of a
 finite face is cut to the stack and to the domain.
@@ -150,16 +150,17 @@ The API guide keeps a short summary of this change under
 For every wave-port entry Palace solves its own 2D eigenproblem. `set_driven(waveport_boundary=...)` chooses which of the
 3D boundary conditions that solve sees:
 
-- `"pec"` (the default) treats the absorbing wall, the finite-conductivity conductor surfaces and the impedance boundaries as
-  perfect conductors **inside the port solve**. gsim lists their attributes in `Boundaries.WavePortPEC`.
-- `"inherit"` keeps those conditions in the port solve, including the conductor loss, and writes no `WavePortPEC`.
+- `"inherit"` (the default since gsim 0.11.0) keeps the absorbing wall, the finite-conductivity conductor surfaces and the
+  impedance boundaries in the port solve, including the conductor loss, and writes no `WavePortPEC`.
+- `"pec"` (the default before 0.11.0) treats those surfaces as perfect conductors **inside the port solve**. gsim lists
+  their attributes in `Boundaries.WavePortPEC`.
 
 Only the `WavePortPEC` override changes. The 3D boundaries stay as they are, and lumped ports are not affected. The two
 policies differ only when the model has absorbing, conductivity or impedance boundaries.
 
 ```python
-sim.set_driven(fmin=1e9, fmax=100e9, num_points=40, waveport_boundary="inherit")
-config_path = sim.write_config()  # no "WavePortPEC" in Boundaries
+sim.set_driven(fmin=1e9, fmax=100e9, num_points=40, waveport_boundary="pec")
+config_path = sim.write_config()  # Boundaries.WavePortPEC lists those attributes
 ```
 
 `set_driven()` replaces the whole driven setting, so repeat the other sweep options in the same call. A change here needs
@@ -167,6 +168,37 @@ no new mesh. The policy is a modelling approximation, not a fix for Palace's mod
 [Numeric wave-port boundaries](api/palace.md#numeric-wave-port-boundaries). The terminal-S method needs the 2D solve that
 supplies the mode shapes to use the same conductor condition as the port eigenproblem
 ([Terminal (multi-pin) Wave Ports](terminal_wave_ports.md), section 6).
+
+### Broadband sweeps: cost and accuracy of the two policies
+
+Palace solves the port eigenproblem at every output frequency. In an adaptive sweep (`adaptive_tol > 0`, the default),
+recent Palace versions build a reduced model of each port's eigenproblem during the training phase and evaluate it at
+the output frequencies. They fall back to an exact port solve whenever the reduced model's residual is too large. The
+`palace.log` of a run reports the counts per port, for example
+`Port 1: basis/cap = 8/12, reduced/exact = 300/9, fallbacks = 0`.
+
+The [CPW (Wave Ports)](nbs/palace_cpw_waveport.md) example (800 µm IHP TopMetal2 line, `default` mesh preset, order 2,
+1.38 M unknowns, 1–100 GHz, 300 points) was run on GDSFactory+ cloud with both policies, each as the adaptive sweep and as
+an exact reference (`adaptive_tol=0`) at 7 log-spaced frequencies:
+
+| | `"pec"` | `"inherit"` (default) |
+| --- | --- | --- |
+| Total run time, 300-point adaptive sweep | 59 s | 131 s |
+| Port eigenproblem time | 12 s | 74 s |
+| Port solves per port: reduced / exact / fallbacks | 300 / 9 / 0 | about 260 / 50 / 40 |
+| Largest \|ΔS\|, adaptive sweep against the exact reference | 4 × 10⁻⁶ | 4 × 10⁻⁶ |
+| Largest \|S11\| over the band | −35 dB | −42 dB |
+
+The two policies agree on S21 to 0.002 dB and 0.02°. They differ in the reflection: with `"pec"` the port mode carries no
+conductor loss while the 3D line does, so each port sees a small impedance step. On this uniform line that step sets a
+reflection floor of about −46 dB at 1 GHz and −35 dB around 45 GHz, up to 27 dB above the `"inherit"` result. This is
+why `"inherit"` became the default in gsim 0.11.0. `"pec"` is about twice as fast and is sufficient when only
+transmission matters; pass `waveport_boundary="pec"` to get it, and the behaviour of gsim before 0.11.0. Eigenmode runs
+with wave ports have no driven settings and keep `"pec"`.
+
+These figures come from one geometry and one Palace build (the cloud's Palace at the time, a development build after
+v0.19.0). The reduced port model is a Palace feature: older Palace versions solve the port eigenproblem exactly at every
+output frequency, which makes a 300-point sweep with two numeric wave ports take far longer.
 
 ## 5. Several modes on one face
 
