@@ -187,11 +187,74 @@ _PDK_AUTHORITATIVE_OPTIONS = frozenset(
 )
 
 
+def _apply_material_overrides(
+    stack: LayerStack,
+    overrides: Mapping[str, MaterialConfig],
+    *,
+    aliases: Mapping[str, str] | None = None,
+    keep_override_key: bool = False,
+) -> dict[str, list[str]]:
+    """Write ``set_material`` overrides into ``stack.materials``, ignoring case.
+
+    Every consumer of ``stack.materials`` looks a material up under the
+    spelling its layer uses (``Aluminum``, ``sio2``...). An override is
+    therefore written onto every spelling of the stack that matches its name
+    ignoring case: the keys of ``stack.materials``, the material of each layer
+    and the material of each dielectric region. An override that matches none
+    of them is added under its own name, so ``set_material`` can still create a
+    material. Of several overrides that differ only in case, the last one
+    wins, because later ones overwrite the key an earlier one created.
+
+    Args:
+        stack: The stack to modify in place.
+        overrides: Material overrides recorded by ``set_material``.
+        aliases: Optional map from a lower-case name to its canonical
+            lower-case name. When given, names that share a canonical name
+            match each other (``MATERIAL_ALIASES``).
+        keep_override_key: Also store each override under its own spelling,
+            even when it matched a spelling of the stack.
+
+    Returns:
+        The overrides that matched nothing, each mapped to the sorted
+        material names the stack had before any override was written.
+    """
+
+    def normalise(name: str) -> str:
+        key = name.lower()
+        return aliases.get(key, key) if aliases else key
+
+    # Snapshot taken before anything is written.
+    spellings = [
+        *stack.materials,
+        *(layer.material for layer in stack.layers.values()),
+        *(d.get("material") for d in stack.dielectrics),
+    ]
+    candidates = dict.fromkeys(s for s in spellings if isinstance(s, str) and s)
+    available = sorted(candidates)
+
+    unmatched: dict[str, list[str]] = {}
+    for name, props in overrides.items():
+        target = normalise(name)
+        matched = [c for c in candidates if normalise(c) == target]
+        for spelling in matched:
+            stack.materials[spelling] = props.to_dict()
+        if not matched:
+            unmatched[name] = available
+            # A later case variant of this name must overwrite it.
+            candidates[name] = None
+            stack.materials[name] = props.to_dict()
+        elif keep_override_key:
+            stack.materials[name] = props.to_dict()
+    return unmatched
+
+
 def _resolve_pdk_authoritative_stack(
     stack_kwargs: Mapping[str, Any],
     materials: Mapping[str, MaterialConfig],
     component: Any,
     airbox_config: Mapping[str, Any] | None,
+    *,
+    unmatched: dict[str, list[str]] | None = None,
 ) -> LayerStack:
     """Build a stack directly from the PDK LayerStack (gsim#230).
 
@@ -204,6 +267,9 @@ def _resolve_pdk_authoritative_stack(
         materials: Material overrides recorded by ``set_material``.
         component: The gdsfactory component, or None.
         airbox_config: The ``set_airbox`` settings, or None.
+        unmatched: If given, filled with the overrides that match no material
+            of the stack (ignoring case and aliases), each mapped to the
+            material names the stack has.
 
     Returns:
         LayerStack object for mesh generation
@@ -226,12 +292,12 @@ def _resolve_pdk_authoritative_stack(
 
     # Apply material overrides to both canonical names and PDK tokens
     # that resolve to them. Layers retain their original material token.
-    for name, props in materials.items():
-        target = MATERIAL_ALIASES.get(name.lower(), name.lower())
-        for token in canonical.materials:
-            if MATERIAL_ALIASES.get(token.lower(), token.lower()) == target:
-                canonical.materials[token] = props.to_dict()
-        canonical.materials[name] = props.to_dict()
+    # Names match ignoring case; the override is also kept under its own key.
+    not_found = _apply_material_overrides(
+        canonical, materials, aliases=MATERIAL_ALIASES, keep_override_key=True
+    )
+    if unmatched is not None:
+        unmatched.update(not_found)
 
     # Keep stack free of synthetic air regions; Palace airboxes are
     # generated explicitly from set_airbox().
@@ -275,6 +341,7 @@ def _resolve_layer_stack(
     *,
     component: Any = None,
     airbox_config: Mapping[str, Any] | None = None,
+    unmatched: dict[str, list[str]] | None = None,
 ) -> LayerStack:
     """Resolve the layer stack from PDK, YAML, or custom object.
 
@@ -283,6 +350,10 @@ def _resolve_layer_stack(
     the stack is built from ``stack_kwargs``, the overrides are applied and
     dielectric air regions are dropped. ``stack_kwargs`` is never modified.
 
+    Overrides match the stack's materials ignoring case, so ``"aluminum"``
+    overrides ``Aluminum``. An override that matches nothing is added as a
+    new material.
+
     Args:
         stack: Stack given via ``set_stack(layer_stack)``, or None.
         stack_kwargs: Arguments recorded by ``set_stack``.
@@ -290,20 +361,22 @@ def _resolve_layer_stack(
         component: The gdsfactory component, read by a PDK-authoritative stack.
         airbox_config: The ``set_airbox`` settings, read by a PDK-authoritative
             stack.
+        unmatched: If given, filled with the overrides that match no material
+            of the stack, each mapped to the material names the stack has.
 
     Returns:
         LayerStack object for mesh generation
     """
     # If a custom stack was given via set_stack(layer_stack), use it
     if stack is not None and stack_kwargs.get("_prebuilt"):
-        # Apply material overrides
-        for name, props in materials.items():
-            stack.materials[name] = props.to_dict()
+        not_found = _apply_material_overrides(stack, materials)
+        if unmatched is not None:
+            unmatched.update(not_found)
         return stack
 
     if stack_kwargs.get("pdk_authoritative"):
         return _resolve_pdk_authoritative_stack(
-            stack_kwargs, materials, component, airbox_config
+            stack_kwargs, materials, component, airbox_config, unmatched=unmatched
         )
 
     from gsim.common.stack import get_stack
@@ -316,9 +389,9 @@ def _resolve_layer_stack(
     }
     built = get_stack(yaml_path=stack_kwargs.get("yaml_path"), **kwargs)
 
-    # Apply material overrides
-    for name, props in materials.items():
-        built.materials[name] = props.to_dict()
+    not_found = _apply_material_overrides(built, materials)
+    if unmatched is not None:
+        unmatched.update(not_found)
 
     # Keep stack free of synthetic air regions; Palace airboxes are
     # generated explicitly from set_airbox().
@@ -386,6 +459,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         absorbing_boundary: bool | None
         absorbing_order: Literal[1, 2]
         _pec_default_noted: bool
+        _unmatched_material_warnings: set[tuple[str, tuple[str, ...]]]
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
@@ -997,8 +1071,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     ) -> None:
         """Override or add material properties.
 
+        The name matches the stack's materials ignoring case, so ``"aluminum"``
+        overrides ``Aluminum``. Two calls whose names differ only in case
+        override the same material: the last call wins. A name that matches no
+        material of the stack adds a material that no layer uses; this is
+        reported with a warning when the stack is resolved (by ``mesh()``,
+        ``write_config()`` and the other methods that read the stack).
+
         Args:
-            name: Material name
+            name: Material name, matched ignoring case
             material_type: Material type (conductor, dielectric, semiconductor)
             conductivity: Conductivity in S/m (for conductors)
             permittivity: Relative permittivity (for dielectrics)
@@ -1020,6 +1101,11 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             else:
                 resolved_type = "dielectric"
 
+        # Keep one spelling per name: the latest call wins.
+        for existing in [
+            k for k in self.materials if k != name and k.lower() == name.lower()
+        ]:
+            del self.materials[existing]
         self.materials[name] = MaterialConfig(
             type=resolved_type,
             conductivity=conductivity,
@@ -1183,13 +1269,30 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     "pdk_authoritative=True; ignoring them."
                 )
 
+        unmatched: dict[str, list[str]] = {}
         stack = _resolve_layer_stack(
             self.stack,
             self._stack_kwargs,
             self.materials,
             component=self.component,
             airbox_config=self._airbox_config,
+            unmatched=unmatched,
         )
+        # set_material() cannot check its name: the stack may not exist yet.
+        # Every consumer resolves the stack, so the check runs here, once per
+        # name and stack.
+        for name, available in unmatched.items():
+            key = (name, tuple(available))
+            if key in self._unmatched_material_warnings:
+                continue
+            self._unmatched_material_warnings.add(key)
+            logger.warning(
+                "set_material(%r) matches no material of the stack, ignoring "
+                "case; it is added as a new material that no layer uses. "
+                "Stack materials: %s",
+                name,
+                ", ".join(available) or "(none)",
+            )
         # A prebuilt stack comes back as the same object; store only a newly
         # built one, so the prebuilt path triggers no assignment validation.
         if stack is not self.stack:
@@ -3885,6 +3988,10 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _output_dir: Path | None = PrivateAttr(default=None)
     _configured_ports: bool = PrivateAttr(default=False)
     _pec_default_noted: bool = PrivateAttr(default=False)
+    # (name, stack materials) of the set_material() names already reported
+    _unmatched_material_warnings: set[tuple[str, tuple[str, ...]]] = PrivateAttr(
+        default_factory=set
+    )
     _last_mesh_result: Any = PrivateAttr(default=None)
     # The mesh settings the last mesh was made with, after presets and
     # auto-sizing; ``mesh_config`` holds only what the user set
