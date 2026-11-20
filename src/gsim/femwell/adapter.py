@@ -22,7 +22,10 @@ field is left at the Window boundary (:func:`boundary_field_ratio`) or
 outside a band of the Cross-section (:func:`field_fraction_outside`),
 the current one conductor carries (:func:`electrode_current`) and the
 Marks-Williams power-current impedance it implies
-(:func:`z0_power_current`), and — for an RF line — the one reading of a
+(:func:`z0_power_current`), the power-voltage and voltage-current
+impedances that read the voltage along a path instead
+(:func:`path_voltage`, :func:`z0_power_voltage`,
+:func:`z0_voltage_current`), and — for an RF line — the one reading of a
 selected Mode an RF line solve asks for: index, impedance and whether it is
 the wall Mode (:func:`line_reading`). :func:`conductor_index_bound` reads, from the
 permittivity a solve was given, the index above which a Mode lives inside a
@@ -59,6 +62,8 @@ from gsim.common.modes import (
     wall_mode_from_currents,
 )
 from gsim.common.modes import z0_power_current as common_z0
+from gsim.common.modes import z0_power_voltage as common_z0_pv
+from gsim.common.modes import z0_voltage_current as common_z0_vi
 from gsim.common.stack.materials import (
     MaterialProperties,
     ResolvedMaterial,
@@ -78,8 +83,11 @@ __all__ = [
     "epsilon_by_region",
     "field_fraction_outside",
     "line_reading",
+    "path_voltage",
     "solve_modes",
     "z0_power_current",
+    "z0_power_voltage",
+    "z0_voltage_current",
 ]
 
 
@@ -630,6 +638,22 @@ def z0_power_current(
             (from :func:`electrode_current`), or the current comes out
             zero.
     """
+    power = _poynting_power(mode)
+    current = electrode_current(
+        mode, frequency_hz=frequency_hz, conductor=conductor, mesh=mesh
+    )
+    return common_z0(power, current)
+
+
+def _poynting_power(mode: Any) -> Any:
+    """Complex Poynting flux ``(1/2) integral (E_t x H_t*) . z dA`` of a Mode.
+
+    The one power integral every impedance definition here divides by:
+    :func:`z0_power_current` and :func:`z0_power_voltage` both read it
+    through this helper. Mesh coordinates are um, so the integral is
+    ``1e12`` times SI for SI fields; the ratios the definitions take
+    cancel that.
+    """
     skfem = require_skfem()
     from skfem.helpers import cross
 
@@ -639,16 +663,284 @@ def z0_power_current(
     def _power_form(w: Any) -> Any:
         return cross(w["E"][0], np.conj(w["H"][0]))
 
-    power = 0.5 * _power_form.assemble(
+    return 0.5 * _power_form.assemble(
         basis,
         E=basis.interpolate(mode.E),
         H=basis.interpolate(mode.H),
     )
 
+
+#: A straight voltage path ``((h0, v0), (h1, v1))`` in mesh coordinates
+#: (um), from the signal conductor to the return.
+VoltagePath = tuple[tuple[float, float], tuple[float, float]]
+
+#: Relative slack of the point-in-triangle test (barycentric coordinates)
+#: and of the path-edge crossing test. Tight enough to be a rounding
+#: allowance only, loose enough that a path running along a mesh edge is
+#: still inside the mesh.
+_PATH_TOL = 1e-9
+
+
+def _path_pieces(
+    mesh: Any, start: tuple[float, float], end: tuple[float, float]
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.int64]]:
+    """Cut a straight path at every mesh edge it crosses.
+
+    Between two consecutive crossings the path lies inside one element,
+    so the finite-element field along it is one polynomial piece. Each
+    piece is located by brute force against every element, independently
+    of skfem's own point finder, which makes "the path is on the mesh" a
+    fact this function establishes rather than assumes: a piece whose
+    midpoint is in no element is in a hole, or outside the domain.
+
+    Args:
+        mesh: The skfem mesh the Mode was solved on.
+        start: Path start ``(h, v)`` in um.
+        end: Path end ``(h, v)`` in um.
+
+    Returns:
+        ``(t_start, t_end, cells)``: each piece's parameter interval on
+        the path (``0`` at *start*, ``1`` at *end*) and the element that
+        contains it.
+
+    Raises:
+        ValueError: When the path has no length, or a piece of it is in
+            no element.
+    """
+    a = np.asarray(start, dtype=np.float64)
+    b = np.asarray(end, dtype=np.float64)
+    if (
+        a.shape != (2,)
+        or b.shape != (2,)
+        or not (np.isfinite(a).all() and np.isfinite(b).all())
+    ):
+        raise ValueError(
+            f"start and end must be finite (h, v) points, got {start}, {end}."
+        )
+    d = b - a
+    length = float(np.hypot(d[0], d[1]))
+    if length == 0.0:
+        raise ValueError("The voltage path has zero length: start equals end.")
+
+    points = mesh.p
+    # Parameter values where the path crosses an edge of the mesh.
+    q0 = points[:, mesh.facets[0]]
+    edge = points[:, mesh.facets[1]] - q0
+    w = q0 - a[:, None]
+    denom = d[0] * edge[1] - d[1] * edge[0]
+    usable = np.abs(denom) > 1e-12 * length * np.hypot(edge[0], edge[1])
+    safe = np.where(usable, denom, 1.0)
+    t_cross = (w[0] * edge[1] - w[1] * edge[0]) / safe
+    u_cross = (w[0] * d[1] - w[1] * d[0]) / safe
+    hit = (
+        usable
+        & (u_cross >= -_PATH_TOL)
+        & (u_cross <= 1.0 + _PATH_TOL)
+        & (t_cross > 0.0)
+        & (t_cross < 1.0)
+    )
+    cuts = np.concatenate(([0.0], np.sort(t_cross[hit]), [1.0]))
+    t_lo, t_hi = cuts[:-1], cuts[1:]
+    long_enough = (t_hi - t_lo) > 1e-12
+    t_lo, t_hi = t_lo[long_enough], t_hi[long_enough]
+
+    # Locate the midpoint of every piece among the elements whose bounding
+    # box touches the path's own.
+    mids = a[:, None] + 0.5 * (t_lo + t_hi)[None, :] * d[:, None]
+    corners = points[:, mesh.t]  # (2, 3, n_elements)
+    margin = _PATH_TOL * length
+    near = np.flatnonzero(
+        (corners[0].max(axis=0) >= min(a[0], b[0]) - margin)
+        & (corners[0].min(axis=0) <= max(a[0], b[0]) + margin)
+        & (corners[1].max(axis=0) >= min(a[1], b[1]) - margin)
+        & (corners[1].min(axis=0) <= max(a[1], b[1]) + margin)
+    )
+    cells = np.full(t_lo.size, -1, dtype=np.int64)
+    if near.size:
+        origin = corners[:, 0, near]
+        e1 = corners[:, 1, near] - origin
+        e2 = corners[:, 2, near] - origin
+        det = e1[0] * e2[1] - e1[1] * e2[0]
+        nondegenerate = det != 0.0
+        det = np.where(nondegenerate, det, 1.0)
+        for index in range(t_lo.size):
+            r = mids[:, index, None] - origin
+            l1 = (r[0] * e2[1] - r[1] * e2[0]) / det
+            l2 = (e1[0] * r[1] - e1[1] * r[0]) / det
+            inside = (
+                nondegenerate
+                & (l1 >= -_PATH_TOL)
+                & (l2 >= -_PATH_TOL)
+                & (1.0 - l1 - l2 >= -_PATH_TOL)
+            )
+            found = np.flatnonzero(inside)
+            if found.size:
+                cells[index] = near[found[0]]
+    missing = np.flatnonzero(cells < 0)
+    if missing.size:
+        first = int(missing[0])
+        raise ValueError(
+            f"The voltage path leaves the mesh: {missing.size} of its "
+            f"{cells.size} pieces lie in no element, the first around "
+            f"({mids[0, first]:.4g}, {mids[1, first]:.4g}) um. It starts or ends "
+            "outside the meshed domain, or crosses a hole in it (a conductor "
+            "left out of the mesh as a perfect conductor)."
+        )
+    return t_lo, t_hi, cells
+
+
+def path_voltage(
+    mode: Any,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    points_per_element: int = 3,
+) -> complex:
+    """Voltage of a Mode along a straight path, ``V = integral E_t . dl``.
+
+    The path runs from *start*, on the signal conductor, to *end*, on the
+    return. With the integral taken in that direction the voltage is the
+    signal's potential relative to the return's; the sign follows the
+    path direction and the mode's phase, and
+    :func:`z0_power_voltage` is independent of it.
+
+    The path is cut at every mesh edge it crosses, so each piece lies
+    inside one element where the finite-element field is a polynomial:
+    ``E_t . dl`` along a straight piece of a Nedelec element of order
+    one or two is a polynomial of degree at most two. Each piece is
+    integrated with a Gauss-Legendre rule of *points_per_element*
+    points, exact up to degree ``2 * points_per_element - 1``, so the
+    default of three integrates the discrete field exactly and the
+    only error left is the solve's own. Cutting at the edges also keeps
+    the quadrature points off the element interfaces, where the normal
+    field component (the part of ``E_t`` along a path crossing a
+    dielectric interface) jumps.
+
+    Mesh coordinates are um, so the path integral is in the same
+    um-coordinate scale as :func:`electrode_current`: with SI fields
+    ``1e6`` times the voltage in volts, the scale that makes
+    ``V / I`` come out in ohms. The Mode's fields are normalized
+    arbitrarily, and so is the voltage.
+
+    Args:
+        mode: A femwell ``Mode`` from :func:`solve_modes`.
+        start: ``(h, v)`` of the path start in um.
+        end: ``(h, v)`` of the path end in um.
+        points_per_element: Gauss-Legendre points on each piece of the
+            path between two mesh edges (default 3, at least 1).
+
+    Returns:
+        The complex voltage, in the scale :func:`electrode_current`
+        returns its current in.
+
+    Raises:
+        ValueError: When the path has zero length, when any part of it
+            is outside the meshed domain or inside a hole of it (a
+            conductor left out of the mesh as a perfect conductor), or
+            when *points_per_element* is below one.
+    """
+    require_skfem()
+    if points_per_element < 1:
+        raise ValueError(
+            f"points_per_element must be at least 1, got {points_per_element}."
+        )
+
+    t_lo, t_hi, cells = _path_pieces(mode.basis.mesh, start, end)
+    a = np.asarray(start, dtype=np.float64)
+    d = np.asarray(end, dtype=np.float64) - a
+
+    nodes, weights = np.polynomial.legendre.leggauss(points_per_element)
+    half = 0.5 * (t_hi - t_lo)
+    t_points = (0.5 * (t_hi + t_lo))[:, None] + half[:, None] * nodes[None, :]
+    t_weights = half[:, None] * weights[None, :]
+    point_cells = np.repeat(cells, points_per_element)
+    positions = a[:, None] + t_points.ravel()[None, :] * d[:, None]
+
+    (e_t, basis_t), _e_z = mode.basis.split(mode.E)
+    local = basis_t.mapping.invF(positions[:, :, None], tind=point_cells)
+    field = np.zeros((2, positions.shape[1]), dtype=np.complex128)
+    for k in range(basis_t.Nbfun):
+        shape_k = basis_t.elem.gbasis(basis_t.mapping, local, k, tind=point_cells)[0]
+        field += e_t[basis_t.element_dofs[k, point_cells]][None, :] * shape_k[:, :, 0]
+    along = d[0] * field[0] + d[1] * field[1]
+    return complex(np.sum(t_weights.ravel() * along))
+
+
+def z0_power_voltage(mode: Any, *, voltage_path: VoltagePath) -> complex:
+    """Power-voltage characteristic impedance of an RF mode.
+
+    ``Z_PV = |V|^2 / (2 P*)`` — the convention Palace and gfem report —
+    with the complex Poynting flux ``P`` over the whole cross-section
+    (the integral :func:`z0_power_current` uses too) and the voltage
+    ``V`` along *voltage_path* (:func:`path_voltage`), divided through
+    the shared definition :func:`gsim.common.modes.z0_power_voltage`.
+    The ratio is invariant to the mode's field normalization and to the
+    direction of the path. No conductor is named: the definition reads
+    no current.
+
+    On a lossy line the power-voltage and power-current impedances
+    differ, and the voltage depends on the path: pick one that joins the
+    two conductors across the gap where the field is a clean
+    line-to-line field. Both give ``Im(Z) < 0`` for a lossy line in the
+    ``exp(+i omega t)`` convention.
+
+    Args:
+        mode: A femwell ``Mode`` from :func:`solve_modes`.
+        voltage_path: ``((h0, v0), (h1, v1))`` in um: the straight path
+            from the signal conductor to the return.
+
+    Returns:
+        Complex characteristic impedance in ohms.
+
+    Raises:
+        ValueError: When the path leaves the mesh (from
+            :func:`path_voltage`), or the voltage or power is zero.
+    """
+    start, end = voltage_path
+    voltage = path_voltage(mode, start, end)
+    return common_z0_pv(_poynting_power(mode), voltage)
+
+
+def z0_voltage_current(
+    mode: Any,
+    *,
+    frequency_hz: float,
+    conductor: Conductor,
+    mesh: meshio.Mesh | str | Path,
+    voltage_path: VoltagePath,
+) -> complex:
+    """Voltage-current characteristic impedance of an RF mode.
+
+    ``Z_VI = V / I`` with the voltage ``V`` along *voltage_path*
+    (:func:`path_voltage`) and the current ``I`` on the signal conductor
+    (:func:`electrode_current`), divided through the shared definition
+    :func:`gsim.common.modes.z0_voltage_current`. Both integrals are in
+    the same um-coordinate scale, so the ratio is in ohms, and the
+    result is returned with a positive real part.
+
+    Args:
+        mode: A femwell ``Mode`` from :func:`solve_modes`.
+        frequency_hz: RF frequency of the solve in Hz.
+        conductor: The signal conductor, named the way its current is
+            read.
+        mesh: The shared msh v2.2 mesh the Mode was solved on.
+        voltage_path: ``((h0, v0), (h1, v1))`` in um: the straight path
+            from the signal conductor to the return.
+
+    Returns:
+        Complex characteristic impedance in ohms.
+
+    Raises:
+        ValueError: When the path leaves the mesh, the conductor has
+            nothing to integrate over, or the voltage or current is
+            zero.
+    """
+    start, end = voltage_path
+    voltage = path_voltage(mode, start, end)
     current = electrode_current(
         mode, frequency_hz=frequency_hz, conductor=conductor, mesh=mesh
     )
-    return common_z0(power, current)
+    return common_z0_vi(voltage, current)
 
 
 def electrode_current(

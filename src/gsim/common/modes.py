@@ -67,6 +67,8 @@ __all__ = [
     "select_line_mode",
     "wall_mode_from_currents",
     "z0_power_current",
+    "z0_power_voltage",
+    "z0_voltage_current",
 ]
 
 #: ``((h_min, h_max), (v_min, v_max))`` of a rectangle on the Cross-section (um).
@@ -265,6 +267,104 @@ def z0_power_current(power: complex, current: complex) -> complex:
     # Palace 203% from femwell instead of 2.98%, and the flipped reading
     # lands on femwell's phase, which is what shows it is the right
     # correction rather than a sign forced positive.
+    return -z0 if z0.real < 0.0 else z0
+
+
+def z0_power_voltage(power: complex, voltage: complex) -> complex:
+    """The power-voltage impedance of a line Mode.
+
+    ``Z_PV = |V|^2 / (2 P*)``, the convention Palace and gfem report,
+    with ``P`` the complex Poynting flux over the whole Cross-section
+    (the integral :func:`z0_power_current` divides by the current
+    squared) and ``V`` the voltage along a path from the signal
+    conductor to the return. The Mode's phase and amplitude cancel, and
+    so does the sign of the path: ``V`` changes sign with the path's
+    direction and only ``|V|^2`` is read.
+
+    In the ``exp(+i omega t)`` convention a lossy line has
+    ``Im(Z_PV) < 0``. The three definitions are tied by the algebraic
+    identity ``Z_PI * conj(Z_PV) = |Z_VI|^2`` (``Z_PI = 2 P / |I|^2``,
+    ``Z_VI = V / I``), which holds for any ``P``, ``V`` and ``I``. The
+    definitions agree with each other only when the integrals are
+    mutually consistent, ``P = V I* / 2``, which is a statement about
+    the fields and the path, not about the formulas.
+
+    Both arguments arrive in whatever coordinate scale the Backend
+    integrated in: ``|V|^2`` and ``P`` scale alike with the mesh
+    coordinate (``1e12`` times SI for a um mesh), so the ratio is in
+    ohms and no unit conversion happens here.
+
+    Args:
+        power: Complex Poynting flux of the Mode over the Cross-section.
+        voltage: Voltage along the path, in the same scale. Only its
+            magnitude is read.
+
+    Returns:
+        The complex impedance in ohms, its real part positive: as for
+        :func:`z0_power_current`, a Mode saved travelling against the
+        plane normal has the sign of ``P`` flipped, and the impedance
+        is flipped back.
+
+    Raises:
+        ValueError: When the power is zero (the Mode carries nothing to
+            divide by) or the voltage is zero (the path joins two
+            points at the same potential, which measures no voltage).
+    """
+    if power == 0:
+        raise ValueError(
+            "The mode carries no power, so it has no power-voltage impedance."
+        )
+    if voltage == 0:
+        raise ValueError(
+            "The voltage path measures no voltage, so it gives no power-voltage "
+            "impedance."
+        )
+    z0 = complex(abs(voltage) ** 2 / (2.0 * complex(power).conjugate()))
+    return -z0 if z0.real < 0.0 else z0
+
+
+def z0_voltage_current(voltage: complex, current: complex) -> complex:
+    """The voltage-current impedance of a line Mode.
+
+    ``Z_VI = V / I`` with ``V`` the voltage along a path from the signal
+    conductor to the return and ``I`` the longitudinal current on the
+    signal conductor, both read the same way round: the ratio is
+    invariant to the Mode's amplitude and phase.
+
+    The sign of the ratio is not physical: it flips with the direction
+    of the path, with the sign convention of the current integral and
+    with the propagation direction the solver chose. As for
+    :func:`z0_power_current` the result is returned with a positive real
+    part. A caller who wants the raw ratio divides the two integrals
+    itself.
+
+    ``V`` and ``I`` arrive in whatever coordinate scale the Backend
+    integrated in, and a um mesh puts both at ``1e6`` times SI, so the
+    ratio is in ohms.
+
+    Args:
+        voltage: Voltage along the path.
+        current: Longitudinal current on the signal conductor.
+
+    Returns:
+        The complex impedance in ohms, its real part positive.
+
+    Raises:
+        ValueError: When the current is zero (the Mode carries no
+            current on that conductor) or the voltage is zero (the
+            path measures no voltage).
+    """
+    if current == 0:
+        raise ValueError(
+            "The mode carries no current on the signal conductor, so it has "
+            "no voltage-current impedance."
+        )
+    if voltage == 0:
+        raise ValueError(
+            "The voltage path measures no voltage, so it gives no "
+            "voltage-current impedance."
+        )
+    z0 = complex(voltage) / complex(current)
     return -z0 if z0.real < 0.0 else z0
 
 
