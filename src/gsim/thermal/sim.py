@@ -516,6 +516,7 @@ class Simulation:
             sigma_by_region[region] = (
                 float(props.electrical_conductivity or 0.0) if heater else 0.0
             )
+        self._check_heater_conducts(mesh.region_material, sigma_by_region)
         conductivity = np.array([k_by_region[r] for r in regions])
         sigma = np.array([sigma_by_region[r] for r in regions])
         heater_mask = np.isin(regions, self.heater.layers)
@@ -560,6 +561,46 @@ class Simulation:
                     "heater conductor."
                 )
 
+    def _check_heater_conducts(
+        self, region_material: Mapping[str, str], sigma: Mapping[str, float]
+    ) -> None:
+        """Raise when no heater conductor has a positive conductivity.
+
+        No current would flow, so the heater could dissipate no power.
+        """
+        heaters = {
+            region: material
+            for region, material in region_material.items()
+            if region in self.heater.layers
+        }
+        if any(sigma[region] > 0 for region in heaters):
+            return
+        found = ", ".join(
+            f"{region!r} is {material!r} ({sigma[region]:g} S/m)"
+            for region, material in heaters.items()
+        )
+        materials = sorted(set(heaters.values()))
+        hint = " or ".join(
+            f"sim.materials[{m!r}] = {{'conductivity': ...}}" for m in materials
+        )
+        raise ValueError(
+            f"Heater has no electrical conductivity: {found}, so no current "
+            f"flows and no power is dissipated. For this run only: {hint} (S/m)."
+        )
+
+    def _check_waveguide_inside(
+        self, spec: Waveguide, strip: _Strip, window: tuple[float, float]
+    ) -> None:
+        """Raise when a waveguide core lies outside the thermal Window."""
+        if strip.h0 < window[0] or strip.h1 > window[1]:
+            raise ValueError(
+                f"Waveguide {spec.name!r}: its core {strip.layer!r} is drawn over "
+                f"[{strip.h0:g}, {strip.h1:g}] um in the cut {self.domain.plane!r}, "
+                f"outside the thermal Window ({window[0]:g}, {window[1]:g}) um. "
+                "Widen the Window with sim.domain(window=(min, max)) to contain "
+                "every waveguide core."
+            )
+
     def _optical_window(
         self, spec: Waveguide, strip: _Strip, thermal: _Thermal
     ) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -591,6 +632,7 @@ class Simulation:
         from gsim.femwell.adapter import epsilon_by_region
 
         strip = self._locate_strip(spec)
+        self._check_waveguide_inside(spec, strip, thermal.mesh.window)
         window, z_range = self._optical_window(spec, strip, thermal)
         rects = [
             r

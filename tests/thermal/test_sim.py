@@ -458,6 +458,27 @@ def test_a_waveguide_core_without_dn_dt_is_an_error():
         sim.solve(wavelength_um=WAVELENGTH)
 
 
+def test_a_waveguide_outside_the_window_is_an_error_naming_it():
+    sim = femwell_sim(neighbour=12.0)
+    sim.solver(precision="fast")
+    with pytest.raises(ValueError, match=r"'neighbour'.*\[11\.75, 12\.25\]") as error:
+        sim.solve(wavelength_um=WAVELENGTH)
+    message = str(error.value)
+    assert "(-8, 8)" in message
+    assert "sim.domain(window=" in message
+
+
+def test_a_heater_without_conductivity_is_an_error_naming_the_override():
+    sim = femwell_sim()
+    sim.materials["tin"] = {"conductivity": 0.0}
+    sim.solver(precision="fast")
+    with pytest.raises(ValueError, match="no electrical conductivity") as error:
+        sim.solve(wavelength_um=WAVELENGTH)
+    message = str(error.value)
+    assert "'heater' is 'tin'" in message
+    assert "sim.materials['tin'] = {'conductivity': ...}" in message
+
+
 def test_missing_femwell_names_the_extra(monkeypatch):
     sim = femwell_sim()
     monkeypatch.setitem(sys.modules, "femwell", None)
