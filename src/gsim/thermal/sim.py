@@ -71,6 +71,7 @@ from gsim.thermal.optical import (
     solve_thermo_optic_shift,
 )
 from gsim.thermal.results import (
+    _UM_TO_M,
     StepResponse,
     ThermalResult,
     power_per_length,
@@ -92,7 +93,6 @@ _OPTICAL_MARGIN_LATERAL_UM = 1.5
 _OPTICAL_MARGIN_VERTICAL_UM = 1.0
 _FEATURE_DIVISIONS = 4.0
 _COARSE_DIVISIONS = 10.0
-_UM_TO_M = 1e-6
 _SETTLED_FRACTION = 0.99
 _EPS0 = 8.8541878128e-12
 _C0 = 299792458.0
