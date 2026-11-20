@@ -61,3 +61,33 @@ jobs:
       with:
         use_oidc: true
         fail_ci_if_error: true
+  release_version:
+    name: Publish a version bump
+    needs: [test, test_coverage]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+    - name: Tag and publish a version bump
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BEFORE_SHA: ${{ github.event.before }}
+      run: |
+        read_version='import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])'
+        previous=$(git show "$BEFORE_SHA:pyproject.toml" | python -c "$read_version")
+        version=$(python -c "$read_version" < pyproject.toml)
+        if [ "$version" = "$previous" ] || git show-ref --verify --quiet "refs/tags/$version"; then
+          exit 0
+        fi
+        git tag "$version" "$GITHUB_SHA"
+        git push origin "refs/tags/$version"
+        # GITHUB_TOKEN tag pushes do not trigger the Release workflow.
+        gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$version"
