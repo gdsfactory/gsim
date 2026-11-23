@@ -17,8 +17,8 @@ gfem is optional. Install the `gfem` extra:
 pip install "gsim[gfem]"
 ```
 
-It brings `gfem` (0.1 series), which in turn needs JAX and NGSolve. `import gsim.gfem` works without them and imports neither;
-`solve_line()` raises an error naming the extra. A gfem outside the 0.1 series imports with a warning.
+It brings `gfem` (0.2 series), which in turn needs JAX and NGSolve. `import gsim.gfem` works without them and imports neither;
+`solve_line()` raises an error naming the extra. A gfem outside the 0.2 series imports with a warning.
 
 ## Solve a line
 

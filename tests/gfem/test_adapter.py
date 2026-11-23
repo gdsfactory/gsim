@@ -245,9 +245,9 @@ def test_require_gfem_warns_outside_the_supported_series(monkeypatch):
     from gsim.gfem.runtime import require_gfem
 
     fake = types.ModuleType("gfem")
-    fake.__dict__["__version__"] = "0.2.0"
+    fake.__dict__["__version__"] = "0.3.0"
     monkeypatch.setitem(sys.modules, "gfem", fake)
-    with pytest.warns(UserWarning, match="0.1."):
+    with pytest.warns(UserWarning, match="0.2."):
         assert require_gfem() is fake
 
 
@@ -283,7 +283,7 @@ def test_gfem_extra_declared_in_packaging():
     gfem_requirements = [r for r in requires if "gfem" in r and "extra" in r]
     if not gfem_requirements:
         pytest.skip("installed gsim metadata predates the gfem extra: re-run uv sync")
-    assert any("gfem>=0.1.0" in r.replace(" ", "") for r in gfem_requirements)
+    assert any("gfem>=0.2.0" in r.replace(" ", "") for r in gfem_requirements)
 
 
 # --- region media ------------------------------------------------------------------

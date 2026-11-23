@@ -42,6 +42,9 @@ femwell = [
   "femwell>=0.1.11",
   "scikit-fem>=8.0.0",
 ]
+gfem = [
+  "gfem>=0.2.0",
+]
 # DEVSIM charge-transport backend (gsim.tcad). scipy-openblas32 gives DEVSIM
 # a BLAS/LAPACK on Linux, Windows and macOS: without it a plain pip install has
 # none DEVSIM can load on macOS or Windows. DEVSIM reads its scipy_-prefixed

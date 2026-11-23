@@ -21,7 +21,7 @@ _INSTALL_HINT = (
 )
 
 #: The gfem release series this adapter was written and checked against.
-SUPPORTED_SERIES = "0.1."
+SUPPORTED_SERIES = "0.2."
 
 
 def require_gfem() -> ModuleType:
