@@ -456,6 +456,17 @@ def test_edge_conditions_default_conductivity_when_the_material_has_none(group_m
     assert conductor.conductivity == adapter.DEFAULT_CONDUCTIVITY_S_PER_M
 
 
+def test_edge_conditions_honour_overrides(group_mesh):
+    override = {"aluminum": MaterialProperties(permittivity=1.0, conductivity=1.0e7)}
+    (conductor, _pec) = edge_conditions(
+        group_mesh,
+        _stack_with_signal_layer(),
+        frequency_hz=1e9,
+        overrides=override,
+    )
+    assert conductor.conductivity == 1.0e7
+
+
 def test_edge_conditions_name_a_missing_layer(group_mesh):
     with pytest.raises(ValueError, match="m3_signal"):
         edge_conditions(group_mesh, _stack(), frequency_hz=1e9)
@@ -548,6 +559,8 @@ def test_wall_mode_is_unknown_without_a_voltage_path_or_power():
     assert wall is None
     wall, _ = wall_mode_from_impedances(complex("nan"), 50.0 + 0.0j)
     assert wall is None
+    wall, _ = wall_mode_from_impedances(complex("inf"), 50.0 + 0.0j)
+    assert wall is None
 
 
 # --- solves (need gfem) --------------------------------------------------------------
@@ -572,6 +585,7 @@ def tem_solution(pec_mesh):
     )
 
 
+@pytest.mark.gfem_local
 def test_tem_line_has_the_dielectric_index(tem_solution):
     n_eff = np.asarray(tem_solution.n_eff)
     assert np.asarray(tem_solution.solved).all()
@@ -581,6 +595,7 @@ def test_tem_line_has_the_dielectric_index(tem_solution):
     assert abs(n_eff[0].imag) < 1e-6
 
 
+@pytest.mark.gfem_local
 def test_n_eff_follows_gamma(tem_solution):
     k0 = 2 * np.pi * FREQUENCY_HZ / C0
     np.testing.assert_allclose(
@@ -590,6 +605,7 @@ def test_n_eff_follows_gamma(tem_solution):
     )
 
 
+@pytest.mark.gfem_local
 def test_tem_impedance_definitions_agree(tem_solution):
     z = adapter.line_impedances(
         tem_solution,
@@ -604,6 +620,7 @@ def test_tem_impedance_definitions_agree(tem_solution):
     np.testing.assert_allclose(z["VI"], z["PV"], rtol=1e-2)
 
 
+@pytest.mark.gfem_local
 def test_tem_line_reading(tem_solution):
     reading = adapter.line_reading(
         tem_solution, signal=TEM_SIGNAL, return_=TEM_GROUND, domain=TEM_DOMAIN
@@ -623,6 +640,7 @@ def test_tem_line_reading(tem_solution):
     assert "Z_VI" in reading.diagnostic
 
 
+@pytest.mark.gfem_local
 def test_line_reading_without_a_return_conductor_has_no_wall_verdict(tem_solution):
     full = adapter.line_reading(
         tem_solution, signal=TEM_SIGNAL, return_=TEM_GROUND, domain=TEM_DOMAIN
@@ -634,6 +652,7 @@ def test_line_reading_without_a_return_conductor_has_no_wall_verdict(tem_solutio
     assert "Z_PV" not in alone.diagnostic
 
 
+@pytest.mark.gfem_local
 def test_line_reading_index_selects_the_frequency(tem_solution):
     with pytest.raises(IndexError):
         adapter.line_reading(
@@ -656,6 +675,7 @@ def test_solve_line_refuses_media_that_change_with_frequency(monkeypatch, pec_me
         adapter.solve_line(pec_mesh, _stack(), frequency_hz=[1e9, 2e9])
 
 
+@pytest.mark.gfem_local
 def test_finite_conductivity_conductor_tends_to_the_perfect_one(conductivity_mesh):
     pytest.importorskip("gfem")
     n_eff = {}

@@ -91,7 +91,7 @@ element away from the metal and clear of every other conductor.
 
 A shielded line has a second propagating mode: the one on which both electrodes sit at one potential and the metallic wall returns
 the current. `line_reading` tells them apart with the rule Palace's reading uses: below `|Z_PV / Z_PI| = 1e-2` the gap voltage
-carries none of the mode's power and `wall_mode` is `True`. gfem 0.1.0 does not expose a signed electrode current, so the
+carries none of the mode's power and `wall_mode` is `True`. gfem 0.2 does not expose a signed electrode current, so the
 electrode-current pairing the femwell reading uses is not available. Without a return conductor `wall_mode` is `None`.
 
 ## Limits
@@ -120,7 +120,7 @@ On the mesh `BoundaryModeSim` writes (10 950 triangles, 0.5 µm elements in the 
 The second table is from a plain-gmsh stand-in of the same geometry with finer metal (12 534 triangles, 0.25 µm in the metal),
 measured before `BoundaryModeSim` meshes could be read here. It covers the four frozen frequencies, which the table above does
 not (50 GHz needs the finer metal mesh); re-measure it on the real mesh with
-`GSIM_GFEM_CPW_FULL=1 pytest tests/gfem/test_lossy_cpw_three_way.py -s`.
+`GSIM_GFEM_CPW_FULL=1 uv run pytest tests/gfem/test_lossy_cpw_three_way.py -m gfem_local -s`.
 
 | f (GHz) | Re n: gfem vs Palace | alpha (dB/cm) | Z_PV (ohm, real part) | Z_PI vs femwell |
 | --- | --- | --- | --- | --- |
@@ -130,7 +130,7 @@ not (50 GHz needs the finer metal mesh); re-measure it on the real mesh with
 | 50 | 1.8512 vs 1.8515 (1.5e-4) | 5.1354 vs 5.1325 (5.7e-4) | 57.83 vs 57.89 (9.9e-4) | 57.95 vs 57.97 (3.6e-4) |
 
 Relative differences in brackets. The frozen numbers were computed with Palace build 295645f driven by gsim 0.9.0 and femwell
-0.1.12; they were copied from a branch of gfem and have not been compared with the merged version.
+0.1.12; they are the constants of `tests/verification/test_lossy_cpw.py` on gfem main (commit 2b5a980).
 
 ## Reference
 

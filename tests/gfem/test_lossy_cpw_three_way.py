@@ -12,6 +12,9 @@ Three references:
 - live Palace results, when ``GSIM_GFEM_PALACE_RESULTS`` points at downloaded
   runs (see ``test_gfem_matches_live_palace``). Nothing here submits a job.
 
+The tests that solve with gfem are marked ``gfem_local`` and deselected by
+default; run them with ``pytest -m gfem_local``.
+
 Environment knobs, all optional:
 
 - ``GSIM_GFEM_CPW_FULL=1``: the four frozen frequencies on a 0.25 um metal mesh
@@ -50,12 +53,11 @@ EDGE_ZONE_UM = 20.0
 
 #: Frozen reference numbers of benvial/gfem#2.
 #:
-#: Copied verbatim from tests/verification/test_lossy_cpw.py of gfem, branch
-#: ali/verification-lossy-cpw @ 32da0c4 (not yet compared with the merged
-#: benvial/gfem#3). Provenance given there: Palace 2D boundary mode, build
+#: The same constants as tests/verification/test_lossy_cpw.py on gfem main
+#: (commit 2b5a980; all eight reference constants match exactly), see also
+#: benvial/gfem#2. Provenance given there: Palace 2D boundary mode, build
 #: 295645f, driven by gsim 0.9.0; femwell 0.1.12; both on the same 27 522-triangle
-#: cross-section (metal 0.15 um, order 2). Source files: doplaydo/simulation-benchmarks
-#: at 177b68f (private; available on request). n_eff = n' - i n''.
+#: cross-section (metal 0.15 um, order 2). n_eff = n' - i n''.
 GHZ = (1e9, 10e9, 25e9, 50e9)
 PALACE_N = np.array(
     [
@@ -290,6 +292,7 @@ def test_frozen_alpha_follows_from_frozen_n():
         np.testing.assert_allclose(_alpha_of_index(n, GHZ), alpha, rtol=1e-4)
 
 
+@pytest.mark.gfem_local
 def test_gfem_matches_frozen_palace_and_femwell(gfem_line):
     result = gfem_line
     # With more than three frequencies gfem solves a few exactly and follows the
@@ -334,6 +337,7 @@ def test_gfem_matches_frozen_palace_and_femwell(gfem_line):
         assert reading.z0_ohm == pytest.approx(z["PI"][index])
 
 
+@pytest.mark.gfem_local
 @pytest.mark.usefixtures("femwell_runtime")
 def test_gfem_and_femwell_line_readings_agree(gfem_line, cpw):
     from gsim.femwell.adapter import epsilon_by_region, line_reading, solve_modes
@@ -398,6 +402,7 @@ def palace_runs() -> dict[float, Path]:
     return runs
 
 
+@pytest.mark.gfem_local
 def test_gfem_matches_live_palace(palace_runs, gfem_line):
     from gsim.palace.results import load_text_results
 

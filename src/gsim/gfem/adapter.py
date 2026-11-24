@@ -253,11 +253,20 @@ def region_media(
 
 
 def _layer_conductivity(
-    stack: LayerStack, layer_name: str, *, frequency_hz: float
+    stack: LayerStack,
+    layer_name: str,
+    *,
+    frequency_hz: float,
+    overrides: dict[str, MaterialProperties] | None = None,
 ) -> float:
-    """Conductivity (S/m) of the material of a conductor layer."""
+    """Conductivity (S/m) of the material of a conductor layer.
+
+    The material entry is looked up as in :func:`region_media`: an override
+    by material name wins over the stack's own entry.
+    """
     layer = stack.layers[layer_name]
-    entry = (stack.materials or {}).get(layer.material)
+    stack_materials = dict(stack.materials or {})
+    entry = (overrides or {}).get(layer.material, stack_materials.get(layer.material))
     resolved = resolve_stack_material(layer.material, entry, C0 / frequency_hz * 1e6)
     sigma = None if resolved is None else resolved.conductivity_scalar
     if sigma is None or sigma <= 0.0:
@@ -274,6 +283,7 @@ def edge_conditions(
     absorbing_boundary: bool = False,
     conductor_boundary: Literal["conductivity", "pec"] = "conductivity",
     conductor_thickness: Literal["thick", "stack"] = "thick",
+    overrides: dict[str, MaterialProperties] | None = None,
 ) -> list[EdgeCondition]:
     """Map the 1D groups of the mesh to port-mode boundary conditions.
 
@@ -302,6 +312,9 @@ def edge_conditions(
             effect alone; ``"stack"`` gives it the layer thickness. gfem
             counts the thickness twice on a one-sided face, which may not be
             what Palace does with the same number (unverified).
+        overrides: Optional material-property overrides by material name,
+            applied to the conductivity of a conductor layer as
+            :func:`region_media` applies them to a region.
 
     Returns:
         The conditions, in mesh tag order.
@@ -344,7 +357,7 @@ def edge_conditions(
                     "conductor",
                     name,
                     conductivity=_layer_conductivity(
-                        stack, layer_name, frequency_hz=frequency
+                        stack, layer_name, frequency_hz=frequency, overrides=overrides
                     ),
                     thickness_m=thickness,
                 )
@@ -443,7 +456,7 @@ def wall_mode_from_impedances(
     Below :data:`~gsim.palace.line_impedance.MIN_VOLTAGE_POWER_RATIO` the
     Mode is the wall Mode. This is the rule Palace's reading applies; it
     replaces the electrode-current pairing the femwell reading uses, because
-    gfem 0.1.0 exposes no signed electrode current.
+    gfem 0.2 exposes no signed electrode current.
 
     Args:
         z_pv: Power-voltage impedance, or ``None`` when no voltage path
@@ -458,7 +471,11 @@ def wall_mode_from_impedances(
     if z_pv is None:
         return None, "no voltage path, so nothing says which mode this is"
     magnitude_pi = abs(z_pi)
-    if not math.isfinite(magnitude_pi) or magnitude_pi == 0.0 or math.isnan(abs(z_pv)):
+    if (
+        not math.isfinite(magnitude_pi)
+        or magnitude_pi == 0.0
+        or not math.isfinite(abs(z_pv))
+    ):
         return None, (
             "the impedances give no finite ratio, so nothing says which mode this is"
         )
@@ -526,6 +543,7 @@ def build_model(
         absorbing_boundary=absorbing_boundary,
         conductor_boundary=conductor_boundary,
         conductor_thickness=conductor_thickness,
+        overrides=overrides,
     )
     boundaries: list[Any] = []
     for condition in conditions:
