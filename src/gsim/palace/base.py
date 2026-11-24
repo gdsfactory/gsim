@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from gdsfactory.component import Component
 
     from gsim.palace._mesh_fingerprint import PortDeclaration
+    from gsim.palace.estimate import ResourceEstimate
     from gsim.palace.mesh.geometry import GeometryData
     from gsim.palace.mesh.nets import Nets
     from gsim.palace.ports.config import PalacePort
@@ -3205,6 +3206,73 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     # Cloud: fine-grained control
     # -------------------------------------------------------------------------
 
+    def estimate_resources(
+        self, *, machine_memory_gib: float | None = None
+    ) -> ResourceEstimate:
+        """Estimate the peak memory and the solve time of this simulation.
+
+        Call it after :meth:`mesh` and :meth:`write_config`: it reads the mesh
+        statistics and the written ``config.json`` and changes nothing. The
+        number of unknowns is counted in the generated mesh. Memory is the
+        figure to rely on (typical error 4 to 16 % for driven and eigenmode
+        runs); time is given as a range only. Solvers and linear solvers
+        without a fit get no estimate (``available`` is ``False``).
+
+        Args:
+            machine_memory_gib: Memory per node (GiB) to compare the estimate
+                with. ``None`` takes the largest successful run in the fitted
+                data, 194.55 GiB on 95 MPI processes, which is not a limit of
+                the cloud service.
+
+        Returns:
+            The :class:`~gsim.palace.estimate.ResourceEstimate`.
+
+        Example:
+            >>> sim.mesh()
+            >>> sim.write_config()
+            >>> estimate = sim.estimate_resources()
+            >>> print(estimate)
+        """
+        import json
+
+        from gsim.palace.estimate import (
+            estimate_from_inputs,
+            unavailable_estimate,
+        )
+
+        result = self._last_mesh_result
+        if result is None:
+            return unavailable_estimate(
+                "no mesh: call mesh() first", machine_memory_gib=machine_memory_gib
+            )
+        config_path = getattr(result, "config_path", None)
+        if config_path is None and self._output_dir is not None:
+            config_path = self._output_dir / "config.json"
+        if config_path is None or not Path(config_path).is_file():
+            return unavailable_estimate(
+                "no config.json: call write_config() first",
+                machine_memory_gib=machine_memory_gib,
+            )
+        config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        return estimate_from_inputs(
+            config,
+            getattr(result, "mesh_stats", None),
+            machine_memory_gib=machine_memory_gib,
+        )
+
+    def _log_resource_estimate(self) -> None:
+        """Log the resource estimate before a job is prepared for upload.
+
+        The estimate is advice: whatever goes wrong while making it is logged
+        at debug level and never stops the upload.
+        """
+        from gsim.palace.estimate import log_estimate
+
+        try:
+            log_estimate(self.estimate_resources())
+        except Exception:
+            logger.debug("Palace resource estimate failed", exc_info=True)
+
     def _prepare_upload_dir(self) -> Path:
         """Prepare a temp directory with all config/mesh files for upload.
 
@@ -3222,6 +3290,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         # Always (re)generate config.json to reflect current driven settings
         self.write_config()
+        self._log_resource_estimate()
 
         # Copy input files to a temp dir so we don't destroy the user's directory
         tmp = Path(tempfile.mkdtemp(prefix="palace_"))

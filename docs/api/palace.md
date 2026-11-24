@@ -353,6 +353,15 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 - [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
 - [`MagnetostaticSim`][gsim.palace.MagnetostaticSim]
 
+## Resource estimate
+
+Peak memory and solve time of a driven or eigenmode run, from the generated mesh and `config.json`, before you submit.
+See [Estimate memory and time before you submit](../getting_started_palace.md#estimate-memory-and-time-before-you-submit)
+for what it covers and how accurate it is.
+
+- [`estimate_resources`][gsim.palace.estimate_resources]
+- [`ResourceEstimate`][gsim.palace.ResourceEstimate]
+
 ## Floquet eigenmodes
 
 Set the signed cell phase in radians. The wave vector uses the measured donor-to-receiver mesh translation; the eigenvalue
