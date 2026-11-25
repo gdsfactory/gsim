@@ -667,6 +667,17 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 - [`MeshConfig`][gsim.palace.MeshConfig]
 - [`generate_mesh`][gsim.palace.generate_mesh]
 
+### Zero-thickness conductors in boundary mode
+
+A boundary-mode cross-section treats a metal layer thinner than 0.02 um as a
+zero-thickness conductor, the same planar threshold the 3D mesh uses. Its strip
+and grounds become curves on the dielectric interface, shared by the dielectrics
+above and below, and are written under `Boundaries.PEC` as `<layer>_pec`
+whatever the layer's conductivity, since a sheet has no thickness to take a
+surface impedance from. Thicker metal keeps its outline as a hole, as before.
+An impedance path around a sheet is a closed loop that encloses the sheet in the
+dielectric.
+
 ### Feature-based sizing
 
 Automatic sizing uses a same-layer geometry heuristic. Touching and overlapping
