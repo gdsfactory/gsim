@@ -191,6 +191,10 @@ Palace resource estimate (driven_adaptive, MUMPS)
            has 4 to 12 samples
 ```
 
+![Measured peak memory per node against field DOFs for 712 Palace runs, with the fitted power law per solver and linear solver](assets/palace/resource_estimate_memory_fit.png)
+
+The memory fit against the 712 measured cloud runs it was made from. Each colour is one solver and linear solver.
+
 This small mesh is below the smallest run behind the fit, which is why it carries the first note. A model within the
 size range of the fitted runs gets no such note.
 
