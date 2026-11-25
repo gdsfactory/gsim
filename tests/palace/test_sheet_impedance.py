@@ -255,12 +255,14 @@ class TestSheetImpedanceConfig:
             SheetImpedanceConfig(layer="sc")
 
     @pytest.mark.parametrize("field", ["inductance", "resistance"])
-    def test_rejects_negative(self, field):
+    @pytest.mark.parametrize("value", [0.0, -1.0])
+    def test_rejects_non_positive(self, field, value):
         with pytest.raises(ValidationError):
-            SheetImpedanceConfig(layer="sc", **{field: -1.0})
+            SheetImpedanceConfig(layer="sc", **{field: value})
 
-    def test_zero_is_allowed(self):
-        assert SheetImpedanceConfig(layer="sc", inductance=0.0).inductance == 0.0
+    def test_zero_with_a_valid_value_is_rejected(self):
+        with pytest.raises(ValidationError):
+            SheetImpedanceConfig(layer="sc", inductance=LS, resistance=0.0)
 
     def test_round_trip(self):
         original = SheetImpedanceConfig(layer="sc", inductance=LS, resistance=RS)
@@ -287,6 +289,11 @@ class TestSimApi:
     def test_requires_a_value(self):
         with pytest.raises(ValueError):
             DrivenSim().add_sheet_impedance("sc")
+
+    @pytest.mark.parametrize("field", ["inductance", "resistance"])
+    def test_zero_rejected_at_call(self, field):
+        with pytest.raises(ValueError):
+            DrivenSim().add_sheet_impedance("sc", **{field: 0.0})
 
     def test_electrostatic_rejected_at_call(self):
         sim = ElectrostaticSim()

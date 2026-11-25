@@ -344,10 +344,10 @@ class SheetImpedanceConfig(BaseModel):
 
     layer: str
     inductance: float | None = Field(
-        default=None, ge=0, description="Sheet inductance [H/sq]"
+        default=None, gt=0, description="Sheet inductance [H/sq]"
     )
     resistance: float | None = Field(
-        default=None, ge=0, description="Sheet resistance [ohm/sq]"
+        default=None, gt=0, description="Sheet resistance [ohm/sq]"
     )
 
     @model_validator(mode="after")

@@ -960,7 +960,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             resistance: Sheet resistance [ohm/sq].
 
         Raises:
-            ValueError: If neither value is given, a value is negative, or the
+            ValueError: If neither value is given, a value is not positive, or the
                 simulation type is electrostatic.
 
         Example:
