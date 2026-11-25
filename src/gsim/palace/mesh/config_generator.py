@@ -1361,6 +1361,16 @@ def generate_palace_config(
     port_boundary = (
         driven_config.waveport_boundary if driven_config is not None else "pec"
     )
+    if boundaries.get("WavePort") and sheet_attrs:
+        logger.warning(
+            "Sheet impedance on %s with wave ports: Palace chooses the port "
+            "mode search target itself, from the bulk permittivity with a 10%% "
+            "margin, and it has no setting for it. A kinetic-inductance mode has "
+            "an effective index well above that, so it can be missed or "
+            "mis-ordered. Check the port mode, n_eff and Z0, against a "
+            "boundary-mode run or lumped/CPW ports.",
+            ", ".join(sorted(repr(sheet.layer) for sheet in sheet_impedances or [])),
+        )
     if boundaries.get("WavePort") and port_boundary == "pec":
         waveport_pec_attrs: set[int] = set()
         absorbing_entry = boundaries.get("Absorbing")
@@ -1377,6 +1387,9 @@ def generate_palace_config(
         # Palace's port mode solve makes only PEC and WavePortPEC attributes
         # Dirichlet; any other attribute on the port edge is natural (PMC).
         waveport_pec_attrs -= set(plane_attrs)
+        # A sheet impedance layer is the line conductor, not a loss term, so it
+        # keeps its Robin condition in the port eigenproblem.
+        waveport_pec_attrs -= sheet_attrs
         if waveport_pec_attrs:
             boundaries["WavePortPEC"] = {"Attributes": sorted(waveport_pec_attrs)}
 

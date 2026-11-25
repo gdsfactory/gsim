@@ -368,8 +368,19 @@ faces would each carry the impedance, so the call raises an error. Electrostatic
 and magnetostatic simulations raise, since Palace has no Impedance boundary there. In a
 boundary-mode cross-section the sheets are curves on the dielectric interface,
 and they take the impedance the same way.
-The default `waveport_boundary="pec"` treats these sheets as PEC inside the port
-eigenproblem, as it does for other impedance boundaries.
+The sheets are the line conductor, so they keep their impedance in the wave-port
+eigenproblem under both `waveport_boundary` policies. They are not added to
+`WavePortPEC`, which still takes the absorbing walls, finite-conductivity conductors
+and other impedance boundaries.
+
+Wave ports need care with kinetic inductance. Palace picks the port mode search
+target itself, from the largest `eps_r * mu_r` on the port with a 10% margin, and has
+no setting for it. Kinetic inductance raises `n_eff` well above the geometric value,
+so the mode can lie above that target and be missed or mis-ordered. gsim does not
+expose the target and logs a warning when a sheet impedance is used with wave ports.
+Check `n_eff` and `Z0` of the port mode against a boundary-mode run, where
+`set_boundary_mode(target=...)` sets the `n_eff` the search aims at, or use lumped or
+CPW ports.
 
 Palace 0.19 and later keep the sheet uncracked, so `inductance` is the film
 value. Earlier versions split an interior sheet into two independent faces, which

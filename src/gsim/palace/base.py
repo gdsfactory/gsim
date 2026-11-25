@@ -950,6 +950,14 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         independent faces, which models a film only when both faces carry the
         same current. Use Palace 0.19 or later for thin films.
 
+        With wave ports the sheets keep their impedance in the port eigenproblem
+        and are not added to ``WavePortPEC``. Palace sets the port mode search
+        target itself, from the largest ``eps_r * mu_r`` on the port with a 10%
+        margin, and gsim cannot change it. Kinetic inductance raises ``n_eff``
+        well above the geometric value, so the port mode can be missed or
+        mis-ordered. gsim logs a warning in this case. Check the port mode
+        against a boundary-mode run, or use lumped or CPW ports.
+
         Thick conductors meshed as volumes are not supported: their outer faces
         would each carry the impedance. Electrostatic simulations have no
         Impedance boundary in Palace.

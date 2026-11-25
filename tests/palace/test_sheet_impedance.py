@@ -9,6 +9,7 @@ meshed tests check the real physical-group keys and ``validate_mesh``.
 from __future__ import annotations
 
 import json
+import logging
 
 import gdsfactory as gf
 import pytest
@@ -23,7 +24,8 @@ from gsim.palace import (
     MagnetostaticSim,
 )
 from gsim.palace.mesh.config_generator import generate_palace_config
-from gsim.palace.models import SheetImpedanceConfig
+from gsim.palace.models import DrivenConfig, SheetImpedanceConfig
+from gsim.palace.ports.config import PalacePort, PortType
 
 LS = 20e-12  # H/sq, a thin superconducting film
 RS = 0.5  # ohm/sq
@@ -80,10 +82,19 @@ def _groups(pec_surfaces: dict | None = None, conductor_surfaces: dict | None = 
     }
 
 
-def _generate(tmp_path, groups, *, sheets=None, simulation_type="driven", stack=None):
+def _generate(
+    tmp_path,
+    groups,
+    *,
+    sheets=None,
+    simulation_type="driven",
+    stack=None,
+    ports=None,
+    driven=None,
+):
     config_path = generate_palace_config(
         groups=groups,
-        ports=[],
+        ports=ports or [],
         port_info=[],
         stack=stack if stack is not None else _stack(),
         output_path=tmp_path,
@@ -92,6 +103,7 @@ def _generate(tmp_path, groups, *, sheets=None, simulation_type="driven", stack=
         simulation_type=simulation_type,
         absorbing_boundary=True,
         sheet_impedances=sheets,
+        driven_config=driven,
     )
     return json.loads(config_path.read_text())
 
@@ -190,6 +202,92 @@ class TestConfigWriting:
         boundaries = config["Boundaries"]
         assert boundaries["Impedance"] == [{"Attributes": [9], "Ls": LS}]
         assert boundaries["PEC"] == {"Attributes": [11]}
+
+
+def _wave_port_groups() -> dict:
+    groups = _groups()
+    groups["port_surfaces"] = {"P1": {"phys_group": 6}, "P2": {"phys_group": 7}}
+    return groups
+
+
+def _wave_ports() -> list[PalacePort]:
+    return [
+        PalacePort(name="o1", port_type=PortType.WAVEPORT, layer="sc"),
+        PalacePort(name="o2", port_type=PortType.WAVEPORT, layer="sc", excited=False),
+    ]
+
+
+class TestWavePorts:
+    def test_sheets_stay_out_of_waveport_pec(self, tmp_path):
+        config = _generate(
+            tmp_path,
+            _wave_port_groups(),
+            sheets=_sheets(inductance=LS),
+            ports=_wave_ports(),
+        )
+        boundaries = config["Boundaries"]
+        assert boundaries["Impedance"] == [{"Attributes": [9], "Ls": LS}]
+        assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8]}
+
+    def test_other_impedance_boundaries_still_listed(self, tmp_path):
+        from gsim.palace.models.ports import ImpedanceBoundaryConfig
+
+        config_path = generate_palace_config(
+            groups=_wave_port_groups(),
+            ports=_wave_ports(),
+            port_info=[],
+            stack=_stack(),
+            output_path=tmp_path,
+            model_name="palace",
+            fmax=100e9,
+            simulation_type="driven",
+            absorbing_boundary=True,
+            sheet_impedances=_sheets(inductance=LS),
+            impedance_boundaries=[
+                ImpedanceBoundaryConfig(attributes=[20], resistance=1.0)
+            ],
+        )
+        boundaries = json.loads(config_path.read_text())["Boundaries"]
+        assert boundaries["WavePortPEC"] == {"Attributes": [4, 5, 8, 20]}
+
+    def test_no_waveport_pec_when_only_sheets_remain(self, tmp_path):
+        groups = _wave_port_groups()
+        groups["conductor_surfaces"] = {}
+        groups["boundary_surfaces"] = {}
+        config = _generate(
+            tmp_path,
+            groups,
+            sheets=_sheets(inductance=LS),
+            ports=_wave_ports(),
+        )
+        assert "WavePortPEC" not in config["Boundaries"]
+
+    def test_inherit_policy_also_keeps_sheets_out(self, tmp_path):
+        config = _generate(
+            tmp_path,
+            _wave_port_groups(),
+            sheets=_sheets(inductance=LS),
+            ports=_wave_ports(),
+            driven=DrivenConfig(waveport_boundary="inherit"),
+        )
+        assert "WavePortPEC" not in config["Boundaries"]
+        assert config["Boundaries"]["Impedance"] == [{"Attributes": [9], "Ls": LS}]
+
+    def test_warns_about_the_port_mode_target(self, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING):
+            _generate(
+                tmp_path,
+                _wave_port_groups(),
+                sheets=_sheets(inductance=LS),
+                ports=_wave_ports(),
+            )
+        assert "mode search target" in caplog.text
+        assert "'sc'" in caplog.text
+
+    def test_no_warning_without_wave_ports(self, tmp_path, caplog):
+        with caplog.at_level(logging.WARNING):
+            _generate(tmp_path, _groups(), sheets=_sheets(inductance=LS))
+        assert "mode search target" not in caplog.text
 
 
 class TestErrors:
