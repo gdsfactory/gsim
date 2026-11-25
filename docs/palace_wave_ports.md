@@ -127,8 +127,9 @@ What `config.json` gets for the outer wall of the line of section 2:
 | --- | --- |
 | `absorbing_boundary` not set (default), with wave ports | The outer surfaces are in `PEC`; there is no `Absorbing` |
 | `absorbing_boundary=True` | `Absorbing`; the outer surfaces are not in `PEC` |
-| `absorbing_boundary=False` | Neither. The outer boundary is left unconditioned, which Palace treats as a magnetic (PMC) wall |
+| `absorbing_boundary=False` | The outer surfaces are in `PMC`, the wall Palace applies to an unconditioned boundary |
 | `metallic_boundaries=True` | `PEC`, as the default. With `absorbing_boundary=True` as well, `write_config()` raises `ValueError` |
+| `outer_boundary` set | That wall, `PEC`, `PMC` or `Absorbing`, which replaces the PEC default. Contradicting a set flag raises `ValueError` |
 
 A driven simulation with lumped ports only stays absorbing by default. The PEC default applies to wave ports added with
 `add_wave_port()` and `add_multimode_wave_port()` and to wave ports declared through `configure_wave_port()` component
@@ -138,7 +139,7 @@ nothing for the PEC wall to attach to: gsim writes no outer-wall entry and logs 
 ```python
 # Add the same wave ports to either of these instead of the default simulation of section 2:
 sim_absorbing = DrivenSim(absorbing_boundary=True)  # keep the absorbing wall
-sim_pmc = DrivenSim(absorbing_boundary=False)  # no outer-wall entry: Palace's own PMC
+sim_pmc = DrivenSim(absorbing_boundary=False)  # outer surfaces in PMC
 ```
 
 The first `write_config()` of a simulation with the PEC default logs one info line, "Wave ports: the outer wall is PEC".

@@ -353,6 +353,23 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 - [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
 - [`MagnetostaticSim`][gsim.palace.MagnetostaticSim]
 
+## Outer walls
+
+`outer_boundary` sets the condition on the outer walls of the domain. `"absorbing"`
+absorbs outgoing radiation and is the default for driven simulations without wave
+ports, which default to `"pec"` (see above). `"pec"` closes the domain with a metal box.
+`"pmc"` is Palace's natural condition and the default for eigenmode and boundary-mode
+simulations. The generated config names the condition. `absorbing_boundary=True` means
+`outer_boundary="absorbing"`, and conflicting values raise an error. Magnetostatic
+simulations take `"pec"` or `"pmc"`, like `metallic_boundaries`, and refuse `"absorbing"`.
+Electrostatic simulations keep Palace's own outer condition, so they do not accept
+`outer_boundary`.
+
+```python
+sim = pa.EigenmodeSim()
+sim.outer_boundary = "pec"  # closed metal box instead of the PMC default
+```
+
 ## Floquet eigenmodes
 
 Set the signed cell phase in radians. The wave vector uses the measured donor-to-receiver mesh translation; the eigenvalue
