@@ -305,12 +305,11 @@ class BoundaryModeSim(_PalaceSimBase):
                 across the gap to the other's.
             current: Corners of a loop around the signal conductor (um),
                 left open — Palace closes it — or ``None`` for the voltage
-                alone. Keep it close to the metal: the loop encloses the
-                gap's displacement current along with the conductor's own,
-                so the further it stands off, the less current it reads
-                and the higher the ``Z_VI`` it gives; a loop hugging the
-                conductor agrees with the field-based power-current
-                impedance. :func:`gsim.palace.line_impedance.line_impedance_paths`
+                alone. Stand it off the metal by a few mesh elements, but
+                well short of the neighbouring conductors: a loop inside
+                the first element next to the metal sees only part of the
+                conductor's current and gives a ``Z_VI`` that is far too
+                high. :func:`gsim.palace.line_impedance.line_impedance_paths`
                 places one from the electrode layout.
             nsamples: Deprecated and ignored; supplying a count emits
                 ``DeprecationWarning``. Omit it to let Palace integrate the path.
