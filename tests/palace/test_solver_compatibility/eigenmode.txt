@@ -50,6 +50,11 @@
     "Boundaries": {
         "Conductivity": [],
         "LumpedPort": [],
-        "WavePort": []
+        "WavePort": [],
+        "PMC": {
+            "Attributes": [
+                2
+            ]
+        }
     }
 }

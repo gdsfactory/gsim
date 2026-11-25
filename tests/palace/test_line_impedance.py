@@ -9,6 +9,7 @@ whatever ``PalaceTextResults`` was handed.
 
 from __future__ import annotations
 
+import json
 import warnings
 
 import numpy as np
@@ -17,6 +18,7 @@ import pytest
 from gsim.common.modes import Conductor
 from gsim.palace import BoundaryModeSim
 from gsim.palace.line_impedance import (
+    LOOP_STANDOFF_FRACTION,
     declare_impedance_paths,
     line_impedance_paths,
     native_line_impedance,
@@ -107,11 +109,22 @@ class TestImpedancePaths:
 
         (h0, v0), (h1, v1) = paths.voltage
         assert v0 == v1 == pytest.approx(0.25)
-        # From the signal's inner face towards the return's inner face,
-        # each end a hair inside the gap rather than on the electrode.
-        assert -20.6 < h0 < -20.5
-        assert -19.5 < h1 < -19.4
-        assert h1 - h0 == pytest.approx(1.2, rel=1e-2)
+        # From the signal's inner face to the return's inner face, on both.
+        assert h0 == -20.6
+        assert h1 == -19.4
+
+    def test_a_sheets_voltage_path_runs_to_its_edge(self):
+        paths = impedance_paths(signal=((-22.6, -20.6), (0.0, 0.0)))
+
+        assert paths.voltage[0] == (-20.6, 0.0)
+
+    def test_a_clearance_fraction_holds_the_ends_off_the_faces(self):
+        paths = impedance_paths(clearance_fraction=1e-3)
+
+        (h0, _), (h1, _) = paths.voltage
+        # 1e-3 of the smallest clearance, which is the 0.5 um thickness.
+        assert h0 == pytest.approx(-20.6 + 0.0005)
+        assert h1 == pytest.approx(-19.4 - 0.0005)
 
     def test_each_end_sits_at_its_own_electrodes_mid_height(self):
         """A return on another metal level is still met on its face."""
@@ -125,10 +138,10 @@ class TestImpedancePaths:
         paths = impedance_paths(signal=GROUND, ground=SIGNAL)
 
         (h0, _), (h1, _) = paths.voltage
-        assert -19.4 > h0 > -19.5
-        assert -20.6 < h1 < -20.5
+        assert h0 == -19.4
+        assert h1 == -20.6
 
-    def test_the_current_loop_hugs_the_signal_and_only_the_signal(self):
+    def test_the_current_loop_stands_off_the_signal_and_clears_everything_else(self):
         paths = impedance_paths()
 
         h = [p[0] for p in paths.current]
@@ -144,8 +157,89 @@ class TestImpedancePaths:
         assert min(h) > DOMAIN[0][0]
         assert min(v) > DOMAIN[1][0]
         assert max(v) < DOMAIN[1][1]
-        # And tight: the loop's clearance is a fraction of the gap.
-        assert max(h) - s1 < 0.01 * (GROUND[0][0] - s1)
+
+    def test_the_loop_stands_off_by_a_fraction_of_the_gap(self):
+        """A loop inside the first mesh element misses most of the current."""
+        paths = impedance_paths()
+
+        gap = GROUND[0][0] - SIGNAL[0][1]
+        standoff = LOOP_STANDOFF_FRACTION * gap
+        assert standoff > 0.2 * gap
+        (s0, s1), (t0, t1) = SIGNAL
+        assert paths.current == (
+            (pytest.approx(s0 - standoff), pytest.approx(t0 - standoff)),
+            (pytest.approx(s1 + standoff), pytest.approx(t0 - standoff)),
+            (pytest.approx(s1 + standoff), pytest.approx(t1 + standoff)),
+            (pytest.approx(s0 - standoff), pytest.approx(t1 + standoff)),
+        )
+
+    def test_the_loop_standoff_does_not_shrink_with_the_conductor_thickness(self):
+        thick = impedance_paths()
+        thin = impedance_paths(signal=((-22.6, -20.6), (0.0, 0.01)))
+
+        assert thin.current[1][0] == pytest.approx(thick.current[1][0])
+        assert thin.current[0][0] == pytest.approx(thick.current[0][0])
+
+    def test_a_sheet_gets_a_loop_around_its_plane(self):
+        paths = impedance_paths(signal=((-22.6, -20.6), (0.0, 0.0)))
+
+        standoff = LOOP_STANDOFF_FRACTION * 1.2
+        assert [p[1] for p in paths.current] == pytest.approx(
+            [-standoff, -standoff, standoff, standoff]
+        )
+
+    def test_the_loop_never_stands_on_the_middle_of_the_gap(self):
+        """Mesh vertices tend to sit on an evenly divided gap."""
+        assert 0.0 < LOOP_STANDOFF_FRACTION < 0.5
+        for divisions in (2, 4, 8, 16):
+            assert LOOP_STANDOFF_FRACTION * divisions % 1.0 != 0.0
+
+    def test_a_nearer_conductor_on_the_other_side_limits_the_standoff(self):
+        near = ((-23.3, -23.0), (0.0, 0.5))  # 0.4 off the signal's left face
+        paths = impedance_paths(others=[near], domain=((-30.0, -15.0), (-3.0, 2.0)))
+
+        left = min(p[0] for p in paths.current)
+        assert left > near[0][1]
+        assert left == pytest.approx(SIGNAL[0][0] - LOOP_STANDOFF_FRACTION * 0.4)
+        assert max(p[0] for p in paths.current) < GROUND[0][0]
+
+    def test_a_diagonal_neighbour_is_cleared_in_both_directions(self):
+        above = ((-19.0, -18.0), (0.9, 1.4))
+        paths = impedance_paths(others=[above])
+
+        corner = paths.current[2]
+        assert not (
+            above[0][0] <= corner[0] <= above[0][1]
+            and above[1][0] <= corner[1] <= above[1][1]
+        )
+
+    def test_an_other_conductor_touching_the_signal_is_refused(self):
+        with pytest.raises(ValueError, match="overlaps or touches"):
+            impedance_paths(others=[((-20.6, -20.0), (0.0, 0.5))])
+
+    def test_the_loop_fraction_is_adjustable(self):
+        paths = impedance_paths(loop_fraction=0.1)
+
+        assert paths.current[1][0] == pytest.approx(SIGNAL[0][1] + 0.12)
+
+    def test_the_declared_solver_input_carries_the_standoff_loop(self):
+        """A CPW's generated postprocessing block has the loop off the strip."""
+        signal = ((-5.0, 5.0), (0.0, 1.0))
+        ground = ((11.0, 511.0), (0.0, 1.0))
+        domain = ((-2000.0, 2000.0), (-500.0, 1000.0))
+        sim = BoundaryModeSim()
+        declare_impedance_paths(
+            sim, line_impedance_paths(signal=signal, ground=ground, domain=domain)
+        )
+
+        declared = json.loads(json.dumps(sim.mode_postprocessing()))["Impedance"][0]
+        corners: list[list[float]] = declared["CurrentPath"]
+        voltage: list[list[float]] = declared["VoltagePath"]
+        # 0.2531 of the 6 um gap, never a hair of it.
+        assert max(c[0] for c in corners) == pytest.approx(5.0 + 0.2531 * 6.0)
+        assert max(c[1] for c in corners) == pytest.approx(1.0 + 0.2531 * 6.0)
+        assert min(c[1] for c in corners) == pytest.approx(-0.2531 * 6.0)
+        assert voltage[0][1] == voltage[1][1] == 0.5
 
     def test_the_loop_is_closed_by_palace_not_by_repeating_a_point(self):
         """Palace joins the last point back to the first itself."""
@@ -357,6 +451,26 @@ class TestLossyConductorsReadTheFields:
             mode_id=1,
             n_eff=2.0,
             signal=SIGNAL_CONDUCTOR,
+            context="The rf stage's palace route",
+        )
+
+        assert reading.z0_ohm == pytest.approx(80.0**2 / 100.0)
+
+    def test_a_sheet_is_perfect_in_the_mesh_so_it_takes_the_table(
+        self, monkeypatch, tmp_path
+    ):
+        self._fields_say(monkeypatch, 74.6 - 8.3j)
+        sheet = Conductor(
+            name="electrode_low", extent=((-5.0, 5.0), (0.0, 0.0)), model="volume"
+        )
+
+        reading = palace_line_impedance(
+            FieldlessSim(tmp_path),
+            impedance_tables(),
+            index=1,
+            mode_id=1,
+            n_eff=2.0,
+            signal=sheet,
             context="The rf stage's palace route",
         )
 

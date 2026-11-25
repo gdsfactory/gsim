@@ -341,6 +341,70 @@ setting writes, and the other wave-port options are on
 
 Material override precedence is separate; see [PR #277](https://github.com/gdsfactory/gsim/pull/277).
 
+## Sheet impedance
+
+A thin superconducting film, much thinner than the London depth, is meshed as a
+zero-thickness sheet. `add_sheet_impedance` gives the sheets of a conductor layer
+a surface impedance. They are written as a Palace `Impedance` boundary instead of
+`PEC`. Values are per square and written unscaled: `inductance` is the sheet
+inductance in H/sq (`Ls`), and `resistance` is the sheet resistance in ohm/sq
+(`Rs`). Calling it again for the same layer replaces the values.
+
+The two values are the parallel channels of Palace's `Impedance` boundary, with sheet
+admittance `Y = 1/Rs + 1/(j w Ls)`. They are not the series surface impedance
+`R_s + j w L_s`. For a two-fluid film, `resistance` is `1/(sigma_1 d)` and
+`inductance` is `1/(w sigma_2 d)`, the kinetic inductance. For a superconductor well
+below its critical temperature the inductance alone is the usual case.
+
+A series `Z_s = R_s + j w L_s` given at one frequency converts through `Y = 1/Z_s`:
+`resistance = 1/Re(Y)` and `inductance = -1/(w Im(Y))`.
+`parallel_sheet_impedance` does this, and the two admittances agree at that frequency
+only.
+
+```python
+from gsim.palace.models import parallel_sheet_impedance
+
+values = parallel_sheet_impedance(inductance=20e-12, resistance=1e-3, frequency=6e9)
+sim.add_sheet_impedance("nb", **values)
+```
+
+```python
+from gsim.palace import DrivenSim
+
+sim = DrivenSim()
+sim.set_geometry(component)  # CPW drawn on the thin superconducting layer "nb"
+sim.add_cpw_port("o1", layer="nb", s_width=10, gap_width=6)
+sim.add_cpw_port("o2", layer="nb", s_width=10, gap_width=6)
+sim.add_sheet_impedance("nb", inductance=20e-12)  # 20 pH/sq
+sim.mesh(preset="fine")
+```
+
+Every sheet of the layer, signal and ground alike, takes the value. The layer must
+be a conductor meshed as sheets, either thinner than 0.02 um or with
+`planar_conductors=True`. A thick conductor is meshed as a volume, and its outer
+faces would each carry the impedance, so the call raises an error. Electrostatic
+and magnetostatic simulations raise, since Palace has no Impedance boundary there. In a
+boundary-mode cross-section the sheets are curves on the dielectric interface,
+and they take the impedance the same way.
+The sheets are the line conductor, so they keep their impedance in the wave-port
+eigenproblem under both `waveport_boundary` policies. They are not added to
+`WavePortPEC`, which still takes the absorbing walls, finite-conductivity conductors
+and other impedance boundaries.
+
+Wave ports need care with kinetic inductance. Palace picks the port mode search
+target itself, from the largest `eps_r * mu_r` on the port with a 10% margin, and has
+no setting for it. Kinetic inductance raises `n_eff` well above the geometric value,
+so the mode can lie above that target and be missed or mis-ordered. gsim does not
+expose the target and logs a warning when a sheet impedance is used with wave ports.
+Check `n_eff` and `Z0` of the port mode against a boundary-mode run, where
+`set_boundary_mode(target=...)` sets the `n_eff` the search aims at, or use lumped or
+CPW ports.
+
+Palace 0.19 and later keep the sheet uncracked, so `inductance` is the film
+value. Earlier versions split an interior sheet into two independent faces, which
+models a film only when both faces carry the same current. Use Palace 0.19 or
+later for thin films.
+
 ## Result validation
 
 - [`validation`][gsim.palace.validation]
@@ -352,6 +416,26 @@ Material override precedence is separate; see [PR #277](https://github.com/gdsfa
 - [`ElectrostaticSim`][gsim.palace.ElectrostaticSim]
 - [`BoundaryModeSim`][gsim.palace.BoundaryModeSim]
 - [`MagnetostaticSim`][gsim.palace.MagnetostaticSim]
+
+## Outer walls
+
+`outer_boundary` sets the condition on the outer walls of the domain. `"absorbing"`
+absorbs outgoing radiation and is the default for driven simulations without wave
+ports, which default to `"pec"` (see above). `"pec"` closes the domain with a metal box.
+`"pmc"` is Palace's natural condition and the default for eigenmode and boundary-mode
+simulations. The generated config names the condition. A PMC wall is written
+explicitly under `Boundaries.PMC` when no other wall condition is set. It is Palace's
+natural condition, so the solve is the same, but `config.json` now differs from the one
+earlier versions wrote, and so does its input hash. `absorbing_boundary=True` means
+`outer_boundary="absorbing"`, and conflicting values raise an error. Magnetostatic
+simulations take `"pec"` or `"pmc"`, like `metallic_boundaries`, and refuse `"absorbing"`.
+Electrostatic simulations keep Palace's own outer condition, so they do not accept
+`outer_boundary`.
+
+```python
+sim = pa.EigenmodeSim()
+sim.outer_boundary = "pec"  # closed metal box instead of the PMC default
+```
 
 ## Floquet eigenmodes
 
@@ -649,6 +733,18 @@ as infinite and stored as `max=None` with a nonzero `singular_elements` count.
 
 - [`MeshConfig`][gsim.palace.MeshConfig]
 - [`generate_mesh`][gsim.palace.generate_mesh]
+
+### Zero-thickness conductors in boundary mode
+
+A boundary-mode cross-section treats a metal layer thinner than 0.02 um as a
+zero-thickness conductor, the same planar threshold the 3D mesh uses. Its strip
+and grounds become curves on the dielectric interface, shared by the dielectrics
+above and below, and are written under `Boundaries.PEC` as `<layer>_pec`
+whatever the layer's conductivity, since a sheet has no thickness to take a
+surface impedance from. `add_sheet_impedance` replaces PEC with a sheet
+impedance. Thicker metal keeps its outline as a hole, as before.
+An impedance path around a sheet is a closed loop that encloses the sheet in the
+dielectric.
 
 ### Feature-based sizing
 

@@ -19,6 +19,7 @@ from .config_generator import (
     write_config,
 )
 from .geometry import (
+    PLANAR_CONDUCTOR_THICKNESS_UM,
     GeometryData,
     add_dielectrics,
     add_metals,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from gsim.common.stack import LayerStack
+    from gsim.palace.base import OuterBoundary
     from gsim.palace.models import (
         BoundaryModeConfig,
         CrossSectionPlaneConfig,
@@ -175,12 +177,26 @@ class MeshResult:
     symmetry_plane: dict | None = None
 
 
+def _is_planar_metal(stack: LayerStack, layer_name: str, z0: float, z1: float) -> bool:
+    """Whether a metal section is a zero-thickness sheet in the 2D cross-section."""
+    layer = stack.layers.get(layer_name)
+    return (
+        layer is not None
+        and layer.layer_type in {"conductor", "via"}
+        and z1 - z0 < PLANAR_CONDUCTOR_THICKNESS_UM
+    )
+
+
 def _extract_native_boundarymode_rectangles(
     component,
     stack: LayerStack,
     cross_section: CrossSectionPlaneConfig,
-) -> list[dict[str, float | str]]:
-    """Return axis-mapped 2D rectangles from the solver-agnostic section API."""
+) -> list[dict[str, float | str | bool]]:
+    """Return axis-mapped 2D rectangles from the solver-agnostic section API.
+
+    A metal section thinner than ``PLANAR_CONDUCTOR_THICKNESS_UM`` comes back
+    with ``planar`` set and ``v0 == v1``: a sheet at its bottom face.
+    """
     from gsim.common import cross_section as section_utils
 
     section = section_utils.extract_plane_section(
@@ -190,7 +206,7 @@ def _extract_native_boundarymode_rectangles(
         value=cross_section.value,
     )
 
-    rects: list[dict[str, float | str]] = []
+    rects: list[dict[str, float | str | bool]] = []
     if cross_section.axis == "x":
         for rect in section:
             y0 = getattr(rect, "y0", None)
@@ -203,15 +219,18 @@ def _extract_native_boundarymode_rectangles(
             y1 = float(y1)
             z0 = float(z0)
             z1 = float(z1)
-            if y1 <= y0 or z1 <= z0:
+            layer_name = str(getattr(rect, "layer_name", "layer"))
+            planar = _is_planar_metal(stack, layer_name, z0, z1)
+            if y1 <= y0 or (z1 <= z0 and not planar):
                 continue
             rects.append(
                 {
-                    "layer_name": str(getattr(rect, "layer_name", "layer")),
+                    "layer_name": layer_name,
                     "h0": y0,
                     "h1": y1,
                     "v0": z0,
-                    "v1": z1,
+                    "v1": z0 if planar else z1,
+                    "planar": planar,
                 }
             )
     elif cross_section.axis == "y":
@@ -226,15 +245,18 @@ def _extract_native_boundarymode_rectangles(
             x1 = float(x1)
             z0 = float(z0)
             z1 = float(z1)
-            if x1 <= x0 or z1 <= z0:
+            layer_name = str(getattr(rect, "layer_name", "layer"))
+            planar = _is_planar_metal(stack, layer_name, z0, z1)
+            if x1 <= x0 or (z1 <= z0 and not planar):
                 continue
             rects.append(
                 {
-                    "layer_name": str(getattr(rect, "layer_name", "layer")),
+                    "layer_name": layer_name,
                     "h0": x0,
                     "h1": x1,
                     "v0": z0,
-                    "v1": z1,
+                    "v1": z0 if planar else z1,
+                    "planar": planar,
                 }
             )
     else:
@@ -352,9 +374,20 @@ def _generate_native_boundarymode_groups(
     outer_surface = kernel.addRectangle(hmin, vmin, 0.0, hmax - hmin, vmax - vmin)
     layer_inputs: list[tuple[str, int]] = []
 
+    # Planar metal is a line on the dielectric interface: its curve is
+    # fragmented with the dielectric surfaces so both sides share it.
+    sheet_inputs: list[tuple[str, int]] = []
     for rect in section_rects:
         h0 = max(float(rect["h0"]), hmin)
         h1 = min(float(rect["h1"]), hmax)
+        if rect.get("planar"):
+            v = float(rect["v0"])
+            if h1 <= h0 or not vmin <= v <= vmax:
+                continue
+            p0 = kernel.addPoint(h0, v, 0.0)
+            p1 = kernel.addPoint(h1, v, 0.0)
+            sheet_inputs.append((str(rect["layer_name"]), kernel.addLine(p0, p1)))
+            continue
         v0 = max(float(rect["v0"]), vmin)
         v1 = min(float(rect["v1"]), vmax)
         if h1 <= h0 or v1 <= v0:
@@ -402,9 +435,19 @@ def _generate_native_boundarymode_groups(
 
     _, out_map = kernel.fragment(
         [(2, outer_surface)],
-        [(2, tag) for _, tag in layer_inputs],
+        [(2, tag) for _, tag in layer_inputs] + [(1, tag) for _, tag in sheet_inputs],
     )
     kernel.synchronize()
+    sheet_pieces: dict[str, set[int]] = {}
+    for idx, (layer_name, _tag) in enumerate(sheet_inputs, start=len(layer_inputs) + 1):
+        pieces = {tag for dim, tag in out_map[idx] if dim == 1}
+        if not pieces:
+            raise ValueError(
+                f"Zero-thickness conductor '{layer_name}' has no curve in cross "
+                f"section '{cross_section.spec}'."
+            )
+        sheet_pieces.setdefault(layer_name, set()).update(pieces)
+    planar_curves: set[int] = set().union(*sheet_pieces.values())
 
     groups: dict[str, dict] = {
         "volumes": {},
@@ -699,6 +742,26 @@ def _generate_native_boundarymode_groups(
                     "tags": curve_tags,
                 }
 
+    # Planar metal is PEC whatever its material: a sheet has no thickness to
+    # take a bulk-conductivity surface impedance from, as in 3D.
+    for layer_name, curves in sorted(sheet_pieces.items()):
+        for ctag in curves:
+            adjacent = set(gmsh.model.getAdjacencies(1, ctag)[0])
+            if not adjacent & vol_pg_surfaces:
+                raise ValueError(
+                    f"Zero-thickness conductor '{layer_name}' has a piece with no "
+                    f"meshed region beside it in cross section "
+                    f"'{cross_section.spec}', so it lies inside other metal or "
+                    "outside the domain."
+                )
+        curve_tags = sorted(curves)
+        pec_pg = gmsh.model.addPhysicalGroup(1, curve_tags)
+        gmsh.model.setPhysicalName(1, pec_pg, f"{layer_name}_pec")
+        groups["pec_surfaces"][layer_name] = {
+            "phys_group": pec_pg,
+            "tags": curve_tags,
+        }
+
     # The 2D background medium (unclaimed domain) is merged into the dielectric
     # groups above, so nothing to add here.
 
@@ -749,7 +812,7 @@ def _generate_native_boundarymode_groups(
             except Exception:
                 continue
             for dim, ctag in bounds:
-                if dim == 1:
+                if dim == 1 and int(ctag) not in planar_curves:
                     curves.add(int(ctag))
         if curves:
             vol_boundary_curves[layer_name] = curves
@@ -854,6 +917,8 @@ def _generate_native_boundarymode_groups(
             continue
         for dim, ctag in boundaries:
             if dim != 1:
+                continue
+            if ctag in planar_curves:
                 continue
             if _curve_on_native_2d_domain_wall(ctag, hmin, vmin, hmax, vmax):
                 outer_curves.add(ctag)
@@ -1428,6 +1493,7 @@ def generate_mesh(
     surface_threads: int = 1,
     split_conductors_by_net: bool = False,
     absorbing_order: int = 2,
+    outer_boundary: OuterBoundary | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1513,6 +1579,8 @@ def generate_mesh(
             in ``groups["nets"]``. Needs ``write_config=False``, since the
             config needs the terminals. Ignored for boundary mode.
         absorbing_order: Order (1 or 2) of the absorbing boundary condition
+        outer_boundary: Outer-wall condition ``"pec"``, ``"pmc"`` or
+            ``"absorbing"``; ``None`` derives it from ``absorbing_boundary``.
 
     Returns:
         MeshResult with paths and metadata
@@ -1792,6 +1860,7 @@ def generate_mesh(
                     absorbing_boundary,
                     periodic_axis,
                     absorbing_order=absorbing_order,
+                    outer_boundary=outer_boundary,
                     # tensors are written in the 2D mesh frame (_to_section_frame)
                     cross_section_axis=cross_section.axis,
                 )
@@ -2102,6 +2171,7 @@ def generate_mesh(
                 periodic_axis,
                 periodic_translation=periodic_translation,
                 absorbing_order=absorbing_order,
+                outer_boundary=outer_boundary,
             )
 
     finally:

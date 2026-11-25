@@ -29,6 +29,7 @@ from gsim.palace.models import (
     MeshGrading,
     PortConfig,
     RefinementConfig,
+    SheetImpedanceConfig,
     SymmetryPlaneConfig,
     TerminalConfig,
     TwoTerminalPortConfig,
@@ -367,6 +368,11 @@ def _folder_relation(folder: Path, other: Path) -> str | None:
     return None
 
 
+#: What the outer walls of the meshed domain are. ``"pmc"`` is Palace's natural
+#: condition, the one an unconditioned outer wall gets.
+OuterBoundary = Literal["pec", "pmc", "absorbing"]
+
+
 class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
     """Mixin providing common methods for all Palace simulation classes.
 
@@ -386,12 +392,15 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         absorbing_boundary: bool | None
         absorbing_order: Literal[1, 2]
         _pec_default_noted: bool
+        outer_boundary: OuterBoundary | None
+        model_fields_set: set[str]
         _output_dir: Path | None
         _stack_kwargs: dict[str, Any]
         _airbox_config: dict[str, Any]
         _pec_blocks: list
         _symmetry_planes: list[SymmetryPlaneConfig]
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
+        _sheet_impedances: dict[str, SheetImpedanceConfig]
         _configured_ports: bool
         _last_mesh_result: Any
         _last_mesh_config: MeshConfig | None
@@ -918,6 +927,72 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 inductance=inductance,
                 name=name,
             )
+        )
+
+    def add_sheet_impedance(
+        self,
+        layer: str,
+        *,
+        inductance: float | None = None,
+        resistance: float | None = None,
+    ) -> None:
+        """Give the planar sheets of a conductor layer a surface impedance.
+
+        Use this for thin films, such as superconducting films much thinner than
+        the London depth, that are meshed as zero-thickness sheets. Every such
+        sheet of ``layer``, signal and ground alike, is written as a Palace
+        ``Impedance`` boundary instead of ``PEC``. Values are per square and are
+        not scaled by the geometry. Calling it again for the same layer replaces
+        the earlier values.
+
+        The two values are the parallel channels of Palace's ``Impedance``
+        boundary, with sheet admittance ``Y = 1/Rs + 1/(j w Ls)``. They are not
+        the series surface impedance ``R_s + j w L_s``. For a two-fluid film,
+        ``resistance`` is ``1/(sigma_1 d)`` and ``inductance`` is
+        ``1/(w sigma_2 d)``. For a superconductor well below its critical
+        temperature the inductance alone is the usual case. To convert a series
+        ``Z_s`` given at one frequency, use ``Y = 1/Z_s``, so
+        ``resistance = 1/Re(Y)`` and ``inductance = -1/(w Im(Y))``, or call
+        :func:`gsim.palace.models.parallel_sheet_impedance`.
+
+        Palace 0.19 and later keep the sheet uncracked, so ``inductance`` is
+        the film value. Earlier versions split an interior sheet into two
+        independent faces, which models a film only when both faces carry the
+        same current. Use Palace 0.19 or later for thin films.
+
+        With wave ports the sheets keep their impedance in the port eigenproblem
+        and are not added to ``WavePortPEC``. Palace sets the port mode search
+        target itself, from the largest ``eps_r * mu_r`` on the port with a 10%
+        margin, and gsim cannot change it. Kinetic inductance raises ``n_eff``
+        well above the geometric value, so the port mode can be missed or
+        mis-ordered. gsim logs a warning in this case. Check the port mode
+        against a boundary-mode run, or use lumped or CPW ports.
+
+        Thick conductors meshed as volumes are not supported: their outer faces
+        would each carry the impedance. Electrostatic simulations have no
+        Impedance boundary in Palace.
+
+        Args:
+            layer: Name of the conductor layer.
+            inductance: Parallel sheet inductance [H/sq], written as ``Ls``.
+            resistance: Parallel sheet resistance [ohm/sq], written as ``Rs``.
+
+        Raises:
+            ValueError: If neither value is given, a value is not positive, or the
+                simulation type is electrostatic.
+
+        Example:
+            >>> sim.add_sheet_impedance("superconductor", inductance=20e-12)
+        """
+        if self.simulation_type in ("electrostatic", "magnetostatic"):
+            raise ValueError(
+                f"add_sheet_impedance is not available for {self.simulation_type} "
+                "simulations: Palace has no Impedance boundary there."
+            )
+        self._sheet_impedances[layer] = SheetImpedanceConfig(
+            layer=layer,
+            inductance=inductance,
+            resistance=resistance,
         )
 
     def set_pn_junction(
@@ -2095,6 +2170,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             pec_blocks=self._pec_blocks or None,
             absorbing_boundary=self._outer_wall(ports)[0],
             absorbing_order=self.absorbing_order,
+            outer_boundary=self.outer_boundary,
             periodic_axis=periodic_axis,
             symmetry_plane=self._symmetry_planes[0] if self._symmetry_planes else None,
             merge_via_distance=mesh_config.merge_via_distance,
@@ -2381,6 +2457,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 pec_blocks=self._pec_blocks or None,
                 absorbing_boundary=self._outer_wall(ports)[0],
                 absorbing_order=self.absorbing_order,
+                outer_boundary=self.outer_boundary,
                 symmetry_plane=(
                     self._symmetry_planes[0] if self._symmetry_planes else None
                 ),
@@ -2535,6 +2612,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         if self._output_dir is None:
             raise ValueError("Output directory not set. Call set_output_dir() first.")
         check_model_name(model_name)
+        self._resolved_outer_boundary()  # Fail before meshing on a conflicting request.
 
         self._apply_airbox_overrides(
             margin_x=margin_x,
@@ -3064,15 +3142,65 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 "mesh, or call mesh() on this simulation."
             )
 
+    def _explicit_outer_boundary(self) -> OuterBoundary | None:
+        """The requested ``outer_boundary``, checked against the legacy flags.
+
+        ``absorbing_boundary`` and ``metallic_boundaries`` conflict with it only
+        when set explicitly, so a class default such as the magnetostatic
+        ``metallic_boundaries=True`` never overrides an explicit ``"pmc"``.
+
+        Raises:
+            ValueError: If the request contradicts an explicitly set flag or is
+                not available for this problem type.
+        """
+        requested = self.outer_boundary
+        if requested is None:
+            return None
+        if self.simulation_type == "electrostatic":
+            raise ValueError(
+                "outer_boundary is not supported for electrostatic simulations; "
+                "their outer walls keep Palace's natural condition."
+            )
+        if self.simulation_type == "magnetostatic" and requested == "absorbing":
+            raise ValueError(
+                "outer_boundary='absorbing' is not supported for magnetostatic "
+                "simulations: Palace ignores an Absorbing boundary there. Use "
+                "'pec' or 'pmc'."
+            )
+        fields_set = self.model_fields_set
+        absorbing = self.absorbing_boundary
+        if (
+            "absorbing_boundary" in fields_set
+            and absorbing is not None
+            and absorbing != (requested == "absorbing")
+        ):
+            raise ValueError(
+                f"outer_boundary={requested!r} contradicts "
+                f"absorbing_boundary={absorbing}; set only outer_boundary."
+            )
+        if (
+            "metallic_boundaries" in fields_set
+            and getattr(self, "metallic_boundaries", False)
+            and requested != "pec"
+        ):
+            raise ValueError(
+                f"outer_boundary={requested!r} contradicts metallic_boundaries=True; "
+                "set only outer_boundary."
+            )
+        return requested
+
     def _outer_wall(self, ports: list | None = None) -> tuple[bool, bool, bool]:
         """Resolve the outer wall as (absorbing, metallic, pec_by_default).
 
-        An unset ``absorbing_boundary`` (``None``) is absorbing, except with
-        wave ports, where the wall is PEC like the port eigenproblem's. Wave
-        ports come from ``add_wave_port`` or from the extracted ports (which
-        include ``configure_wave_port`` metadata); ``ports`` defaults to the
-        last extracted ones.
+        An explicit ``outer_boundary`` decides. Otherwise an unset
+        ``absorbing_boundary`` (``None``) is absorbing, except with wave ports,
+        where the wall is PEC like the port eigenproblem's. Wave ports come
+        from ``add_wave_port`` or from the extracted ports (which include
+        ``configure_wave_port`` metadata); ``ports`` defaults to the last
+        extracted ones.
         """
+        if (requested := self._explicit_outer_boundary()) is not None:
+            return requested == "absorbing", requested == "pec", False
         absorbing = self.absorbing_boundary
         metallic = bool(getattr(self, "metallic_boundaries", False))
         if absorbing is not None:
@@ -3085,6 +3213,22 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         ):
             return False, True, True
         return True, False, False
+
+    def _resolved_outer_boundary(self, ports: list | None = None) -> OuterBoundary:
+        """The outer-wall condition the sim asks for, as one name.
+
+        Raises:
+            ValueError: If the request is contradictory.
+        """
+        absorbing, metallic, _ = self._outer_wall(ports)
+        if absorbing and metallic:
+            raise ValueError(
+                "metallic_boundaries and absorbing_boundary both claim the "
+                "outer wall; turn one of them off."
+            )
+        if metallic:
+            return "pec"
+        return "absorbing" if absorbing else "pmc"
 
     def _config_options(self) -> dict[str, Any]:
         """Keyword arguments only this problem type gives the config generator."""
@@ -3184,10 +3328,12 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             boundary_mode_config=self._get_problem_settings("boundary_mode"),
             absorbing_boundary=absorbing,
             absorbing_order=self.absorbing_order,
+            outer_boundary=self.outer_boundary,
             electrostatic_config=electrostatic_config,
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
             impedance_boundaries=self._impedance_boundaries,
+            sheet_impedances=list(self._sheet_impedances.values()),
             metallic_boundaries=metallic,
             **self._config_options(),
             magnetostatic_config=self._get_problem_settings("magnetostatic"),
@@ -3870,6 +4016,18 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
             "Palace in use includes that fix."
         ),
     )
+    outer_boundary: OuterBoundary | None = Field(
+        default=None,
+        description=(
+            "Condition on the outer walls of the domain: ``'pec'`` (closed metal "
+            "box), ``'pmc'`` (Palace's natural condition) or ``'absorbing'``. "
+            "``None`` keeps the default: absorbing when ``absorbing_boundary`` is "
+            "true, PEC with ``metallic_boundaries`` or, for a driven simulation "
+            "with wave ports and no ``absorbing_boundary``, PEC like the port "
+            "eigenproblem. Otherwise PMC. The written config names the "
+            "condition for driven, eigenmode and boundary-mode simulations."
+        ),
+    )
     mesh_config: MeshConfig = Field(default_factory=MeshConfig.default)
 
     # Stack configuration (stored as kwargs until resolved)
@@ -3879,6 +4037,9 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _symmetry_planes: list[SymmetryPlaneConfig] = PrivateAttr(default_factory=list)
     _impedance_boundaries: list[ImpedanceBoundaryConfig] = PrivateAttr(
         default_factory=list
+    )
+    _sheet_impedances: dict[str, SheetImpedanceConfig] = PrivateAttr(
+        default_factory=dict
     )
 
     # Internal state

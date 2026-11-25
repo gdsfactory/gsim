@@ -470,6 +470,10 @@ def _sheet_contacts(boundaries: dict, mesh_path: Path) -> dict[int, int]:
     conductor_attributes = set(boundaries.get("PEC", {}).get("Attributes", []))
     for boundary in boundaries.get("Conductivity", []):
         conductor_attributes.update(boundary.get("Attributes", []))
+    # Sheet impedances move planar conductors from PEC to Impedance. Interface
+    # impedances are included too; that only loosens this contact check.
+    for boundary in boundaries.get("Impedance", []):
+        conductor_attributes.update(boundary.get("Attributes", []))
     if not conductor_attributes:
         raise ValueError("config.json has no conductor surface attributes")
 
@@ -669,6 +673,7 @@ def validate_mesh(sim) -> ValidationResult:
                     or boundaries.get("PEC")
                     or boundaries.get("Terminal")
                     or boundaries.get("Ground")
+                    or (has_pec and boundaries.get("Impedance"))
                 )
                 if not has_conductor_bounds and not has_shaped_dielectrics:
                     errors.append("config.json has no Conductivity or PEC boundaries.")

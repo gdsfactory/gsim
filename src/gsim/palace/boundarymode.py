@@ -157,9 +157,8 @@ class BoundaryModeSim(_PalaceSimBase):
 
     solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
     absorbing_boundary: bool = False
-    #: Put a perfect-conductor condition on the outer wall of the meshed
-    #: domain, making the mode solve a shielded one. Off, Palace's own
-    #: default for an unconditioned outer boundary applies, which is PMC.
+    #: Legacy spelling of ``outer_boundary="pec"``: a shielded mode solve. Off,
+    #: the outer wall is PMC.
     metallic_boundaries: bool = False
     #: What the finite-conductivity conductor surfaces of the 2D mesh are in
     #: the eigenproblem. ``"conductivity"`` (default) keeps them as Palace's
@@ -306,12 +305,11 @@ class BoundaryModeSim(_PalaceSimBase):
                 across the gap to the other's.
             current: Corners of a loop around the signal conductor (um),
                 left open — Palace closes it — or ``None`` for the voltage
-                alone. Keep it close to the metal: the loop encloses the
-                gap's displacement current along with the conductor's own,
-                so the further it stands off, the less current it reads
-                and the higher the ``Z_VI`` it gives; a loop hugging the
-                conductor agrees with the field-based power-current
-                impedance. :func:`gsim.palace.line_impedance.line_impedance_paths`
+                alone. Stand it off the metal by a few mesh elements, but
+                well short of the neighbouring conductors: a loop inside
+                the first element next to the metal sees only part of the
+                conductor's current and gives a ``Z_VI`` that is far too
+                high. :func:`gsim.palace.line_impedance.line_impedance_paths`
                 places one from the electrode layout.
             nsamples: Deprecated and ignored; supplying a count emits
                 ``DeprecationWarning``. Omit it to let Palace integrate the path.

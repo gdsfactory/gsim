@@ -43,6 +43,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Below this thickness (um) a conductor is a planar sheet, in 3D and in the 2D
+# cross-section; it is also the thinnest volume the 3D mesher takes
+PLANAR_CONDUCTOR_THICKNESS_UM = 0.02
+
 # Merging vias warns when the merged area is more than this factor of the
 # drawn area (the gaps between nearby vias get filled in)
 VIA_MERGE_AREA_WARN_RATIO = 1.05
@@ -1217,7 +1221,7 @@ def add_metals(
             # um — thinner volumes can't mesh as 3D. Lowered from 0.05 so the
             # IHP MIM 40 nm (0.04 um) high-k dielectric is meshed as a solid
             # volume rather than being dropped (see gdsfactory/IHP#188).
-            min_volume_thickness = 0.02
+            min_volume_thickness = PLANAR_CONDUCTOR_THICKNESS_UM
             is_planar = (
                 planar_conductors or thickness == 0 or thickness < min_volume_thickness
             )

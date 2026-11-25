@@ -44,11 +44,14 @@ from gsim.palace.mode_fields import check_field_is_the_mode
 from gsim.palace.mode_fields import z0_power_current as palace_z0
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from gsim.palace.boundarymode import BoundaryModeSim
     from gsim.palace.results import PalaceTextResults
 
 __all__ = [
     "IMPEDANCE_PORT",
+    "LOOP_STANDOFF_FRACTION",
     "MIN_VOLTAGE_POWER_RATIO",
     "PATH_CLEARANCE_FRACTION",
     "ImpedancePaths",
@@ -59,12 +62,21 @@ __all__ = [
     "palace_line_impedance",
 ]
 
-#: How far inside the gap a postprocessing path keeps from a conductor
-#: face, as a fraction of the smallest clearance around it. The paths
-#: are sampled on the meshed domain, and under the ``"pec"`` model a
-#: conductor's interior is not in it (ADR 0003); a hair inside the gap
-#: is on the domain, and a hair is what the voltage integral misses.
-PATH_CLEARANCE_FRACTION: float = 1e-3
+#: How far inside the gap the voltage path keeps from a conductor face, as a
+#: fraction of the smallest clearance around it. Zero runs the path from face
+#: to face. The field of a thin conductor is singular at its edge, so a path
+#: that stops short of the face misses part of the voltage, a few percent for
+#: a conductor of no thickness, and the part it misses changes with the mesh.
+PATH_CLEARANCE_FRACTION: float = 0.0
+
+#: How far the current loop stands off the signal conductor, as a fraction
+#: of the room around it (the gap, the distance to any other conductor and
+#: to the domain walls). A loop inside the first mesh element picks up only
+#: part of the conductor's current, so the loop has to be a few elements
+#: out, not a hair. The odd digits keep the loop's legs from crossing the
+#: conductor plane on a vertex of an evenly divided gap, which Palace's
+#: line integrator can fail to locate.
+LOOP_STANDOFF_FRACTION: float = 0.2531
 
 #: Name of the postprocessing port the line's paths are declared under.
 IMPEDANCE_PORT: str = "line"
@@ -100,12 +112,21 @@ class ImpedancePaths:
     current: tuple[tuple[float, float], ...]
 
 
+def _separation(a: Extent, b: Extent) -> float:
+    """Largest of the two axis gaps between rectangles, 0 where they overlap."""
+    (a_h0, a_h1), (a_v0, a_v1) = a
+    (b_h0, b_h1), (b_v0, b_v1) = b
+    return max(0.0, b_h0 - a_h1, a_h0 - b_h1, b_v0 - a_v1, a_v0 - b_v1)
+
+
 def line_impedance_paths(
     *,
     signal: Extent,
     ground: Extent,
     domain: Extent,
     clearance_fraction: float = PATH_CLEARANCE_FRACTION,
+    loop_fraction: float = LOOP_STANDOFF_FRACTION,
+    others: Sequence[Extent] = (),
 ) -> ImpedancePaths:
     """Size the impedance postprocessing paths from the electrode layout.
 
@@ -113,34 +134,41 @@ def line_impedance_paths(
     the signal electrode's face at its mid-height to the return
     electrode's face at its own, so it is the same path whichever side
     the drive is on. The current loop is the signal electrode's outline
-    pushed out by a clearance: tight enough that anything standing
-    against the electrode contributes nothing to the enclosed current,
-    which is what the Marks-Williams contour of the field-based fallback
-    measures too.
+    pushed out by a fraction of the room around it. It has to clear the
+    first mesh elements next to the electrode, which carry only part of its
+    current, and it has to stay clear of every other conductor, so it
+    encloses the signal electrode and nothing else.
 
     Args:
         signal: ``((h_min, h_max), (v_min, v_max))`` of the signal
-            electrode (um).
+            electrode (um). A zero-thickness electrode, as a planar sheet,
+            has ``v_min == v_max``.
         ground: The same for the return electrode.
         domain: The same for the meshed domain the paths are sampled on.
         clearance_fraction: Fraction of the smallest clearance around the
             signal electrode — the gap, its thickness, its distance to
-            each domain wall — that the paths keep from every face.
+            each domain wall — that the voltage path ends keep from the
+            faces. The default of zero runs the path from face to face.
+        loop_fraction: Fraction of the room around the signal electrode (the
+            gap, the distance to any ``others``, and to each domain wall)
+            that the current loop stands off the electrode.
+        others: Further conductors the current loop must not reach, such as
+            a second return electrode.
 
     Returns:
         The two paths.
 
     Raises:
         ValueError: When the electrodes leave no gap to cross along the
-            in-plane axis, or the signal electrode is not strictly inside
+            in-plane axis, the signal electrode is not strictly inside
             the domain (an electrode the domain clips has no outline to
-            loop around).
+            loop around), or one of ``others`` touches the signal electrode.
     """
     (s_lo, s_hi), (t_lo, t_hi) = signal
     (g_lo, g_hi), (u_lo, u_hi) = ground
     (d_lo, d_hi), (e_lo, e_hi) = domain
 
-    if not (d_lo < s_lo < s_hi < d_hi and e_lo < t_lo < t_hi < e_hi):
+    if not (d_lo < s_lo < s_hi < d_hi and e_lo < t_lo <= t_hi < e_hi):
         raise ValueError(
             f"The signal electrode spans {signal} but is not inside the meshed "
             f"domain {domain}, so no path around it can be sampled."
@@ -155,21 +183,27 @@ def line_impedance_paths(
             "the in-plane axis to integrate the line voltage across."
         )
 
-    clearance = clearance_fraction * min(
-        gap, t_hi - t_lo, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi
-    )
-    # A hair into the gap from each face, on the domain rather than on
-    # (or, under the "pec" model, inside) the conductor.
+    # A zero-thickness electrode (a sheet) has no thickness to clear.
+    spans = (gap, t_hi - t_lo, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi)
+    clearance = clearance_fraction * min(span for span in spans if span > 0.0)
     inset = clearance if faces[0] < faces[1] else -clearance
     voltage = (
         (faces[0] + inset, 0.5 * (t_lo + t_hi)),
         (faces[1] - inset, 0.5 * (u_lo + u_hi)),
     )
+    apart = [_separation(signal, other) for other in others]
+    if any(distance <= 0.0 for distance in apart):
+        raise ValueError(
+            f"A conductor in {list(others)} overlaps or touches the signal "
+            f"electrode at {signal}, so no loop can enclose the signal alone."
+        )
+    room = min(gap, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi, *apart)
+    standoff = loop_fraction * room
     current = (
-        (s_lo - clearance, t_lo - clearance),
-        (s_hi + clearance, t_lo - clearance),
-        (s_hi + clearance, t_hi + clearance),
-        (s_lo - clearance, t_hi + clearance),
+        (s_lo - standoff, t_lo - standoff),
+        (s_hi + standoff, t_lo - standoff),
+        (s_hi + standoff, t_hi + standoff),
+        (s_lo - standoff, t_hi + standoff),
     )
     return ImpedancePaths(voltage=voltage, current=current)
 
@@ -370,7 +404,9 @@ def palace_line_impedance(
         if index is not None
         else None
     )
-    if native is not None and signal.model == "pec":
+    # A zero-thickness electrode is meshed as PEC whatever its model says.
+    is_sheet = signal.extent[1][0] == signal.extent[1][1]
+    if native is not None and (signal.model == "pec" or is_sheet):
         return native
     h_span, v_span = signal.extent
     z0 = field_line_impedance(

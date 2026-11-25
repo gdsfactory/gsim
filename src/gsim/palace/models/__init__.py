@@ -31,9 +31,11 @@ from gsim.palace.models.ports import (
     CurrentSourceConfig,
     ImpedanceBoundaryConfig,
     PortConfig,
+    SheetImpedanceConfig,
     TerminalConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
+    parallel_sheet_impedance,
 )
 from gsim.palace.models.problems import (
     BoundaryModeConfig,
@@ -82,6 +84,7 @@ __all__ = [
     "PECBlockConfig",
     "PortConfig",
     "RefinementConfig",
+    "SheetImpedanceConfig",
     "SimulationResult",
     "SolverConfig",
     "SymmetryPlaneConfig",
@@ -90,4 +93,5 @@ __all__ = [
     "TwoTerminalPortConfig",
     "ValidationResult",
     "WavePortConfig",
+    "parallel_sheet_impedance",
 ]

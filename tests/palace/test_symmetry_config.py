@@ -158,11 +158,11 @@ def test_pec_plane_not_in_waveport_pec(tmp_path):
 
 
 def test_pmc_written_without_absorbing_boundary(tmp_path):
-    """The plane is emitted even when the absorbing boundary is off."""
+    """The plane is emitted, and outer walls join it as PMC when absorbing is off."""
     boundaries = _generate(
         tmp_path, _groups("pmc"), _lumped_ports(), absorbing_boundary=False
     )["Boundaries"]
-    assert boundaries["PMC"] == {"Attributes": [PLANE_PG]}
+    assert boundaries["PMC"] == {"Attributes": [8, 12, PLANE_PG]}
     assert "Absorbing" not in boundaries
 
 
