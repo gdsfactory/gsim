@@ -15,6 +15,7 @@ import gmsh
 import numpy as np
 
 from gsim.palace.mesh.floquet import periodic_boundary_config
+from gsim.palace.mesh.geometry import PLANAR_CONDUCTOR_THICKNESS_UM
 from gsim.palace.mesh.gmsh_utils import gmsh_options, mesh_hash
 from gsim.palace.mesh.metadata import (
     tetrahedral_topology,
@@ -48,7 +49,11 @@ if TYPE_CHECKING:
         RefinementConfig,
         SolverConfig,
     )
-    from gsim.palace.models.ports import ImpedanceBoundaryConfig, TerminalConfig
+    from gsim.palace.models.ports import (
+        ImpedanceBoundaryConfig,
+        SheetImpedanceConfig,
+        TerminalConfig,
+    )
     from gsim.palace.ports.config import PalacePort
     from gsim.palace.terminals import ResolvedTerminal
 
@@ -134,6 +139,76 @@ def _solver_block(
             linear = cast("dict[str, Any]", solver_conf["Linear"])
             linear["MGMaxLevels"] = _BOUNDARY_MODE_LINEAR_DEFAULTS["mg_max_levels"]
     return solver_conf
+
+
+def _resolve_sheet_impedances(
+    sheet_impedances: list[SheetImpedanceConfig] | None,
+    groups: dict,
+    stack: LayerStack,
+    simulation_type: str,
+) -> tuple[list[dict[str, object]], set[int]]:
+    """Resolve sheet impedances into ``Impedance`` entries.
+
+    Each layer's planar sheets become one entry with ``Ls``/``Rs`` taken as
+    per-square values. Returns the entries and the physical groups they cover,
+    which must not also appear under ``PEC``.
+
+    Raises:
+        ValueError: If a layer is not a conductor, is meshed as a volume or
+            has no planar sheets, or the simulation type has no Impedance boundary.
+    """
+    if not sheet_impedances:
+        return [], set()
+    if simulation_type in ("electrostatic", "electrostatics", "magnetostatic"):
+        raise ValueError(
+            f"Sheet impedance is not available for {simulation_type} "
+            "simulations: Palace has no Impedance boundary there."
+        )
+
+    entries: list[dict[str, object]] = []
+    taken: set[int] = set()
+    for sheet in sheet_impedances:
+        name = sheet.layer
+        layer = stack.layers.get(name)
+        if layer is None:
+            raise ValueError(f"Sheet impedance layer '{name}' is not in the stack.")
+        if layer.layer_type != "conductor":
+            raise ValueError(
+                f"Sheet impedance layer '{name}' is a {layer.layer_type} layer; "
+                "it must be a conductor layer."
+            )
+        thick_2d = (
+            simulation_type == "boundarymode"
+            and layer.zmax - layer.zmin >= PLANAR_CONDUCTOR_THICKNESS_UM
+        )
+        volumes = [
+            key
+            for key in groups.get("conductor_surfaces", {})
+            if (key.rsplit("_", 1)[0] if key.endswith(("_xy", "_z")) else key) == name
+        ]
+        if volumes or thick_2d:
+            raise ValueError(
+                f"Sheet impedance layer '{name}' is meshed as a volume, so its "
+                "outer faces would each carry the impedance. Make the layer "
+                f"thinner than {PLANAR_CONDUCTOR_THICKNESS_UM} um or set "
+                "planar_conductors=True."
+            )
+        pgs: list[int] = []
+        if name in groups.get("pec_surfaces", {}):
+            pg = groups["pec_surfaces"][name]["phys_group"]
+            pgs.extend(pg if isinstance(pg, list) else [pg])
+        if not pgs:
+            raise ValueError(
+                f"Sheet impedance layer '{name}' has no planar sheets in the mesh."
+            )
+        entry: dict[str, object] = {"Attributes": sorted(pgs)}
+        if sheet.resistance is not None:
+            entry["Rs"] = sheet.resistance
+        if sheet.inductance is not None:
+            entry["Ls"] = sheet.inductance
+        entries.append(entry)
+        taken.update(pgs)
+    return entries, taken
 
 
 def _resolve_impedance_boundaries(
@@ -632,6 +707,7 @@ def generate_palace_config(
     absorbing_order: int = 2,
     *,
     impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
+    sheet_impedances: list[SheetImpedanceConfig] | None = None,
     metallic_boundaries: bool | None = None,
     conductor_boundary: Literal["conductivity", "pec"] | None = None,
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
@@ -663,6 +739,8 @@ def generate_palace_config(
             Private ``_``-prefixed keys for the options below are deprecated;
             a keyword passed explicitly wins over its private key.
         impedance_boundaries: Impedance boundaries to add to the config
+        sheet_impedances: Surface impedances of planar conductor layers, which
+            replace their ``PEC`` entries
         metallic_boundaries: Put a perfect conductor on the outer wall.
             ``None`` (the default) means ``False``.
         conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
@@ -983,6 +1061,10 @@ def generate_palace_config(
     pec_attrs: list[int] = [
         info["phys_group"] for info in groups.get("pec_surfaces", {}).values()
     ]
+    sheet_entries, sheet_attrs = _resolve_sheet_impedances(
+        sheet_impedances, groups, stack, simulation_type
+    )
+    pec_attrs = [pg for pg in pec_attrs if pg not in sheet_attrs]
     boundaries: dict[str, Any]
     mode_rows: list[PortModeEntry] = []
 
@@ -1259,7 +1341,9 @@ def generate_palace_config(
         )
 
     # Process impedance boundaries (interface-based or attribute-based)
-    impedance_entries = _resolve_impedance_boundaries(impedance_boundaries, groups)
+    impedance_entries = sheet_entries + _resolve_impedance_boundaries(
+        impedance_boundaries, groups
+    )
     if impedance_entries:
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
 
@@ -1553,6 +1637,7 @@ def write_config(
     absorbing_order: int = 2,
     *,
     impedance_boundaries: list[ImpedanceBoundaryConfig] | None = None,
+    sheet_impedances: list[SheetImpedanceConfig] | None = None,
     metallic_boundaries: bool | None = None,
     conductor_boundary: Literal["conductivity", "pec"] | None = None,
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
@@ -1578,6 +1663,8 @@ def write_config(
             Private ``_``-prefixed keys for the options below are deprecated;
             a keyword passed explicitly wins over its private key.
         impedance_boundaries: Impedance boundaries to add to the config
+        sheet_impedances: Surface impedances of planar conductor layers, which
+            replace their ``PEC`` entries
         metallic_boundaries: Put a perfect conductor on the outer wall.
             ``None`` (the default) means ``False``.
         conductor_boundary: ``"pec"`` makes a boundary-mode run's conductor
@@ -1630,6 +1717,7 @@ def write_config(
         resolved_terminals=resolved_terminals,
         absorbing_order=absorbing_order,
         impedance_boundaries=impedance_boundaries,
+        sheet_impedances=sheet_impedances,
         metallic_boundaries=metallic_boundaries,
         conductor_boundary=conductor_boundary,
         mode_postprocessing=mode_postprocessing,

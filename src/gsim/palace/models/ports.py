@@ -327,6 +327,37 @@ class ImpedanceBoundaryConfig(BaseModel):
         return self
 
 
+class SheetImpedanceConfig(BaseModel):
+    """Surface impedance of the planar (zero-thickness) sheets of a conductor layer.
+
+    Values are per square and written to Palace unscaled: ``inductance`` is the
+    sheet inductance in H/sq (``Ls``), ``resistance`` the sheet resistance in
+    ohm/sq (``Rs``). At least one of them is required.
+
+    Attributes:
+        layer: Name of the conductor layer.
+        inductance: Sheet inductance [H/sq].
+        resistance: Sheet resistance [ohm/sq].
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    layer: str
+    inductance: float | None = Field(
+        default=None, ge=0, description="Sheet inductance [H/sq]"
+    )
+    resistance: float | None = Field(
+        default=None, ge=0, description="Sheet resistance [ohm/sq]"
+    )
+
+    @model_validator(mode="after")
+    def _validate_value(self) -> Self:
+        """Require at least one of inductance and resistance."""
+        if self.inductance is None and self.resistance is None:
+            raise ValueError("Give inductance (H/sq), resistance (ohm/sq), or both")
+        return self
+
+
 class WavePortConfig(BaseModel):
     """Configuration for a wave port (domain boundary with mode solving).
 
@@ -486,6 +517,7 @@ __all__ = [
     "CPWPortConfig",
     "ImpedanceBoundaryConfig",
     "PortConfig",
+    "SheetImpedanceConfig",
     "TerminalConfig",
     "TwoTerminalPortConfig",
     "WavePortConfig",

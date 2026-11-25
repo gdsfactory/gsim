@@ -29,6 +29,7 @@ from gsim.palace.models import (
     MeshGrading,
     PortConfig,
     RefinementConfig,
+    SheetImpedanceConfig,
     SymmetryPlaneConfig,
     TerminalConfig,
     TwoTerminalPortConfig,
@@ -399,6 +400,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         _pec_blocks: list
         _symmetry_planes: list[SymmetryPlaneConfig]
         _impedance_boundaries: list[ImpedanceBoundaryConfig]
+        _sheet_impedances: dict[str, SheetImpedanceConfig]
         _configured_ports: bool
         _last_mesh_result: Any
         _last_mesh_config: MeshConfig | None
@@ -925,6 +927,54 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 inductance=inductance,
                 name=name,
             )
+        )
+
+    def add_sheet_impedance(
+        self,
+        layer: str,
+        *,
+        inductance: float | None = None,
+        resistance: float | None = None,
+    ) -> None:
+        """Give the planar sheets of a conductor layer a surface impedance.
+
+        Use this for thin films, such as superconducting films much thinner than
+        the London depth, that are meshed as zero-thickness sheets. Every such
+        sheet of ``layer``, signal and ground alike, is written as a Palace
+        ``Impedance`` boundary instead of ``PEC``. Values are per square and are
+        not scaled by the geometry. Calling it again for the same layer replaces
+        the earlier values.
+
+        Palace 0.19 and later keep the sheet uncracked, so ``inductance`` is
+        the film value. Earlier versions split an interior sheet into two
+        independent faces, which models a film only when both faces carry the
+        same current. Use Palace 0.19 or later for thin films.
+
+        Thick conductors meshed as volumes are not supported: their outer faces
+        would each carry the impedance. Electrostatic simulations have no
+        Impedance boundary in Palace.
+
+        Args:
+            layer: Name of the conductor layer.
+            inductance: Sheet inductance [H/sq].
+            resistance: Sheet resistance [ohm/sq].
+
+        Raises:
+            ValueError: If neither value is given, a value is negative, or the
+                simulation type is electrostatic.
+
+        Example:
+            >>> sim.add_sheet_impedance("superconductor", inductance=20e-12)
+        """
+        if self.simulation_type in ("electrostatic", "magnetostatic"):
+            raise ValueError(
+                f"add_sheet_impedance is not available for {self.simulation_type} "
+                "simulations: Palace has no Impedance boundary there."
+            )
+        self._sheet_impedances[layer] = SheetImpedanceConfig(
+            layer=layer,
+            inductance=inductance,
+            resistance=resistance,
         )
 
     def set_pn_junction(
@@ -3265,6 +3315,7 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             terminals=terminals or [],
             resolved_terminals=self._config_terminals(self._last_mesh_result.groups),
             impedance_boundaries=self._impedance_boundaries,
+            sheet_impedances=list(self._sheet_impedances.values()),
             metallic_boundaries=metallic,
             **self._config_options(),
             magnetostatic_config=self._get_problem_settings("magnetostatic"),
@@ -3968,6 +4019,9 @@ class _PalaceSimBase(PalaceSimMixin, BaseModel):
     _symmetry_planes: list[SymmetryPlaneConfig] = PrivateAttr(default_factory=list)
     _impedance_boundaries: list[ImpedanceBoundaryConfig] = PrivateAttr(
         default_factory=list
+    )
+    _sheet_impedances: dict[str, SheetImpedanceConfig] = PrivateAttr(
+        default_factory=dict
     )
 
     # Internal state

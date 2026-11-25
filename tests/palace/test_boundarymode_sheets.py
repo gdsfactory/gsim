@@ -200,3 +200,15 @@ def test_terminal_paths_stay_in_the_gap_between_sheets():
     for h, v in points:
         assert v == 0.0
         assert STRIP_H[1] < h < GROUND_H[0]
+
+
+def test_sheet_impedance_replaces_pec_on_2d_sheets(tmp_path):
+    sim = _sim(tmp_path)
+    sim.add_sheet_impedance("film", inductance=20e-12)
+    sim.write_config()
+    mesh = meshio.read(sim.mesh_path)
+    config = json.loads((tmp_path / "config.json").read_text())
+    tag = int(mesh.field_data["film_pec"][0])
+    boundaries = config["Boundaries"]
+    assert boundaries["Impedance"] == [{"Attributes": [tag], "Ls": 20e-12}]
+    assert tag not in boundaries.get("PEC", {}).get("Attributes", [])
