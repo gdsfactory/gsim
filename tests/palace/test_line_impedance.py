@@ -109,11 +109,22 @@ class TestImpedancePaths:
 
         (h0, v0), (h1, v1) = paths.voltage
         assert v0 == v1 == pytest.approx(0.25)
-        # From the signal's inner face towards the return's inner face,
-        # each end a hair inside the gap rather than on the electrode.
-        assert -20.6 < h0 < -20.5
-        assert -19.5 < h1 < -19.4
-        assert h1 - h0 == pytest.approx(1.2, rel=1e-2)
+        # From the signal's inner face to the return's inner face, on both.
+        assert h0 == -20.6
+        assert h1 == -19.4
+
+    def test_a_sheets_voltage_path_runs_to_its_edge(self):
+        paths = impedance_paths(signal=((-22.6, -20.6), (0.0, 0.0)))
+
+        assert paths.voltage[0] == (-20.6, 0.0)
+
+    def test_a_clearance_fraction_holds_the_ends_off_the_faces(self):
+        paths = impedance_paths(clearance_fraction=1e-3)
+
+        (h0, _), (h1, _) = paths.voltage
+        # 1e-3 of the smallest clearance, which is the 0.5 um thickness.
+        assert h0 == pytest.approx(-20.6 + 0.0005)
+        assert h1 == pytest.approx(-19.4 - 0.0005)
 
     def test_each_end_sits_at_its_own_electrodes_mid_height(self):
         """A return on another metal level is still met on its face."""
@@ -127,8 +138,8 @@ class TestImpedancePaths:
         paths = impedance_paths(signal=GROUND, ground=SIGNAL)
 
         (h0, _), (h1, _) = paths.voltage
-        assert -19.4 > h0 > -19.5
-        assert -20.6 < h1 < -20.5
+        assert h0 == -19.4
+        assert h1 == -20.6
 
     def test_the_current_loop_stands_off_the_signal_and_clears_everything_else(self):
         paths = impedance_paths()

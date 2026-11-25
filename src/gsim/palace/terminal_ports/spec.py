@@ -30,6 +30,15 @@ if TYPE_CHECKING:
 
 Point = tuple[float, float]
 
+#: How far a detour leaves a thick terminal's wall, as a fraction of the gap
+#: it rises through. A path along the wall itself would graze the terminal's
+#: rectangle, and the wall field is regular, so a hair off it is enough.
+_WALL_CLEARANCE_FRACTION = 1e-3
+
+#: Fraction of an end segment that is left out when the path is tested against
+#: the conductors it starts and ends on.
+_END_TRIM = 1e-6
+
 
 def _overlap_or_touch(a: Extent, b: Extent) -> bool:
     """Whether two rectangles share an interior point or an edge."""
@@ -140,6 +149,24 @@ def _segment_hits_box(p: Point, q: Point, box: Extent) -> bool:
     return True
 
 
+def _path_is_clear(path: Sequence[Point], boxes: Sequence[Extent]) -> bool:
+    """Whether no segment of the path meets a conductor but at the path's two ends.
+
+    The ends sit on the terminal and on the reference, so each end segment is
+    shortened by a hair before it is tested. A path through the middle of a
+    conductor is still caught, including a sheet's zero-height rectangle.
+    """
+    last = len(path) - 2
+    for k, (p, q) in enumerate(pairwise(path)):
+        if k == 0:
+            p = (p[0] + _END_TRIM * (q[0] - p[0]), p[1] + _END_TRIM * (q[1] - p[1]))
+        if k == last:
+            q = (q[0] + _END_TRIM * (p[0] - q[0]), q[1] + _END_TRIM * (p[1] - q[1]))
+        if any(_segment_hits_box(p, q, box) for box in boxes):
+            return False
+    return True
+
+
 def _mid(lo: float, hi: float) -> float:
     """Midpoint of an interval."""
     return 0.5 * (lo + hi)
@@ -153,6 +180,8 @@ def _direct_path(term: Extent, ref: Extent, fraction: float) -> list[Point] | No
     at the middle of their common width. Each end keeps ``fraction`` of the
     smallest of the gap and the two conductors' thicknesses off its face, in
     the gap, as :func:`gsim.palace.line_impedance.line_impedance_paths` does.
+    With no inset the path runs from face to face and meets each conductor
+    on its edge, where the field of a thin conductor is singular.
 
     Args:
         term: The terminal's rectangle.
@@ -232,7 +261,9 @@ def _detour_path(
     headroom = d_v1 - top
     if gap <= 0.0 or headroom <= 0.0:
         return None
-    x_exit = face + direction * fraction * _least_span(gap, tv1 - tv0)
+    # A sheet terminal is left from its edge; a thick one from just off its wall.
+    leave = fraction if tv1 == tv0 else max(fraction, _WALL_CLEARANCE_FRACTION)
+    x_exit = face + direction * leave * _least_span(gap, tv1 - tv0)
     rise = min(0.5 * headroom, gap)
     y_top = top + rise
     x_down = _mid(rh0, rh1)
@@ -260,10 +291,10 @@ def terminal_paths(
     :func:`gsim.palace.line_impedance.line_impedance_paths` uses. Where another
     conductor stands in the way, the path leaves the terminal at mid-height into
     the gap beside it, rises above all the metal, runs across and comes down
-    onto the reference. Every path starts and ends a hair inside the gap
-    (``clearance_fraction`` of the gap, as in
-    :data:`gsim.palace.line_impedance.PATH_CLEARANCE_FRACTION`), on the meshed
-    domain rather than on a conductor's face, and no segment of it meets any
+    onto the reference. Every path starts and ends ``clearance_fraction`` of the
+    gap off the conductor faces (zero by default, as in
+    :data:`gsim.palace.line_impedance.PATH_CLEARANCE_FRACTION`, so a path
+    meets a conductor on its face), and no other part of it meets any
     conductor's rectangle.
 
     The voltage of a full-wave mode depends a little on the path; for the
@@ -275,7 +306,8 @@ def terminal_paths(
         domain: ``((h_min, h_max), (v_min, v_max))`` of the meshed domain
             the paths are sampled on (um).
         clearance_fraction: Inset of the path ends from the conductor faces,
-            as a fraction of the gap.
+            as a fraction of the gap. The default runs the path from face to
+            face.
 
     Returns:
         ``{terminal name: ((h, v), ...)}`` in terminal order.
@@ -308,11 +340,7 @@ def terminal_paths(
                 path is not None
                 and len(path) >= 2
                 and all(_inside(p, domain) for p in path)
-                and not any(
-                    _segment_hits_box(p, q, box)
-                    for p, q in pairwise(path)
-                    for box in boxes
-                )
+                and _path_is_clear(path, boxes)
             ):
                 paths[terminal.name] = tuple(path)
                 break

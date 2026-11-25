@@ -62,12 +62,12 @@ __all__ = [
     "palace_line_impedance",
 ]
 
-#: How far inside the gap a postprocessing path keeps from a conductor
-#: face, as a fraction of the smallest clearance around it. The paths
-#: are sampled on the meshed domain, and under the ``"pec"`` model a
-#: conductor's interior is not in it (ADR 0003); a hair inside the gap
-#: is on the domain, and a hair is what the voltage integral misses.
-PATH_CLEARANCE_FRACTION: float = 1e-3
+#: How far inside the gap the voltage path keeps from a conductor face, as a
+#: fraction of the smallest clearance around it. Zero runs the path from face
+#: to face. The field of a thin conductor is singular at its edge, so a path
+#: that stops short of the face misses part of the voltage, a few percent for
+#: a conductor of no thickness, and the part it misses changes with the mesh.
+PATH_CLEARANCE_FRACTION: float = 0.0
 
 #: How far the current loop stands off the signal conductor, as a fraction
 #: of the room around it (the gap, the distance to any other conductor and
@@ -147,7 +147,8 @@ def line_impedance_paths(
         domain: The same for the meshed domain the paths are sampled on.
         clearance_fraction: Fraction of the smallest clearance around the
             signal electrode — the gap, its thickness, its distance to
-            each domain wall — that the voltage path keeps from every face.
+            each domain wall — that the voltage path ends keep from the
+            faces. The default of zero runs the path from face to face.
         loop_fraction: Fraction of the room around the signal electrode (the
             gap, the distance to any ``others``, and to each domain wall)
             that the current loop stands off the electrode.
@@ -185,8 +186,6 @@ def line_impedance_paths(
     # A zero-thickness electrode (a sheet) has no thickness to clear.
     spans = (gap, t_hi - t_lo, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi)
     clearance = clearance_fraction * min(span for span in spans if span > 0.0)
-    # A hair into the gap from each face, on the domain rather than on
-    # (or, under the "pec" model, inside) the conductor.
     inset = clearance if faces[0] < faces[1] else -clearance
     voltage = (
         (faces[0] + inset, 0.5 * (t_lo + t_hi)),

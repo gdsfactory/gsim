@@ -118,10 +118,15 @@ class TestTerminalPortSpec:
 
 
 def clearance_ok(path, spec):
-    """No sampled point of any segment lies in a conductor's closed rectangle."""
+    """No sampled point of the path, but its two ends, lies in a closed conductor."""
     boxes = [c.extent for c in (*spec.terminals, spec.reference)]
-    for p, q in pairwise(np.asarray(path, dtype=float)):
+    segments = list(pairwise(np.asarray(path, dtype=float)))
+    for k, (p, q) in enumerate(segments):
         pts = p + np.linspace(0.0, 1.0, 4001)[:, None] * (q - p)
+        if k == 0:
+            pts = pts[1:]
+        if k == len(segments) - 1:
+            pts = pts[:-1]
         for (h0, h1), (v0, v1) in boxes:
             inside = (
                 (pts[:, 0] >= h0)
@@ -153,15 +158,54 @@ class TestTerminalPaths:
             assert clearance_ok(path, GSSG)
             assert all(0.0 < h < 1.0 and 0.0 < v < 1.0 for h, v in path)
 
-    def test_paths_start_and_end_a_hair_inside_the_gap(self):
-        gap = 0.125
-        # PATH_CLEARANCE_FRACTION times the smaller of the gap and the thickness.
+    def test_a_straight_path_runs_from_face_to_face(self):
+        path = terminal_paths(GSSG, DOMAIN)["S2"]
+        assert distance_to_box(path[0], S2.extent) == 0.0
+        assert distance_to_box(path[-1], G2.extent) == 0.0
+
+    def test_a_detour_leaves_a_hair_off_the_wall_and_lands_on_the_reference(self):
+        # The wall hair is 1e-3 times the smaller of the gap and the thickness.
         hair = 1e-3 * 0.125
-        for name, path in terminal_paths(GSSG, DOMAIN).items():
+        for name in ("G1", "S1"):
+            path = terminal_paths(GSSG, DOMAIN)[name]
             own = GSSG.terminals[GSSG.terminal_names.index(name)].extent
             assert distance_to_box(path[0], own) == pytest.approx(hair, rel=1e-9)
-            assert distance_to_box(path[-1], G2.extent) == pytest.approx(hair, rel=1e-9)
-            assert hair < gap
+            assert distance_to_box(path[-1], G2.extent) == 0.0
+
+    def test_a_clearance_fraction_keeps_the_straight_path_off_the_faces(self):
+        hair = 1e-3 * 0.125
+        path = terminal_paths(GSSG, DOMAIN, clearance_fraction=1e-3)["S2"]
+        assert distance_to_box(path[0], S2.extent) == pytest.approx(hair, rel=1e-9)
+        assert distance_to_box(path[-1], G2.extent) == pytest.approx(hair, rel=1e-9)
+
+    def test_a_sheet_terminal_is_left_and_reached_on_its_edge(self):
+        gap = 0.25
+        sheet = Conductor("S", ((0.25, 0.375), (0.5, 0.5)))
+        ground = Conductor("G", ((0.375 + gap, 0.875), (0.5, 0.5)))
+        spec = TerminalPortSpec("cpw", terminals=[sheet], reference=ground)
+        path = terminal_paths(spec, DOMAIN)["S"]
+        np.testing.assert_allclose(
+            path, ((0.375, 0.5), (0.625, 0.5)), rtol=0, atol=1e-12
+        )
+
+    def test_a_sheet_behind_another_conductor_is_left_from_its_edge(self):
+        near = Conductor("near", ((0.3125, 0.375), (0.5, 0.5)))
+        far = Conductor("far", ((0.5, 0.5625), (0.5, 0.5)))
+        ground = Conductor("G", ((0.6875, 0.9375), (0.5, 0.5)))
+        spec = TerminalPortSpec("cpw", terminals=[near, far], reference=ground)
+        path = terminal_paths(spec, DOMAIN)["near"]
+        assert len(path) == 4
+        assert path[0] == pytest.approx((0.375, 0.5))
+        assert clearance_ok(path, spec)
+
+    def test_a_straight_path_through_a_sheet_is_still_rejected(self):
+        left = Conductor("L", ((0.1, 0.2), (0.375, 0.625)))
+        plate = Conductor("plate", ((0.4, 0.5), (0.5, 0.5)))
+        right = Conductor("R", ((0.7, 0.8), (0.375, 0.625)))
+        spec = TerminalPortSpec("p", terminals=[left, plate], reference=right)
+        path = terminal_paths(spec, DOMAIN)["L"]
+        assert len(path) == 4  # over the plate, not through it
+        assert clearance_ok(path, spec)
 
     def test_a_terminal_facing_the_reference_gets_the_straight_path(self):
         path = terminal_paths(GSSG, DOMAIN)["S2"]
@@ -177,7 +221,7 @@ class TestTerminalPaths:
             assert max(v for _, v in path) > 0.5625  # above every conductor
             # leaves into the gap on its right, comes down on top of the reference
             assert path[0][1] == pytest.approx(mid_height)
-            assert path[-1][1] == pytest.approx(0.5 + 1e-3 * 0.125)
+            assert path[-1][1] == pytest.approx(0.5)
             assert path[-1][0] == pytest.approx(0.8125)
 
     def test_the_straight_path_is_the_one_the_line_impedance_code_draws(self):
@@ -197,10 +241,7 @@ class TestTerminalPaths:
         strip = Conductor("strip", ((0.4, 0.6), (0.3, 0.4)))
         spec = TerminalPortSpec("ms", terminals=[strip], reference=plane)
         path = terminal_paths(spec, domain)["strip"]
-        hair = 1e-3 * 0.2  # the smaller of the 0.2 gap and the strip's 0.2 width
-        np.testing.assert_allclose(
-            path, ((0.5, 0.3 - hair), (0.5, 0.1 + hair)), rtol=0, atol=1e-12
-        )
+        np.testing.assert_allclose(path, ((0.5, 0.3), (0.5, 0.1)), rtol=0, atol=1e-12)
         assert clearance_ok(path, spec)
 
     def test_a_terminal_to_the_right_of_the_reference_exits_to_its_left(self):

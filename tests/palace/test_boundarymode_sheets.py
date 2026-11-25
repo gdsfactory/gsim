@@ -182,8 +182,9 @@ def test_impedance_paths_for_a_sheet_signal_enclose_it(tmp_path):
     )
     (h_start, v_start), (h_end, v_end) = paths.voltage
     assert v_start == v_end == 0.0
-    for h in (h_start, h_end):
-        assert STRIP_H[1] < h < GROUND_H[0]
+    # Edge to edge: the field is singular at a sheet's edge, so a path that
+    # stops short of it misses part of the voltage.
+    assert (h_start, h_end) == (STRIP_H[1], GROUND_H[0])
     corners = np.asarray(paths.current)
     assert corners[:, 1].min() < 0.0 < corners[:, 1].max()
     assert corners[:, 0].min() < STRIP_H[0]
@@ -199,7 +200,8 @@ def test_terminal_paths_stay_in_the_gap_between_sheets():
     ((_, points),) = terminal_paths(spec, ((-41.0, 41.0), (-300.0, 200.0))).items()
     for h, v in points:
         assert v == 0.0
-        assert STRIP_H[1] < h < GROUND_H[0]
+        assert STRIP_H[1] <= h <= GROUND_H[0]
+    assert (points[0][0], points[-1][0]) == (STRIP_H[1], GROUND_H[0])
 
 
 def test_sheet_impedance_replaces_pec_on_2d_sheets(tmp_path):
