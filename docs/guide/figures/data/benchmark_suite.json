@@ -1,0 +1,375 @@
+{
+  "cases": [
+    {
+      "case_id": "charge.bj2012_cv.measured",
+      "date": "2026-11-12T14:32:19Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "charge.bj2012_vpil.measured",
+      "date": "2026-11-12T14:32:19Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "charge.cv_sze.approximate",
+      "date": "2026-11-12T13:56:09Z",
+      "ours": 4.584010005516477e-12,
+      "reference": 4.472690314384563e-12,
+      "status": "pass"
+    },
+    {
+      "case_id": "charge.depletion_width.approximate",
+      "date": "2026-11-12T14:00:54Z",
+      "ours": 0.045697628850441395,
+      "reference": 0.04834210538559219,
+      "status": "pass"
+    },
+    {
+      "case_id": "charge.dneff_4v.approximate",
+      "date": "2026-11-12T14:02:36Z",
+      "ours": 0.00028459147866666257,
+      "reference": 0.0002812117483470544,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.adddrop_ring_resonance.exact",
+      "date": "2026-11-12T14:07:07Z",
+      "ours": 1513.4506809318118,
+      "reference": 1513.4506808369315,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.adddrop_ring_transmission.exact",
+      "date": "2026-11-12T14:07:07Z",
+      "ours": 0.31372317703582486,
+      "reference": 0.31372317703207536,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.allpass_ring_group_delay.exact",
+      "date": "2026-11-12T14:07:08Z",
+      "ours": 155.55467337843203,
+      "reference": 155.55467333005936,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.allpass_ring_q.approximate",
+      "date": "2026-11-12T14:07:08Z",
+      "ours": 39111.240159874644,
+      "reference": 39112.78645558953,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.allpass_ring_resonance.exact",
+      "date": "2026-11-12T14:07:08Z",
+      "ours": 1513.450681365882,
+      "reference": 1513.4506808369315,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.allpass_ring_transmission.exact",
+      "date": "2026-11-12T14:07:08Z",
+      "ours": 0.606254614747772,
+      "reference": 0.6062546147529488,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.lattice_transmission.exact",
+      "date": "2026-11-12T14:07:09Z",
+      "ours": 0.5312665310640263,
+      "reference": 0.531266531063664,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.mzi_group_delay.exact",
+      "date": "2026-11-12T14:07:09Z",
+      "ours": -22.78803994653093,
+      "reference": -22.78803994384458,
+      "status": "pass"
+    },
+    {
+      "case_id": "circuit.mzi_transmission.exact",
+      "date": "2026-11-12T14:07:09Z",
+      "ours": 0.5207679829182953,
+      "reference": 0.5207679829180699,
+      "status": "pass"
+    },
+    {
+      "case_id": "coupler.cmt_vs_fdtd_1550.cross-solver",
+      "date": "2026-11-13T11:24:35Z",
+      "ours": 0.5399765200810521,
+      "reference": 0.5234254011646873,
+      "status": "pass"
+    },
+    {
+      "case_id": "coupler.cmt_vs_fdtd_band.cross-solver",
+      "date": "2026-11-13T11:24:35Z",
+      "ours": 0.9204083143120537,
+      "reference": 0.944491962525201,
+      "status": "pass"
+    },
+    {
+      "case_id": "coupler.supermode_dn.convergence",
+      "date": "2026-11-12T14:42:01Z",
+      "ours": 0.014898055394128917,
+      "reference": 0.014909812087565033,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.leaky_box_te0.meep",
+      "date": "2026-11-12T13:26:36Z",
+      "ours": null,
+      "reference": null,
+      "status": "skip"
+    },
+    {
+      "case_id": "mode.metal_clad_te0.meep",
+      "date": "2026-11-13T12:44:07Z",
+      "ours": 2.4225673237538414,
+      "reference": null,
+      "status": "skip"
+    },
+    {
+      "case_id": "mode.nitride_te0.meep",
+      "date": "2026-11-13T12:44:07Z",
+      "ours": 1.6082912237509965,
+      "reference": 1.6065354601221167,
+      "status": "miss"
+    },
+    {
+      "case_id": "mode.nitride_te0.palace",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 1.6082912237509965,
+      "reference": 1.60829567365,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.rib_te0.meep",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 2.566984971336287,
+      "reference": 2.5450445000089372,
+      "status": "miss"
+    },
+    {
+      "case_id": "mode.rib_te0.palace",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 2.566984971336287,
+      "reference": 2.566916031876,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.slab_te0.exact",
+      "date": "2026-11-12T13:23:16Z",
+      "ours": 2.84748552513977,
+      "reference": 2.847485540342903,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.slab_tm0.exact",
+      "date": "2026-11-12T13:24:29Z",
+      "ours": 2.053097306636742,
+      "reference": 2.053097506040335,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.slot_te0.meep",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 1.9466623615523009,
+      "reference": 1.9378845984552227,
+      "status": "miss"
+    },
+    {
+      "case_id": "mode.slot_te0.palace",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 1.9466623615523009,
+      "reference": 1.946689807915,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.strip_te0.convergence",
+      "date": "2026-11-12T13:26:34Z",
+      "ours": 2.4450714927693484,
+      "reference": 2.445094124439808,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.strip_te0.meep",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 2.4450714927693484,
+      "reference": 2.4181412470829566,
+      "status": "miss"
+    },
+    {
+      "case_id": "mode.strip_tm0.convergence",
+      "date": "2026-11-12T13:26:34Z",
+      "ours": 1.7701119370854128,
+      "reference": 1.7700661291643007,
+      "status": "pass"
+    },
+    {
+      "case_id": "mode.strip_tm0.meep",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 1.7701119370854128,
+      "reference": 1.7448753104601071,
+      "status": "miss"
+    },
+    {
+      "case_id": "mode.tfln_te0.meep",
+      "date": "2026-11-12T13:28:16Z",
+      "ours": null,
+      "reference": null,
+      "status": "skip"
+    },
+    {
+      "case_id": "mode.thick_soi_te0.palace",
+      "date": "2026-11-13T12:44:06Z",
+      "ours": 3.4595874631354366,
+      "reference": 3.459586556147,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_alpha_cst.cross-solver",
+      "date": "2026-11-17T12:02:49Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_alpha_gfem.cross-solver",
+      "date": "2026-11-18T11:26:26Z",
+      "ours": 5.1309886941746115,
+      "reference": 5.1325918527756365,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_alpha_p2d.cross-solver",
+      "date": "2026-11-17T10:37:53Z",
+      "ours": 5.132591863464413,
+      "reference": 5.1309886941746115,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_eps.convergence",
+      "date": "2026-11-16T11:51:58Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_eps_cst.cross-solver",
+      "date": "2026-11-17T12:02:49Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_h_eps.exact",
+      "date": "2026-11-16T11:14:20Z",
+      "ours": 4.1000024893622244,
+      "reference": 4.1,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_h_s21.exact",
+      "date": "2026-11-17T12:02:48Z",
+      "ours": -122.31448423350001,
+      "reference": -121.57484667732986,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_h_z0.approximate",
+      "date": "2026-11-16T11:49:26Z",
+      "ours": 50.81219249690759,
+      "reference": 45.43591047994615,
+      "status": "miss"
+    },
+    {
+      "case_id": "rf.cpw_line_p3d.cross-solver",
+      "date": "2026-11-18T11:02:07Z",
+      "ours": 4.056075785984885,
+      "reference": 4.549714450774073,
+      "status": "miss"
+    },
+    {
+      "case_id": "rf.cpw_line_p3d_vol.cross-solver",
+      "date": "2026-11-18T10:33:39Z",
+      "ours": 4.619397976392938,
+      "reference": 4.549714450774073,
+      "status": "miss"
+    },
+    {
+      "case_id": "rf.cpw_neff_gfem.cross-solver",
+      "date": "2026-11-18T11:26:26Z",
+      "ours": 1.8514674523527659,
+      "reference": 1.851462948,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_neff_p2d.cross-solver",
+      "date": "2026-11-17T10:37:53Z",
+      "ours": 1.851462947047,
+      "reference": 1.8514674523527659,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_s21_p3d.convergence",
+      "date": "2026-11-18T11:02:07Z",
+      "ours": -0.4302372536267996,
+      "reference": -0.4197181621692,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_s21mag_cst.cross-solver",
+      "date": "2026-11-17T12:02:49Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_s21phase_cst.cross-solver",
+      "date": "2026-11-17T12:02:49Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_surface_alpha.approximate",
+      "date": "2026-11-17T21:01:56Z",
+      "ours": 2.6148545667506875,
+      "reference": 3.558209566572405,
+      "status": "miss"
+    },
+    {
+      "case_id": "rf.cpw_z0.convergence",
+      "date": "2026-11-16T11:51:59Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_z0_cst.cross-solver",
+      "date": "2026-11-16T12:55:24Z",
+      "ours": null,
+      "reference": null,
+      "status": "pending"
+    },
+    {
+      "case_id": "rf.cpw_z0_gfem.cross-solver",
+      "date": "2026-11-18T11:26:26Z",
+      "ours": 57.9944235088245,
+      "reference": 57.917104209401025,
+      "status": "pass"
+    },
+    {
+      "case_id": "rf.cpw_z0_p2d.cross-solver",
+      "date": "2026-11-17T10:37:53Z",
+      "ours": 57.89154370458,
+      "reference": 57.96759062543252,
+      "status": "pass"
+    }
+  ]
+}

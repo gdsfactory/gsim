@@ -6,6 +6,15 @@ API guides for the full option lists and to the notebooks for complete worked ex
 
 Start with [choosing a solver](choosing-a-solver.md) if you do not yet know which engine fits your question.
 
+## What a solve returns
+
+![Electric-field intensity of the TE0 and TM0 modes of a 500 by 220 nm silicon strip, with n_eff in each panel title](images/index-strip-modes.png)
+
+*Fundamental TE0 and TM0 modes of a 500 × 220 nm silicon strip in SiO₂ at 1.55 µm: |E|² normalised to its peak, the silicon core
+outlined in white, n_eff in the panel titles. Local `gsim.femwell` run on the generic-PDK stack (silicon index 3.476, oxide 1.444),
+2026-11-25. The benchmark cases `mode.strip_te0.convergence` and `mode.strip_tm0.convergence` give 2.4451 and 1.7701 for the
+same strip on a finer mesh.*
+
 ## Task pages
 
 | Task | Solver | Page |
@@ -53,6 +62,11 @@ Each task page uses the same headings:
 
 The defaults on these pages were read from the source of the version in this repository, and they change between releases.
 Where a page quotes a number that the page's author measured rather than took from a test or a stored result, it says so.
+
+## Figures
+
+Each figure has a caption that says what is drawn and where the numbers come from: a local run with its date, or a stored
+benchmark case. The scripts that draw them are in `docs/guide/figures/` (one per page) and write to `docs/guide/images/`.
 
 ## Cloud use
 

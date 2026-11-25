@@ -62,6 +62,13 @@ Steps, in order:
 7. One run measures one column of the S-matrix. `fdtd.s_matrix([...])` combines runs and raises when an entry was not
    measured, unless you pass `assume_reciprocal=True` or `assume_unmeasured_zero=True`.
 
+![Static FDTD set-up plots of the 1x2 MMI and of a directional coupler](images/couplers-setup.png)
+
+*What the snippet sets up, drawn by `Simulation.plot_2d_static()` on the XY plane at mid-height, with no cloud call: the
+refractive index at the source wavelength, the physical domain (1 µm padding), the PML outside it, the source on `o1` and
+the monitors on the other ports. Top: the snippet's 1x2 MMI. Bottom: a directional coupler with a 236 nm gap and
+L = 20 µm, the device of the benchmark below. Local run with gsim 0.10.0 and 60 nm cells, 2026-11-25.*
+
 ## Key settings and defaults
 
 | Concern | Setting | Default |
@@ -92,6 +99,17 @@ To excite a higher-order mode, pass `mode={"kind": "mode_order", "mode_order": 2
 the same selection as the source.
 
 ## What to check
+
+A stored result shows what the answer looks like and how it can be compared with an independent model.
+
+![Cross power of a directional coupler against coupling length, FDTD against a femwell model](images/couplers-cross-power.png)
+
+*Cross-port power of a silicon directional coupler (500 × 220 nm guides, 236 nm gap) against its straight coupling length L.
+Left: FDTD at 1550 nm (17 cloud runs, 40 nm cells, all converged) and a femwell supermode model that integrates the index
+difference of the two supermodes along the coupler's gap profile. Right: the absolute difference at 1550 nm, and its largest
+value over 1510 to 1600 nm (1500 nm is below the noise floor in every run and is left out). Benchmark cases
+`coupler.cmt_vs_fdtd_1550` and `coupler.cmt_vs_fdtd_band`, cloud runs stored with the case dated 2026-11-13. The largest
+differences are 0.017 (1550 nm, L = 24 µm) and 0.024 (1600 nm, L = 45 µm). The model is not a measurement.*
 
 Run these on the result of every device, not only on the first one.
 

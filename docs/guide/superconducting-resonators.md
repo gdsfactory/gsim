@@ -94,6 +94,13 @@ What the lines do:
 5. `set_driven(...)` chooses a narrow band around the expected resonance. `adaptive_tol=1e-3` is the value the
    `DrivenConfig` docstring calls accurate; the default is `0.02`.
 
+![Top view of the example resonator with its two CPW ports and the airbox, and a zoom on one coupling end](images/resonator-setup.png)
+
+*The structure the snippet builds, drawn from the page's own `coupled_strip` function: metal1 in gold, the two CPW ports in red
+(the port elements are the two 6 µm gaps either side of the 10 µm signal conductor), and the airbox of the `set_airbox` call, whose outer wall
+is a PMC because both simulations use `absorbing_boundary=False`. Top: the whole structure. Bottom: the o1 end. This is a set-up
+drawing, not a result: no resonance is claimed for this structure. Drawn locally, 2026-11-25.*
+
 ## Key settings and defaults
 
 | Class | Setting | Default |

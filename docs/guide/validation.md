@@ -7,6 +7,15 @@ A stated result is a number that a test, a notebook or a docs page in this repos
 it was not re-run for this page. The page does not summarise accuracy as one figure, because the evidence does not support
 one.
 
+![Relative difference of each stored benchmark case to its reference, by family, coloured by stored status](images/validation-benchmark-suite.png)
+
+*Stored results of the cross-solver benchmark suite, in a separate repository and not part of this one (cases dated 2026-11-12
+to 2026-11-18). One marker per case: the relative difference between the case's headline value and its reference, coloured by
+the status stored with the case. The thresholds differ per case and are not drawn. Of the 41 cases drawn, 9 are misses: five
+Meep mode-solver cases against femwell (the strip TE0 case records limited Meep grid resolution as the cause) and four RF
+cases. Cases still pending or skipped (12) are counted, not drawn, and the paper-device cases are left out. This is a snapshot
+of the stored files, not a re-run, and not an accuracy statement: the cases differ in what they compare.*
+
 ## 1. One solver against another
 
 Each entry gives what was compared, the result it states, and what it does not show.

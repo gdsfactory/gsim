@@ -94,6 +94,13 @@ def neff_at(carriers, optical_mesh, wavelength_um=1.55):
 step 3. The notebook meshes its own window around the rib, holds the same fine element size across the junction as the charge
 mesh, and keeps the mesh fixed across biases: only the element permittivity changes.
 
+![Cross-section of the PN device as meshed for the charge solve](images/phase-shifter-setup.png)
+
+*The device behind the outline, drawn from the mesh of `sim.mesh()` (the device of the PN junction notebook, generic PDK): four
+doped strips 220 nm tall over a 90 nm slab, every doped region at 10¹⁸ cm⁻³, an aluminium electrode on each pad, the junction at
+the centre, the charge-solve window, and the refinement box that holds 10 nm elements across the junction. Regions that are
+neither doped nor declared insulating, here the slab and the oxide, take no part in the carrier solve. Local run, 2026-11-25.*
+
 Status of this outline: step 1 was executed in this checkout on the PN junction notebook's device, and it gives the same
 C(V) as the notebook's own cells. The imports and the signatures used in step 2-3 were checked. `neff_at` follows the
 notebook's `solve_optical_mode` function but was not executed as written here, because it needs an optical mesh. The
@@ -126,6 +133,14 @@ Without mesh grading, the mesh refines along every internal curve, and the eleme
 [TCAD guide](../api/tcad.md#configure-and-solve).
 
 ## What to check
+
+![Carrier densities across the junction at 0 and 2 V, and C(V) against the depletion approximation](images/phase-shifter-cv.png)
+
+*Result of the carrier solve on that device. Left: electron and hole density along a cut at mid-height of the rib, at 0 V and
+at 2 V reverse bias. The strip where both are below 10¹⁶ cm⁻³ is 17 nm wide at 0 V and 58 nm at 2 V, on a 10 nm mesh. Right:
+small-signal capacitance per cm of device length at five biases, next to the depletion approximation from
+`tcad.compare_capacitance`; the largest deviation is 2.8 %, at 0 V. Local DEVSIM run with gsim 0.10.0, 2026-11-25; the
+numbers are the ones check 1 quotes.*
 
 1. **C(V) against the depletion approximation.** `tcad.compare_capacitance(junction, sweep, height_um=...)` puts the
    simulated capacitance next to the abrupt-junction formula in `gsim.common.stack.PNJunctionConfig` and reports the largest
