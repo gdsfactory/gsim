@@ -34,7 +34,9 @@ def build_simulation(component):
     sim = fdtd.Simulation()
     sim.materials(background="SiO2", overrides={"si": 3.4757})
     sim.geometry(component)
-    sim.source(port="o1", wavelength_um=1.55, wavelength_span_um=0.1, num_wavelengths=101)
+    sim.source(
+        port="o1", wavelength_um=1.55, wavelength_span_um=0.1, num_wavelengths=101
+    )
     sim.domain(padding=1.0)
     sim.solver(cell_size_nm=60)
     return sim
@@ -62,10 +64,16 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="guidefig-dc3d-") as scratch:
         sim.write(scratch)  # local files only; nothing is submitted
         meta = json.loads((Path(scratch) / "metadata.json").read_text(encoding="utf8"))
-    low, high = meta["grid"]["non_pml_bounds"]["min"], meta["grid"]["non_pml_bounds"]["max"]
+    low, high = (
+        meta["grid"]["non_pml_bounds"]["min"],
+        meta["grid"]["non_pml_bounds"]["max"],
+    )
     LOG.info("physical domain (nm) min %s max %s", low, high)
     (x0, y0, z0), (x1, y1, z1) = ([v / 1000 for v in low], [v / 1000 for v in high])
-    core = gf.gpdk.PDK.layer_stack.layers["core"]
+    stack = gf.gpdk.PDK.layer_stack
+    if stack is None:
+        raise RuntimeError("the generic PDK has no layer stack")
+    core = stack.layers["core"]
     core_z0, core_z1 = core.zmin, core.zmin + core.thickness
     LOG.info(
         "stretch of the drawing: y x%.1f, z x%.1f",
@@ -77,10 +85,14 @@ def main() -> None:
     ax = fig.add_subplot(111, projection="3d")
     tops, sides = silicon_faces(component, core_z0, core_z1)
     ax.add_collection3d(
-        Poly3DCollection(sides, facecolors="#4a78a8", edgecolors="none", rasterized=True)
+        Poly3DCollection(
+            sides, facecolors="#4a78a8", edgecolors="none", rasterized=True
+        )
     )
     ax.add_collection3d(
-        Poly3DCollection(tops, facecolors="#7fb2e5", edgecolors="#23415f", linewidths=0.4)
+        Poly3DCollection(
+            tops, facecolors="#7fb2e5", edgecolors="#23415f", linewidths=0.4
+        )
     )
 
     # Domain box (physical domain; the PML lies outside it).
@@ -91,10 +103,14 @@ def main() -> None:
         for b in corners[i + 1 :]
         if sum(u != v for u, v in zip(a, b, strict=True)) == 1
     ]
-    ax.add_collection3d(Line3DCollection(edges, colors="0.35", linestyles="--", linewidths=0.8))
+    ax.add_collection3d(
+        Line3DCollection(edges, colors="0.35", linestyles="--", linewidths=0.8)
+    )
 
     # Source plane on o1, monitor planes on the other ports (y-z planes at the port).
-    half = 0.5 + 2 * 0.5  # half-width (um) of the drawn plane: port width + 0.5 um each side
+    half = (
+        0.5 + 2 * 0.5
+    )  # half-width (um) of the drawn plane: port width + 0.5 um each side
     for port in component.ports:
         x, y = port.dcenter
         z_lo, z_hi = core_z0 - 0.5, core_z1 + 0.5
@@ -132,7 +148,7 @@ def main() -> None:
     ax.set_ylabel("y (µm)", labelpad=2)
     ax.set_zlabel("z (µm)", labelpad=-2)
     ax.set_yticks([-2, 0, 2])
-    ax.set_zticks([-1, 0, 1])
+    ax.set_zticks([-1, 0, 1])  # ty: ignore[call-non-callable]
     ax.set_title(
         f"Directional coupler, gap {GAP_UM * 1000:.0f} nm, L = {LENGTH_UM:.0f} µm: "
         "silicon in SiO$_2$, domain box dashed"

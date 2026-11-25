@@ -1,11 +1,11 @@
 """Waveguide cross-sections for docs/guide/index.md: strip, rib and slot.
 
-Writes docs/guide/images/guide-mode-sections.png. Each column is one cross-section of the
-generic PDK stack in the window ``BoundaryModeSim.set_cross_section`` cuts: the top row
-shows the window, the cross-section mesh and the silicon, the bottom row zooms on the TE0
-mode computed by ``gsim.femwell.solve_modes`` (|E|^2, normalised to its peak). The mesh
-comes from gsim's native-2D mesher and the modes from femwell; everything runs locally and
-nothing touches the cloud.
+Writes docs/guide/images/guide-mode-sections.png. Each column is one cross-section of
+the generic PDK stack in the window ``BoundaryModeSim.set_cross_section`` cuts: the top
+row shows the window, the cross-section mesh and the silicon, the bottom row zooms on
+the TE0 mode computed by ``gsim.femwell.solve_modes`` (|E|^2, normalised to its peak).
+The mesh comes from gsim's native-2D mesher and the modes from femwell; everything runs
+locally and nothing touches the cloud.
 """
 
 from __future__ import annotations
@@ -56,7 +56,9 @@ def build_component(label: str) -> gf.Component:
         component << gf.c.rectangle((10.0, 3.0), centered=True, layer=layer.SLAB90)
     else:
         for sign in (-1, 1):
-            rail = component << gf.c.rectangle((10.0, 0.25), centered=True, layer=layer.WG)
+            rail = component << gf.c.rectangle(
+                (10.0, 0.25), centered=True, layer=layer.WG
+            )
             rail.move((0, sign * 0.175))
     return component
 
@@ -67,7 +69,9 @@ def solve(label: str):
     sim.set_output_dir(tempfile.mkdtemp(prefix="guidefig-modes-"))
     sim.set_stack(substrate_thickness=1.0)
     sim.set_geometry(build_component(label))
-    sim.set_airbox(margin_x=3.0, margin_y=3.0, z_above=3.0, z_below=1.0, material="sio2")
+    sim.set_airbox(
+        margin_x=3.0, margin_y=3.0, z_above=3.0, z_below=1.0, material="sio2"
+    )
     sim.set_cross_section("x=0", window=WINDOW_Y, window_z=WINDOW_Z)
     sim.mesh(preset="coarse", refined_mesh_size=0.02, max_mesh_size=0.3, verbose=False)
     if sim.stack is None:
@@ -115,10 +119,24 @@ def main() -> None:
         top, bottom = axes[0, column], axes[1, column]
 
         # Top row: window, mesh, silicon, oxide above and below.
-        top.triplot(mesh.p[0], mesh.p[1], mesh.t.T, color="0.55", linewidth=0.15, rasterized=True)
+        top.triplot(
+            mesh.p[0],
+            mesh.p[1],
+            mesh.t.T,
+            color="0.55",
+            linewidth=0.15,
+            rasterized=True,
+        )
         for y0, y1, z0, z1 in rectangles:
             top.add_patch(
-                Rectangle((y0, z0), y1 - y0, z1 - z0, facecolor="tab:blue", edgecolor="black", linewidth=0.6)
+                Rectangle(
+                    (y0, z0),
+                    y1 - y0,
+                    z1 - z0,
+                    facecolor="tab:blue",
+                    edgecolor="black",
+                    linewidth=0.6,
+                )
             )
         top.axhline(0.0, color="black", linewidth=0.5, linestyle=":")
         top.text(WINDOW_Y[0] + 0.1, 0.9, "SiO$_2$ cladding", fontsize=8, color="0.25")
@@ -143,7 +161,14 @@ def main() -> None:
         )
         for y0, y1, z0, z1 in rectangles:
             bottom.add_patch(
-                Rectangle((y0, z0), y1 - y0, z1 - z0, fill=False, edgecolor="white", linewidth=0.8)
+                Rectangle(
+                    (y0, z0),
+                    y1 - y0,
+                    z1 - z0,
+                    fill=False,
+                    edgecolor="white",
+                    linewidth=0.8,
+                )
             )
         bottom.set_xlim(-1.2, 1.2)
         bottom.set_ylim(-0.6, 0.8)
@@ -153,7 +178,7 @@ def main() -> None:
         bottom.set_title(f"TE0: $n_{{eff}}$ = {mode.n_eff.real:.3f}", fontsize=9)
     axes[0, 0].set_ylabel("z (µm)")
     axes[1, 0].set_ylabel("z (µm)")
-    fig.colorbar(last, ax=axes[1, :], label="|E|² (normalised)", shrink=0.8)
+    fig.colorbar(last, ax=axes[1, :], label="|E|² (normalised)", shrink=0.8)  # ty: ignore[invalid-argument-type]
     save(fig, "guide-mode-sections.png")
     LOG.info("run date: %s", today())
 

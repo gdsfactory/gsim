@@ -4,8 +4,8 @@ Writes docs/guide/images/guide-ring-circuit.png. Top: the layouts of the generic
 ``ring_single`` and ``mzi`` as gdsfactory builds them. Bottom left: the circuit idea (a
 coupler section plus a loop of waveguide). Bottom right: the through-port spectrum of
 that circuit, computed locally with SAX from an ideal coupler and a straight-waveguide
-model. The coupler and the loop use illustrative numbers that are set in this script; they
-are not extracted from the layouts and not from an FDTD run. No cloud call.
+model. The coupler and the loop use illustrative numbers that are set in this script;
+they are not extracted from the layouts and not from an FDTD run. No cloud call.
 """
 
 from __future__ import annotations
@@ -32,10 +32,11 @@ NEFF, NG = 2.34, 3.4  # defaults of sax.models.straight
 def draw_layout(ax, component, title: str) -> None:
     """Fill the polygons of the component and label its ports."""
     dbu = component.kcl.dbu
-    shapes = []
-    for polygons in component.get_polygons(by="tuple").values():
-        for polygon in polygons:
-            shapes.append([(p.x * dbu, p.y * dbu) for p in polygon.each_point_hull()])
+    shapes = [
+        [(p.x * dbu, p.y * dbu) for p in polygon.each_point_hull()]
+        for polygons in component.get_polygons(by="tuple").values()
+        for polygon in polygons
+    ]
     ax.add_collection(
         PolyCollection(
             shapes, facecolors="#7fb2e5", edgecolors="#23415f", linewidths=0.4
@@ -67,7 +68,7 @@ def draw_layout(ax, component, title: str) -> None:
 
 
 def ring_spectrum():
-    """Through-port power of an all-pass ring: ideal coupler plus straight loop (SAX)."""
+    """Through-port power of an all-pass ring: ideal coupler and straight loop (SAX)."""
     netlist = {
         "instances": {
             "dc": {"component": "coupler", "settings": {"coupling": COUPLING}},
@@ -80,7 +81,7 @@ def ring_spectrum():
         "ports": {"in": "dc,in0", "thru": "dc,out0"},
     }
     models = {"coupler": sax.models.coupler_ideal, "straight": sax.models.straight}
-    circuit, _ = sax.circuit(netlist, models)  # ty: ignore[no-matching-overload]
+    circuit, _ = sax.circuit(netlist, models)  # ty: ignore[invalid-argument-type]
     wl = np.linspace(1.50, 1.60, 4001)
     power = np.abs(np.asarray(circuit(wl=wl)[("in", "thru")])) ** 2
     dips = [
@@ -175,7 +176,8 @@ def main() -> None:
     spectrum.set_xlabel("Wavelength (nm)")
     spectrum.set_ylabel("Through power (dB)")
     spectrum.set_title(
-        f"SAX: \u03ba\u00b2 = {COUPLING}, L = {LOOP_LENGTH_UM:.0f} µm, {LOOP_LOSS_DB_CM:g} dB/cm",
+        f"SAX: \u03ba\u00b2 = {COUPLING}, L = {LOOP_LENGTH_UM:.0f} µm, "
+        f"{LOOP_LOSS_DB_CM:g} dB/cm",
         fontsize=9,
     )
     save(fig, "guide-ring-circuit.png")

@@ -36,7 +36,9 @@ def build_simulation() -> meep.Simulation:
     """The set-up cells of the 2D grating-coupler notebook."""
     gf.gpdk.PDK.activate()
     component = gf.Component()
-    grating = component.add_ref(gf.components.grating_coupler_elliptical(fiber_angle=0.0))
+    grating = component.add_ref(
+        gf.components.grating_coupler_elliptical(fiber_angle=0.0)
+    )
     straight = component.add_ref(gf.components.straight(length=3))
     straight.connect("o1", grating.ports["o1"])
     component.add_port("o2", port=straight.ports["o2"])
@@ -53,7 +55,9 @@ def build_simulation() -> meep.Simulation:
     sim.monitors = ["o2"]
     # z_bounds=(-1.5, 4.6) is what the notebook's margin_z=(1.5, 0) resolves to (the
     # library's deprecation warning prints this tuple).
-    sim.domain(pml=1.0, margin_x=0.5, margin_y=0.5, z_bounds=(-1.5, 4.6), extend_into_pml=True)
+    sim.domain(
+        pml=1.0, margin_x=0.5, margin_y=0.5, z_bounds=(-1.5, 4.6), extend_into_pml=True
+    )
     sim.num_freqs = 21
     return sim
 
