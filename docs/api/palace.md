@@ -423,7 +423,10 @@ later for thin films.
 absorbs outgoing radiation and is the default for driven simulations without wave
 ports, which default to `"pec"` (see above). `"pec"` closes the domain with a metal box.
 `"pmc"` is Palace's natural condition and the default for eigenmode and boundary-mode
-simulations. The generated config names the condition. `absorbing_boundary=True` means
+simulations. The generated config names the condition. A PMC wall is written
+explicitly under `Boundaries.PMC` when no other wall condition is set. It is Palace's
+natural condition, so the solve is the same, but `config.json` now differs from the one
+earlier versions wrote, and so does its input hash. `absorbing_boundary=True` means
 `outer_boundary="absorbing"`, and conflicting values raise an error. Magnetostatic
 simulations take `"pec"` or `"pmc"`, like `metallic_boundaries`, and refuse `"absorbing"`.
 Electrostatic simulations keep Palace's own outer condition, so they do not accept

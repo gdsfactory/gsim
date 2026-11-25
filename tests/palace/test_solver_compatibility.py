@@ -83,6 +83,8 @@ def test_complete_config_matches_main_baseline(
     output = sim.write_config(validate_mesh=False)
     # Legacy and grouped APIs must export the same configuration. Byte comparison
     # also protects key ordering, which participates in the cloud input hash.
+    # The eigenmode reference lists the PMC outer wall on purpose. It is Palace's
+    # natural condition, so the solve is the same.
     reference = Path(__file__).with_suffix("") / f"{group}.txt"
     # The JSON writer uses native line endings, including CRLF on Windows.
     expected = reference.read_text().removesuffix("\n").replace("\n", os.linesep)
