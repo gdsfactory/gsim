@@ -1,4 +1,4 @@
-"""Figures for docs/guide/phase-shifters.md.
+"""Figures for the "Carrier-depletion phase shifters" section of docs/guide/index.md.
 
 Writes docs/guide/images/phase-shifter-setup.png (the device of the page's outline,
 drawn from the mesh that ``tcad.Simulation.mesh`` makes) and

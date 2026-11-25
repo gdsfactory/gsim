@@ -1,4 +1,6 @@
-"""Result figure for docs/guide/validation.md: the stored benchmark suite by family.
+"""Result figure for the "Validation and benchmarks" section of docs/guide/index.md.
+
+The stored benchmark suite by family.
 
 Writes docs/guide/images/validation-benchmark-suite.png. One marker per stored case
 file of the benchmark results folder (top level ``<family>.<name>.<kind>.json``): the

@@ -1,4 +1,4 @@
-"""Figures for docs/guide/couplers-and-mmis.md.
+"""Figures for the "Directional couplers and MMIs" section of docs/guide/index.md.
 
 Writes docs/guide/images/couplers-setup.png (static FDTD set-up plots, drawn locally,
 no cloud call) and docs/guide/images/couplers-cross-power.png (stored cloud FDTD runs

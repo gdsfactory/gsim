@@ -1,4 +1,4 @@
-"""Overview figure for docs/guide/index.md.
+"""Strip-mode figure for the "Waveguide modes" section of docs/guide/index.md.
 
 TE0 and TM0 of a 500 x 220 nm strip, local femwell solve.
 

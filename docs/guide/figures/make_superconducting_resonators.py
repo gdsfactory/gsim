@@ -1,4 +1,4 @@
-"""Set-up figure for docs/guide/superconducting-resonators.md.
+"""Set-up figure for the "Superconducting resonators" section of docs/guide/index.md.
 
 Writes docs/guide/images/resonator-setup.png: the page's ``coupled_strip`` (read from
 the page, not retyped) in top view with its two CPW ports and the airbox of the page's
@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 from _common import HERE, LOG, apply_style, save
 from matplotlib.patches import Polygon, Rectangle
 
-PAGE = HERE.parent / "superconducting-resonators.md"
+PAGE = HERE.parent / "index.md"  # the "Superconducting resonators" section
 METAL_COLOR = "#c9a227"
 
 
@@ -35,11 +35,14 @@ def component_from_page():
     )
     if function is None:
         raise ValueError("coupled_strip not found on the page")
-    settings = re.search(r"settings = (\{[^}]*\})", text)
+    # The guide is one page with many snippets: read the numbers from the resonator
+    # snippet, which starts at the function.
+    snippet = text[function.start() :]
+    settings = re.search(r"settings = (\{[^}]*\})", snippet)
     airbox = re.search(
         r"set_airbox\(margin_x=([\d.]+), margin_y=([\d.]+), "
         r"z_above=([\d.]+), z_below=([\d.]+)\)",
-        text,
+        snippet,
     )
     if settings is None or airbox is None:
         raise ValueError("settings or set_airbox call not found on the page")
