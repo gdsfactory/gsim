@@ -110,11 +110,12 @@ start small; use `"default"` or `"fine"` once the geometry is right.
 pip install gsim
 ```
 
-Two optional extras bring in the solvers behind `gsim.tcad` and `gsim.femwell`:
+Optional extras bring in the solvers behind `gsim.tcad` and `gsim.femwell`, and the Quantum PDK used by the QPDK notebooks:
 
 ```bash
 pip install "gsim[tcad]"     # DEVSIM, for the charge-transport solver
 pip install "gsim[femwell]"  # femwell and scikit-fem, for the mode solver
+pip install "gsim[qpdk]"     # qpdk 0.4.x, for the nbs/palace_qpdk_* notebooks
 ```
 
 ## API guides

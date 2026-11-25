@@ -42,6 +42,12 @@ femwell = [
   "femwell>=0.1.11",
   "scikit-fem>=8.0.0",
 ]
+# Quantum PDK (qpdk) used by the nbs/palace_qpdk_*.ipynb and
+# nbs/palace_transmon.ipynb notebooks. The docs workflow installs this extra,
+# so the published notebook output comes from the same qpdk series users get.
+qpdk = [
+  "qpdk>=0.4,<0.5",
+]
 # DEVSIM charge-transport backend (gsim.tcad). scipy-openblas32 gives DEVSIM
 # a BLAS/LAPACK on Linux, Windows and macOS: without it a plain pip install has
 # none DEVSIM can load on macOS or Windows. DEVSIM reads its scipy_-prefixed
