@@ -120,7 +120,8 @@ def line_impedance_paths(
 
     Args:
         signal: ``((h_min, h_max), (v_min, v_max))`` of the signal
-            electrode (um).
+            electrode (um). A zero-thickness electrode, as a planar sheet,
+            has ``v_min == v_max``.
         ground: The same for the return electrode.
         domain: The same for the meshed domain the paths are sampled on.
         clearance_fraction: Fraction of the smallest clearance around the
@@ -140,7 +141,7 @@ def line_impedance_paths(
     (g_lo, g_hi), (u_lo, u_hi) = ground
     (d_lo, d_hi), (e_lo, e_hi) = domain
 
-    if not (d_lo < s_lo < s_hi < d_hi and e_lo < t_lo < t_hi < e_hi):
+    if not (d_lo < s_lo < s_hi < d_hi and e_lo < t_lo <= t_hi < e_hi):
         raise ValueError(
             f"The signal electrode spans {signal} but is not inside the meshed "
             f"domain {domain}, so no path around it can be sampled."
@@ -155,9 +156,9 @@ def line_impedance_paths(
             "the in-plane axis to integrate the line voltage across."
         )
 
-    clearance = clearance_fraction * min(
-        gap, t_hi - t_lo, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi
-    )
+    # A zero-thickness electrode (a sheet) has no thickness to clear.
+    spans = (gap, t_hi - t_lo, s_lo - d_lo, d_hi - s_hi, t_lo - e_lo, e_hi - t_hi)
+    clearance = clearance_fraction * min(span for span in spans if span > 0.0)
     # A hair into the gap from each face, on the domain rather than on
     # (or, under the "pec" model, inside) the conductor.
     inset = clearance if faces[0] < faces[1] else -clearance
@@ -370,7 +371,9 @@ def palace_line_impedance(
         if index is not None
         else None
     )
-    if native is not None and signal.model == "pec":
+    # A zero-thickness electrode is meshed as PEC whatever its model says.
+    is_sheet = signal.extent[1][0] == signal.extent[1][1]
+    if native is not None and (signal.model == "pec" or is_sheet):
         return native
     h_span, v_span = signal.extent
     z0 = field_line_impedance(

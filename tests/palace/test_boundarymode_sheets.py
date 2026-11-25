@@ -15,8 +15,11 @@ import meshio
 import numpy as np
 import pytest
 
+from gsim.common.modes import Conductor
 from gsim.common.stack.extractor import Layer, LayerStack
 from gsim.palace import BoundaryModeSim
+from gsim.palace.line_impedance import line_impedance_paths
+from gsim.palace.terminal_ports import TerminalPortSpec, terminal_paths
 
 STRIP_W = 10.0
 GAP = 6.0
@@ -168,3 +171,32 @@ def test_a_sheet_on_the_domain_wall_is_pec_and_not_absorbing(tmp_path):
     metal = (STRIP_H, GROUND_H, (-GROUND_H[1], -GROUND_H[0]))
     for h in midpoints:
         assert not any(lo < h < hi for lo, hi in metal)
+
+
+def test_impedance_paths_for_a_sheet_signal_enclose_it(tmp_path):
+    sim = _sim(tmp_path)
+    paths = line_impedance_paths(
+        signal=(STRIP_H, (0.0, 0.0)),
+        ground=(GROUND_H, (0.0, 0.0)),
+        domain=sim.mesh_extent,
+    )
+    (h_start, v_start), (h_end, v_end) = paths.voltage
+    assert v_start == v_end == 0.0
+    for h in (h_start, h_end):
+        assert STRIP_H[1] < h < GROUND_H[0]
+    corners = np.asarray(paths.current)
+    assert corners[:, 1].min() < 0.0 < corners[:, 1].max()
+    assert corners[:, 0].min() < STRIP_H[0]
+    assert corners[:, 0].max() > STRIP_H[1]
+    on_metal = (corners[:, 1] == 0.0) & (np.abs(corners[:, 0]) <= STRIP_H[1])
+    assert not on_metal.any()
+
+
+def test_terminal_paths_stay_in_the_gap_between_sheets():
+    signal = Conductor("S", (STRIP_H, (0.0, 0.0)))
+    ground = Conductor("G", (GROUND_H, (0.0, 0.0)))
+    spec = TerminalPortSpec("p", terminals=[signal], reference=ground)
+    ((_, points),) = terminal_paths(spec, ((-41.0, 41.0), (-300.0, 200.0))).items()
+    for h, v in points:
+        assert v == 0.0
+        assert STRIP_H[1] < h < GROUND_H[0]

@@ -362,6 +362,26 @@ class TestLossyConductorsReadTheFields:
 
         assert reading.z0_ohm == pytest.approx(80.0**2 / 100.0)
 
+    def test_a_sheet_is_perfect_in_the_mesh_so_it_takes_the_table(
+        self, monkeypatch, tmp_path
+    ):
+        self._fields_say(monkeypatch, 74.6 - 8.3j)
+        sheet = Conductor(
+            name="electrode_low", extent=((-5.0, 5.0), (0.0, 0.0)), model="volume"
+        )
+
+        reading = palace_line_impedance(
+            FieldlessSim(tmp_path),
+            impedance_tables(),
+            index=1,
+            mode_id=1,
+            n_eff=2.0,
+            signal=sheet,
+            context="The rf stage's palace route",
+        )
+
+        assert reading.z0_ohm == pytest.approx(80.0**2 / 100.0)
+
 
 class TestTablesFirstFieldsAfter:
     """The policy: Palace's own answer, then the saved fields."""

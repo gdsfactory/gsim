@@ -38,15 +38,24 @@ def _overlap_or_touch(a: Extent, b: Extent) -> bool:
     return a_h0 <= b_h1 and b_h0 <= a_h1 and a_v0 <= b_v1 and b_v0 <= a_v1
 
 
-def _check_extent(name: str, extent: Extent) -> None:
-    """Refuse a rectangle that is empty, inverted or not finite."""
+def _check_extent(name: str, extent: Extent, *, sheet: bool = False) -> None:
+    """Refuse a rectangle that is empty, inverted or not finite.
+
+    With ``sheet``, a zero-thickness conductor (``v_min == v_max``) is allowed.
+    """
     (h0, h1), (v0, v1) = extent
-    if not all(np.isfinite([h0, h1, v0, v1])) or not (h0 < h1 and v0 < v1):
+    thick_ok = v0 <= v1 if sheet else v0 < v1
+    if not all(np.isfinite([h0, h1, v0, v1])) or not (h0 < h1 and thick_ok):
         raise ValueError(
             f"Conductor {name!r} has the extent {extent}, which is not a "
             "rectangle ((h_min, h_max), (v_min, v_max)) with h_min < h_max and "
-            "v_min < v_max."
+            "v_min < v_max" + (" (or v_min == v_max for a sheet)." if sheet else ".")
         )
+
+
+def _least_span(*spans: float) -> float:
+    """The smallest span that is not zero: a sheet has no thickness to inset from."""
+    return min(span for span in spans if span > 0.0)
 
 
 @dataclass(frozen=True)
@@ -95,7 +104,7 @@ class TerminalPortSpec:
                 f"reference may not also be a terminal; repeated: {repeated}."
             )
         for conductor in everyone:
-            _check_extent(conductor.name, conductor.extent)
+            _check_extent(conductor.name, conductor.extent, sheet=True)
         for first, second in combinations(everyone, 2):
             if _overlap_or_touch(first.extent, second.extent):
                 raise ValueError(
@@ -160,7 +169,7 @@ def _direct_path(term: Extent, ref: Extent, fraction: float) -> list[Point] | No
     gap_v = max(rv0 - tv1, tv0 - rv1)
     if gap_h > 0.0:
         a, b, sign = (th1, rh0, 1.0) if rh0 > th1 else (th0, rh1, -1.0)
-        inset = fraction * min(gap_h, tv1 - tv0, rv1 - rv0)
+        inset = fraction * _least_span(gap_h, tv1 - tv0, rv1 - rv0)
         return [
             (a + sign * inset, _mid(tv0, tv1)),
             (b - sign * inset, _mid(rv0, rv1)),
@@ -170,7 +179,7 @@ def _direct_path(term: Extent, ref: Extent, fraction: float) -> list[Point] | No
         if hi <= lo:
             return None
         a, b, sign = (tv1, rv0, 1.0) if rv0 > tv1 else (tv0, rv1, -1.0)
-        inset = fraction * min(gap_v, th1 - th0, rh1 - rh0)
+        inset = fraction * _least_span(gap_v, th1 - th0, rh1 - rh0)
         h_mid = _mid(lo, hi)
         return [(h_mid, a + sign * inset), (h_mid, b - sign * inset)]
     return None
@@ -223,11 +232,11 @@ def _detour_path(
     headroom = d_v1 - top
     if gap <= 0.0 or headroom <= 0.0:
         return None
-    x_exit = face + direction * fraction * min(gap, tv1 - tv0)
+    x_exit = face + direction * fraction * _least_span(gap, tv1 - tv0)
     rise = min(0.5 * headroom, gap)
     y_top = top + rise
     x_down = _mid(rh0, rh1)
-    y_end = rv1 + fraction * min(rise, rv1 - rv0)
+    y_end = rv1 + fraction * _least_span(rise, rv1 - rv0)
     path = [(x_exit, v_mid), (x_exit, y_top), (x_down, y_top), (x_down, y_end)]
     return [p for i, p in enumerate(path) if i == 0 or p != path[i - 1]]
 
