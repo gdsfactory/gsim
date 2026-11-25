@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from gsim.common.stack import LayerStack
+    from gsim.palace.base import OuterBoundary
     from gsim.palace.models import (
         BoundaryModeConfig,
         DrivenConfig,
@@ -515,7 +516,7 @@ def _magnetostatic_boundaries(
     conductor surface, PEC surface and via side wall is PEC: without the via
     walls a loop that drops through a via would be open. Each current source
     is one ``SurfaceCurrent`` sheet, with ``Index`` in the order the sources
-    were added. The outer wall is left to the ``_metallic_boundaries`` hint.
+    were added. The outer wall is left to ``metallic_boundaries``.
 
     Raises:
         ValueError: If a port is not a current source, a source has no sheet
@@ -555,6 +556,58 @@ def _magnetostatic_boundaries(
     return {"PEC": {"Attributes": sorted(pec)}, "SurfaceCurrent": surface_currents}
 
 
+def _add_outer_wall(
+    boundaries: dict[str, Any],
+    groups: dict,
+    kind: Literal["pec", "pmc"],
+    *,
+    simulation_type: str,
+) -> None:
+    """Write the outer walls as PEC or PMC, leaving claimed attributes alone.
+
+    Impedance and conductivity attributes and Floquet donor and receiver faces
+    keep their own condition. Electrostatic keeps Palace's natural outer
+    condition, since PEC and PMC cannot sit beside its Ground and ZeroCharge.
+    Magnetostatic takes PEC but leaves PMC to Palace's natural condition.
+    """
+    if simulation_type.startswith("electrostatic"):
+        if kind == "pec":
+            raise ValueError(
+                "outer_boundary='pec' is not supported for electrostatic "
+                "simulations; their outer walls keep Palace's natural condition."
+            )
+        return
+    if simulation_type == "magnetostatic" and kind == "pmc":
+        return
+
+    surfaces = groups["boundary_surfaces"]
+    outer = surfaces.get("absorbing")
+    if outer is None:
+        if kind == "pec":
+            raise ValueError(
+                "metallic_boundaries asks for a perfect-conductor outer wall, "
+                "but the mesh carries no outer-boundary physical group to put "
+                "it on."
+            )
+        return
+
+    outer_pg = outer["phys_group"]
+    attrs = set(outer_pg if isinstance(outer_pg, list) else [outer_pg])
+    for key in ("periodic_donor", "periodic_receiver"):
+        claimed_pg = surfaces.get(key, {}).get("phys_group")
+        if claimed_pg is not None:
+            attrs -= set(claimed_pg if isinstance(claimed_pg, list) else [claimed_pg])
+    for block in ("Impedance", "Conductivity"):
+        for entry in boundaries.get(block, []):
+            attrs -= set(entry.get("Attributes", []))
+    if not attrs:
+        return
+
+    name = "PEC" if kind == "pec" else "PMC"
+    existing = boundaries.get(name, {}).get("Attributes", [])
+    boundaries[name] = {"Attributes": sorted({*existing, *attrs})}
+
+
 def generate_palace_config(
     groups: dict,
     ports: list[PalacePort],
@@ -584,6 +637,7 @@ def generate_palace_config(
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
     magnetostatic_config: MagnetostaticConfig | None = None,
+    outer_boundary: OuterBoundary | None = None,
 ) -> Path:
     """Generate Palace config.json file.
 
@@ -601,6 +655,8 @@ def generate_palace_config(
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
+        outer_boundary: What the outer walls are: ``"pec"``, ``"pmc"`` or
+            ``"absorbing"``. ``None`` derives it from ``absorbing_boundary``.
         periodic_axis: Optional periodic axis identifier
         periodic_translation: Actual donor-to-receiver translation in mesh units
         hints: Additional entries merged into the top level of the JSON.
@@ -656,6 +712,26 @@ def generate_palace_config(
         "magnetostatic",
     ):
         raise ValueError(f"Unsupported simulation type: {simulation_type}")
+
+    if simulation_type == "magnetostatic" and (
+        absorbing_boundary or outer_boundary == "absorbing"
+    ):
+        raise ValueError(
+            "Palace ignores an Absorbing boundary in a magnetostatic solve "
+            "and leaves the outer wall PMC; use metallic_boundaries or "
+            "outer_boundary to choose a PEC or PMC outer wall instead."
+        )
+
+    if outer_boundary is None:
+        if metallic_boundaries and absorbing_boundary:
+            raise ValueError(
+                "metallic_boundaries and absorbing_boundary both claim the "
+                "outer wall; turn one of them off."
+            )
+        if metallic_boundaries:
+            outer_boundary = "pec"
+        else:
+            outer_boundary = "absorbing" if absorbing_boundary else "pmc"
 
     sym = groups.get("boundary_surfaces", {}).get("symmetry")
     if sym is not None and simulation_type not in ("driven", "eigenmode"):
@@ -1018,12 +1094,6 @@ def generate_palace_config(
             boundaries["Postprocessing"] = mode_postprocessing
 
     elif simulation_type == "magnetostatic":
-        if absorbing_boundary:
-            raise ValueError(
-                "Palace ignores an Absorbing boundary in a magnetostatic solve "
-                "and leaves the outer wall PMC; use metallic_boundaries to "
-                "choose a PEC (True) or PMC (False) outer wall instead."
-            )
         boundaries = _magnetostatic_boundaries(
             groups, ports, conductor_attrs, pec_attrs
         )
@@ -1150,7 +1220,7 @@ def generate_palace_config(
         if pec_attrs:
             boundaries["PEC"] = {"Attributes": pec_attrs}
 
-    if "absorbing" in groups["boundary_surfaces"] and absorbing_boundary:
+    if "absorbing" in groups["boundary_surfaces"] and outer_boundary == "absorbing":
         absorbing_pg = groups["boundary_surfaces"]["absorbing"]["phys_group"]
         # phys_group may be a list (multiple __None groups) or a single int
         attrs = absorbing_pg if isinstance(absorbing_pg, list) else [absorbing_pg]
@@ -1179,28 +1249,6 @@ def generate_palace_config(
             )
             boundaries["PEC"] = {"Attributes": sorted(merged)}
 
-    if metallic_boundaries:
-        # A metallic window: the outer wall of the domain carries a
-        # perfect-conductor condition, so the solve is a shielded one.
-        # Without it Palace assigns its own default to an unconditioned
-        # outer boundary, which is PMC — the opposite wall.
-        outer = groups["boundary_surfaces"].get("absorbing")
-        if outer is None:
-            raise ValueError(
-                "metallic_boundaries asks for a perfect-conductor outer "
-                "wall, but the mesh carries no outer-boundary physical "
-                "group to put it on."
-            )
-        if "Absorbing" in boundaries:
-            raise ValueError(
-                "metallic_boundaries and absorbing_boundary both claim the "
-                "outer wall; turn one of them off."
-            )
-        outer_pg = outer["phys_group"]
-        outer_attrs = outer_pg if isinstance(outer_pg, list) else [outer_pg]
-        existing = boundaries.get("PEC", {}).get("Attributes", [])
-        boundaries["PEC"] = {"Attributes": sorted({*existing, *outer_attrs})}
-
     if (
         simulation_type == "eigenmode"
         and eigenmode_config is not None
@@ -1214,6 +1262,14 @@ def generate_palace_config(
     impedance_entries = _resolve_impedance_boundaries(impedance_boundaries, groups)
     if impedance_entries:
         boundaries.setdefault("Impedance", []).extend(impedance_entries)
+
+    if outer_boundary in ("pec", "pmc"):
+        _add_outer_wall(
+            boundaries,
+            groups,
+            outer_boundary,
+            simulation_type=simulation_type,
+        )
 
     # Preserve the default PEC approximation in the numeric port eigenproblem.
     # Explicit "inherit" keeps its physical Robin terms, including conductor
@@ -1502,6 +1558,7 @@ def write_config(
     mode_postprocessing: dict[str, list[dict[str, object]]] | None = None,
     cross_section_axis: str | None = None,
     magnetostatic_config: MagnetostaticConfig | None = None,
+    outer_boundary: OuterBoundary | None = None,
 ) -> Path:
     """Write Palace config.json from a MeshResult.
 
@@ -1578,6 +1635,7 @@ def write_config(
         mode_postprocessing=mode_postprocessing,
         cross_section_axis=cross_section_axis,
         magnetostatic_config=magnetostatic_config,
+        outer_boundary=outer_boundary,
     )
 
     # Update the mesh_result with the config path

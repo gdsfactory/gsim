@@ -157,9 +157,8 @@ class BoundaryModeSim(_PalaceSimBase):
 
     solver: BoundaryModeSolverConfig = Field(default_factory=BoundaryModeSolverConfig)
     absorbing_boundary: bool = False
-    #: Put a perfect-conductor condition on the outer wall of the meshed
-    #: domain, making the mode solve a shielded one. Off, Palace's own
-    #: default for an unconditioned outer boundary applies, which is PMC.
+    #: Legacy spelling of ``outer_boundary="pec"``: a shielded mode solve. Off,
+    #: the outer wall is PMC.
     metallic_boundaries: bool = False
     #: What the finite-conductivity conductor surfaces of the 2D mesh are in
     #: the eigenproblem. ``"conductivity"`` (default) keeps them as Palace's

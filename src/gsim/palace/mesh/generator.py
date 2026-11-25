@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from gsim.common.stack import LayerStack
+    from gsim.palace.base import OuterBoundary
     from gsim.palace.models import (
         BoundaryModeConfig,
         CrossSectionPlaneConfig,
@@ -1428,6 +1429,7 @@ def generate_mesh(
     surface_threads: int = 1,
     split_conductors_by_net: bool = False,
     absorbing_order: int = 2,
+    outer_boundary: OuterBoundary | None = None,
 ) -> MeshResult:
     """Generate mesh for Palace EM simulation.
 
@@ -1513,6 +1515,8 @@ def generate_mesh(
             in ``groups["nets"]``. Needs ``write_config=False``, since the
             config needs the terminals. Ignored for boundary mode.
         absorbing_order: Order (1 or 2) of the absorbing boundary condition
+        outer_boundary: Outer-wall condition ``"pec"``, ``"pmc"`` or
+            ``"absorbing"``; ``None`` derives it from ``absorbing_boundary``.
 
     Returns:
         MeshResult with paths and metadata
@@ -1792,6 +1796,7 @@ def generate_mesh(
                     absorbing_boundary,
                     periodic_axis,
                     absorbing_order=absorbing_order,
+                    outer_boundary=outer_boundary,
                     # tensors are written in the 2D mesh frame (_to_section_frame)
                     cross_section_axis=cross_section.axis,
                 )
@@ -2102,6 +2107,7 @@ def generate_mesh(
                 periodic_axis,
                 periodic_translation=periodic_translation,
                 absorbing_order=absorbing_order,
+                outer_boundary=outer_boundary,
             )
 
     finally:
