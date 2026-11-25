@@ -8,8 +8,10 @@ meshed tests check the real physical-group keys and ``validate_mesh``.
 
 from __future__ import annotations
 
+import cmath
 import json
 import logging
+import math
 
 import gdsfactory as gf
 import pytest
@@ -24,7 +26,11 @@ from gsim.palace import (
     MagnetostaticSim,
 )
 from gsim.palace.mesh.config_generator import generate_palace_config
-from gsim.palace.models import DrivenConfig, SheetImpedanceConfig
+from gsim.palace.models import (
+    DrivenConfig,
+    SheetImpedanceConfig,
+    parallel_sheet_impedance,
+)
 from gsim.palace.ports.config import PalacePort, PortType
 
 LS = 20e-12  # H/sq, a thin superconducting film
@@ -366,6 +372,61 @@ class TestSheetImpedanceConfig:
         original = SheetImpedanceConfig(layer="sc", inductance=LS, resistance=RS)
         restored = SheetImpedanceConfig.model_validate_json(original.model_dump_json())
         assert restored == original
+
+
+class TestParallelSheetImpedance:
+    FREQ = 6e9
+
+    @staticmethod
+    def _parallel_admittance(omega, values):
+        y = 0j
+        if "resistance" in values:
+            y += 1 / values["resistance"]
+        if "inductance" in values:
+            y += 1 / (1j * omega * values["inductance"])
+        return y
+
+    @pytest.mark.parametrize("series_r", [0.0, 1e-3, 0.5, 50.0])
+    def test_admittance_matches_series_at_the_frequency(self, series_r):
+        omega = 2 * math.pi * self.FREQ
+        values = parallel_sheet_impedance(
+            inductance=LS, resistance=series_r, frequency=self.FREQ
+        )
+        expected = 1 / complex(series_r, omega * LS)
+        assert cmath.isclose(
+            self._parallel_admittance(omega, values), expected, rel_tol=1e-12
+        )
+
+    def test_lossless_series_is_the_same_inductance(self):
+        values = parallel_sheet_impedance(inductance=LS, frequency=self.FREQ)
+        assert values == pytest.approx({"inductance": LS})
+
+    def test_loss_adds_a_resistance(self):
+        values = parallel_sheet_impedance(
+            inductance=LS, resistance=RS, frequency=self.FREQ
+        )
+        assert set(values) == {"inductance", "resistance"}
+        assert values["inductance"] > LS
+
+    def test_feeds_add_sheet_impedance(self):
+        sim = DrivenSim()
+        values = parallel_sheet_impedance(
+            inductance=LS, resistance=RS, frequency=self.FREQ
+        )
+        sim.add_sheet_impedance("sc", **values)
+        assert sim._sheet_impedances["sc"].inductance == values["inductance"]
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"inductance": 0.0, "frequency": 6e9},
+            {"inductance": LS, "frequency": 0.0},
+            {"inductance": LS, "frequency": 6e9, "resistance": -1.0},
+        ],
+    )
+    def test_rejects_invalid_input(self, kwargs):
+        with pytest.raises(ValueError):
+            parallel_sheet_impedance(**kwargs)
 
 
 class TestSimApi:

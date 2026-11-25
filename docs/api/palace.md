@@ -350,6 +350,24 @@ a surface impedance. They are written as a Palace `Impedance` boundary instead o
 inductance in H/sq (`Ls`), and `resistance` is the sheet resistance in ohm/sq
 (`Rs`). Calling it again for the same layer replaces the values.
 
+The two values are the parallel channels of Palace's `Impedance` boundary, with sheet
+admittance `Y = 1/Rs + 1/(j w Ls)`. They are not the series surface impedance
+`R_s + j w L_s`. For a two-fluid film, `resistance` is `1/(sigma_1 d)` and
+`inductance` is `1/(w sigma_2 d)`, the kinetic inductance. For a superconductor well
+below its critical temperature the inductance alone is the usual case.
+
+A series `Z_s = R_s + j w L_s` given at one frequency converts through `Y = 1/Z_s`:
+`resistance = 1/Re(Y)` and `inductance = -1/(w Im(Y))`.
+`parallel_sheet_impedance` does this, and the two admittances agree at that frequency
+only.
+
+```python
+from gsim.palace.models import parallel_sheet_impedance
+
+values = parallel_sheet_impedance(inductance=20e-12, resistance=1e-3, frequency=6e9)
+sim.add_sheet_impedance("nb", **values)
+```
+
 ```python
 from gsim.palace import DrivenSim
 

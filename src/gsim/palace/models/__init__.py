@@ -35,6 +35,7 @@ from gsim.palace.models.ports import (
     TerminalConfig,
     TwoTerminalPortConfig,
     WavePortConfig,
+    parallel_sheet_impedance,
 )
 from gsim.palace.models.problems import (
     BoundaryModeConfig,
@@ -92,4 +93,5 @@ __all__ = [
     "TwoTerminalPortConfig",
     "ValidationResult",
     "WavePortConfig",
+    "parallel_sheet_impedance",
 ]

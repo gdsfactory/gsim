@@ -945,6 +945,16 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         not scaled by the geometry. Calling it again for the same layer replaces
         the earlier values.
 
+        The two values are the parallel channels of Palace's ``Impedance``
+        boundary, with sheet admittance ``Y = 1/Rs + 1/(j w Ls)``. They are not
+        the series surface impedance ``R_s + j w L_s``. For a two-fluid film,
+        ``resistance`` is ``1/(sigma_1 d)`` and ``inductance`` is
+        ``1/(w sigma_2 d)``. For a superconductor well below its critical
+        temperature the inductance alone is the usual case. To convert a series
+        ``Z_s`` given at one frequency, use ``Y = 1/Z_s``, so
+        ``resistance = 1/Re(Y)`` and ``inductance = -1/(w Im(Y))``, or call
+        :func:`gsim.palace.models.parallel_sheet_impedance`.
+
         Palace 0.19 and later keep the sheet uncracked, so ``inductance`` is
         the film value. Earlier versions split an interior sheet into two
         independent faces, which models a film only when both faces carry the
@@ -964,8 +974,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
 
         Args:
             layer: Name of the conductor layer.
-            inductance: Sheet inductance [H/sq].
-            resistance: Sheet resistance [ohm/sq].
+            inductance: Parallel sheet inductance [H/sq], written as ``Ls``.
+            resistance: Parallel sheet resistance [ohm/sq], written as ``Rs``.
 
         Raises:
             ValueError: If neither value is given, a value is not positive, or the

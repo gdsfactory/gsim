@@ -330,14 +330,22 @@ class ImpedanceBoundaryConfig(BaseModel):
 class SheetImpedanceConfig(BaseModel):
     """Surface impedance of the planar (zero-thickness) sheets of a conductor layer.
 
-    Values are per square and written to Palace unscaled: ``inductance`` is the
-    sheet inductance in H/sq (``Ls``), ``resistance`` the sheet resistance in
-    ohm/sq (``Rs``). At least one of them is required.
+    Values are per square and written to Palace unscaled. They are the parallel
+    channels of Palace's ``Impedance`` boundary, whose sheet admittance is
+    ``Y = 1/Rs + 1/(j w Ls)``. They are not the series surface impedance
+    ``R_s + j w L_s``. For a two-fluid film, ``resistance`` is ``1/(sigma_1 d)``
+    for the normal fluid and ``inductance`` is ``1/(w sigma_2 d)`` for the
+    superfluid, which is the kinetic inductance of the film. For a
+    superconductor well below its critical temperature the inductance alone is
+    the usual case. At least one of them is required.
+
+    Use :func:`parallel_sheet_impedance` to convert a series ``R_s + j w L_s``
+    given at one frequency.
 
     Attributes:
         layer: Name of the conductor layer.
-        inductance: Sheet inductance [H/sq].
-        resistance: Sheet resistance [ohm/sq].
+        inductance: Parallel sheet inductance [H/sq], written as ``Ls``.
+        resistance: Parallel sheet resistance [ohm/sq], written as ``Rs``.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -356,6 +364,48 @@ class SheetImpedanceConfig(BaseModel):
         if self.inductance is None and self.resistance is None:
             raise ValueError("Give inductance (H/sq), resistance (ohm/sq), or both")
         return self
+
+
+def parallel_sheet_impedance(
+    *, inductance: float, frequency: float, resistance: float = 0.0
+) -> dict[str, float]:
+    """Parallel sheet values equivalent to a series ``R_s + j w L_s`` at one frequency.
+
+    Palace's ``Impedance`` boundary combines the resistance and inductance in
+    parallel, so a series surface impedance ``Z_s = R_s + j w L_s`` has to be
+    converted. With ``Y = 1/Z_s``, the parallel resistance is ``1/Re(Y)`` and the
+    parallel inductance is ``-1/(w Im(Y))``. The two admittances agree at
+    ``frequency`` only. A channel that is zero or infinite is left out.
+
+    Args:
+        inductance: Series sheet inductance ``L_s`` [H/sq].
+        frequency: Frequency [Hz] at which the series impedance is given.
+        resistance: Series sheet resistance ``R_s`` [ohm/sq].
+
+    Returns:
+        Keyword arguments for ``add_sheet_impedance``: ``inductance`` and, when
+        ``resistance`` is not zero, ``resistance``.
+
+    Raises:
+        ValueError: If ``frequency`` or ``inductance`` is not positive, or
+            ``resistance`` is negative.
+
+    Example:
+        >>> values = parallel_sheet_impedance(
+        ...     inductance=20e-12, resistance=1e-3, frequency=6e9
+        ... )
+        >>> sim.add_sheet_impedance("nb", **values)
+    """
+    if frequency <= 0 or inductance <= 0 or resistance < 0:
+        raise ValueError(
+            "frequency and inductance must be positive and resistance not negative"
+        )
+    omega = 2 * math.pi * frequency
+    y = 1 / complex(resistance, omega * inductance)
+    values = {"inductance": -1 / (omega * y.imag)}
+    if resistance:
+        values["resistance"] = 1 / y.real
+    return values
 
 
 class WavePortConfig(BaseModel):
