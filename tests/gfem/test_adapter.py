@@ -361,6 +361,42 @@ def test_region_media_takes_a_tensor_with_equal_components_as_isotropic(layered_
     assert media[OXIDE_REGION] == Medium(eps_r=3.9)
 
 
+@pytest.mark.parametrize("permeability", [2.0, 0.5, [1.0, 1.0, 3.0], [2.0, 2.0, 2.0]])
+def test_region_media_refuses_a_magnetic_material(layered_mesh, permeability):
+    override = {
+        "sio2_rf": MaterialProperties(permittivity=4.1, permeability=permeability)
+    }
+    with pytest.raises(ValueError, match="permeability") as excinfo:
+        region_media(
+            layered_mesh, _layered_stack(), frequency_hz=1e9, overrides=override
+        )
+    message = str(excinfo.value)
+    assert f"'{OXIDE_REGION}'" in message
+    assert "'sio2_rf'" in message
+
+
+def test_region_media_refuses_a_magnetic_material_in_the_stack(layered_mesh):
+    stack = _layered_stack()
+    entry = dict(stack.materials["aluminum"])
+    entry["permeability"] = 100.0
+    stack.materials["aluminum"] = entry
+    with pytest.raises(ValueError, match="permeability") as excinfo:
+        region_media(layered_mesh, stack, frequency_hz=1e9)
+    assert "'m3_signal'" in str(excinfo.value)
+    assert "'aluminum'" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("permeability", [1.0, [1.0, 1.0, 1.0]])
+def test_region_media_accepts_a_unit_permeability(layered_mesh, permeability):
+    override = {
+        "sio2_rf": MaterialProperties(permittivity=3.9, permeability=permeability)
+    }
+    media = region_media(
+        layered_mesh, _layered_stack(), frequency_hz=1e9, overrides=override
+    )
+    assert media[OXIDE_REGION] == Medium(eps_r=3.9)
+
+
 @pytest.mark.parametrize("frequency_hz", [0.0, -1e9, float("nan"), float("inf")])
 def test_region_media_refuses_a_bad_frequency(layered_mesh, frequency_hz):
     with pytest.raises(ValueError, match="frequency_hz"):
@@ -543,6 +579,41 @@ def test_edge_conditions_pec_conductor_boundary_uses_no_conductivity(group_mesh)
     override = {
         "aluminum": MaterialProperties(
             permittivity=1.0, conductivity=[1.0e7, 1.0e7, 3.0e7]
+        )
+    }
+    conditions = edge_conditions(
+        group_mesh,
+        _stack_with_signal_layer(),
+        frequency_hz=1e9,
+        conductor_boundary="pec",
+        overrides=override,
+    )
+    assert conditions[0] == EdgeCondition("pec", "m3_signal_conductivity")
+
+
+@pytest.mark.parametrize("permeability", [50.0, [1.0, 1.0, 5.0]])
+def test_edge_conditions_refuse_a_magnetic_conductor(group_mesh, permeability):
+    override = {
+        "aluminum": MaterialProperties(
+            permittivity=1.0, conductivity=1.0e7, permeability=permeability
+        )
+    }
+    with pytest.raises(ValueError, match="permeability") as excinfo:
+        edge_conditions(
+            group_mesh,
+            _stack_with_signal_layer(),
+            frequency_hz=1e9,
+            overrides=override,
+        )
+    message = str(excinfo.value)
+    assert "'m3_signal_conductivity'" in message
+    assert "'aluminum'" in message
+
+
+def test_edge_conditions_pec_conductor_boundary_uses_no_permeability(group_mesh):
+    override = {
+        "aluminum": MaterialProperties(
+            permittivity=1.0, conductivity=1.0e7, permeability=50.0
         )
     }
     conditions = edge_conditions(

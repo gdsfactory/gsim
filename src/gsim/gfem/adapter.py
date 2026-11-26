@@ -216,6 +216,35 @@ def _isotropic(
     return value[0]
 
 
+def _require_unit_permeability(
+    value: float | list[float] | None,
+    *,
+    region: str,
+    material: str,
+) -> None:
+    """Refuse a relative permeability other than 1, scalar or tensor.
+
+    gfem's media carry a permittivity and a conductivity but no
+    permeability, so a magnetic material would be solved as non-magnetic
+    without saying so. A missing permeability and 1 (or a tensor of ones)
+    are non-magnetic and pass; the comparison is exact.
+
+    Raises:
+        ValueError: When any component differs from 1, naming the region (or
+            mesh group) and the material.
+    """
+    if value is None:
+        return
+    components = value if isinstance(value, list) else [value]
+    if any(component != 1.0 for component in components):
+        raise ValueError(
+            f"Region '{region}' (material '{material}') has a relative "
+            f"permeability {value!r}; gfem has no permeability, so it would "
+            "be solved as non-magnetic. Use a material with a relative "
+            "permeability of 1 for this region."
+        )
+
+
 def region_media(
     mesh: meshio.Mesh | str | Path,
     stack: LayerStack,
@@ -243,10 +272,12 @@ def region_media(
         ValueError: When the mesh has no 2D group, a region's material does
             not resolve, a region's material is anisotropic (permittivity,
             loss tangent or conductivity with differing components; the
-            message names the region and the material), or a region's
-            permittivity is not above zero
-            (gfem solves passive media with ``Re(eps) > 0`` only, so an
-            optical metal cannot be handed to it).
+            message names the region and the material), a region's
+            material has a relative permeability other than 1 (scalar or
+            tensor; the message names the region and the material), or a
+            region's permittivity is not above zero (gfem solves passive
+            media with ``Re(eps) > 0`` only, so an optical metal cannot be
+            handed to it).
     """
     frequency = _check_frequency(frequency_hz)
     wavelength_um = C0 / frequency * 1e6
@@ -287,6 +318,9 @@ def region_media(
             region=region,
             material=material,
         )
+        _require_unit_permeability(
+            resolved.permeability, region=region, material=material
+        )
         eps_r = 1.0 if eps_r is None else float(eps_r)
         if eps_r <= 0.0:
             raise ValueError(
@@ -316,13 +350,18 @@ def _layer_conductivity(
     by material name wins over the stack's own entry.
 
     Raises:
-        ValueError: When the conductivity is anisotropic; the message names
-            the mesh group (``group``) and the material.
+        ValueError: When the conductivity is anisotropic or the relative
+            permeability is not 1; the message names the mesh group
+            (``group``) and the material.
     """
     layer = stack.layers[layer_name]
     stack_materials = dict(stack.materials or {})
     entry = (overrides or {}).get(layer.material, stack_materials.get(layer.material))
     resolved = resolve_stack_material(layer.material, entry, C0 / frequency_hz * 1e6)
+    if resolved is not None:
+        _require_unit_permeability(
+            resolved.permeability, region=group, material=layer.material
+        )
     sigma = (
         None
         if resolved is None
@@ -386,9 +425,10 @@ def edge_conditions(
     Raises:
         ValueError: When a ``<layer>_conductivity`` group names no layer of
             the stack, ``conductor_thickness`` is not a known choice, or a
-            conductor's conductivity is anisotropic (the message names the
-            group and the material; not checked when
-            ``conductor_boundary="pec"``, which uses no conductivity).
+            conductor's conductivity is anisotropic or its relative
+            permeability is not 1 (the message names the group and the
+            material; neither is checked when ``conductor_boundary="pec"``,
+            which uses no material).
     """
     if conductor_thickness not in ("thick", "stack"):
         raise ValueError(

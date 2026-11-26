@@ -205,8 +205,7 @@ def _cpw_layer_stack():
 def _build_cpw_sim(out_dir: Path):
     """Mesh the CPW cross-section with ``BoundaryModeSim``, metal as volume regions.
 
-    Follows the recipe behind the frozen numbers (simulation-benchmarks
-    ``build_cpw`` / ``cross_section_sim``, variant A): one gsim layer per
+    Follows the recipe behind the frozen numbers (variant A): one gsim layer per
     conductor so the signal and the ground have their own mesh region, a thin
     oxide slice that gives the domain its width, an explicit stack, and a
     refinement box over the signal, the gaps and the inner ground.
