@@ -148,6 +148,52 @@ class TestOverrides:
         assert eps["core"].real == pytest.approx(9.0)
 
 
+class TestAnisotropicMaterials:
+    """One permittivity per region: unequal tensor components are rejected."""
+
+    @pytest.mark.parametrize(
+        "props",
+        [
+            {"permittivity": [4.0, 4.0, 4.6]},
+            {"permittivity": 4.0, "loss_tangent": [0.0, 0.0, 1e-3]},
+            {"permittivity": 4.0, "conductivity": [0.0, 0.0, 1.0]},
+        ],
+    )
+    def test_unequal_components_raise(self, tmp_path, props):
+        path = _two_region_mesh(tmp_path)
+        stack = _stack()
+        stack.materials["clad"] = props
+        with pytest.raises(ValueError, match=r"Region 'clad'.*anisotropic"):
+            epsilon_by_region(path, stack, wavelength_um=WL_UM)
+
+    def test_unequal_override_raises(self, tmp_path):
+        path = _two_region_mesh(tmp_path)
+        with pytest.raises(ValueError, match=r"Region 'core'.*'si'.*anisotropic"):
+            epsilon_by_region(
+                path,
+                _stack(),
+                wavelength_um=WL_UM,
+                overrides={"si": MaterialProperties(permittivity=[9.0, 9.0, 10.0])},
+            )
+
+    def test_builtin_lithium_niobate_raises(self, tmp_path):
+        path = _two_region_mesh(tmp_path)
+        stack = _stack()
+        stack.layers["core"].material = "LiNbO3-Zelmon"
+        with pytest.raises(ValueError, match="anisotropic permittivity"):
+            epsilon_by_region(path, stack, wavelength_um=WL_UM)
+
+    def test_equal_components_and_axes_are_accepted(self, tmp_path):
+        path = _two_region_mesh(tmp_path)
+        stack = _stack()
+        stack.materials["clad"] = {
+            "permittivity": [2.085, 2.085, 2.085],
+            "material_axes": [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        }
+        eps = epsilon_by_region(path, stack, wavelength_um=WL_UM)
+        assert eps["clad"] == pytest.approx(2.085)
+
+
 class TestConductorIndexBound:
     """The |n_eff| above which a Mode lives inside a conductor (#498)."""
 

@@ -83,6 +83,27 @@ __all__ = [
 ]
 
 
+def _require_isotropic(
+    resolved: ResolvedMaterial, *, region: str, material: str
+) -> None:
+    """Reject a material whose tensor components differ.
+
+    The femwell adapter assigns one complex permittivity per region. A
+    tensor with unequal components has no single value, and its axes are
+    in the layout frame, not the cross-section frame, so picking one
+    component would give a wrong result without warning.
+    """
+    for name in ("permittivity", "loss_tangent", "conductivity"):
+        value = getattr(resolved, name)
+        if isinstance(value, list) and len(set(value)) > 1:
+            raise ValueError(
+                f"Region '{region}' maps to material '{material}' with "
+                f"anisotropic {name} {value}. The femwell adapter supports "
+                "isotropic materials only: give a scalar value through "
+                "`overrides` or the stack materials."
+            )
+
+
 def _complex_permittivity(
     resolved: ResolvedMaterial, *, frequency_hz: float
 ) -> complex:
@@ -161,6 +182,7 @@ def epsilon_by_region(
                 "not resolvable from the stack materials or the built-in "
                 "database."
             )
+        _require_isotropic(resolved, region=region, material=material)
         result[region] = _complex_permittivity(resolved, frequency_hz=frequency)
     return result
 
