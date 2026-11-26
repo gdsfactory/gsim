@@ -20,7 +20,7 @@
 **Broadband photonic simulation in just over a minute.**
 GDSFactory FDTD solved this 37-million-cell directional coupler on cloud CPUs
 in 75 seconds. See how its optical response, throughput and cost compare with
-commercial CPU, commercial GPU and Meep solvers.
+traditional FDTD CPU, traditional FDTD GPU and Meep solvers.
 
 ## The problem
 
@@ -43,9 +43,9 @@ the **cross port o3** measures |S31|² and the **through port o4** measures |S41
 
 ## Cross and through transmission
 
-**Close agreement with the commercial CPU result.** At 1550 nm, GDSFactory
+**Close agreement with the traditional FDTD CPU result.** At 1550 nm, GDSFactory
 predicts **39.1% cross transmission** and **60.9% through transmission**, each
-within 0.7 percentage points of the commercial CPU result. The plots show the
+within 0.7 percentage points of the traditional FDTD CPU result. The plots show the
 full 1500–1600 nm response for all four solvers at 40 nm nominal cell size.
 
 <div class="fdtd-response-stack">
@@ -86,8 +86,8 @@ below shows the cost per GCUPS-hour as simulation size increases.
 | Solver | Recorded runtime | Customer cost / run |
 | --- | ---: | ---: |
 | GDSFactory FDTD CPU | 75 s | $1.95 |
-| Commercial GPU | 31.2 s | $4.90 |
-| Commercial CPU | 221.4 s | $4.36 |
+| Traditional FDTD GPU | 31.2 s | $4.90 |
+| Traditional FDTD CPU | 221.4 s | $4.36 |
 | Meep CPU · self-managed | 1,239.3 s | $0.67 |
 
 Meep uses self-managed compute without a solver license fee.
@@ -96,10 +96,10 @@ Meep uses self-managed compute without a solver license fee.
 
 Lower dollars per GCUPS-hour means more grid updates for the same budget.
 Above 100M cells, the GDSFactory curve illustrates a hypothetical cost scenario
-following the commercial GPU trend. Values through 100M cells use the benchmark's
+following the traditional FDTD GPU trend. Values through 100M cells use the benchmark's
 customer rates.
 
-Alternative commercial offerings combine annual subscriptions with pay-as-you-go
+Traditional FDTD offerings combine annual subscriptions with pay-as-you-go
 usage rates, similarly to GDSFactory+.
 
 ## Try it on your next design
