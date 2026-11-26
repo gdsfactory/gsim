@@ -184,6 +184,38 @@ def _as_frequencies(value: float | Sequence[float]) -> tuple[float, ...]:
     return tuple(_check_frequency(float(v)) for v in values)
 
 
+def _isotropic(
+    value: float | list[float] | None,
+    *,
+    quantity: str,
+    region: str,
+    material: str,
+) -> float | None:
+    """The scalar of a material property, refusing a genuine tensor.
+
+    gfem 0.2 refuses anisotropic materials on a 2D cross-section, so a
+    property whose components differ cannot be solved, and taking component
+    0 would solve the wrong problem without saying so. A list whose
+    components are all equal is isotropic and reads as that value.
+
+    Raises:
+        ValueError: When the components differ, naming the region and the
+            material.
+    """
+    if value is None or not isinstance(value, list):
+        return value
+    if not value:
+        return None
+    if any(component != value[0] for component in value[1:]):
+        raise ValueError(
+            f"Region '{region}' (material '{material}') has an anisotropic "
+            f"{quantity} {list(value)}; gfem 0.2 does not solve anisotropic "
+            "materials on a 2D cross-section. Use an isotropic material for "
+            "this region."
+        )
+    return value[0]
+
+
 def region_media(
     mesh: meshio.Mesh | str | Path,
     stack: LayerStack,
@@ -209,7 +241,10 @@ def region_media(
 
     Raises:
         ValueError: When the mesh has no 2D group, a region's material does
-            not resolve, or a region's permittivity is not above zero
+            not resolve, a region's material is anisotropic (permittivity,
+            loss tangent or conductivity with differing components; the
+            message names the region and the material), or a region's
+            permittivity is not above zero
             (gfem solves passive media with ``Re(eps) > 0`` only, so an
             optical metal cannot be handed to it).
     """
@@ -234,7 +269,24 @@ def region_media(
                 "not resolvable from the stack materials or the built-in "
                 "database."
             )
-        eps_r = resolved.permittivity_scalar
+        eps_r = _isotropic(
+            resolved.permittivity,
+            quantity="permittivity",
+            region=region,
+            material=material,
+        )
+        loss = _isotropic(
+            resolved.loss_tangent,
+            quantity="loss tangent",
+            region=region,
+            material=material,
+        )
+        sigma = _isotropic(
+            resolved.conductivity,
+            quantity="conductivity",
+            region=region,
+            material=material,
+        )
         eps_r = 1.0 if eps_r is None else float(eps_r)
         if eps_r <= 0.0:
             raise ValueError(
@@ -242,8 +294,6 @@ def region_media(
                 f"permittivity {eps_r:g}; gfem solves media with Re(eps) > 0 "
                 "only, so a metal with a negative permittivity is out of scope."
             )
-        loss = resolved.loss_tangent_scalar
-        sigma = resolved.conductivity_scalar
         media[region] = Medium(
             eps_r=eps_r,
             tan_delta=0.0 if loss is None else float(loss),
@@ -256,6 +306,7 @@ def _layer_conductivity(
     stack: LayerStack,
     layer_name: str,
     *,
+    group: str,
     frequency_hz: float,
     overrides: dict[str, MaterialProperties] | None = None,
 ) -> float:
@@ -263,12 +314,25 @@ def _layer_conductivity(
 
     The material entry is looked up as in :func:`region_media`: an override
     by material name wins over the stack's own entry.
+
+    Raises:
+        ValueError: When the conductivity is anisotropic; the message names
+            the mesh group (``group``) and the material.
     """
     layer = stack.layers[layer_name]
     stack_materials = dict(stack.materials or {})
     entry = (overrides or {}).get(layer.material, stack_materials.get(layer.material))
     resolved = resolve_stack_material(layer.material, entry, C0 / frequency_hz * 1e6)
-    sigma = None if resolved is None else resolved.conductivity_scalar
+    sigma = (
+        None
+        if resolved is None
+        else _isotropic(
+            resolved.conductivity,
+            quantity="conductivity",
+            region=group,
+            material=layer.material,
+        )
+    )
     if sigma is None or sigma <= 0.0:
         return DEFAULT_CONDUCTIVITY_S_PER_M
     return float(sigma)
@@ -321,7 +385,10 @@ def edge_conditions(
 
     Raises:
         ValueError: When a ``<layer>_conductivity`` group names no layer of
-            the stack, or ``conductor_thickness`` is not a known choice.
+            the stack, ``conductor_thickness`` is not a known choice, or a
+            conductor's conductivity is anisotropic (the message names the
+            group and the material; not checked when
+            ``conductor_boundary="pec"``, which uses no conductivity).
     """
     if conductor_thickness not in ("thick", "stack"):
         raise ValueError(
@@ -357,7 +424,11 @@ def edge_conditions(
                     "conductor",
                     name,
                     conductivity=_layer_conductivity(
-                        stack, layer_name, frequency_hz=frequency, overrides=overrides
+                        stack,
+                        layer_name,
+                        group=name,
+                        frequency_hz=frequency,
+                        overrides=overrides,
                     ),
                     thickness_m=thickness,
                 )

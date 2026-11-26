@@ -319,6 +319,48 @@ def test_region_media_refuses_a_non_positive_permittivity(layered_mesh):
         region_media(layered_mesh, stack, frequency_hz=1e9, overrides=override)
 
 
+@pytest.mark.parametrize(
+    ("material", "field", "quantity"),
+    [
+        ("sio2_rf", "permittivity", "permittivity"),
+        ("si_rf", "loss_tangent", "loss tangent"),
+        ("aluminum", "conductivity", "conductivity"),
+    ],
+)
+def test_region_media_refuses_an_anisotropic_material(
+    layered_mesh, material, field, quantity
+):
+    stack = _layered_stack()
+    entry = dict(stack.materials[material])
+    entry[field] = [1.0, 2.0, 3.0]
+    stack.materials[material] = entry
+    region = {"sio2_rf": OXIDE_REGION, "si_rf": SILICON_REGION}.get(
+        material, "m3_signal"
+    )
+    with pytest.raises(ValueError, match="anisotropic") as excinfo:
+        region_media(layered_mesh, stack, frequency_hz=1e9)
+    message = str(excinfo.value)
+    assert f"'{region}'" in message
+    assert f"'{material}'" in message
+    assert quantity in message
+
+
+def test_region_media_refuses_an_anisotropic_override(layered_mesh):
+    override = {"sio2_rf": MaterialProperties(permittivity=[4.1, 4.1, 5.0])}
+    with pytest.raises(ValueError, match=rf"'{OXIDE_REGION}'.*anisotropic"):
+        region_media(
+            layered_mesh, _layered_stack(), frequency_hz=1e9, overrides=override
+        )
+
+
+def test_region_media_takes_a_tensor_with_equal_components_as_isotropic(layered_mesh):
+    override = {"sio2_rf": MaterialProperties(permittivity=[3.9, 3.9, 3.9])}
+    media = region_media(
+        layered_mesh, _layered_stack(), frequency_hz=1e9, overrides=override
+    )
+    assert media[OXIDE_REGION] == Medium(eps_r=3.9)
+
+
 @pytest.mark.parametrize("frequency_hz", [0.0, -1e9, float("nan"), float("inf")])
 def test_region_media_refuses_a_bad_frequency(layered_mesh, frequency_hz):
     with pytest.raises(ValueError, match="frequency_hz"):
@@ -465,6 +507,52 @@ def test_edge_conditions_honour_overrides(group_mesh):
         overrides=override,
     )
     assert conductor.conductivity == 1.0e7
+
+
+def test_edge_conditions_refuse_an_anisotropic_conductor(group_mesh):
+    override = {
+        "aluminum": MaterialProperties(
+            permittivity=1.0, conductivity=[1.0e7, 1.0e7, 3.0e7]
+        )
+    }
+    with pytest.raises(ValueError, match="anisotropic") as excinfo:
+        edge_conditions(
+            group_mesh,
+            _stack_with_signal_layer(),
+            frequency_hz=1e9,
+            overrides=override,
+        )
+    message = str(excinfo.value)
+    assert "'m3_signal_conductivity'" in message
+    assert "'aluminum'" in message
+
+
+def test_edge_conditions_refuse_an_anisotropic_conductor_in_the_stack(group_mesh):
+    stack = _stack_with_signal_layer()
+    stack.materials["aluminum"] = {
+        "permittivity": 1.0,
+        "conductivity": [1.0, 2.0, 3.0],
+    }
+    with pytest.raises(ValueError, match="anisotropic") as excinfo:
+        edge_conditions(group_mesh, stack, frequency_hz=1e9)
+    assert "'m3_signal_conductivity'" in str(excinfo.value)
+    assert "'aluminum'" in str(excinfo.value)
+
+
+def test_edge_conditions_pec_conductor_boundary_uses_no_conductivity(group_mesh):
+    override = {
+        "aluminum": MaterialProperties(
+            permittivity=1.0, conductivity=[1.0e7, 1.0e7, 3.0e7]
+        )
+    }
+    conditions = edge_conditions(
+        group_mesh,
+        _stack_with_signal_layer(),
+        frequency_hz=1e9,
+        conductor_boundary="pec",
+        overrides=override,
+    )
+    assert conditions[0] == EdgeCondition("pec", "m3_signal_conductivity")
 
 
 def test_edge_conditions_name_a_missing_layer(group_mesh):
