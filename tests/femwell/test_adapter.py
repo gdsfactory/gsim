@@ -179,7 +179,7 @@ class TestAnisotropicMaterials:
     def test_builtin_lithium_niobate_raises(self, tmp_path):
         path = _two_region_mesh(tmp_path)
         stack = _stack()
-        stack.layers["core"].material = "LiNbO3-Zelmon"
+        stack.layers["core"].material = "linbo3"
         with pytest.raises(ValueError, match="anisotropic permittivity"):
             epsilon_by_region(path, stack, wavelength_um=WL_UM)
 
