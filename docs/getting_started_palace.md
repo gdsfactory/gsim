@@ -163,6 +163,89 @@ If a job is rejected as too large, or fails with exit code 137 (SIGKILL, often o
 shrink the model; see
 [Palace size limits and out-of-memory failures](api/cloud.md#palace-size-limits-and-out-of-memory-failures).
 
+### Estimate memory and time before you submit
+
+After `mesh()` and `write_config()`, `estimate_resources()` gives the peak memory and the solve time that a run of the
+current mesh and settings is expected to need. It reads the mesh statistics and `config.json`, writes nothing and
+submits nothing.
+
+```python
+sim.write_config()
+estimate = sim.estimate_resources()
+print(estimate)
+```
+
+For the `coarse` mesh of this page (7,897 tetrahedra, 50,992 field DOFs) it prints:
+
+```text
+Palace resource estimate (driven_adaptive, MUMPS)
+  DOFs:    50,992 (counted from the mesh edges, faces and tetrahedra)
+  Memory:  0.7 GiB per node, range 0.5 to 1.0 GiB (typical error 16 %)
+  Time:    6 s, range 3 s to 46 s (solve only; typical factor x1.4)
+  Machine: 194.55 GiB per node, the largest successful run in the fitted data (95 MPI processes);
+           not a limit of the cloud service
+  Note:    50,992 DOFs is below the smallest run behind the fit (201,928): a power law has no fixed
+           overhead, so memory and time may be underestimated for such a small mesh
+  Note:    adaptive sweep: the sample count is not known before the run; time is for 8 samples (the
+           median of the data) and its upper end for the cap of 20, with 2 excitation(s); the data
+           has 4 to 12 samples
+```
+
+![Peak memory per node against field DOFs of Palace cloud runs, with the fitted power law](assets/palace/resource_estimate_memory_fit.png)
+
+The memory fit against the measured cloud runs it was made from: one panel per solver and linear solver.
+The line is the power law and the band its leave-one-out error.
+
+This small mesh is below the smallest run behind the fit, which is why it carries the first note. A model within the
+size range of the fitted runs gets no such note.
+
+`run()` and `upload()` log the same text at `INFO` level before they upload, and each warning at `WARNING` level. The
+estimate never stops a submission, and a failure while making it is only logged at `DEBUG` level. The object has the
+numbers too: `estimate.memory_gib`, `estimate.memory_range_gib`, `estimate.time_s`, `estimate.time_range_s`,
+`estimate.warnings` and `estimate.available`.
+
+**How it is made.** The unknowns are counted in your mesh (edges, faces and tetrahedra at the field order of
+`sim.solver.order`). Memory and time then follow a power law in the number of unknowns, fitted to the logs of finished
+Palace runs, one fit per solver and linear solver. Time also grows with the work: excitations times frequency points
+for a uniform sweep, samples times excitations for an adaptive one, modes for an eigenmode run. The coefficients, their
+errors and a version are in `gsim/palace/data/resource_fits.json`. The date of the logs is not recorded in that file.
+
+**How accurate.** The error is the leave-one-out error of the fit: each run is predicted by a fit that did not see it.
+The range printed next to each number is the estimate divided and multiplied by that error twice.
+
+| Solver, linear solver | Runs | Memory, typical error | Time, typical factor |
+| --- | ---: | ---: | ---: |
+| driven adaptive, MUMPS | 31 | 16 % | x1.4 |
+| driven adaptive, SuperLU | 22 | 5 % | x2.2 |
+| driven uniform, MUMPS | 24 | 13 % | x1.4 |
+| driven uniform, SuperLU | 17 | 6 % | x1.1 |
+| eigenmode, MUMPS | 9 | 4 % | x1.7 |
+
+Memory is the figure to rely on: the worst run of any of these groups was off by 34 %. Time is a range: single runs are
+off by more (up to x3.4 in the adaptive SuperLU group), and a wave-port eigenproblem can multiply it by more than ten
+without any change in the mesh size, so time is never used to decide anything. The number of samples of an adaptive
+sweep is not known before the run, so its time is for the median count in the data, and the upper end of its range is
+for the cap you set with `adaptive_max_samples`.
+
+**When there is a warning.**
+
+- The estimate, or the upper end of its range, is above the machine memory. By default that is 194.55 GiB per node, the
+  largest successful run in the data, on 95 MPI processes. It is not a limit of the cloud service, which picks its
+  resources itself (see [Cloud sizing metadata](api/cloud.md#sizing-metadata)). Pass `machine_memory_gib=` to compare
+  with another size.
+- The number of unknowns is more than 1.5 times the largest run behind the fit. The uniform-sweep fits stop at about
+  1.1 million DOFs (MUMPS) and 0.57 million (SuperLU), the adaptive ones at 15.1 and 1.4 million, so above those the
+  estimate is an extrapolation and its range is optimistic.
+- Adaptive mesh refinement or uniform refinement levels are on. The estimate is for the input mesh and does not
+  include them.
+
+**What is not covered.** Without a fit there is no estimate (`estimate.available` is `False` and `estimate.reason` says
+why): electrostatic, magnetostatic and boundary-mode runs, driven runs with an iterative linear solver, STRUMPACK, and
+every other solver (Meep, FDTD). `Default` as the linear solver is read as SuperLU, as it resolved in the logged runs.
+The data holds no failed run, so it cannot show where a machine runs out of memory, and it mixes several Palace builds
+and machine sizes. The number of unknowns is the count before Palace's own preprocessing; it has not been compared with
+the count Palace reports for the same mesh.
+
 ## 6. Read the results
 
 `SParams` indexes by port-name pair as `results["to", "from"]`, and `s11`, `s21`, `s12`, `s22` are shorthand on a

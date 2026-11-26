@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "fits_version": 1,
+  "data_date": null,
+  "data_date_note": "The date the Palace logs were collected is not recorded with the fit; fill it in when the fits are refreshed.",
+  "source": {
+    "description": "Least-squares power-law fits in log space to Palace logs of finished runs, one fit per (solver, linear solver) group.",
+    "palace_logs_unique": 712,
+    "runs_tabulated": 232,
+    "runs_in_calibrated_groups": 218,
+    "provenance": "Only logs from gsim's own test, notebook and benchmark paths were tabulated. That selection is path-based; the logs do not record the PDK.",
+    "palace_builds": "5 builds mixed, several unrecorded machine types, 1 to 95 MPI processes, no failed runs, no adaptive mesh refinement runs, no multi-node runs."
+  },
+  "units": {
+    "memory": "GiB (1024-based), peak memory per node, as reported by Palace",
+    "time": "seconds, Palace's own total elapsed time of the solve; excludes meshing, upload and queue time"
+  },
+  "models": {
+    "memory": "memory_gib = a * dofs**p",
+    "time": "time_s = b * dofs**q * work**w",
+    "work": "driven_uniform: excitations x frequency points; driven_adaptive: samples x excitations; eigen: modes; boundary_mode: 1",
+    "range": "central value divided and multiplied by exp(band_sigmas * loo), loo being the leave-one-out rms of ln(predicted / measured)"
+  },
+  "band_sigmas": 2.0,
+  "extrapolation_factor": 1.5,
+  "time_loo_warning": 0.5,
+  "default_machine": {
+    "memory_gib": 194.55,
+    "mpi_procs": 95,
+    "description": "Largest peak memory per node of a successful run in the data (15,102,634 DOFs, driven adaptive, MUMPS). It shows that a machine of this size existed, not where a machine fails: no run in the data failed."
+  },
+  "groups": [
+    {
+      "solver": "boundary_mode",
+      "linear_solver": "MUMPS",
+      "runs": 91,
+      "dofs_min": 4029,
+      "dofs_max": 379520,
+      "memory": {
+        "a": 0.0326173,
+        "p": 0.347057,
+        "rms": 0.214011,
+        "loo": 0.219827,
+        "loo_max_rel": 2.12134
+      },
+      "time": {
+        "b": 0.634811,
+        "q": 0.197048,
+        "w": 1.0,
+        "w_fitted": false,
+        "rms": 0.612726,
+        "loo": 0.626078,
+        "loo_max_rel": 5.33533
+      }
+    },
+    {
+      "solver": "boundary_mode",
+      "linear_solver": "SuperLU",
+      "runs": 24,
+      "dofs_min": 11672,
+      "dofs_max": 78132,
+      "memory": {
+        "a": 0.0653413,
+        "p": 0.30517,
+        "rms": 0.0303786,
+        "loo": 0.0368586,
+        "loo_max_rel": 0.0933013
+      },
+      "time": {
+        "b": 6.56435e-5,
+        "q": 0.94186,
+        "w": 1.0,
+        "w_fitted": false,
+        "rms": 0.214615,
+        "loo": 0.25798,
+        "loo_max_rel": 1.49621
+      }
+    },
+    {
+      "solver": "driven_adaptive",
+      "linear_solver": "MUMPS",
+      "runs": 31,
+      "dofs_min": 201928,
+      "dofs_max": 15102634,
+      "memory": {
+        "a": 2.49658e-5,
+        "p": 0.946916,
+        "rms": 0.138601,
+        "loo": 0.151657,
+        "loo_max_rel": 0.34497
+      },
+      "time": {
+        "b": 3.02349e-6,
+        "q": 0.958777,
+        "w": 1.4936,
+        "w_fitted": true,
+        "rms": 0.288446,
+        "loo": 0.321147,
+        "loo_max_rel": 0.720266
+      },
+      "dofs_per_tet": {
+        "2": {
+          "median": 6.75,
+          "spread": 0.044
+        }
+      },
+      "samples_seen": {
+        "min": 4,
+        "median": 8,
+        "max": 12
+      }
+    },
+    {
+      "solver": "driven_adaptive",
+      "linear_solver": "SuperLU",
+      "runs": 22,
+      "dofs_min": 223532,
+      "dofs_max": 1383376,
+      "memory": {
+        "a": 0.00019422,
+        "p": 0.789825,
+        "rms": 0.0441454,
+        "loo": 0.0488082,
+        "loo_max_rel": 0.105973
+      },
+      "time": {
+        "b": 0.00046189,
+        "q": 0.693044,
+        "w": 1.38682,
+        "w_fitted": true,
+        "rms": 0.69198,
+        "loo": 0.776895,
+        "loo_max_rel": 2.39444
+      },
+      "dofs_per_tet": {
+        "2": {
+          "median": 7.44,
+          "spread": 0.025
+        }
+      },
+      "samples_seen": {
+        "min": 4,
+        "median": 4,
+        "max": 14
+      }
+    },
+    {
+      "solver": "driven_uniform",
+      "linear_solver": "MUMPS",
+      "runs": 24,
+      "dofs_min": 83568,
+      "dofs_max": 1111112,
+      "memory": {
+        "a": 0.00123303,
+        "p": 0.655772,
+        "rms": 0.104352,
+        "loo": 0.122159,
+        "loo_max_rel": 0.271146
+      },
+      "time": {
+        "b": 1.69712e-6,
+        "q": 1.12539,
+        "w": 1.0,
+        "w_fitted": false,
+        "rms": 0.264414,
+        "loo": 0.30428,
+        "loo_max_rel": 0.521761
+      },
+      "dofs_per_tet": {
+        "2": {
+          "median": 7.4,
+          "spread": 0.044
+        }
+      }
+    },
+    {
+      "solver": "driven_uniform",
+      "linear_solver": "SuperLU",
+      "runs": 17,
+      "dofs_min": 145772,
+      "dofs_max": 565210,
+      "memory": {
+        "a": 0.000303427,
+        "p": 0.754149,
+        "rms": 0.0525725,
+        "loo": 0.0600469,
+        "loo_max_rel": 0.139716
+      },
+      "time": {
+        "b": 3.51381e-5,
+        "q": 0.912236,
+        "w": 1.0,
+        "w_fitted": false,
+        "rms": 0.0978196,
+        "loo": 0.107563,
+        "loo_max_rel": 0.180537
+      },
+      "dofs_per_tet": {
+        "2": {
+          "median": 7.46,
+          "spread": 0.019
+        }
+      }
+    },
+    {
+      "solver": "eigen",
+      "linear_solver": "MUMPS",
+      "runs": 9,
+      "dofs_min": 306504,
+      "dofs_max": 12216112,
+      "memory": {
+        "a": 8.89854e-5,
+        "p": 0.85201,
+        "rms": 0.0309678,
+        "loo": 0.0389626,
+        "loo_max_rel": 0.0548002
+      },
+      "time": {
+        "b": 1.8663e-7,
+        "q": 1.39239,
+        "w": 1.0,
+        "w_fitted": false,
+        "rms": 0.462621,
+        "loo": 0.553557,
+        "loo_max_rel": 1.25684
+      },
+      "dofs_per_tet": {
+        "2": {
+          "median": 6.38,
+          "spread": 0.001
+        }
+      }
+    }
+  ],
+  "not_calibrated": [
+    {
+      "solver": "driven_adaptive",
+      "linear_solver": "iterative",
+      "runs": 5,
+      "reason": "DOFs span only x1.15"
+    },
+    {
+      "solver": "magnetostatic",
+      "linear_solver": "iterative",
+      "runs": 7,
+      "reason": "too few runs"
+    },
+    {
+      "solver": "electrostatic",
+      "linear_solver": "iterative",
+      "runs": 2,
+      "reason": "too few runs"
+    }
+  ]
+}

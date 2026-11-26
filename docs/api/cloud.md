@@ -63,6 +63,10 @@ Contact support for the current supported capacity if your model exceeds it.
 Inspect `sim.mesh()`'s **Estimated Field DOFs**, or
 `result.metadata["mesh"]["field_dofs"]["estimated_field_dofs"]`, before submission.
 The estimate uses the configured field order, rather than mesh file size alone.
+`sim.estimate_resources()` turns those counts into an expected peak memory and
+solve time for driven and eigenmode runs, and `run()` logs a warning when the memory
+estimate is above the machine memory; see
+[Estimate memory and time before you submit](../getting_started_palace.md#estimate-memory-and-time-before-you-submit).
 Acceptance is not a memory guarantee: solver settings, mesh preprocessing and
 refinement can change peak memory beyond the sizing estimate.
 

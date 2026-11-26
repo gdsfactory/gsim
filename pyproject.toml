@@ -347,6 +347,7 @@ convention = "google"
 
 [tool.setuptools.package-data]
 "gsim.fdtd" = ["assets/*.html"]
+"gsim.palace" = ["data/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

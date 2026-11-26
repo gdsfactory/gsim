@@ -82,6 +82,9 @@ from gsim.palace.driven import DrivenSim
 from gsim.palace.eigenmode import EigenmodeSim
 from gsim.palace.electrostatic import ElectrostaticSim
 
+# Memory and time estimate of a run, before it is submitted
+from gsim.palace.estimate import ResourceEstimate, estimate_resources
+
 # Visualization
 from gsim.palace.field_viz import (
     extract_streamplot_inputs_2d,
@@ -300,6 +303,7 @@ __all__ = [
     "PortModes2D",
     "PortType",
     "RLCFit",
+    "ResourceEstimate",
     "SParam",
     "SParams",
     "SelectorContext",
@@ -337,6 +341,7 @@ __all__ = [
     "degenerate_mode_groups",
     "differential_delay",
     "differential_impedance",
+    "estimate_resources",
     "extract_axis_slice",
     "extract_boundary_cells",
     "extract_from_pdk",
