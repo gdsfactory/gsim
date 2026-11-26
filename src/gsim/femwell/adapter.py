@@ -164,16 +164,25 @@ def epsilon_by_region(
         used_names=set(materials.values()),
         label="overrides",
     )
+    stack_materials = dict(stack.materials or {})
     stack_by_name = {
-        str(name).lower().strip(): entry
-        for name, entry in (stack.materials or {}).items()
+        str(name).lower().strip(): entry for name, entry in stack_materials.items()
     }
 
     result: dict[str, complex] = {}
     for region in regions:
         material = materials[region]
         key = material.lower().strip()
-        entry = overrides_by_name.get(key, stack_by_name.get(key))
+        # Precedence: override > exact stack key > case-folded stack key. The
+        # exact key comes first so that stack entries differing only in case
+        # keep their own values (as Palace's _lookup_material does). Explicit
+        # membership tests, since an entry may be falsy.
+        if key in overrides_by_name:
+            entry = overrides_by_name[key]
+        elif material in stack_materials:
+            entry = stack_materials[material]
+        else:
+            entry = stack_by_name.get(key)
         resolved = resolve_stack_material(material, entry, wavelength)
         if resolved is None:
             raise ValueError(

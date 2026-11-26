@@ -47,8 +47,11 @@ def _two_region_mesh(tmp_path):
     return path
 
 
-def _stack(*, layer_material="Polymer", stack_key="Polymer"):
-    """A 'core' layer of ``layer_material``; the stack describes ``stack_key``."""
+def _stack(*, layer_material="Polymer", stack_key="Polymer", extra=None):
+    """A 'core' layer of ``layer_material``; the stack describes ``stack_key``.
+
+    ``extra`` adds further stack entries (e.g. a case variant of ``stack_key``).
+    """
     stack = LayerStack(pdk_name="test", units="um")
     stack.layers["core"] = Layer(
         name="core",
@@ -62,6 +65,7 @@ def _stack(*, layer_material="Polymer", stack_key="Polymer"):
     )
     stack.materials[stack_key] = {"permittivity": STACK_EPS}
     stack.materials["clad"] = {"permittivity": CLAD_EPS}
+    stack.materials.update(extra or {})
     return stack
 
 
@@ -111,6 +115,53 @@ def test_stack_material_found_whatever_its_case(tmp_path, layer_material, stack_
     assert _eps(path, stack)["core"].real == pytest.approx(STACK_EPS)
     overrides = {"Polymer": MaterialProperties(permittivity=9.0)}
     eps = _eps(path, stack, overrides=overrides)
+    assert eps["core"].real == pytest.approx(9.0)
+
+
+@pytest.mark.parametrize(
+    ("layer_material", "first", "second"),
+    [
+        ("Polymer", "Polymer", "polymer"),
+        ("Polymer", "polymer", "Polymer"),
+        ("polymer", "Polymer", "polymer"),
+        ("polymer", "polymer", "Polymer"),
+    ],
+)
+def test_exact_stack_key_wins_over_case_variant(
+    tmp_path, layer_material, first, second
+):
+    """Stack keys differing only in case keep their own values, in any order."""
+    path = _two_region_mesh(tmp_path)
+    values = {"Polymer": 3.0, "polymer": 4.0}
+    stack = _stack(
+        layer_material=layer_material,
+        stack_key=first,
+        extra={second: {"permittivity": values[second]}},
+    )
+    stack.materials[first] = {"permittivity": values[first]}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        eps = _eps(path, stack)
+    assert eps["core"].real == pytest.approx(values[layer_material])
+
+
+def test_override_beats_exact_stack_key(tmp_path):
+    path = _two_region_mesh(tmp_path)
+    stack = _stack(extra={"polymer": {"permittivity": 4.0}})
+    eps = _eps(path, stack, overrides={"POLYMER": MaterialProperties(permittivity=9.0)})
+    assert eps["core"].real == pytest.approx(9.0)
+
+
+def test_whitespace_in_layer_material_matches_override(tmp_path):
+    """A layer material ' Polymer ' takes the override and does not warn."""
+    path = _two_region_mesh(tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        eps = _eps(
+            path,
+            _stack(layer_material=" Polymer "),
+            overrides={"polymer": MaterialProperties(permittivity=9.0)},
+        )
     assert eps["core"].real == pytest.approx(9.0)
 
 

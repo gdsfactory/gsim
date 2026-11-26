@@ -441,6 +441,20 @@ class TestResolveMaterialsCaseInsensitive:
         assert "SiO2" in materials
         assert materials["SiO2"].epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
 
+    def test_whitespace_in_used_name_matches_override_without_warning(self):
+        """A used name ' SiO2 ' matches override 'sio2' and does not warn."""
+        import warnings
+
+        overrides = {"sio2": MaterialProperties(permittivity=3.9)}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            materials = resolve_materials(
+                {" SiO2 "}, overrides=overrides, wavelength_um=1.55
+            )
+        assert len(materials) == 1
+        (resolved,) = materials.values()
+        assert resolved.epsilon_diag == pytest.approx([3.9, 3.9, 3.9])
+
     def test_override_without_wavelength_legacy(self):
         """Case-insensitive override works in legacy (no wavelength) path."""
         overrides = {
