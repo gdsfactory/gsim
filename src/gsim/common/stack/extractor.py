@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from gdsfactory.technology import LayerStack as GfLayerStack
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from gsim.common.materials.registry import get_project_material_cards
-from gsim.common.stack._layer_utils import classify_layer_type, get_gds_layer_tuple
+from gsim.common.stack._layer_utils import (
+    classify_layer_type,
+    get_gds_layer_tuple,
+    has_boolean_layer,
+)
 from gsim.common.stack.materials import (
     MATERIALS_DB,
     get_material_properties,
@@ -43,6 +47,26 @@ class Layer(BaseModel):
     sidewall_angle: float = 0.0  # degrees
     mesh_resolution: str | float = "medium"
     mesh_order: int | None = None
+
+    # The PDK LayerLevel of a level whose layer is a boolean expression (e.g.
+    # ``WG - DEEP_ETCH``); ``gds_layer`` then holds only one leaf of it. Kept
+    # out of the serialized stack (YAML, ``model_dump``): a stack read back
+    # from YAML has plain layers.
+    _derived_source: Any = PrivateAttr(default=None)
+
+    @property
+    def derived_source(self) -> Any | None:
+        """The PDK ``LayerLevel`` whose boolean layer defines this level.
+
+        ``None`` for a level drawn on a single GDS layer. The Palace mesher
+        evaluates the expression on the component instead of reading the raw
+        polygons of ``gds_layer``.
+        """
+        return self._derived_source
+
+    def set_derived_source(self, level: Any | None) -> None:
+        """Remember the PDK level whose boolean layer defines this level."""
+        self._derived_source = level
 
     def get_mesh_size(self, base_size: float = 1.0) -> float:
         """Get mesh size in um for this layer.
@@ -473,6 +497,9 @@ def extract_layer_stack(
             layer_type=layer_type,
             sidewall_angle=float(sidewall_angle),
         )
+
+        if has_boolean_layer(layer_level):
+            layer.set_derived_source(layer_level)
 
         stack.layers[layer_name] = layer
         materials_used.add(material)

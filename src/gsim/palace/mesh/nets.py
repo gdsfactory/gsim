@@ -258,7 +258,8 @@ def extract_nets(
         for name, layer in stack.layers.items()
         if layer.layer_type in _CONNECTING
     }
-    names_by_number: dict[int, list[str]] = {}
+    # keyed by polygon key: the GDS layer number unless a level needs more
+    names_by_number: dict[object, list[str]] = {}
     nodes: list[tuple[str, int]] = []  # (layer name, index in geometry.polygons)
     shapes: list[Polygon] = []
     for index, (number, xs, ys, holes) in enumerate(geometry.polygons):

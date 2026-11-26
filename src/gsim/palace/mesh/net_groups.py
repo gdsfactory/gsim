@@ -191,15 +191,17 @@ def check_via_merging(
         _merge_via_layer,
         _polygons_by_gds_layer,
         _via_landing_area,
+        polygon_keys,
     )
 
     if merge_via_distance <= 0:
         return
     polygons_by_gds = _polygons_by_gds_layer(geometry.polygons)
+    keys = polygon_keys(stack)
     for name, layer in stack.layers.items():
         if layer.layer_type != "via":
             continue
-        number = layer.gds_layer[0]
+        number = keys[name]
         indices = [
             i for i, polygon in enumerate(geometry.polygons) if polygon[0] == number
         ]

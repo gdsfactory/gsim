@@ -18,6 +18,7 @@ from shapely import Polygon as ShapelyPolygon
 from shapely import STRtree, buffer, make_valid
 from shapely.ops import unary_union
 
+from gsim.common.polygon import layer_level_region
 from gsim.palace.ports.config import PortType
 from gsim.palace.ports.modes import same_face_pairs
 
@@ -102,13 +103,17 @@ def is_air_like_material(
     return _contains_air_token(dielectric_name)
 
 
+PolygonKey = int | tuple[int, int] | str
+"""What ``GeometryData.polygons`` is keyed by; see :func:`polygon_keys`."""
+
+
 @dataclass
 class GeometryData:
     """Container for geometry data extracted from component."""
 
-    polygons: list  # List of (layer_num, pts_x, pts_y, holes) tuples
+    polygons: list  # List of (polygon key, pts_x, pts_y, holes) tuples
     bbox: tuple[float, float, float, float]  # (xmin, ymin, xmax, ymax)
-    layer_bboxes: dict  # layer_num -> (xmin, ymin, xmax, ymax)
+    layer_bboxes: dict  # polygon key -> (xmin, ymin, xmax, ymax)
 
 
 @dataclass(frozen=True)
@@ -347,6 +352,47 @@ def _verify_symmetry(regions: dict, plane: SymmetryPlaneConfig, dbu: float) -> N
         )
 
 
+def polygon_keys(stack: LayerStack) -> dict[str, PolygonKey]:
+    """Key under which ``extract_geometry`` files the polygons of each level.
+
+    * A level whose layer is a boolean expression (``Layer.derived_source``,
+      e.g. ``WG - DEEP_ETCH``) is keyed by its name: its polygons are the
+      evaluated region, which no GDS layer holds.
+    * A level drawn on a GDS layer number that another level uses with a
+      different datatype is keyed by its ``(layer, datatype)`` tuple, so the
+      two do not receive each other's polygons.
+    * Any other level is keyed by its GDS layer number, as it always was; levels
+      on the same tuple (e.g. a MIM dielectric and its top plate) share a key.
+    """
+    datatypes: dict[int, set[int]] = {}
+    for layer in stack.layers.values():
+        if layer.derived_source is None:
+            number, datatype = layer.gds_layer
+            datatypes.setdefault(number, set()).add(datatype)
+    keys: dict[str, PolygonKey] = {}
+    for name, layer in stack.layers.items():
+        number, datatype = layer.gds_layer
+        if layer.derived_source is not None:
+            keys[name] = name
+        elif len(datatypes[number]) > 1:
+            keys[name] = (number, datatype)
+        else:
+            keys[name] = number
+    return keys
+
+
+def _boolean_level_polygons(component, level) -> list[kdb.Polygon]:
+    """Merged polygons of the region a boolean stack level covers.
+
+    Evaluated by :func:`gsim.common.polygon.layer_level_region`, as the FDTD
+    route does, so both routes mesh the same region.
+    """
+    region = layer_level_region(component, level).dup()
+    # KLayout's default merge can produce self-touching rings
+    region.min_coherence = True
+    return list(region.each_merged())
+
+
 def extract_geometry(
     component,
     stack: LayerStack,
@@ -355,6 +401,11 @@ def extract_geometry(
     symmetry_plane: SymmetryPlaneConfig | None = None,
 ) -> GeometryData:
     """Extract polygon geometry from a gdsfactory component.
+
+    Plain levels get the raw polygons of their GDS layer. A level whose layer
+    is a boolean expression of the PDK stack (``Layer.derived_source``) gets
+    the evaluated region instead, as the FDTD route resolves it. Polygons are
+    keyed as :func:`polygon_keys` says.
 
     Args:
         component: gdsfactory Component
@@ -377,7 +428,8 @@ def extract_geometry(
     dbu = component.kcl.layout.dbu
     if symmetry_plane is not None:
         plane_position_dbu(symmetry_plane, dbu=dbu)
-    full_regions: dict[tuple[int, int], kdb.Region] = {}
+    # keyed by GDS tuple, or by level name for a boolean level
+    full_regions: dict[tuple[int, int] | str, kdb.Region] = {}
     polygons = []
     global_bbox = [math.inf, math.inf, -math.inf, -math.inf]
     layer_bboxes = {}
@@ -419,22 +471,45 @@ def extract_geometry(
             info = layout.get_info(layer_index)
             index_to_gds[layer_index] = (info.layer, info.datatype)
 
-    # Build GDS tuple -> layer number mapping
-    gds_to_layernum = {}
-    for layer_data in stack.layers.values():
+    # GDS tuple -> polygon key of the stack levels drawn on a single GDS layer.
+    # A level whose layer is a boolean expression has no tuple of its own: its
+    # polygons come from the evaluated expression (same evaluation as the FDTD
+    # route), keyed by level name. The raw polygons of its leaf tuple still
+    # count for the layout bbox, which sets the domain size.
+    keys = polygon_keys(stack)
+    gds_to_key: dict[tuple[int, int], PolygonKey] = {}
+    boolean_tuples: set[tuple[int, int]] = set()
+    boolean_levels: dict[str, Any] = {}
+    for name, layer_data in stack.layers.items():
         gds_tuple = tuple(layer_data.gds_layer)
-        gds_to_layernum[gds_tuple] = gds_tuple[0]
+        if layer_data.derived_source is None:
+            gds_to_key[gds_tuple] = keys[name]
+        else:
+            boolean_tuples.add(gds_tuple)
+            boolean_levels[name] = layer_data.derived_source
 
-    # Convert polygons
+    # (key, symmetry-check key, kdb polygons, emitted to the mesher)
+    sources: list[tuple[PolygonKey | None, tuple[int, int] | str, list, bool]] = []
     for layer_index, polys in polygons_by_index.items():
         gds_tuple = index_to_gds.get(layer_index)
         if gds_tuple is None:
             continue
+        if gds_tuple in gds_to_key:
+            sources.append((gds_to_key[gds_tuple], gds_tuple, polys, True))
+        elif gds_tuple in boolean_tuples:
+            sources.append((None, gds_tuple, polys, False))
+    for name, level in boolean_levels.items():
+        polys = _boolean_level_polygons(component, level)
+        if decimate_tolerance is not None:
+            from gsim.common.polygon_utils import decimate
 
-        layernum = gds_to_layernum.get(gds_tuple)
-        if layernum is None:
-            continue
+            polys = decimate(
+                polys, relative_tolerance=decimate_tolerance, verbose=True, dbu=dbu
+            )
+        sources.append((keys[name], name, polys, True))
 
+    # Convert polygons
+    for layernum, region_key, polys, emitted in sources:
         for poly in polys:
             parsed = _parse_klayout_polygon(poly, dbu)
             if parsed is None:
@@ -447,10 +522,12 @@ def extract_geometry(
             global_bbox[1] = min(global_bbox[1], ymin)
             global_bbox[2] = max(global_bbox[2], xmax)
             global_bbox[3] = max(global_bbox[3], ymax)
+            if not emitted:
+                continue
 
             pieces = [parsed]
             if symmetry_plane is not None:
-                full_regions.setdefault(gds_tuple, kdb.Region()).insert(poly)
+                full_regions.setdefault(region_key, kdb.Region()).insert(poly)
                 pieces = [
                     p
                     for piece in clip_polygon(poly, symmetry_plane, dbu=dbu)
@@ -590,9 +667,9 @@ def _via_neighbour_conductors(
     return below, above
 
 
-def _polygons_by_gds_layer(polygons: list) -> dict[int, list[tuple]]:
-    """Group ``(layer, pts_x, pts_y, holes)`` polygons by GDS layer number."""
-    by_layer: dict[int, list[tuple]] = {}
+def _polygons_by_gds_layer(polygons: list) -> dict[PolygonKey, list[tuple]]:
+    """Group ``(key, pts_x, pts_y, holes)`` polygons by their polygon key."""
+    by_layer: dict[PolygonKey, list[tuple]] = {}
     for layernum, pts_x, pts_y, holes in polygons:
         by_layer.setdefault(layernum, []).append((pts_x, pts_y, holes))
     return by_layer
@@ -702,23 +779,27 @@ def _distance_keeps_vias_as_drawn(
 
 
 def _side_footprint(
-    polygons_by_gds: dict[int, list[tuple]], stack: LayerStack, names: list[str]
+    polygons_by_gds: dict[PolygonKey, list[tuple]],
+    stack: LayerStack,
+    names: list[str],
 ):
     """Union of the polygons of the stack layers *names* (empty when none)."""
     shapes = []
+    keys = polygon_keys(stack)
     for name in names:
-        polys = polygons_by_gds.get(stack.layers[name].gds_layer[0], [])
+        polys = polygons_by_gds.get(keys[name], [])
         shapes.extend(_via_shapes(polys))
     return unary_union(shapes) if shapes else ShapelyPolygon()
 
 
 def _via_landing_area(
-    polygons_by_gds: dict[int, list[tuple]], stack: LayerStack, via_name: str
+    polygons_by_gds: dict[PolygonKey, list[tuple]], stack: LayerStack, via_name: str
 ):
     """Overlap of the metal below and the metal above a via layer.
 
     Args:
-        polygons_by_gds: Polygons grouped by GDS layer number.
+        polygons_by_gds: Polygons grouped by polygon key (the GDS layer number
+            unless :func:`polygon_keys` says otherwise).
         stack: The layer stack.
         via_name: Name of the via layer.
 
@@ -974,13 +1055,14 @@ def _detect_shaped_dielectric_layers(
     Returns:
         Set of layer names that should be treated as shaped dielectrics.
     """
-    gds_layers_with_polys = {layernum for layernum, *_ in geometry.polygons}
+    keys_with_polys = {layernum for layernum, *_ in geometry.polygons}
+    keys = polygon_keys(stack)
 
     shaped: set[str] = set()
     for name, layer in stack.layers.items():
         if layer.layer_type != "dielectric":
             continue
-        if layer.gds_layer[0] not in gds_layers_with_polys:
+        if keys[name] not in keys_with_polys:
             continue
         if _is_covered_by_dielectric_box(layer, stack):
             continue
@@ -989,18 +1071,21 @@ def _detect_shaped_dielectric_layers(
     return shaped
 
 
-def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
-    """Get layer info from stack by GDS layer number.
+def get_layer_info(stack: LayerStack, gds_layer: PolygonKey) -> dict | None:
+    """Get layer info from stack by polygon key.
 
     Args:
         stack: LayerStack with layer definitions
-        gds_layer: GDS layer number
+        gds_layer: Polygon key as in ``GeometryData.polygons``: the GDS layer
+            number, unless :func:`polygon_keys` gives the level a
+            ``(layer, datatype)`` tuple or its name.
 
     Returns:
         Dict with layer info or None if not found
     """
+    keys = polygon_keys(stack)
     for name, layer in stack.layers.items():
-        if layer.gds_layer[0] == gds_layer:
+        if keys[name] == gds_layer:
             return {
                 "name": name,
                 "zmin": layer.zmin,
@@ -1012,8 +1097,8 @@ def get_layer_info(stack: LayerStack, gds_layer: int) -> dict | None:
     return None
 
 
-def get_layer_infos(stack: LayerStack, gds_layer: int) -> list[dict]:
-    """Get ALL layer infos from stack matching a GDS layer number.
+def get_layer_infos(stack: LayerStack, gds_layer: PolygonKey) -> list[dict]:
+    """Get ALL layer infos from stack matching a polygon key.
 
     A single GDS layer may back more than one stack ``LayerLevel`` (e.g. the
     IHP MIM capacitor: ``mim_diel`` dielectric + ``mim`` top-plate conductor
@@ -1022,14 +1107,17 @@ def get_layer_infos(stack: LayerStack, gds_layer: int) -> list[dict]:
 
     Args:
         stack: LayerStack with layer definitions
-        gds_layer: GDS layer number
+        gds_layer: Polygon key as in ``GeometryData.polygons``: the GDS layer
+            number, unless :func:`polygon_keys` gives the level a
+            ``(layer, datatype)`` tuple or its name.
 
     Returns:
         List of layer-info dicts (possibly empty).
     """
     infos = []
+    keys = polygon_keys(stack)
     for name, layer in stack.layers.items():
-        if layer.gds_layer[0] == gds_layer:
+        if keys[name] == gds_layer:
             infos.append(
                 {
                     "name": name,
@@ -2892,6 +2980,7 @@ __all__ = [
     "get_layer_info",
     "get_layer_infos",
     "overlapping_wave_ports",
+    "polygon_keys",
     "same_surface_pairs",
     "wave_port_face",
     "wave_port_faces_overlap",
