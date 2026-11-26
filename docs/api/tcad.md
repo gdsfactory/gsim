@@ -114,8 +114,9 @@ the sizes set; a refinement box holds its size inside and steps to the surroundi
 `mesh_grading=MeshGrading(growth_per_um=0.25)` replaces that: the size is `refined_mesh_size_um` on the conductors and
 the declared Interfaces, and a box's own size inside each refinement box, and grows from them by `growth_per_um` per µm
 of distance up to `max_mesh_size_um`. `sources=` limits the features it grows from (`"conductors"`, `"junctions"`,
-`"fine_regions"`). A growth of 0.1 to 0.25 per µm keeps the oxide elements around a small section well shaped at a node
-count close to the ungraded mesh. Grading is off by default, so existing meshes and results do not change.
+`"fine_regions"`). A growth of 0.1 to 0.25 per µm keeps the oxide elements around a small section well shaped; the
+[graded meshes](#graded-meshes) subsection has measured node counts. Grading is off by default, so existing meshes and
+results do not change.
 
 `refined_mesh_size_um` does not set the same size in the two cases. Without grading, the elements on the internal curves
 are half of `refined_mesh_size_um`; with grading, the elements on the conductors and Interfaces are
@@ -219,16 +220,70 @@ density follows the temperature.
 - **Temperature:** `materials.temperature_k` sets the thermal voltage, the intrinsic density and the SRH trap densities.
   The Masetti mobility is its 300 K fit at every temperature.
 
-## Edge couples and node volumes
+## Mesh quality
 
-DEVSIM assembles its equations by finite boxes: each mesh edge carries a couple, the length of the boundary shared by
-its two nodes' boxes, and each node a volume. DEVSIM's own couples and volumes take the absolute cotangent of the angle
-opposite each edge, which is wrong on every obtuse triangle: the potential equation gains coupling it should not have,
-capacitance comes out too high and the node volumes of a Region add up to more than its area. gsim corrects this: each
-device is assembled with the signed cotangent couples and the node volumes that go with them, so the potential equation
-is the P1 finite-element Laplacian on any triangulation and the node volumes of each Region add up to its area.
+DEVSIM discretises by control volumes, also called finite boxes: each node owns a box, each equation is a flux balance
+over one box, each mesh edge carries a couple (the length of the boundary its two boxes share) and each node a volume.
+The result is only as good as the mesh it sits on, in two ways. The shape of a triangle decides the sign and size of
+its couples, and the size of the elements decides whether a depletion edge, a contact end or a doping step is resolved
+at all. `gsim.tcad` handles four cases, one subsection each: obtuse triangles, graded element sizes, the ends of a
+Contact and the edges of a doping box. Each has a symptom, the reason in terms of the boxes, what gsim does now, what
+you set, and a before and after figure.
 
-The size of the correction depends on the mesh. Measured:
+The device in every figure is the PN junction of the [PN junction notebook](../nbs/tcad_pn_junction.md): a 220 nm
+silicon rib cut into four doped strips, 1e18 cm⁻³ on both sides of the junction, an aluminium electrode on each pad,
+and the notebook's mesh settings unless a subsection says otherwise. The figures come from
+`docs/assets/tcad/make_mesh_quality.py`, which needs the `tcad` extra and about three minutes, and which prints the
+numbers quoted below (DEVSIM 2.12.0 on Windows; other platforms and versions can differ in the last digits). None of
+the four changes has a public switch that restores the earlier behaviour, so the "before" runs of that script switch
+the new code off by patching private names of `gsim.tcad`. Treat it as a way to reproduce the figures, not as an
+interface.
+
+### Signed edge couples and obtuse meshes
+
+**Symptom.** Capacitance comes out too high, by an amount that depends on the mesh and not on the device. On the
+coarse mesh of the junction (the notebook's settings without its refinement box, 35 % of the triangles in the doped
+silicon obtuse), the signed couples lower C(V) by 14 % to 19 % from DEVSIM's own over 0 to 2 V reverse bias. On the
+notebook's refined mesh the same swap moves it by 0.6 % to 0.7 %.
+
+**Why.** Inside a triangle, the boundary shared by the boxes of two of its nodes has length `L cot(θ) / 2`, with `L`
+the length of the edge between the nodes and `θ` the triangle's angle opposite it. It is negative when `θ` exceeds 90°,
+because the box boundaries are built from the circumcentre and that lies outside an obtuse triangle. DEVSIM's own
+couples and volumes take the absolute value, which turns that negative length into coupling the Laplacian does not
+have: the potential equation is no longer the finite-element one, and the volumes of a Region add up to more than its
+area. The error therefore follows the obtuse triangles of the mesh, not the device.
+
+**What gsim does now.** Each device is assembled with the signed couples and the node volumes that go with them
+(the models `SignedEdgeCouple` and `SignedNodeVolume`, set as the device's `edge_couple_model` and `node_volume_model`),
+so the potential equation is the P1 finite-element Laplacian on any triangulation and the node volumes of each Region
+add up to its area. They are set on the device alone; other DEVSIM devices in the process keep their own.
+
+![C(V) with DEVSIM's own couples and the signed ones, on a coarse and a refined mesh](../assets/tcad/mesh_quality_couples.png)
+
+*Left: the coarse mesh around the junction, obtuse triangles shaded. Right: C(V) with DEVSIM's own couples (dotted) and
+the signed ones (solid) on that mesh and on the notebook's refined mesh, against the depletion approximation. The
+remaining distance of the coarse-mesh curve from the depletion approximation is resolution, not couples: its elements
+are larger than the depletion width.*
+
+**What you set.** Nothing: the correction is always on and has no option. What you control is how many obtuse triangles
+the mesh has in the doped Regions. The sizes and boxes of the next subsection refine it, and grading removes most of
+them. To count them on a mesh you have made:
+
+```python
+import meshio
+import numpy as np
+
+msh = meshio.read(str(mesh.mesh_path))  # the mesh, in µm
+tag = msh.field_data["n_rib"][0]  # the physical group of a Region
+for block, tags in zip(msh.cells, msh.cell_data["gmsh:physical"], strict=True):
+    if block.type != "triangle":
+        continue
+    corners = msh.points[block.data[tags == tag]][..., :2]  # (n, 3, 2)
+    sides = np.sum((corners - np.roll(corners, 1, axis=1)) ** 2, axis=-1)  # squared lengths
+    print(f"{np.mean(2 * sides.max(axis=1) > sides.sum(axis=1)):.0%} obtuse")
+```
+
+The size of the correction on other meshes, as measured with the test suite's meshes:
 
 - A carriers-off capacitor on a mesh with obtuse triangles in both dielectrics now matches an independent P1
   finite-element solve (scikit-fem) to 1e-14; DEVSIM's own couples read 35 % high on that mesh.
@@ -254,6 +309,139 @@ flips their sign at that node. On a 1e17/1e17 cm⁻³ junction meshed with 640 t
 - With strongly obtuse triangles (about 180 negative couples and 3 to 7 negative volumes), it stays within a few
   percent, depending on the mesh: 0.2 % to 9 % over twelve random meshes, not tied to the number of negative volumes.
   DEVSIM's own couples read 17 % to 39 % low on the same meshes.
+
+### Graded meshes
+
+**Symptom.** The oxide and the silicon around a small feature are meshed with many obtuse triangles. Each one costs a
+negative couple, and strongly obtuse ones can stop the Newton solve from converging (see Limits). On the PN junction with
+the oxide declared as an insulator, 32 % of the oxide triangles are obtuse, and 19 % of those in the doped silicon even
+with the notebook's refinement box.
+
+**Why.** Without grading the pipeline refines along every internal curve and lets the element size grow from it at about
+2 per µm, whatever sizes you set: half of `refined_mesh_size_um` on the curve, so with the notebook's 0.02 µm roughly
+0.2 µm at 0.1 µm from it. Where the size changes that fast the mesher has to fill the gap between a row of small
+elements and a row of large ones, and the triangles that do it tend to be stretched, often with an obtuse angle, which
+is the case of the previous subsection. Growing the size slowly keeps neighbouring elements alike.
+
+**What gsim does now.** `mesh_grading` is an opt-in. With a `MeshGrading` (`tcad.MeshGrading`) the element size grows
+linearly with the distance from the chosen features, at `growth_per_um` per µm, up to `max_mesh_size_um`, and only those
+features refine the mesh. On this device, at the same 0.01 µm on the junction and the contacts:
+
+| Mesh | Triangles in the solved Regions | Obtuse in the oxide | Obtuse in the doped silicon |
+| --- | --- | --- | --- |
+| Default growth, with the refinement box | 5854 | 32 % | 19 % |
+| Graded, 0.25 per µm, with the refinement box | 8372 | 4.1 % | 4.7 % |
+| Default growth, no box | 4670 | 32 % | 35 % |
+| Graded, 0.25 per µm, no box | 6704 | 4.9 % | 6.3 % |
+
+Grading costs triangles here (43 % more with the box, 44 % without): the size now rises slowly from the 0.01 µm
+features instead of jumping, so the oxide beside them is finer too. How many more depends on the sizes and the growth;
+a larger `growth_per_um` gives fewer. C(V) with the oxide in the solve moves by 0.4 % to 1.0 % between the two meshes
+at 0, 1 and 2 V. On this device grading buys element shape, not a different answer.
+
+![The default and a graded mesh around the junction, obtuse triangles shaded, and C(V) on both](../assets/tcad/mesh_quality_grading.png)
+
+*The default mesh (left) and the graded one (middle) of the oxide and the doped silicon around the junction, obtuse
+triangles shaded, with the notebook's refinement box. Right: C(V) with the oxide solved on both meshes, against the
+depletion approximation. The depletion approximation has no fringing field, so the curves, which include the oxide's,
+lie above it.*
+
+**What you set.** All of these are fields of the `solver` concern.
+
+- `mesh_grading`, default `None`: keeps the fixed growth from every internal curve. A `MeshGrading` replaces it.
+- `MeshGrading.growth_per_um`, no default, above 0: the size increase per µm of distance. 0.1 to 0.25 keeps the elements
+  well shaped; larger gives fewer nodes.
+- `MeshGrading.sources`, default `("conductors", "junctions", "fine_regions")`: the features the size grows from, each
+  named at most once.
+- `refined_mesh_size_um`, default `None`, which takes the preset's size: 5 µm for `mesh_preset=None` or `"default"`,
+  10 µm for `"coarse"`, 2 µm for `"fine"`. With grading it is the size on the conductors and the declared Interfaces.
+- `max_mesh_size_um`, default `None`, which takes the preset's: 300, 600 and 70 µm for the same three presets. A size
+  above it is held at it.
+- `refinement_boxes`, default `None`: boxes `(h_min, h_max, z_min, z_max, size)` in µm. Each holds `size` inside, and
+  with `"fine_regions"` the size grows from it outside.
+
+The preset sizes are meant for wavelengths, far too coarse for a 220 nm rib: always set the two sizes. Without grading the
+elements on the internal curves are half of `refined_mesh_size_um`, and with it they are `refined_mesh_size_um` itself,
+so halve it to keep the size when you switch grading on. The figure was made with:
+
+```python
+sim.solver(
+    mesh_preset="coarse",
+    refined_mesh_size_um=0.01,
+    max_mesh_size_um=40.0,
+    refinement_boxes=[(-20.12, -19.88, 0.0, 0.22, 0.01)],
+    mesh_grading=tcad.MeshGrading(growth_per_um=0.25),
+)
+```
+
+### Contact ends
+
+**Symptom.** Where a Contact ends on another solved Region, an Interface to the next doped Region or the oxide, the node of
+that Region at the end of the Contact does not sit at the Contact's potential, although it touches the same metal. The
+error is local, and it is largest where the doping steps at the end. With a contact pad at 1e20 cm⁻³ ending on a rib at
+1e17 cm⁻³, the oxide solved, and 1 V on the cathode, the rib's end node sat at 1.4629 V when the end was not held, and
+sits at 1.4173 V when it is, the bias plus the rib's equilibrium potential. The cathode current changed by 3.3 %
+(1.408e-14 to 1.454e-14 A/cm in magnitude) and C by 0.07 %.
+
+**Why.** A Contact fixes the potential of the nodes on its own curve, in its own Region. The node of the neighbouring
+Region at the end of the curve is a separate node with a box of its own. The box touches the metal too, but no contact
+equation is attached to it, so its potential follows from the flux balance with its neighbours and not from the metal.
+An ohmic contact is neutral at the metal's Fermi level on each side, so on a doped side the potential is the bias plus
+`V_t asinh(N / 2n_i)`, and across a doping step the two sides differ by the high-low built-in voltage
+`V_t ln(N_high / N_low)`.
+
+**What gsim does now.** Each node of another solved Region on a Contact's curve is claimed by that Contact. A doped
+Region's node becomes an ohmic contact of its own doping, an insulator's node takes the potential of the Contact's node
+beside it, and its charge and current count towards the Contact. A node on another Contact's curve stays with that
+Contact, and a node two Contacts reach goes to the one declared first. A test on a carriers-off capacitor with the Contact
+ending on an Interface and on the oxide reproduces an independent P1 solve to a relative 1e-5, and one with a 10:1 step
+at the end checks the end nodes' potential against the equilibrium value to 1e-9 V.
+
+![Nodes at the end of the cathode Contact and the potential there, with and without the end held](../assets/tcad/mesh_quality_contact_ends.png)
+
+*Left: the nodes of the n pad, the n rib and the oxide at the end of the cathode Contact; the ring marks the end node
+the Contact now holds (the rib's and the oxide's lie at the same point). Right: the potential along the top surface
+through the end at 1 V on the cathode, pad 1e20 cm⁻³ and rib 1e17 cm⁻³, with the oxide solved; dotted lines mark the
+equilibrium potentials of the two sides.*
+
+**What you set.** Nothing to switch on: the ends are found from the mesh wherever a Contact's curve reaches a node of
+another solved Region. What you control is the declarations. The order of the `sim.contacts.add(...)` calls decides who
+keeps a node that two Contacts reach. A Contact may not be declared against an insulator, and an Interface is declared
+between every pair of touching doped Regions (see Contacts, interfaces and insulators). The end nodes are mesh groups
+named `<contact>_end_<region>_<node>`, written to `devsim_contact_ends.msh` beside the DEVSIM mesh when there are any.
+
+### Doping edges
+
+**Symptom.** Nodes on the edge of a doping box, or on an implant's surface, come out undoped. On the PN junction with each
+`StepDoping` given `y_range=(0.0, 0.22)`, the whole top surface of the silicon (164 of its 1617 nodes, among them the
+ones under both electrodes) read a net doping of zero. With the edge handled, none do. At 1 V on the cathode that moves
+C from 3.1098 to 3.1388 pF/cm (0.9 %) and the cathode current from -4.360e-15 to -4.200e-15 A/cm (3.7 % in magnitude).
+
+**Why.** DEVSIM holds the mesh in cm, and gsim reads the node coordinates back from it into µm. The round trip is not
+exact: a node at 0.22 µm returns as 0.22000000000000003. A hard window `y <= 0.22` then excludes the very nodes that lie
+on the edge, however the box was drawn. A node's doping sets the charge of its box, and the ohmic condition of a Contact
+reads the node's net doping to pick the equilibrium potential, so an undoped node under an electrode sits at the
+equilibrium potential of undoped silicon, not of the pad.
+
+**What gsim does now.** Every hard edge is inclusive with a slack of 1e-9 µm: the bounds of `x_range` and `y_range`, the
+implant surface of `ImplantDoping`, and the ends of a zero-fill `TableDoping`. That is far above the rounding of the
+round trip (about 3e-17 µm here) and far below any mesh spacing, so a node 1 nm outside a box stays undoped. The slack
+is a module constant, not a setting.
+
+![Nodes of the doped silicon, without and with the slack on the edge of a doping box](../assets/tcad/mesh_quality_doping_edges.png)
+
+*The nodes of the four doped strips around the junction, each doped by a box that reaches the top surface. Top: with a
+strict edge, the top row of nodes (red crosses) has no doping. Bottom: with the slack, every node is doped.*
+
+**What you set.** Draw box edges where the geometry is: the edge of the doped layer, not a hair inside or outside it. The
+edges are closed, so two boxes on the same Region that abut both dope the nodes on their shared edge, and those nodes carry
+the sum. Cover the span with one box to dope the edge once. You can check what a profile does to a node before you solve:
+
+```python
+step = tcad.StepDoping(region="n_rib", dopant_type="donor", concentration_cm3=1e18, y_range=(0.0, 0.22))
+y_node = (0.22 * 1e-4) / 1e-4  # a node on the top surface, as DEVSIM returns it: 0.22000000000000003 µm
+step.concentration(-20.1, [y_node, 0.221])  # array([1.e+18, 0.e+00])
+```
 
 ## Limits
 
