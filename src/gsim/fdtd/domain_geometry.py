@@ -21,8 +21,12 @@ def resolve_domain_geometry(
     domain: Domain,
     background_material: str,
 ) -> ResolvedPassivePcell:
-    """Size the domain once, then fill its XY extent with native blanket films."""
-    options = {
+    """Size the domain once, then fill it with native blanket films.
+
+    Films fill the XY extent. Films that the PDK declares on its wafer layer
+    also fill the Z extent, but they never size the domain.
+    """
+    options: dict[str, Any] = {
         "pdk": pdk,
         "settings": geometry.settings,
         "wavelength_um": wavelength_um,
@@ -53,6 +57,10 @@ def resolve_domain_geometry(
         settings=None,
         x_bounds=(bounds[0] / UM_TO_NM, bounds[3] / UM_TO_NM),
         y_bounds=(bounds[1] / UM_TO_NM, bounds[4] / UM_TO_NM),
+        # Wafer films (substrate, oxide, cladding) fill the domain that the
+        # patterned layers and the padding or explicit bounds have sized. Those
+        # layers are trimmed to it whether or not clip_geometry is set.
+        wafer_z_bounds=(bounds[2] / UM_TO_NM, bounds[5] / UM_TO_NM),
     )
     expanded = resolve_passive_pcell(resolved.component, **options)
     # Newly exposed blanket films can add material height, but XY padding must
@@ -61,4 +69,10 @@ def resolve_domain_geometry(
         (*resolved.bounds[0][:2], expanded.bounds[0][2]),
         (*resolved.bounds[1][:2], expanded.bounds[1][2]),
     )
-    return replace(expanded, layout_bounds=layout_bounds)
+    # Without clip_geometry the domain contains the layout, so the window that
+    # sizes the blanket films must not report the layout's own sloped footprints
+    # (for example a tapered core at a port face) as removed material.
+    clipped = (
+        expanded.clipped_layers if domain.clip_geometry else resolved.clipped_layers
+    )
+    return replace(expanded, layout_bounds=layout_bounds, clipped_layers=clipped)

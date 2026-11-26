@@ -78,6 +78,14 @@ def _pick_unique(
     )
 
 
+def _canonical_target(target: str, cards: Mapping[str, MaterialCard]) -> str:
+    """Resolve an alias target to an exact card name, ignoring letter case."""
+    if target in cards or target in GSIM_MATERIAL_CARDS:
+        return target
+    match = _case_insensitive_name(target, cards, {})
+    return target if match is None else match
+
+
 def _case_insensitive_name(
     material_name: str,
     cards: Mapping[str, MaterialCard],
@@ -91,8 +99,10 @@ def _case_insensitive_name(
     project: dict[str, MaterialCard | None] = {}
     for key in (*cards, *aliases):
         if key.casefold() == folded:
-            target = _follow_aliases(key, cards, aliases)
-            project[target] = cards.get(target)
+            # An alias reached only by folding may name its target loosely too
+            # (``Legacy`` -> ``si``), so the target gets the same card lookup.
+            target = _canonical_target(_follow_aliases(key, cards, aliases), cards)
+            project[target] = cards.get(target) or GSIM_MATERIAL_CARDS.get(target)
     match = _pick_unique(material_name, project)
     if match is not None:
         return match

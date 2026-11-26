@@ -43,6 +43,22 @@ def is_wafer_level(level: Any, wafer_layer: tuple[int, int]) -> bool:
     return get_gds_layer_tuple(level) == wafer_layer
 
 
+def wafer_film_keys(layer_stack: Any, pdk: Any | None) -> frozenset[str]:
+    """Return the keys of levels that :func:`with_wafer_films` marks.
+
+    Levels the PDK already declares ``background=True`` are not included: they
+    keep their existing meaning, including their share in sizing a domain.
+    """
+    wafer_layer = wafer_layer_tuple(pdk)
+    return frozenset(
+        key
+        for key, level in layer_stack.layers.items()
+        if "background" in type(level).model_fields
+        and not level.background
+        and is_wafer_level(level, wafer_layer)
+    )
+
+
 def with_wafer_films(layer_stack: Any, pdk: Any | None) -> Any:
     """Return *layer_stack* with wafer-layer levels marked ``background=True``.
 
@@ -50,22 +66,20 @@ def with_wafer_films(layer_stack: Any, pdk: Any | None) -> Any:
     shallow copy holding copied levels. Stacks of gdsfactory versions without
     the ``background`` field are returned unchanged.
     """
-    wafer_layer = wafer_layer_tuple(pdk)
     updated = {
-        key: level.model_copy(update={"background": True})
-        for key, level in layer_stack.layers.items()
-        if "background" in type(level).model_fields
-        and not level.background
-        and is_wafer_level(level, wafer_layer)
+        key: layer_stack.layers[key].model_copy(update={"background": True})
+        for key in wafer_film_keys(layer_stack, pdk)
     }
     if not updated:
         return layer_stack
-    return layer_stack.model_copy(update={"layers": {**layer_stack.layers, **updated}})
+    layers = {key: updated.get(key, level) for key, level in layer_stack.layers.items()}
+    return layer_stack.model_copy(update={"layers": layers})
 
 
 __all__ = [
     "GDSFACTORY_WAFER_LAYER",
     "is_wafer_level",
+    "wafer_film_keys",
     "wafer_layer_tuple",
     "with_wafer_films",
 ]

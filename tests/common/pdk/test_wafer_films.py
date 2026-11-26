@@ -54,6 +54,34 @@ def test_gpdk_component_resolves_the_whole_stack(gpdk_active, name) -> None:
     assert not resolved.component.get_polygons(by="tuple").get((999, 0))
 
 
+def test_wafer_films_do_not_size_the_bounds(gpdk_active) -> None:
+    resolved = resolve_passive_pcell("mmi1x2", pdk=gpdk_active)
+    assert resolved.wafer_films == {"substrate", "box", "clad"}
+    # Substrate (z = -13) and cladding (z = 3) are in the layers, not the bounds.
+    assert resolved.layers["substrate"].zmin == pytest.approx(-13)
+    assert resolved.bounds[0][2] == pytest.approx(0)
+    assert resolved.bounds[1][2] == pytest.approx(0.22)
+
+
+def test_wafer_z_window_omits_and_trims_only_the_films(gpdk_active) -> None:
+    resolved = resolve_passive_pcell(
+        "mmi1x2", pdk=gpdk_active, wafer_z_bounds=(-1, 1.22)
+    )
+    assert list(resolved.layers) == ["box", "core", "clad"]
+    assert resolved.layers["box"].z_bounds == pytest.approx((-1, 0))
+    assert resolved.layers["clad"].z_bounds == pytest.approx((0, 1.22))
+    assert resolved.layers["core"].z_bounds == pytest.approx((0, 0.22))
+    # Films are not reported as clipped, and the PDK's wafer keys are kept.
+    assert not resolved.clipped_layers
+    assert resolved.wafer_films == {"substrate", "box", "clad"}
+
+
+def test_wafer_films_are_not_reported_as_clipped_by_z_bounds(gpdk_active) -> None:
+    resolved = resolve_passive_pcell("mmi1x2", pdk=gpdk_active, z_bounds=(-1, 1.22))
+    assert "substrate" not in resolved.layers
+    assert not {"substrate", "box", "clad"} & set(resolved.clipped_layers)
+
+
 def test_ports_stay_on_the_component_faces(gpdk_active) -> None:
     resolved = resolve_passive_pcell("coupler", pdk=gpdk_active)
     xmin, _ymin, _zmin = resolved.bounds[0]

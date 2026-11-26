@@ -79,6 +79,23 @@ def test_pdk_alias_is_found_ignoring_case() -> None:
     assert canonical_material_name("LEGACY_SI", pdk) == "Si"
 
 
+def test_alias_target_is_resolved_ignoring_case_too() -> None:
+    """``LEGACY`` and ``Legacy`` reach the same card through a loose target."""
+    card = GSIM_MATERIAL_CARDS["SiN"].model_copy(update={"name": "Si"})
+    pdk = SimpleNamespace(
+        material_cards={"Si": card}, material_aliases={"Legacy": "si"}
+    )
+    assert canonical_material_name("Legacy", pdk) == "Si"
+    assert canonical_material_name("legacy", pdk) == "Si"
+    assert canonical_material_name("LEGACY", pdk) == "Si"
+
+
+def test_alias_target_folds_to_a_builtin_card() -> None:
+    pdk = SimpleNamespace(material_cards={}, material_aliases={"Legacy": "sio2"})
+    assert canonical_material_name("Legacy", pdk) == "SiO2"
+    assert canonical_material_name("LEGACY", pdk) == "SiO2"
+
+
 def test_project_cards_differing_only_by_case_are_ambiguous() -> None:
     first = GSIM_MATERIAL_CARDS["Si"].model_copy(update={"name": "Core"})
     second = GSIM_MATERIAL_CARDS["SiO2"].model_copy(update={"name": "core"})
