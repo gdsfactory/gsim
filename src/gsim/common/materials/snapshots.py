@@ -23,7 +23,11 @@ from pdk_schema import (
 )
 
 from gsim.common.materials.oscillators import oscillator_index
-from gsim.common.materials.registry import MaterialSource, find_material_card
+from gsim.common.materials.registry import (
+    AmbiguousMaterialNameError,
+    MaterialSource,
+    find_material_card,
+)
 
 
 class MaterialResolutionError(ValueError):
@@ -364,6 +368,8 @@ def resolve_material_snapshot(
         card, source = find_material_card(material_name, project_material_cards)
     except KeyError as error:
         raise MaterialNotFoundError(error.args[0]) from error
+    except AmbiguousMaterialNameError as error:
+        raise MaterialResolutionError(str(error)) from error
     if not isinstance(card, MaterialCard):
         raise MaterialModelError(
             f"Material {material_name!r} resolves to {type(card).__name__}, "

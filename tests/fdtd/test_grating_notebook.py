@@ -162,7 +162,8 @@ def test_grating_notebook_launches_guided_mode_and_captures_fiber_fields(tmp_pat
     # Extending the oxide domain alone does not create a silicon substrate.
     # Check the generated material volume, including its physical interface.
     substrate = document["geometry"]["layers"]["substrate"]
-    assert substrate["material"] == "si"
+    # The PDK declares ``si``; it resolves to the built-in ``Si`` card.
+    assert substrate["material"] == "Si"
     mesh = meshio.read(artifacts.mesh_path)
     tags = mesh.cell_data_dict["gmsh:physical"]["tetra"]
     substrate_cells = mesh.cells_dict["tetra"][tags == substrate["phys_group"]]

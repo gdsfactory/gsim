@@ -12,6 +12,7 @@ from pdk_schema import MaterialCard
 from shapely import box
 
 from gsim.common.materials import (
+    AmbiguousMaterialNameError,
     MaterialResolutionError,
     canonical_material_name,
     get_project_material_cards,
@@ -27,6 +28,7 @@ from gsim.common.pdk.models import (
 from gsim.common.pdk.models import ResolvedPort as ResolvedPort
 from gsim.common.pdk.models import UnsupportedPortError as UnsupportedPortError
 from gsim.common.pdk.ports import _resolved_ports
+from gsim.common.pdk.wafer import with_wafer_films
 from gsim.common.polygon import fuse_polygons
 
 
@@ -249,6 +251,13 @@ def resolve_passive_pcell(
     sections identify physical bands; ambiguous bands require an explicit map.
     Existing direct matches and explicit selections keep their precedence.
 
+    Levels declared on the PDK's wafer layer (``LAYER.WAFER`` in gdsfactory,
+    typically substrate, buried oxide and cladding) are blanket films: they
+    cover the whole component, or the requested XY bounds, without any polygon
+    on that layer. ``resolved.layer_stack`` is a copy that marks them with
+    ``background=True``; the PDK's own stack is not modified. Material names
+    that differ from a card only by letter case resolve to that card.
+
     Optional axis bounds omit external films and footprints before material
     lookup. Blanket films fill the requested XY bounds, retaining their exclusion
     masks. Intersecting layers retain their original extrusion profiles; the
@@ -257,7 +266,9 @@ def resolve_passive_pcell(
     """
     pdk_object, pdk_or_module = _resolve_pdk(pdk)
     resolved_component = _resolve_component(pdk_object, component, settings)
-    layer_stack = _resolve_layer_stack(pdk_object)
+    # Levels on the wafer layer fill the chip. The marked copy keeps the PDK's
+    # own stack unchanged.
+    layer_stack = with_wafer_films(_resolve_layer_stack(pdk_object), pdk_object)
     try:
         derived_component = layer_stack.get_component_with_derived_layers(
             resolved_component
@@ -271,16 +282,19 @@ def resolve_passive_pcell(
         resolved_component, layer_stack, z_bounds, x_bounds, y_bounds, clipped_layers
     )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
-    layers = {
-        key: replace(
-            layer,
-            material=canonical_material_name(
-                layer.material,
-                pdk_or_module if pdk_or_module is not None else pdk_object,
-            ),
-        )
-        for key, layer in layers.items()
-    }
+    try:
+        layers = {
+            key: replace(
+                layer,
+                material=canonical_material_name(
+                    layer.material,
+                    pdk_or_module if pdk_or_module is not None else pdk_object,
+                ),
+            )
+            for key, layer in layers.items()
+        }
+    except AmbiguousMaterialNameError as error:
+        raise LayerResolutionError(f"Could not resolve a material: {error}") from error
     materials = {}
     for material_name in dict.fromkeys(layer.material for layer in layers.values()):
         try:

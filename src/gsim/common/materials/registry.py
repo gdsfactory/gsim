@@ -27,23 +27,102 @@ def _project_materials(pdk: Any | None) -> tuple[Any, Mapping[str, MaterialCard]
     return module, cards or getattr(module, "MATERIAL_CARDS", None) or {}
 
 
-def canonical_material_name(material_name: str, pdk: Any | None = None) -> str:
-    """Resolve declared PDK aliases and the built-in air alias, without case folding.
+class AmbiguousMaterialNameError(ValueError):
+    """A material name matches several cards that differ only by letter case."""
 
-    An exact project card takes precedence over aliases. Distinct
-    project names such as ``Air`` and ``air`` therefore remain distinct.
-    """
-    module, cards = _project_materials(pdk)
-    aliases = get_project_material_aliases(module)
+
+def _follow_aliases(
+    material_name: str,
+    cards: Mapping[str, MaterialCard],
+    aliases: Mapping[str, str],
+) -> str:
+    """Follow declared aliases until an exact project card or a plain name."""
     seen = set()
     while material_name not in cards and material_name in aliases:
         if material_name in seen:
             raise ValueError(f"Material alias cycle at {material_name!r}")
         seen.add(material_name)
         material_name = aliases[material_name]
+    return material_name
+
+
+def _same_card(first: MaterialCard, second: MaterialCard) -> bool:
+    """Return whether two cards differ at most in their name."""
+    try:
+        first_data = first.model_dump(exclude={"name"})
+        second_data = second.model_dump(exclude={"name"})
+    except (AttributeError, TypeError, ValueError):
+        return False  # Not comparable, so treat the cards as distinct.
+    return first_data == second_data
+
+
+def _pick_unique(
+    material_name: str, matches: Mapping[str, MaterialCard | None]
+) -> str | None:
+    """Pick the single case-insensitive match, or raise when it is ambiguous.
+
+    *matches* maps each candidate name to its card (``None`` if unresolved).
+    Several candidates are accepted only when they carry the same card, for
+    example the built-in ``Air`` and ``air`` entries.
+    """
+    if len(matches) <= 1:
+        return next(iter(matches), None)
+    first, *others = matches.values()
+    if first is not None and all(
+        card is not None and _same_card(first, card) for card in others
+    ):
+        return next(iter(matches))
+    raise AmbiguousMaterialNameError(
+        f"Material name {material_name!r} matches several cards that differ only "
+        f"by letter case: {sorted(matches)}. Use the exact card name."
+    )
+
+
+def _case_insensitive_name(
+    material_name: str,
+    cards: Mapping[str, MaterialCard],
+    aliases: Mapping[str, str],
+) -> str | None:
+    """Return the project or built-in name equal to *material_name* ignoring case.
+
+    Project cards and PDK aliases are searched before the built-in cards.
+    """
+    folded = material_name.casefold()
+    project: dict[str, MaterialCard | None] = {}
+    for key in (*cards, *aliases):
+        if key.casefold() == folded:
+            target = _follow_aliases(key, cards, aliases)
+            project[target] = cards.get(target)
+    match = _pick_unique(material_name, project)
+    if match is not None:
+        return match
+    builtin = {
+        name: card
+        for name, card in GSIM_MATERIAL_CARDS.items()
+        if name.casefold() == folded
+    }
+    return _pick_unique(material_name, builtin)
+
+
+def canonical_material_name(material_name: str, pdk: Any | None = None) -> str:
+    """Resolve declared PDK aliases, the built-in air alias and letter case.
+
+    An exact project card takes precedence over aliases, and any exact name
+    takes precedence over a case-insensitive one. Distinct project names such
+    as ``Air`` and ``air`` therefore remain distinct. A name with no exact
+    match is resolved to the unique project card, PDK alias or built-in card
+    that equals it ignoring letter case (``si`` -> ``Si``). Several such
+    matches that carry different cards raise ``AmbiguousMaterialNameError``.
+    """
+    module, cards = _project_materials(pdk)
+    aliases = get_project_material_aliases(module)
+    material_name = _follow_aliases(material_name, cards, aliases)
     if material_name == "air" and material_name not in cards:
         return "Air"
-    return material_name
+    if material_name in cards or material_name in GSIM_MATERIAL_CARDS:
+        return material_name
+    match = _case_insensitive_name(material_name, cards, aliases)
+    return material_name if match is None else match
 
 
 def get_project_material_aliases(pdk: Any | None = None) -> Mapping[str, str]:
@@ -97,7 +176,12 @@ def find_material_card(
     material_name: str,
     project_material_cards: Mapping[str, MaterialCard] | None = None,
 ) -> tuple[MaterialCard, MaterialSource]:
-    """Find a project card first, then a built-in fallback card."""
+    """Find a project card first, then a built-in fallback card.
+
+    An exact name wins. Otherwise the unique card whose name equals it
+    ignoring letter case is used, so ``si`` finds ``Si``. Several cards that
+    differ only by case raise ``AmbiguousMaterialNameError``.
+    """
     cards = (
         get_project_material_cards()
         if project_material_cards is None
@@ -111,6 +195,11 @@ def find_material_card(
         return cards["Air"], "project"
     if material_name in GSIM_MATERIAL_CARDS:
         return GSIM_MATERIAL_CARDS[material_name], "gsim"
+    match = _case_insensitive_name(material_name, cards, {})
+    if match is not None:
+        if match in cards:
+            return cards[match], "project"
+        return GSIM_MATERIAL_CARDS[match], "gsim"
     available = sorted(set(cards) | set(GSIM_MATERIAL_CARDS))
     raise KeyError(
         f"No MaterialCard found for {material_name!r}. Available cards: {available}. "
@@ -129,6 +218,7 @@ def get_material_card(
 
 __all__ = [
     "GSIM_MATERIAL_CARDS",
+    "AmbiguousMaterialNameError",
     "MaterialSource",
     "canonical_material_name",
     "find_material_card",

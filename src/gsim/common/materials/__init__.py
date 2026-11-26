@@ -7,6 +7,7 @@ from gsim.common.materials.lithium_niobate import (
 )
 from gsim.common.materials.registry import (
     GSIM_MATERIAL_CARDS,
+    AmbiguousMaterialNameError,
     canonical_material_name,
     find_material_card,
     get_material_card,
@@ -36,6 +37,7 @@ __all__ = [
     "SIO2_MALITSON",
     "SI_LI_293K",
     "SI_SALZBERG",
+    "AmbiguousMaterialNameError",
     "MaterialModelError",
     "MaterialNotFoundError",
     "MaterialResolutionError",

@@ -201,7 +201,11 @@ def test_material_override_participates_in_gpdk_resolution() -> None:
 
     resolved = simulation.geometry(gf.gpdk.PDK.get_component("mmi1x2"))
 
-    assert resolved.materials["si"].refractive_index == 3.47
+    # The override named ``si`` replaces the card the PDK's ``si`` resolves to.
+    assert resolved.materials["Si"].refractive_index == 3.47
+    assert "si" not in resolved.materials
+    silica = resolved.materials["SiO2"].refractive_index
+    assert silica == pytest.approx(1.444, abs=1e-3)
 
 
 def test_concerns_batch_validate_without_partial_updates() -> None:
