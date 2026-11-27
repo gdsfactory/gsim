@@ -1,0 +1,206 @@
+{
+  "Boundaries": {
+    "Absorbing": {
+      "Attributes": [
+        11
+      ],
+      "Order": 2
+    },
+    "Conductivity": [],
+    "LumpedPort": [
+      {
+        "Active": true,
+        "C": 0.0,
+        "Cs": 0.0,
+        "Elements": [
+          {
+            "Attributes": [
+              4
+            ],
+            "Direction": "+Y"
+          },
+          {
+            "Attributes": [
+              5
+            ],
+            "Direction": "-Y"
+          }
+        ],
+        "Excitation": 1,
+        "IncludeInSynthesis": true,
+        "Index": 1,
+        "L": 0.0,
+        "Ls": 0.0,
+        "R": 50,
+        "Rs": 0.0
+      },
+      {
+        "Active": true,
+        "C": 0.0,
+        "Cs": 0.0,
+        "Elements": [
+          {
+            "Attributes": [
+              6
+            ],
+            "Direction": "-Y"
+          },
+          {
+            "Attributes": [
+              7
+            ],
+            "Direction": "+Y"
+          }
+        ],
+        "Excitation": false,
+        "IncludeInSynthesis": true,
+        "Index": 2,
+        "L": 0.0,
+        "Ls": 0.0,
+        "R": 50,
+        "Rs": 0.0
+      }
+    ],
+    "WavePort": []
+  },
+  "Domains": {
+    "Materials": [
+      {
+        "Attributes": [
+          2
+        ],
+        "Conductivity": 0.0,
+        "LondonDepth": 0.0,
+        "LossTan": 0.0,
+        "Permeability": 1.0,
+        "Permittivity": 4.1
+      },
+      {
+        "Attributes": [
+          3
+        ],
+        "Conductivity": 0.0,
+        "LondonDepth": 0.0,
+        "LossTan": 0.0,
+        "Permeability": 1.0,
+        "Permittivity": 1.0
+      },
+      {
+        "Attributes": [
+          1
+        ],
+        "Conductivity": 37700000.0,
+        "LondonDepth": 0.0,
+        "LossTan": 0.0,
+        "Permeability": 1.0,
+        "Permittivity": 1.0
+      }
+    ],
+    "Postprocessing": {
+      "Energy": [],
+      "Probe": []
+    }
+  },
+  "Model": {
+    "AddInterfaceBoundaryElements": true,
+    "CleanUnusedElements": true,
+    "CrackDisplacementFactor": 1e-12,
+    "ExportPrerefinedMesh": false,
+    "L0": 1e-06,
+    "MakeHexahedral": false,
+    "MakeSimplex": false,
+    "Mesh": "palace.msh",
+    "RefineCrackElements": true,
+    "Refinement": {
+      "MaxIts": 0,
+      "MaxNCLevels": 1,
+      "MaxSize": 0,
+      "MaximumImbalance": 1.1,
+      "Nonconformal": true,
+      "SaveAdaptIterations": true,
+      "SaveAdaptMesh": false,
+      "SerialUniformLevels": 0,
+      "Tol": 0.01,
+      "UniformLevels": 0,
+      "UpdateFraction": 0.7
+    },
+    "RemoveCurvature": false,
+    "ReorderElements": false,
+    "ReorientTetMesh": false
+  },
+  "Problem": {
+    "Output": "output/palace",
+    "OutputFormats": {
+      "GridFunction": false,
+      "Paraview": true
+    },
+    "Type": "Driven",
+    "Verbose": 3
+  },
+  "Solver": {
+    "Device": "CPU",
+    "Driven": {
+      "AdaptiveCircuitSynthesis": false,
+      "AdaptiveCircuitSynthesisDomainOrthogonalization": "Energy",
+      "AdaptiveConvergenceMemory": 2,
+      "AdaptiveGSOrthogonalization": "CGS2",
+      "AdaptiveMaxSamples": 20,
+      "AdaptiveTol": 0,
+      "Restart": 1,
+      "Samples": [
+        {
+          "Freq": [
+            6.719
+          ],
+          "SaveStep": 0,
+          "Type": "Point"
+        }
+      ]
+    },
+    "Linear": {
+      "AMGAggressiveCoarsening": false,
+      "AMSMaxIts": 2,
+      "AMSSingularOperator": false,
+      "AMSVectorInterpolation": false,
+      "ColumnOrdering": "Default",
+      "ComplexCoarseSolve": true,
+      "DivFreeMaxIts": 1000,
+      "DivFreeTol": 1e-12,
+      "DropSmallEntries": false,
+      "EstimatorMG": false,
+      "EstimatorMaxIts": 10000,
+      "EstimatorTol": 0.01,
+      "GSOrthogonalization": "MGS",
+      "InitialGuess": true,
+      "KSPType": "GMRES",
+      "LondonPCShift": 0.1,
+      "MGAuxiliarySmoother": true,
+      "MGCoarsenType": "Logarithmic",
+      "MGCycleIts": 1,
+      "MGMaxLevels": 100,
+      "MGSmoothChebyshev4th": true,
+      "MGSmoothEigScaleMax": 1.0,
+      "MGSmoothEigScaleMin": 0.0,
+      "MGSmoothIts": 1,
+      "MGSmoothOrder": 4,
+      "MGUseMesh": true,
+      "MaxIts": 400,
+      "MaxSize": 400,
+      "PCMatReal": false,
+      "PCMatShifted": false,
+      "PCSide": "Default",
+      "ReorderingReuse": true,
+      "STRUMPACKButterflyLevels": 1,
+      "STRUMPACKCompressionTol": 0.001,
+      "STRUMPACKCompressionType": "None",
+      "STRUMPACKLossyPrecision": 16,
+      "SuperLU3DCommunicator": false,
+      "Tol": 1e-08,
+      "Type": "MUMPS"
+    },
+    "Order": 2,
+    "PartialAssemblyOrder": 1,
+    "QuadratureOrderExtra": 0,
+    "QuadratureOrderJacobian": false
+  }
+}

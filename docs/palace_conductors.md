@@ -4,8 +4,10 @@ This page says what gsim writes into `config.json` for a metal layer, and when e
 What Palace does with a key once it reads it is described in Palace's own configuration reference, which this page does not
 reproduce. Statements that were not checked are marked *not verified*, and the list is repeated at the end.
 
-Every number below comes from the gpdk CPW line in the snippets on this page (coarse preset), from the gsim source, or from the
-tests named in the text. Nothing on this page was solved: the snippets stop at `write_config()`.
+Every number below comes from the gpdk CPW line in the snippets on this page (coarse preset), from the gsim source, from the tests named
+in the text, or from the stored solver results of the section [Surface model against meshed volume](#surface-model-against-meshed-volume).
+The snippets stop at `write_config()`. Only that section was solved: ten Palace runs on a 5 um thick line, not the 0.7 um `metal1`
+of the snippets.
 
 ## What gsim writes for a conductor
 
@@ -128,8 +130,9 @@ gsim's own comments and tests say this; Palace's release notes were not read:
 - Palace before 0.19 rejects the key and always cracks. `run_local()` therefore hands such a runtime a copy of the configuration without
   `Crack`, when it knows the version. `config.json` on disk keeps the key, so an upload or a later run on a newer Palace still has it.
   The local auto-downloaded runtime is Palace 0.18.0, see the [Palace guide](api/palace.md).
-- Which Palace the cloud runs is not given as a release number in these docs (the [Palace guide](api/palace.md) names a commit), so
-  this page does not say whether the cloud reads `Crack`. gsim sends `config.json` as written.
+- Which Palace the cloud runs is not given as a release number in these docs (the [Palace guide](api/palace.md) names a commit).
+  gsim sends `config.json` as written. The five surface runs of the [last section](#surface-model-against-meshed-volume) were accepted
+  by the cloud runtime with `Crack` set, and the resolved configuration of each keeps it.
 
 ## Wave ports and the conductor
 
@@ -196,8 +199,9 @@ Caveats:
 - The layer needs polygons on its GDS layer, and anything that looks for a conductor layer no longer sees it. The gap-type lumped port
   raises "requires a conductor layer" for it (`gsim/palace/ports/config.py`). Only the CPW ports above were tried.
 - Which other features read the layer type (nets, wave-port boundaries, current sources) was not checked here.
-- Only the config was written. Nothing was solved, so how Palace treats the conductive volume, and whether the coarse preset above resolves
-  the skin depth inside the metal (see the next section), is *not verified*.
+- For the line of this section only the config was written. The conductive volume was solved on a different line, 5 um thick (see the
+  [last section](#surface-model-against-meshed-volume)). Whether the coarse preset above resolves the skin depth inside the metal is
+  *not verified*.
 
 One other public-API attempt was made: redeclare `metal1` as a `"via"` layer. For the CPW above, `mesh()` then stops with
 `Mesh validation failed: No conductor surfaces in mesh`. That rules out the `"via"` classification, not the dielectric one.
@@ -235,8 +239,68 @@ Reading the table:
   2.6 um at 1 GHz (the table gives 2.59 um), and fits only from 5 GHz up
   ([CPW length sweep and de-embedding](nbs/palace_cpw_deembedding.md)).
 
-How large the error of the surface condition is for a given t / delta is not shown on this page. No comparison with a meshed-metal run
-is stored in the repository (the previous section only writes its config), so no number is given.
+### Surface model against meshed volume
+
+![Metal loss of the surface-impedance model divided by the meshed-volume model, against t / delta](assets/plots/conductor_loss_vs_skin_depth.png)
+
+The figure compares the two models on one gpdk coplanar line. The signal is 10 um wide, the gaps are 6 um and the grounds are 10 um
+wide. `metal1` is made 5 um thick (gpdk: 0.7 um) and keeps its aluminum, 3.77e7 S/m. The line has two 50 ohm CPW ports of 5 um
+length. Only port 1 is excited. The outer wall is absorbing.
+
+The frequency sets t / delta at that thickness. The values 0.5, 1, 2.4, 5 and 10 are 0.06719, 0.2688, 1.548, 6.719 and 26.88 GHz.
+Each point is one Palace driven solve at one frequency. The two models are:
+
+- **Surface.** gsim's default shell: `Boundaries.Conductivity` with `Thickness` 5 and `Crack` true.
+- **Volume.** `metal1` is classified as a dielectric, as in the previous section, so it is a meshed conductive volume. The mesh asks for
+  elements of about delta or smaller inside the metal. The measured mean edge in the metal is 0.15, 0.31, 0.74, 0.97 and 0.99 of delta
+  (field `metal_mean_edge_over_delta` in `nbs/data/conductors/jobs/manifest.json`).
+
+The absorbed fraction is `1 - |S11|^2 - |S21|^2` with port 1 excited: the part of the incident power that leaves through neither port.
+The table gives it for each run. The last column divides the surface value by the volume value. Both runs of a pair have the same line
+length, so this is also the ratio of the loss per mm that the figure plots.
+
+| t / delta | f (GHz) | Line (um) | Absorbed, surface | Absorbed, volume | Surface / volume |
+| --- | --- | --- | --- | --- | --- |
+| 0.5 | 0.06719 | 40 | 4.56e-4 | 1.04e-3 | 0.44 |
+| 1 | 0.2688 | 40 | 4.84e-4 | 1.05e-3 | 0.46 |
+| 2.4 | 1.548 | 40 | 6.18e-4 | 1.27e-3 | 0.49 |
+| 5 | 6.719 | 40 | 1.36e-3 | 2.11e-3 | 0.65 |
+| 10 | 26.88 | 20 | 1.49e-3 | 2.10e-3 | 0.71 |
+
+In these runs the surface model absorbs less than the volume model at every t / delta. At t / delta = 2.4 it gives 0.49 times the
+absorbed power of the volume model. At t / delta = 0.5 it gives 0.44 times and at t / delta = 10 it gives 0.71 times. The ratio rises
+with t / delta, but it is still 0.71 at 10. These are the values of `nbs/data/conductors/conductor_loss_vs_skin_depth.csv`, rounded to two digits.
+
+What the numbers do and do not say:
+
+- **The absorbed fraction is not only metal loss.** The PEC-sheet baseline runs were prepared but not run, so nothing is subtracted.
+  The oxide and the air have no loss in these jobs (`LossTan` 0, `Conductivity` 0 in the run's configuration). The rest of the absorbed
+  power is what the absorbing outer wall takes (radiation) plus solver error. Those terms are the same in both models only to the
+  extent that the two meshes agree, and they do not agree: the surface runs have 30,167 tetrahedra (20,225 at t / delta = 10), the volume
+  runs have 51,929 to 144,819 (447,085 at t / delta = 10). If the shared terms are positive and equal in a pair, the true ratio of
+  metal loss is further from 1 than the table shows. This was not measured.
+- **The t / delta = 10 pair is 20 um long, not 40 um.** The 40 um volume job at t / delta = 10 (about 0.87 million tetrahedra, from the
+  first build of the jobs) was stopped by the cloud for lack of memory. Both jobs at t / delta = 10 were rebuilt at 20 um. The ratio at
+  10 compares two runs of equal length. The loss per mm of that point is not on the same footing as the other four, because the
+  non-metal terms above do not scale with the length.
+- **One geometry, one thickness, one mesh sizing.** No mesh-convergence pair was run for either model. At t / delta = 5 and 10 the mean
+  edge in the metal is about one skin depth, so the volume model may be under-resolved there. This was not tested.
+- **Mesh and model are not separated.** The jobs that put the surface model on the volume's mesh sizing were prepared but not run. So the
+  table cannot say how much of the gap comes from the model and how much from the mesh.
+- **Thickness and `Crack`.** The Palace log of each surface run lists `h = 5.000e-06 m` for each conductivity boundary, so the runtime
+  read `Thickness`. The resolved configuration of the run keeps `"Crack": true`. What formula the runtime applies was not checked.
+
+The solves ran in the cloud on 30 MPI processes. The Palace log of all ten reports the changeset
+`295645f7590769a5f3a180dce14c21717c3f434a`. No release number is stored with the results. Palace reports 1.9 to 6.0 s of elapsed time
+for the surface runs and 3.2 to 41.9 s for the volume runs. The largest is the volume run at t / delta = 10, with 2,830,780 unknowns. These
+times leave out queue and upload time.
+
+The solver check of each run is stored as `validation.txt` next to its `port-S.csv`, with `palace.json`, `palace.log` and
+`config_resolved.json`. It comes from `validate_solution` (see [Validate Palace result evidence](palace-validation.md)). The `core`
+check passed for all ten: GMRES reached the tolerance of 1e-8 in 7 to 10 iterations. That says the linear solve converged. It does not
+say how large the discretization error is. The `estimator` check is `unknown`, as it is for a normal run. The exit status and OOM checks
+are `unknown` because the downloaded files do not record them. In the surface run at t / delta = 5, MUMPS ran out of workspace in the
+first factorization. Palace repeated it with a larger memory relaxation (40), and the solve then converged.
 
 ## Superconducting layers (London penetration depth)
 
@@ -407,12 +471,19 @@ sides, alpha would be about half. In the 3D runs the lowest mode was taken as th
 
 ## Not verified
 
-- Anything Palace does with these keys: no solver was run for this page. In particular what `Thickness` does on a cracked boundary, and
-  whether the cloud runtime reads `Crack`.
+- What Palace does with these keys, beyond the ten runs above. In particular what formula it applies with `Thickness` on a cracked
+  boundary. The runs show that the cloud runtime accepted `Crack` and read `Thickness`, not what it did with them.
+- How large the metal-loss error of the surface model is. The ratios above include the absorbed power that is not metal loss, because the
+  PEC-sheet baseline was not run. They come from one line, one thickness and one mesh sizing, and no mesh-convergence pair was run.
+- Whether the volume runs at t / delta = 5 and 10, with about one element edge per skin depth, are converged.
+- Whether the gap between the two models comes from the model or from the different meshes. The surface runs on the volume's mesh sizing
+  were not run.
+- The t / delta = 10 point was run on a 20 um line, not 40 um, so its loss per mm is not comparable with the other four.
+- The Palace release of the cloud runtime. The runs report a changeset, not a release number.
 - The claim that Palace 0.19 reads an interior `Conductivity` boundary as a thin film comes from gsim's code comments and tests.
 - The check that `set_material` is case-sensitive was made on the gpdk stack only.
-- The `"via"` re-declaration was tried on one CPW with lumped ports. The dielectric classification was tried on the same line only, and
-  only as far as `write_config()`.
+- The `"via"` re-declaration was tried on one CPW with lumped ports. The dielectric classification of the 0.7 um line was tried only as
+  far as `write_config()`.
 - That PEC is adequate for a phase, an impedance or a resonant frequency: the page gives the textbook reason to check, not a measurement.
 - The numbers in the line table were produced on one Windows machine with the coarse preset; the tetrahedron counts depend on the mesher.
 - Everything under [Superconducting layers](#superconducting-layers-london-penetration-depth) about Palace: that `Ls` is read in H per
