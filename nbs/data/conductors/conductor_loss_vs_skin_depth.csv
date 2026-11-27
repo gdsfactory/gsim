@@ -1,0 +1,6 @@
+t_over_delta_requested,t_over_delta,frequency_ghz,skin_depth_um,length_mm,baseline,absorbed_surface,absorbed_volume,absorbed_surface_matched,absorbed_pec,loss_per_mm_surface,loss_per_mm_volume,loss_per_mm_surface_matched,ratio_surface_over_volume,ratio_surface_matched_over_volume
+0.5,0.500003,0.06719,9.99993,0.04,none,0.000455882,0.00104092,,,0.011397,0.0260231,,0.437958,
+1,1.00008,0.2688,4.99959,0.04,none,0.000483908,0.00105296,,,0.0120977,0.026324,,0.45957,
+2.4,2.39997,1.548,2.08336,0.04,none,0.000617787,0.00127044,,,0.0154447,0.0317611,,0.486276,
+5,5.00003,6.719,0.999993,0.04,none,0.00136481,0.00211362,,,0.0341203,0.0528405,,0.645722,
+10,10.0008,26.88,0.499959,0.02,none,0.00148776,0.00209663,,,0.0743878,0.104831,,0.709595,

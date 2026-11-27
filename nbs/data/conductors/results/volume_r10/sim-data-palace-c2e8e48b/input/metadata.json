@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "solver": "palace",
+  "simulation": {
+    "problem_type": "Driven",
+    "field_order": 2,
+    "device": "CPU",
+    "linear_solver": {
+      "Type": "MUMPS",
+      "KSPType": "GMRES",
+      "Tol": 1e-08,
+      "MaxIts": 400,
+      "MGMaxLevels": 100,
+      "PCMatReal": false,
+      "ComplexCoarseSolve": true,
+      "EstimatorTol": 0.01
+    },
+    "refinement": {
+      "UniformLevels": 0,
+      "Tol": 0.01,
+      "MaxIts": 0
+    }
+  },
+  "mesh": {
+    "bbox": {
+      "xmin": -60.0000001,
+      "ymin": -71.0000001,
+      "zmin": -52.0000001,
+      "xmax": 60.0000001,
+      "ymax": 71.0000001,
+      "zmax": 59.5000001
+    },
+    "nodes": 73836,
+    "elements": 496839,
+    "element_type": 4,
+    "dimension": 3,
+    "geometry_orders": [
+      1
+    ],
+    "elements_by_type": {
+      "Line 2": 1612,
+      "Triangle 3": 48094,
+      "Tetrahedron 4": 447085,
+      "Point": 48
+    },
+    "tetrahedra": 447085,
+    "topology": {
+      "edges": 521070,
+      "triangular_faces": 894320
+    },
+    "field_dofs": {
+      "estimated_field_dofs": 2830780,
+      "field_order": 2,
+      "problem_type": "Driven",
+      "method": "tetrahedral_nd_topology_v1",
+      "scope": "before_palace_preprocessing"
+    },
+    "kappa": {
+      "max": 18.166883935817825,
+      "worst_element_tag": 494036,
+      "singular_elements": 0,
+      "sample_location": "tetrahedron center"
+    },
+    "quality": {
+      "min": 0.142,
+      "max": 1.0,
+      "mean": 0.733
+    },
+    "sicn": {
+      "min": 0.139,
+      "mean": 0.762,
+      "invalid": 0
+    },
+    "edge_length": {
+      "min": 0.204,
+      "max": 50.671
+    },
+    "groups": {
+      "volumes": [
+        {
+          "name": "metal1",
+          "tag": 1,
+          "elements": 268193,
+          "edge_length": {
+            "min": 0.20418275732034474,
+            "max": 0.865372567748451
+          }
+        },
+        {
+          "name": "sio2",
+          "tag": 2,
+          "elements": 150442,
+          "edge_length": {
+            "min": 0.20418275732034474,
+            "max": 5.758952622667782
+          }
+        },
+        {
+          "name": "air",
+          "tag": 3,
+          "elements": 28450,
+          "edge_length": {
+            "min": 0.20602108661265273,
+            "max": 50.670955210016835
+          }
+        }
+      ],
+      "surfaces": [
+        {
+          "name": "P1_E0",
+          "tag": 4,
+          "elements": 572,
+          "edge_length": {
+            "min": 0.2425184083936896,
+            "max": 0.5434714818809516
+          }
+        },
+        {
+          "name": "P1_E1",
+          "tag": 5,
+          "elements": 574,
+          "edge_length": {
+            "min": 0.22641639854150244,
+            "max": 0.5042325041113405
+          }
+        },
+        {
+          "name": "P2_E0",
+          "tag": 6,
+          "elements": 572,
+          "edge_length": {
+            "min": 0.24251840839368916,
+            "max": 0.512752722830042
+          }
+        },
+        {
+          "name": "P2_E1",
+          "tag": 7,
+          "elements": 572,
+          "edge_length": {
+            "min": 0.23305554025794428,
+            "max": 0.512641540309802
+          }
+        },
+        {
+          "name": "air__metal1",
+          "tag": 8,
+          "elements": 9744,
+          "edge_length": {
+            "min": 0.21115484943655513,
+            "max": 0.5221080542985246
+          }
+        },
+        {
+          "name": "metal1__sio2",
+          "tag": 9,
+          "elements": 30492,
+          "edge_length": {
+            "min": 0.20418275732034474,
+            "max": 0.546185250461288
+          }
+        },
+        {
+          "name": "air__sio2",
+          "tag": 10,
+          "elements": 5268,
+          "edge_length": {
+            "min": 0.20602108661265273,
+            "max": 5.758952622667782
+          }
+        },
+        {
+          "name": "air__None",
+          "tag": 11,
+          "elements": 300,
+          "edge_length": {
+            "min": 19.150200815442524,
+            "max": 41.116642752323585
+          }
+        }
+      ]
+    },
+    "versions": {
+      "gsim": "0.10.0",
+      "gmsh": "4.15.2"
+    },
+    "gmsh_options": {
+      "General.NumThreads": 1.0,
+      "Mesh.MaxNumThreads1D": 1.0,
+      "Mesh.MaxNumThreads2D": 1.0,
+      "Mesh.MaxNumThreads3D": 1.0,
+      "Mesh.Algorithm": 5.0,
+      "Mesh.Algorithm3D": 1.0,
+      "Mesh.Reproducible": 0.0,
+      "Mesh.RandomSeed": 1.0,
+      "Mesh.RandomFactor": 1e-09,
+      "Mesh.MeshSizeMin": 0.0,
+      "Mesh.MeshSizeMax": 1e+22,
+      "Mesh.MeshSizeFactor": 1.0,
+      "Mesh.MeshSizeFromPoints": 0.0,
+      "Mesh.MeshSizeFromCurvature": 0.0,
+      "Mesh.MeshSizeExtendFromBoundary": 0.0,
+      "Mesh.ElementOrder": 1.0,
+      "Mesh.SecondOrderLinear": 0.0,
+      "Mesh.Optimize": 1.0
+    },
+    "mesh_hash": "sha256:d87e6c0ffd6e136bafa8309f1a2e6b8999252a339ca4d157103ddbdacfdf3035"
+  }
+}

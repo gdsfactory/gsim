@@ -1,0 +1,8 @@
+gsim validate_solution(palace.log, metadata=palace.json)
+core: passed
+  line 550: GMRES solver converged in 8 iterations (avg. reduction factor: 7.878e-02)
+estimator: unknown
+exit_status: unknown
+oom: unknown
+solver revision (GitTag): 295645f7590769a5f3a180dce14c21717c3f434a
+warnings: []

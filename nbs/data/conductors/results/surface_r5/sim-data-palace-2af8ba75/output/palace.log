@@ -1,0 +1,766 @@
+>> /usr/bin/mpirun -n 30 --use-hwthread-cpus --bind-to none --map-by slot /opt/palace/bin/palace-x86_64.bin config.json
+
+_____________     _______
+_____   __   \____ __   /____ ____________
+____   /_/  /  __ ` /  /  __ ` /  ___/  _ \
+___   _____/  /_/  /  /  /_/  /  /__/  ___/
+  /__/     \___,__/__/\___,__/\_____\_____/
+
+Git changeset ID: 295645f7590769a5f3a180dce14c21717c3f434a
+Running with 30 MPI processes, 1 OpenMP thread
+Device configuration: omp,cpu
+Memory configuration: host-std
+libCEED backend: /cpu/self/xsmm/blocked
+
+Added 2164 duplicate vertices for interior boundaries in the mesh
+Added 4316 duplicate boundary elements for interior boundaries in the mesh
+
+Characteristic length and time scales:
+ Lc = 1.420e-04 m, tc = 4.737e-04 ns
+Finished partitioning mesh into 30 subdomains
+
+Mesh curvature order: 1
+Mesh bounding box:
+ (Xmin, Ymin, Zmin) = (-7.000e-05, -7.100e-05, -5.200e-05) m
+ (Xmax, Ymax, Zmax) = (+7.000e-05, +7.100e-05, +5.950e-05) m
+
+Parallel Mesh Stats:
+
+                minimum     average     maximum       total
+ vertices           156         250         395        7519
+ edges             1130        1405        1783       42171
+ faces             1977        2160        2401       64826
+ elements           982        1005        1035       30167
+ neighbors            1           9          19
+
+            minimum     maximum
+ h       0.00405993     0.26354
+ kappa      1.02852     12.4359
+
+Estimated current per-rank memory usage is: Min. 47.6M, Max. 68.8M, Avg. 49.3M, Total 1.4G
+Estimated current per-node memory usage is: Min. 1.4G, Max. 1.4G, Avg. 1.4G, Total 1.4G
+
+Configuring Robin absorbing BC (order 2) at attributes:
+ 10
+
+Configuring Robin finite conductivity BC at attributes:
+ 3: σ = 3.770e+07 S/m, h = 5.000e-06 m, n = (+0.0,-0.0,-1.0)
+ 4: σ = 3.770e+07 S/m, h = 5.000e-06 m, n = (-0.0,+1.0,-0.0)
+
+Configuring Robin impedance BC for lumped ports at attributes:
+ 5: Rs = 8.333e+01 Ω/sq, n = (+0.0,-0.0,+1.0)
+ 6: Rs = 8.333e+01 Ω/sq, n = (+0.0,+0.0,+1.0)
+ 7: Rs = 8.333e+01 Ω/sq, n = (-0.0,-0.0,+1.0)
+ 8: Rs = 8.333e+01 Ω/sq, n = (-0.0,-0.0,+1.0)
+
+Configuring lumped port circuit properties:
+ Index = 1: R = 5.000e+01 Ω
+ Index = 2: R = 5.000e+01 Ω
+
+Configuring lumped port excitation source term at attributes:
+ 5: Index = 1
+ 6: Index = 1
+
+Computing frequency response for:
+Excitation with index 1 has contributions from:
+ Lumped port  1
+
+Assembling system matrices, number of global unknowns:
+ H1 (p = 2): 49690, ND (p = 2): 213994, RT (p = 2): 284979
+ Operator assembly level: Partial
+ Mesh geometries:
+  Tetrahedron: P = 20, Q = 14 (quadrature order = 4)
+
+Assembling multigrid hierarchy:
+ Level 0 (p = 1): 42171 unknowns
+ Level 1 (p = 2): 213994 unknowns
+ Level 0 (auxiliary) (p = 1): 7519 unknowns
+ Level 1 (auxiliary) (p = 2): 49690 unknowns
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   1       84342
+      executing #MPI =     30 and #OMP =      1
+
+ =================================================
+ MUMPS compiled with option -DGEMMT_AVAILABLE
+ MUMPS compiled with option -Dmetis
+ MUMPS compiled with option -Dparmetis
+ MUMPS compiled with option -Dpord
+ This MUMPS version includes code for mixed precision BLR including memory accessors during solve
+ =================================================
+L D L^T Solver for general symmetric matrices
+Type of parallelism: Working host
+
+ ****** ANALYSIS STEP ********
+
+ ** Maximum transversal (ICNTL(6)) not allowed because matrix is distributed
+ Processing a graph of size:     84342 with       2364174 edges
+ Ordering based on METIS
+ ELAPSED TIME SPENT IN METIS reordering  =      0.4342
+ SYMBOLIC based on column counts
+ ELAPSED TIME IN symbolic factorization  =      0.0247
+ A root of estimated size         1370  has been selected for Scalapack.
+
+Leaving analysis phase with  ...
+ INFOG(1)                                       =               0
+ INFOG(2)                                       =               0
+ -- (20) Number of entries in factors (estim.)  =        17634965
+ --  (3) Real space for factors    (estimated)  =        19806577
+ --  (4) Integer space for factors (estimated)  =          880771
+ --  (5) Maximum frontal size      (estimated)  =            1712
+ --  (6) Number of nodes in the tree            =            3333
+ -- (32) Type of analysis effectively used      =               1
+ --  (7) Ordering option effectively used       =               5
+ ICNTL (6) Maximum transversal option           =               0
+ ICNTL (7) Pivot order option                   =               7
+ ICNTL(12) Ordering symmetric indef. matrices   =               1
+ ICNTL(13) Parallelism/splitting of root node   =               0
+ ICNTL(14) Percentage of memory relaxation      =              20
+ ICNTL(15) Analysis by block effectively used   =               0
+ ICNTL(18) Distributed input matrix (on if >0)  =               3
+ ICNTL(32) Forward elimination during facto.    =               0
+ ICNTL(35) BLR activation                       =               0
+ ICNTL(48) Tree based multithreading (effective)=               0
+ ICNTL(58) Symbolic factorization option        =               2
+ Number of level 2 nodes                        =              39
+ Number of split nodes                          =               1
+ RINFOG(1) Operations during elimination (estim)= 1.064D+10
+ Distributed matrix entry format (ICNTL(18))    =               3
+
+ MEMORY ESTIMATIONS ...
+ Estimations with standard Full-Rank (FR) factorization:
+    Maximum estim. space in Mbytes, IC facto.    (INFOG(16)):             174
+    Total space in MBytes, IC factorization      (INFOG(17)):            5046
+    Maximum estim. space in Mbytes, OOC facto.   (INFOG(26)):             170
+    Total space in MBytes,  OOC factorization    (INFOG(27)):            4968
+
+ Elapsed time in analysis driver=       0.4891
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   2       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+****** FACTORIZATION STEP ********
+
+ GLOBAL STATISTICS PRIOR NUMERICAL FACTORIZATION ...
+ Number of working processes                =              30
+ ICNTL(22) Out-of-core option               =               0
+ ICNTL(35) BLR activation (eff. choice)     =               0
+ ICNTL(37) BLR CB compression (eff. choice) =               0
+ ICNTL(40) Mixed/adaptive precision BLR     =               0
+ ICNTL(49) Compact workarray S (end facto.) =               0
+ ICNTL(56) Effective value during facto.    =               0
+ ICNTL(14) Memory relaxation                =              20
+ INFOG(3) Real space for factors (estimated)=        19806577
+ INFOG(4) Integer space for factors (estim.)=          880771
+ Maximum frontal size (estimated)           =            1712
+ Number of nodes in the tree                =            3333
+ ICNTL(23) Memory allowed (value on host)   =               0
+           Sum over all procs               =               0
+ Memory provided by user, sum of LWK_USER   =               0
+ Effective threshold for pivoting, CNTL(1)  =      0.1000D-01
+
+ Statistics on the scaling phase
+ Elapsed time for scaling                   =      0.0043
+ Max difference from 1 after scaling the entries for ONE-NORM (option 7/8)   = 0.81D-01
+
+ Average Effective size of S     (based on INFO(39))=              1306695
+
+ Redistrib: total data local/sent           =           77414         2469858
+ Elapsed time to reformat/distribute matrix =      0.0039
+
+
+ Allocated buffers
+ ------------------
+ Size of reception buffer in bytes ...... =       937904
+ Size of async. emission buffer (bytes).. =      3760994
+ Small emission buffer (bytes) .......... =        20748
+ ** Memory allocated, max in Mbytes             (INFOG(18)):         174
+
+ ** Memory allocated, total in Mbytes           (INFOG(19)):        5047
+ ** Memory effectively used, max in  Mbytes     (INFOG(21)):         171
+ ** Memory effectively used, total in Mbytes    (INFOG(22)):        4975
+
+ Elapsed time to process root node                  =      0.0000
+
+ Elapsed time for (failed) factorization            =      0.0357
+
+Leaving factorization with ...
+ RINFOG (2) Operations in node assembly             = 2.517D+07
+ ------ (3) Operations in node elimination          = 6.679D+09
+ ICNTL  (8) Scaling effectively used                =               7
+ INFOG  (9) Real space for factors                  =        16860896
+ INFOG (10) Integer space for factors               =          836812
+ INFOG (11) Maximum front size                      =            1816
+ INFOG (29) Number of entries in factors            =        14787850
+ INFOG (12) Number of negative pivots               =           40999
+ INFOG (13) Number of delayed pivots                =            1226
+ Number of 2x2 pivots in type 1 nodes               =             464
+ Number of 2x2 pivots in type 2 nodes               =              12
+ RINFOG(19) Smallest pivot WITH perturbed pivots    = 3.227D-09
+ RINFOG(20) Smallest pivot WITHOUT perturbed pivots = 3.227D-09
+ RINFOG(21) Largest pivot in absolute value         = 3.706D+01
+ INFOG (24) Effective value of ICNTL(12)            =               1
+ INFOG (14) Number of memory compress               =              21
+
+ Elapsed time in factorization driver               =      0.0446
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -9
+ ** INFO(2)=           28497
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ ** ERROR RETURN ** FROM DMUMPS INFO(1)=   -1
+ ** INFO(2)=               8
+ On return from DMUMPS, INFOG(1)=              -9
+ On return from DMUMPS, INFOG(2)=           28497
+Re-running MUMPS factorization with memory relaxation 40
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   2       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+****** FACTORIZATION STEP ********
+
+ GLOBAL STATISTICS PRIOR NUMERICAL FACTORIZATION ...
+ Number of working processes                =              30
+ ICNTL(22) Out-of-core option               =               0
+ ICNTL(35) BLR activation (eff. choice)     =               0
+ ICNTL(37) BLR CB compression (eff. choice) =               0
+ ICNTL(40) Mixed/adaptive precision BLR     =               0
+ ICNTL(49) Compact workarray S (end facto.) =               0
+ ICNTL(56) Effective value during facto.    =               0
+ ICNTL(14) Memory relaxation                =              40
+ INFOG(3) Real space for factors (estimated)=        19806577
+ INFOG(4) Integer space for factors (estim.)=          880771
+ Maximum frontal size (estimated)           =            1712
+ Number of nodes in the tree                =            3333
+ ICNTL(23) Memory allowed (value on host)   =               0
+           Sum over all procs               =               0
+ Memory provided by user, sum of LWK_USER   =               0
+ Effective threshold for pivoting, CNTL(1)  =      0.1000D-01
+
+ Statistics on the scaling phase
+ Elapsed time for scaling                   =      0.0040
+ Max difference from 1 after scaling the entries for ONE-NORM (option 7/8)   = 0.81D-01
+
+ Average Effective size of S     (based on INFO(39))=              1524486
+
+ Redistrib: total data local/sent           =           77414         2469858
+ Elapsed time to reformat/distribute matrix =      0.0041
+
+
+ Allocated buffers
+ ------------------
+ Size of reception buffer in bytes ...... =      1023168
+ Size of async. emission buffer (bytes).. =      4102903
+ Small emission buffer (bytes) .......... =        20748
+ ** Memory allocated, max in Mbytes             (INFOG(18)):         176
+
+ ** Memory allocated, total in Mbytes           (INFOG(19)):        5099
+ ** Memory effectively used, max in  Mbytes     (INFOG(21)):         171
+ ** Memory effectively used, total in Mbytes    (INFOG(22)):        4976
+
+ Elapsed time to process root node                  =      0.0175
+
+ Elapsed time for factorization                     =      0.0530
+
+Leaving factorization with ...
+ RINFOG (2) Operations in node assembly             = 2.757D+07
+ ------ (3) Operations in node elimination          = 1.299D+10
+ ICNTL  (8) Scaling effectively used                =               7
+ INFOG  (9) Real space for factors                  =        21027683
+ INFOG (10) Integer space for factors               =          864641
+ INFOG (11) Maximum front size                      =            1816
+ INFOG (29) Number of entries in factors            =        18362285
+ INFOG (12) Number of negative pivots               =           41323
+ INFOG (13) Number of delayed pivots                =            1480
+ Number of 2x2 pivots in type 1 nodes               =             464
+ Number of 2x2 pivots in type 2 nodes               =              18
+ RINFOG(19) Smallest pivot WITH perturbed pivots    = 3.227D-09
+ RINFOG(20) Smallest pivot WITHOUT perturbed pivots = 3.227D-09
+ RINFOG(21) Largest pivot in absolute value         = 3.706D+01
+ INFOG (24) Effective value of ICNTL(12)            =               1
+ INFOG (14) Number of memory compress               =              12
+
+ Elapsed time in factorization driver               =      0.0621
+
+It 1/1: ω/2π = 6.719e+00 GHz (total elapsed time = 7.66e-01 s)
+
+  Residual norms for GMRES solve
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000274
+ Time in solution step (fwd/bwd)  =       0.003979
+  .. Time in forward (fwd) step   =          0.001663
+  .. Time in ScaLAPACK root       =          0.001061
+  .. Time in backward (bwd) step  =          0.001177
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000097
+
+ Elapsed time in solve driver=       0.0057
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000252
+ Time in solution step (fwd/bwd)  =       0.003711
+  .. Time in forward (fwd) step   =          0.001601
+  .. Time in ScaLAPACK root       =          0.000963
+  .. Time in backward (bwd) step  =          0.001136
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000088
+
+ Elapsed time in solve driver=       0.0051
+  0 (restart 0) KSP residual norm 2.053678e+01
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000260
+ Time in solution step (fwd/bwd)  =       0.003608
+  .. Time in forward (fwd) step   =          0.001595
+  .. Time in ScaLAPACK root       =          0.000938
+  .. Time in backward (bwd) step  =          0.001063
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000086
+
+ Elapsed time in solve driver=       0.0049
+  1 (restart 0) KSP residual norm 1.159840e+00
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000264
+ Time in solution step (fwd/bwd)  =       0.003638
+  .. Time in forward (fwd) step   =          0.001591
+  .. Time in ScaLAPACK root       =          0.000976
+  .. Time in backward (bwd) step  =          0.001060
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000084
+
+ Elapsed time in solve driver=       0.0049
+  2 (restart 0) KSP residual norm 1.012114e-01
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000250
+ Time in solution step (fwd/bwd)  =       0.003735
+  .. Time in forward (fwd) step   =          0.001579
+  .. Time in ScaLAPACK root       =          0.001113
+  .. Time in backward (bwd) step  =          0.001031
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000086
+
+ Elapsed time in solve driver=       0.0050
+  3 (restart 0) KSP residual norm 6.776420e-03
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000262
+ Time in solution step (fwd/bwd)  =       0.003647
+  .. Time in forward (fwd) step   =          0.001592
+  .. Time in ScaLAPACK root       =          0.000964
+  .. Time in backward (bwd) step  =          0.001082
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000088
+
+ Elapsed time in solve driver=       0.0049
+  4 (restart 0) KSP residual norm 5.813293e-04
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000263
+ Time in solution step (fwd/bwd)  =       0.003620
+  .. Time in forward (fwd) step   =          0.001621
+  .. Time in ScaLAPACK root       =          0.000952
+  .. Time in backward (bwd) step  =          0.001035
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000085
+
+ Elapsed time in solve driver=       0.0051
+  5 (restart 0) KSP residual norm 5.548375e-05
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000243
+ Time in solution step (fwd/bwd)  =       0.003615
+  .. Time in forward (fwd) step   =          0.001587
+  .. Time in ScaLAPACK root       =          0.000935
+  .. Time in backward (bwd) step  =          0.001084
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000087
+
+ Elapsed time in solve driver=       0.0050
+  6 (restart 0) KSP residual norm 5.543990e-06
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000252
+ Time in solution step (fwd/bwd)  =       0.003570
+  .. Time in forward (fwd) step   =          0.001591
+  .. Time in ScaLAPACK root       =          0.000945
+  .. Time in backward (bwd) step  =          0.001022
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000086
+
+ Elapsed time in solve driver=       0.0048
+  7 (restart 0) KSP residual norm 1.287309e-06
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000240
+ Time in solution step (fwd/bwd)  =       0.003586
+  .. Time in forward (fwd) step   =          0.001593
+  .. Time in ScaLAPACK root       =          0.000943
+  .. Time in backward (bwd) step  =          0.001040
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000086
+
+ Elapsed time in solve driver=       0.0048
+  8 (restart 0) KSP residual norm 3.233812e-07
+
+Entering DMUMPS 5.9.1 from C interface with JOB, N =   3       84342
+      executing #MPI =     30 and #OMP =      1
+
+
+
+ ****** SOLVE & CHECK STEP ********
+
+ GLOBAL STATISTICS PRIOR SOLVE PHASE ...........
+ Number of right-hand-sides                    =           1
+ Blocking factor for multiple rhs              =           1
+ ICNTL (9)                                     =           1
+  --- (10)                                     =           0
+  --- (11)                                     =           0
+  --- (20)                                     =          10
+  --- (21)                                     =           1
+  --- (30)                                     =           0
+  --- (35)                                     =           0
+  --- (48) (effective)                         =           0
+ ** Rank of processor needing largest memory in solve     :        23
+ ** Space in MBYTES used by this processor for solve      :        40
+ ** Avg. Space in MBYTES per working proc during solve    :        33
+
+ Leaving solve with ...
+ Time to build/scatter RHS        =       0.000246
+ Time in solution step (fwd/bwd)  =       0.003554
+  .. Time in forward (fwd) step   =          0.001598
+  .. Time in ScaLAPACK root       =          0.000928
+  .. Time in backward (bwd) step  =          0.001017
+ Time to gather solution(cent.sol)=       0.000000
+ Time for distributed solution    =       0.000084
+
+ Elapsed time in solve driver=       0.0048
+  9 (restart 0) KSP residual norm 6.597144e-08
+GMRES solver converged in 9 iterations (avg. reduction factor: 1.138e-01)
+ Sol. ||E|| = 2.079708e+01 (||RHS|| = 5.599957e-02)
+ Field energy E (1.435e-13 J) + H (1.116e-13 J) = 2.551e-13 J
+ S[1][1] = +6.755e-04-6.445e-04i, |S[1][1]| = -6.060e+01, arg(S[1][1]) = -4.366e+01
+ S[2][1] = +9.993e-01-1.147e-02i, |S[2][1]| = -5.935e-03, arg(S[2][1]) = -6.576e-01
+ Updating solution error estimates
+
+Entering DMUMPS 5.9.1 from C interface with JOB =  -2
+      executing #MPI =     30 and #OMP =      1
+
+Completed 0 iterations of adaptive mesh refinement (AMR):
+ Indicator norm = 9.608e-02, global unknowns = 213994
+ Max. iterations = 0, tol. = 1.000e-02
+
+Estimated peak per-rank memory usage is: Min. 102.4M, Max. 115.9M, Avg. 107.6M, Total 3.2G
+Estimated peak per-node memory usage is: Min. 3.2G, Max. 3.2G, Avg. 3.2G, Total 3.2G
+
+Elapsed Time Report (s)           Min.        Max.        Avg.
+==============================================================
+Initialization                   0.055       0.154       0.151
+  Mesh Preprocessing             0.089       0.189       0.093
+Operator Construction            0.022       0.026       0.025
+Linear Solve                     0.019       0.027       0.026
+  Setup                          0.761       0.764       0.762
+  Preconditioner                 0.262       0.283       0.265
+  Coarse Solve                   0.059       0.075       0.070
+Estimation                       0.003       0.005       0.004
+  Construction                   0.006       0.006       0.006
+  Solve                          0.054       0.054       0.054
+Postprocessing                   0.007       0.009       0.007
+Disk IO                          0.061       0.064       0.064
+--------------------------------------------------------------
+Total                            2.085       2.110       2.099
+
+Peak Memory                   Per-Node       Total   Total HWM
+==============================================================
+Initialization                   93.3M       93.3M       93.3M
+  Mesh Preprocessing            105.7M      105.7M      198.9M
+Operator Construction           378.7M      378.7M      577.7M
+Linear Solve                      2.3M        2.3M      580.0M
+  Setup                         998.8M      998.8M        1.5G
+  Preconditioner                  5.9M        5.9M        1.5G
+  Coarse Solve                   34.9M       34.9M        1.6G
+Estimation                       91.0M       91.0M        1.7G
+  Construction                  141.0M      141.0M        1.8G
+  Solve                          94.8M       94.8M        1.9G
+Postprocessing                   39.4M       39.4M        1.9G
+Disk IO                          26.2M       26.2M        2.0G
+--------------------------------------------------------------
+Total                             2.3G        2.3G        2.3G

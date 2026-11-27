@@ -1,0 +1,14 @@
+# Job folders hold meshes of up to ~50 MB; rebuild them with make_skin_depth_jobs.py.
+# jobs/manifest.json (sizes, frequencies, mesh hashes, job ids, runtimes) is kept.
+jobs/*/
+
+# Downloaded results: keep only the small files that state the answer and how it was got.
+# Meshes, field output and the other csv files stay on disk but are not tracked.
+results/**/*
+!results/**/
+!results/**/port-S.csv
+!results/**/palace.json
+!results/**/config_resolved.json
+!results/**/palace.log
+!results/**/validation.txt
+!results/**/metadata.json
