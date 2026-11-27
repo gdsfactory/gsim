@@ -1978,6 +1978,13 @@ FIELD_COMPONENTS = ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz")
 def _make_medium(mat_data):
     \"""Build a MEEP Medium from resolved material data.\"""
     eps = mat_data.get("epsilon_diag")
+    offdiag = mat_data.get("epsilon_offdiag")
+    anisotropic = len(set(eps)) > 1 if isinstance(eps, list) else False
+    if isinstance(eps, list) and len(eps) == 3 and (anisotropic or any(offdiag or [])):
+        kwargs = {"epsilon_diag": mp.Vector3(*eps)}
+        if any(offdiag or []):
+            kwargs["epsilon_offdiag"] = mp.Vector3(*offdiag)
+        return mp.Medium(**kwargs)
     if isinstance(eps, list):
         eps = eps[0]
     if eps is None:
