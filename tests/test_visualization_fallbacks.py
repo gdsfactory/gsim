@@ -29,6 +29,29 @@ def test_forced_offscreen_environment(monkeypatch, xvfb_failure):
     startup.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("platform", "display", "force", "expected"),
+    [
+        ("linux", None, None, True),
+        ("linux", ":0", None, False),
+        ("win32", None, None, False),
+        ("darwin", None, None, False),
+        ("win32", None, "1", True),
+        ("linux", ":0", "1", True),
+    ],
+)
+def test_is_headless_by_platform(monkeypatch, platform, display, force, expected):
+    """Only Linux without DISPLAY is headless; the env override still wins."""
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("GSIM_FORCE_OFFSCREEN", raising=False)
+    if display is not None:
+        monkeypatch.setenv("DISPLAY", display)
+    if force is not None:
+        monkeypatch.setenv("GSIM_FORCE_OFFSCREEN", force)
+    assert viz._is_headless() is expected
+
+
 def test_virtual_display_startup(monkeypatch):
     display = Mock()
     registered = []

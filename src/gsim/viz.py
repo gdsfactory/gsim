@@ -94,13 +94,16 @@ def interactive_mode() -> bool:
 def _is_headless() -> bool:
     """Return ``True`` when no usable X display is available.
 
+    Only Linux uses ``DISPLAY``; Windows and macOS never set it and have a
+    native window system, so they are not treated as headless.
+
     An explicit ``GSIM_FORCE_OFFSCREEN=1`` always forces off-screen
     rendering, which is useful in CI where a display may be present but X
     forwarding is undesirable.
     """
     if os.environ.get("GSIM_FORCE_OFFSCREEN") == "1":
         return True
-    return not os.environ.get("DISPLAY")
+    return sys.platform.startswith("linux") and not os.environ.get("DISPLAY")
 
 
 #: Virtual display started by this process, and the PID that owns it.
