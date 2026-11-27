@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from gsim.common.stack.materials import (
+    THERMAL_FIELDS,
     DispersionModel,
     MaterialProperties,
     ValidityRange,
@@ -77,6 +78,10 @@ def load_overlay(path: str | Path) -> dict[str, MaterialProperties]:
 
         if "material_axes" in entry:
             props_kwargs["material_axes"] = entry["material_axes"]
+
+        for key in THERMAL_FIELDS:
+            if entry.get(key) is not None:
+                props_kwargs[key] = float(entry[key])
 
         dispersion_models = []
         if "dispersion_models" in entry:
@@ -154,6 +159,7 @@ def _merge_material(
         "loss_tangent",
         "permeability",
         "material_axes",
+        *THERMAL_FIELDS,
     ):
         overlay_val = getattr(overlay, field_name)
         base_val = getattr(base, field_name)

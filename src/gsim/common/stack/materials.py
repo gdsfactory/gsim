@@ -25,13 +25,21 @@ Resolution priority:
     1. dispersion_models evaluated at target frequency (-> permittivity)
     2. PDK overlay (constant-eps)
     3. ``permittivity`` scalar or tensor (directly specified)
+
+Thermal properties:
+    ``thermal_conductivity`` (W/m/K), ``specific_heat`` (J/kg/K),
+    ``mass_density`` (kg/m^3) and ``dn_dT`` (1/K at 1550 nm) are optional
+    scalar fields read by the thermal solver through
+    :func:`thermal_properties`. The EM backends ignore them.
 """
 
 from __future__ import annotations
 
+import contextlib
 import math
 import warnings
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -60,6 +68,11 @@ _EDGE_RTOL = 1e-9
 # PDK ranges that are narrower than typical sweeps, and a warning there would
 # fire on every RF run; the result is still flagged ``within_validity=False``.
 _COVERAGE_WARNING_MAX_WAVELENGTH_UM = 100.0
+
+
+# Thermal properties carried by ``MaterialProperties``. They are read by the
+# thermal solver only; the EM backends (Palace, MEEP, femwell) ignore them.
+THERMAL_FIELDS = ("thermal_conductivity", "specific_heat", "mass_density", "dn_dT")
 
 
 class DispersionCoverageWarning(UserWarning):
@@ -454,7 +467,7 @@ class ResolvedMaterial(BaseModel):
 
 
 class MaterialProperties(BaseModel):
-    """EM properties for a material.
+    """EM and thermal properties for a material.
 
     Supports both legacy scalar properties and frequency-dependent dispersion
     models with validity ranges. Tensor fields (permittivity, conductivity,
@@ -469,6 +482,11 @@ class MaterialProperties(BaseModel):
     Resolution priority:
     1. dispersion_models evaluated at target frequency (-> permittivity)
         2. permittivity scalar or tensor (directly specified)
+
+    The optional thermal fields (``thermal_conductivity``,
+    ``specific_heat``, ``mass_density``, ``dn_dT``) are scalars in SI
+    units; see :func:`thermal_properties`. Electrical resistivity for Joule
+    heating is ``1 / conductivity``.
     """
 
     model_config = ConfigDict(validate_assignment=True, arbitrary_types_allowed=True)
@@ -495,6 +513,30 @@ class MaterialProperties(BaseModel):
         description="Frequency-dependent dispersion models with validity ranges.",
     )
 
+    thermal_conductivity: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Thermal conductivity k in W/m/K.",
+    )
+    specific_heat: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Specific heat capacity c_p in J/kg/K.",
+    )
+    mass_density: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Mass density rho in kg/m^3.",
+    )
+    dn_dT: float | None = Field(  # noqa: N815 - physics symbol
+        default=None,
+        allow_inf_nan=False,
+        description="Thermo-optic coefficient dn/dT in 1/K at 1550 nm.",
+    )
+
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary for YAML/JSON output."""
         d: dict[str, object] = {}
@@ -510,6 +552,10 @@ class MaterialProperties(BaseModel):
             d["material_axes"] = self.material_axes
         if self.dispersion_models:
             d["dispersion_models"] = [m.model_dump() for m in self.dispersion_models]
+        for key in THERMAL_FIELDS:
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
         return d
 
     def evaluate_at_wavelength(self, wavelength_um: float) -> ResolvedMaterial:
@@ -835,6 +881,10 @@ _SI_LI_293K_EPS, _SI_LI_293K_A = li_coefficients(293.0)
 MATERIALS_DB: dict[str, MaterialProperties] = {
     "aluminum": MaterialProperties(
         conductivity=3.77e7,
+        # Thermal: Incropera, Fundamentals of Heat and Mass Transfer, Table A.1.
+        thermal_conductivity=237.0,
+        specific_heat=903.0,
+        mass_density=2702.0,
         dispersion_models=[
             DispersionModel(
                 type="constant",
@@ -846,6 +896,10 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     ),
     "copper": MaterialProperties(
         conductivity=5.8e7,
+        # Thermal: Incropera, Fundamentals of Heat and Mass Transfer, Table A.1.
+        thermal_conductivity=401.0,
+        specific_heat=385.0,
+        mass_density=8933.0,
         dispersion_models=[
             DispersionModel(
                 type="constant",
@@ -857,6 +911,10 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     ),
     "tungsten": MaterialProperties(
         conductivity=1.82e7,
+        # Thermal: bulk handbook values (Incropera, Table A.1).
+        thermal_conductivity=174.0,
+        specific_heat=132.0,
+        mass_density=19300.0,
         dispersion_models=[
             DispersionModel(
                 type="constant",
@@ -868,6 +926,10 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     ),
     "gold": MaterialProperties(
         conductivity=4.1e7,
+        # Thermal: Incropera, Fundamentals of Heat and Mass Transfer, Table A.1.
+        thermal_conductivity=317.0,
+        specific_heat=129.0,
+        mass_density=19300.0,
         dispersion_models=[
             DispersionModel(
                 type="constant",
@@ -879,6 +941,11 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     ),
     "TiN": MaterialProperties(
         conductivity=5.0e6,
+        # Thermal: Jacques et al. heater model (Table 3, via Tidy3D). Thin
+        # films vary ~10-30 W/m/K; override with the foundry value.
+        thermal_conductivity=28.0,
+        specific_heat=598.0,
+        mass_density=5240.0,
         dispersion_models=[
             DispersionModel(
                 type="constant",
@@ -902,6 +969,14 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "SiO2": MaterialProperties(
         permittivity=4.1,
         loss_tangent=0.0,
+        # Thermal: Jacques/Tidy3D (fused silica 1.38 / 709 / 2203); deposited
+        # oxide is ~10 % lower (Lee & Cahill, J. Appl. Phys. 81, 2590 (1997)).
+        # dn/dT: deposited SiOx, Arbabi & Goddard, Opt. Lett. 38, 3878 (2013);
+        # fused silica is 8.45e-6 (Leviton & Frey, arXiv 0805.0091).
+        thermal_conductivity=1.38,
+        specific_heat=709.0,
+        mass_density=2203.0,
+        dn_dT=0.95e-5,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -936,6 +1011,13 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "Si3N4": MaterialProperties(
         permittivity=7.5,
         loss_tangent=0.001,
+        # Thermal: amorphous LPCVD film, low confidence (film k ~2-3 W/m/K,
+        # bulk ceramic 16-30); override with the foundry value.
+        # dn/dT: Arbabi & Goddard, Opt. Lett. 38, 3878 (2013).
+        thermal_conductivity=2.5,
+        specific_heat=700.0,
+        mass_density=3100.0,
+        dn_dT=2.45e-5,
         dispersion_models=[
             DispersionModel(
                 type="sellmeier",
@@ -969,6 +1051,10 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "air": MaterialProperties(
         permittivity=1.0,
         loss_tangent=0.0,
+        # Thermal: 300 K, 1 atm (Jacques et al., via Tidy3D).
+        thermal_conductivity=0.026,
+        specific_heat=1007.0,
+        mass_density=1.177,
     ),
     "vacuum": MaterialProperties(
         permittivity=1.0,
@@ -977,6 +1063,13 @@ MATERIALS_DB: dict[str, MaterialProperties] = {
     "silicon": MaterialProperties(
         permittivity=11.9,
         conductivity=2.0,
+        # Thermal: bulk Si (Incropera Table A.1; Jacques/Tidy3D). A 220 nm
+        # SOI film is ~90 W/m/K (Asheghi et al. 1998); override for thin films.
+        # dn/dT: Frey, Leviton & Madison, Proc. SPIE 6273 (2006), at 1.55 um.
+        thermal_conductivity=148.0,
+        specific_heat=711.0,
+        mass_density=2330.0,
+        dn_dT=1.86e-4,
         # Precedence = list order (first covering model wins). Li 1980 is
         # listed first: it covers the O-band (1.2-14 um, which the Salzberg &
         # Villa range 1.36-11 um does not) and is the reference already used
@@ -1362,6 +1455,159 @@ def resolve_stack_material(
     if overrides is None and get_material_properties(name) is None:
         return None
     return resolve_material_at_wavelength(name, wavelength_um, overrides=overrides)
+
+
+@dataclass(frozen=True)
+class ThermalProperties:
+    """Thermal and thermo-optic properties of one material, in SI units.
+
+    Attributes:
+        thermal_conductivity: k in W/m/K.
+        specific_heat: c_p in J/kg/K.
+        mass_density: rho in kg/m^3.
+        dn_dT: Thermo-optic coefficient in 1/K at 1550 nm.
+        electrical_conductivity: sigma in S/m (Joule heating), taken from
+            :attr:`MaterialProperties.conductivity`.
+    """
+
+    thermal_conductivity: float | None = None
+    specific_heat: float | None = None
+    mass_density: float | None = None
+    dn_dT: float | None = None  # noqa: N815 - physics symbol
+    electrical_conductivity: float | None = None
+
+
+_THERMAL_PROPERTY_NAMES = (*THERMAL_FIELDS, "electrical_conductivity")
+
+
+def _get_ci[T](mapping: Mapping[str, T] | None, name: str) -> T | None:
+    """Look *name* up in *mapping*, exact key first, then case-insensitively."""
+    if not mapping:
+        return None
+    if name in mapping:
+        return mapping[name]
+    name_lower = name.lower().strip()
+    for key, val in mapping.items():
+        if str(key).lower().strip() == name_lower:
+            return val
+    return None
+
+
+def _scalar_conductivity(
+    value: float | list[float] | None, label: str, *, required: bool
+) -> float | None:
+    """Return an isotropic conductivity as a scalar.
+
+    An anisotropic one has no scalar value: it is an error when the
+    caller needs the conductivity, and left out (``None``) otherwise.
+    """
+    if value is None or not isinstance(value, list):
+        return value
+    if len(set(value)) == 1:
+        return value[0]
+    if not required:
+        return None
+    msg = (
+        f"Material {label} has an anisotropic conductivity {value}; the "
+        "thermal solver needs a scalar electrical conductivity."
+    )
+    raise ValueError(msg)
+
+
+def thermal_properties(
+    material: str | MaterialProperties,
+    stack: LayerStack | None = None,
+    overrides: Mapping[str, MaterialProperties | Mapping[str, Any]] | None = None,
+    *,
+    required: Iterable[str] = (),
+) -> ThermalProperties:
+    """Resolve a material's thermal properties.
+
+    Each property is taken field by field from, highest priority first:
+    *overrides*, the stack's entry for the material, then the built-in
+    database. A stack entry that is no valid :class:`MaterialProperties`
+    record is skipped, as in :func:`resolve_stack_material`.
+
+    Args:
+        material: Material name, or a :class:`MaterialProperties` record
+            used as it stands.
+        stack: Layer stack whose ``materials`` entry for the name applies.
+        overrides: Per-run overrides by material name (case-insensitive),
+            as records or plain property mappings.
+        required: Field names of :class:`ThermalProperties` that must
+            resolve to a value.
+
+    Returns:
+        The resolved :class:`ThermalProperties`.
+
+    Raises:
+        ValueError: If the material is unknown, a required field is
+            unknown or unset, or the electrical conductivity is required
+            and anisotropic (an anisotropic one that is not required
+            resolves to ``None``).
+    """
+    required = tuple(required)
+    unknown = [f for f in required if f not in _THERMAL_PROPERTY_NAMES]
+    if unknown:
+        msg = (
+            f"Unknown thermal property name(s) {unknown}; "
+            f"expected any of {list(_THERMAL_PROPERTY_NAMES)}."
+        )
+        raise ValueError(msg)
+
+    # Lowest priority first; later sources overwrite set fields.
+    sources: list[MaterialProperties] = []
+    if isinstance(material, MaterialProperties):
+        label = "(given record)"
+        sources.append(material)
+    else:
+        label = f"'{material}'"
+        db_entry = get_material_properties(material)
+        if db_entry is not None:
+            sources.append(db_entry)
+        stack_entry = _get_ci(stack.materials if stack else None, material)
+        if isinstance(stack_entry, MaterialProperties):
+            sources.append(stack_entry)
+        elif stack_entry is not None:
+            with contextlib.suppress(ValidationError):
+                sources.append(MaterialProperties.model_validate(stack_entry))
+        override = _get_ci(overrides, material)
+        if override is not None:
+            sources.append(
+                override
+                if isinstance(override, MaterialProperties)
+                else MaterialProperties.model_validate(override)
+            )
+        if not sources:
+            msg = (
+                f"Material {label} is not in the overrides, the stack "
+                "materials or the built-in database."
+            )
+            raise ValueError(msg)
+
+    values: dict[str, float | list[float] | None] = dict.fromkeys(
+        _THERMAL_PROPERTY_NAMES
+    )
+    for src in sources:
+        for key in THERMAL_FIELDS:
+            if (value := getattr(src, key)) is not None:
+                values[key] = value
+        if src.conductivity is not None:
+            values["electrical_conductivity"] = src.conductivity
+    values["electrical_conductivity"] = _scalar_conductivity(
+        values["electrical_conductivity"],
+        label,
+        required="electrical_conductivity" in required,
+    )
+
+    missing = [f for f in required if values[f] is None]
+    if missing:
+        msg = (
+            f"Material {label} has no {', '.join(missing)}; set it in the "
+            "stack materials or pass it as an override."
+        )
+        raise ValueError(msg)
+    return ThermalProperties(**values)  # ty: ignore[invalid-argument-type]
 
 
 def should_enable_dispersion(

@@ -27,7 +27,7 @@ from pydantic import (
 )
 
 from gsim.common.carriers import MobilityModel
-from gsim.common.config import MutableModel
+from gsim.common.config import MutableModel, NamedModels
 from gsim.common.cross_section import parse_plane_spec
 from gsim.common.validation import AscendingInterval
 from gsim.palace.models.mesh import MeshGrading
@@ -364,56 +364,7 @@ class Interface(BaseModel):
         return self
 
 
-class _Named[T: BaseModel]:
-    """Insertion-ordered collection of models with a unique ``name``."""
-
-    _kind: str
-    _model: type[T]
-
-    def __init__(self, items: Iterable[T | Mapping[str, Any]] | None = None) -> None:
-        """Validate an optional initial list."""
-        self._items: dict[str, T] = {}
-        for item in items or []:
-            self._insert(self._model.model_validate(item))
-
-    def _insert(self, item: T) -> T:
-        """Store an item, requiring a unique name."""
-        name = item.name  # ty: ignore[unresolved-attribute]
-        if name in self._items:
-            raise ValueError(f"{self._kind} {name!r} already exists")
-        self._items[name] = item
-        return item
-
-    def remove(self, name: str) -> T:
-        """Remove and return one item by name."""
-        return self._items.pop(name)
-
-    def clear(self) -> None:
-        """Remove every item."""
-        self._items.clear()
-
-    def __getitem__(self, name: str) -> T:
-        """Return one item by name."""
-        return self._items[name]
-
-    def __contains__(self, name: object) -> bool:
-        """Whether an item of that name is declared."""
-        return name in self._items
-
-    def __iter__(self) -> Iterator[T]:
-        """Iterate over the items in insertion order."""
-        return iter(list(self._items.values()))
-
-    def __len__(self) -> int:
-        """Return the number of items."""
-        return len(self._items)
-
-    def __repr__(self) -> str:
-        """Show the items."""
-        return f"{type(self).__name__}({list(self._items.values())!r})"
-
-
-class Contacts(_Named[Contact]):
+class Contacts(NamedModels[Contact]):
     """The declared contacts, by name."""
 
     _kind = "contact"
@@ -426,7 +377,7 @@ class Contacts(_Named[Contact]):
         )
 
 
-class Interfaces(_Named[Interface]):
+class Interfaces(NamedModels[Interface]):
     """The declared interfaces between doped Regions, by name."""
 
     _kind = "interface"

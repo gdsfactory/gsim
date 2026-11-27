@@ -87,6 +87,9 @@ jobs:
       run: |
         uv sync --no-default-groups --group docs
         case "$NOTEBOOK" in
+          nbs/thermal_*.ipynb)
+            uv sync --no-default-groups --group docs --extra femwell
+            ;;
           nbs/palace_qpdk_*.ipynb)
             uv pip install qpdk==0.4.0
             ;;

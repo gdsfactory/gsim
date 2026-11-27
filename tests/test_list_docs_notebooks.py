@@ -38,6 +38,7 @@ EXPECTED_NOTEBOOKS = [
     "nbs/palace_magnetostatic.ipynb",
     "nbs/palace_cpw_via.ipynb",
     "nbs/palace_cpw_fields.ipynb",
+    "nbs/thermal_phase_shifter.ipynb",
     "nbs/palace_cpw_deembedding.ipynb",
     "nbs/palace_signal_integrity.ipynb",
     "nbs/palace_terminal_waveport.ipynb",
