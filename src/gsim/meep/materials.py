@@ -230,6 +230,22 @@ def _rotate_diagonal_tensor(
     return [rotated[0][1], rotated[0][2], rotated[1][2]]
 
 
+def _rotated_diagonal(
+    diag: list[float],
+    material_axes: list[list[float]],
+) -> list[float]:
+    """Diagonal components [T'00, T'11, T'22] of the rotated tensor R diag(d) R^T.
+
+    Args:
+        diag: Diagonal components [d1, d2, d3] in the material frame
+        material_axes: 3x3 rotation matrix (rows = new axis vectors)
+
+    Returns:
+        Diagonal components of the rotated tensor in the simulation frame
+    """
+    return [sum(material_axes[i][k] ** 2 * diag[k] for k in range(3)) for i in range(3)]
+
+
 def _resolved_to_material_data(
     resolved: ResolvedMaterial,
     wavelength_um: float,
@@ -324,9 +340,11 @@ def _resolved_to_material_data(
         and not _is_identity_axes(resolved.material_axes)
         and data.epsilon_diag is not None
     ):
+        principal = data.epsilon_diag
         data.epsilon_offdiag = _rotate_diagonal_tensor(
-            data.epsilon_diag, resolved.material_axes
+            principal, resolved.material_axes
         )
+        data.epsilon_diag = _rotated_diagonal(principal, resolved.material_axes)
 
     return data
 

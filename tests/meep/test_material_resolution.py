@@ -19,6 +19,7 @@ from gsim.meep.materials import (
     _is_identity_axes,
     _resolved_to_material_data,
     _rotate_diagonal_tensor,
+    _rotated_diagonal,
     _validity_to_freq_range,
     dispersion_model_to_meep_poles,
     lorentzian_to_meep_poles,
@@ -526,3 +527,13 @@ class TestResolveMaterialsWithDispersionCaseInsensitive:
                 wavelength_um=1.55,
                 dispersion="false",
             )
+
+
+def test_rotated_tensor_has_rotated_diagonal_and_offdiagonal():
+    """Rotating diag(4, 4, 9) by 45 deg about x gives diag (4, 6.5, 6.5), yz -2.5."""
+    c = 0.5**0.5
+    axes = [[1.0, 0.0, 0.0], [0.0, c, -c], [0.0, c, c]]
+    diag = _rotated_diagonal([4.0, 4.0, 9.0], axes)
+    offdiag = _rotate_diagonal_tensor([4.0, 4.0, 9.0], axes)
+    assert diag == pytest.approx([4.0, 6.5, 6.5])
+    assert offdiag == pytest.approx([0.0, 0.0, -2.5])
