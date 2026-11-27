@@ -45,9 +45,17 @@ gsim leaves all three variables alone in these cases:
 If DEVSIM cannot find a BLAS/LAPACK library, gsim raises an `ImportError` that names these remedies. DEVSIM cannot initialise
 twice in one process, so restart Python (or the notebook kernel) after you change any of these variables.
 
-On Windows 11 with DEVSIM 2.11.2, a fresh process with only `DEVSIM_MATH_LIBS` set to scipy-openblas32's
-`libscipy_openblas.dll` also worked. If DEVSIM fails to initialise after you set `DEVSIM_MATH_LIBS` by hand, set
-`DEVSIM_BLAS_PREFIX=scipy_` and `DEVSIM_BLAS_SUFFIX=_` as well, the values gsim uses for this library.
+Checked on Windows 11 with DEVSIM 2.12.0 and scipy-openblas32 0.3.34.481.3, each case in a fresh process:
+
+- With nothing set, gsim's automatic setting loads DEVSIM and the DEVSIM-backed tests pass.
+- With only `DEVSIM_MATH_LIBS` set by hand to `libscipy_openblas.dll`, DEVSIM also loads and those tests also pass. This DLL
+  exports both `dgetrf_` and `scipy_dgetrf_` (checked with `ctypes`). With the same DLL and
+  `DEVSIM_BLAS_PREFIX=nope_`, DEVSIM reports `MISSING SYMBOLS` and the import fails.
+- With `DEVSIM_MATH_LIBS` pointing at a file that does not exist, DEVSIM reports `MISSING DLL` and the import fails.
+
+Other DEVSIM or scipy-openblas32 versions and other platforms were not tried. If DEVSIM fails to initialise after you set
+`DEVSIM_MATH_LIBS` by hand, set `DEVSIM_BLAS_PREFIX=scipy_` and `DEVSIM_BLAS_SUFFIX=_` as well, the values gsim uses for this
+library.
 
 ## Configure and solve
 
