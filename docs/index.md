@@ -10,6 +10,8 @@ Photonic FDTD and RF/microwave simulation for GDSFactory, powered by [GDSFactory
 | **Palace** (`gsim.palace`)        | **Established.** FEM simulations for RF and microwave devices.                    |
 | **Meep** (`gsim.meep`)            | **Supported.** Photonic workflows that are not yet available in GDSFactory FDTD.  |
 
+New to gsim, or not sure which solver fits your question? The [Simulation guide](guide/index.md) is organised by task.
+
 ## Photonic FDTD
 
 **GDSFactory FDTD (`gsim.fdtd`) is the primary engine for new photonic simulations.** Meep (`gsim.meep`) remains

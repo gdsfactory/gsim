@@ -2,6 +2,7 @@
 docs_dir = "."
 nav = [
   { "Home" = "index.md" },
+  { "Simulation guide" = "guide/index.md" },
   { "Photonic FDTD" = [
     { "MMI Quickstart" = "nbs/fdtd_mmi_gpdk.md" },
     { "3D Grating Coupler" = "nbs/fdtd_focusing_grating_coupler_gpdk.md" },
@@ -94,6 +95,7 @@ full_output = "llms-full.txt"
 [project.plugins.llmstxt.sections]
 "Getting started" = ["index.md", "getting_started_palace.md"]
 "Guides" = [
+  "guide/index.md",
   "api/*.md",
   "transmission_line_analysis.md",
   "emx_proc_import.md",
