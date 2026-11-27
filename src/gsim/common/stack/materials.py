@@ -1180,7 +1180,7 @@ def _normalize_material_keys[T](
         )
 
     if used_names is not None:
-        used_lower = {n.lower() for n in used_names}
+        used_lower = {n.lower().strip() for n in used_names}
         unmatched = sorted(k for k in normalized if k not in used_lower)
         if unmatched:
             warnings.warn(

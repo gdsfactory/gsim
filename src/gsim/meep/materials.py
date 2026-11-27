@@ -414,8 +414,8 @@ def resolve_materials(
     materials: dict[str, MaterialData] = {}
 
     for name in sorted(used_material_names):
-        if name.lower() in normalized_overrides:
-            props = normalized_overrides[name.lower()]
+        if name.lower().strip() in normalized_overrides:
+            props = normalized_overrides[name.lower().strip()]
             if wavelength_um is not None:
                 resolved = props.evaluate_at_wavelength(wavelength_um)
                 if resolved.behavior == "conductive":
@@ -533,8 +533,8 @@ def resolve_materials_with_dispersion(
         resolved: ResolvedMaterial | None
         props: MaterialProperties | None = None
 
-        if name.lower() in normalized_overrides:
-            override_props = normalized_overrides[name.lower()]
+        if name.lower().strip() in normalized_overrides:
+            override_props = normalized_overrides[name.lower().strip()]
             resolved = override_props.evaluate_at_wavelength(wavelength_um)
             props = override_props
         else:
