@@ -99,6 +99,16 @@ def _meep_medium(material_data: MaterialData) -> Any:
     mp = _import_meep()
 
     eps = material_data.epsilon_diag
+    offdiag = material_data.epsilon_offdiag
+    if (
+        isinstance(eps, list)
+        and len(eps) == 3
+        and (len(set(eps)) > 1 or any(offdiag or []))
+    ):
+        kwargs = {"epsilon_diag": mp.Vector3(*eps)}
+        if offdiag is not None and any(offdiag):
+            kwargs["epsilon_offdiag"] = mp.Vector3(*offdiag)
+        return mp.Medium(**kwargs)
     if isinstance(eps, list):
         eps = eps[0]
 
