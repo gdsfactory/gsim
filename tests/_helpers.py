@@ -26,6 +26,81 @@ def skip_without_devsim() -> None:
         pytest.skip(f"DEVSIM is unavailable: {err}", allow_module_level=True)
 
 
+def restore_generic_pdk() -> None:
+    """Activate the generic PDK and put its layers back at their enum slots.
+
+    All PDKs share one ``kfactory`` layout. Activating a PDK that has a layer
+    enum (IHP) deletes the empty layers of the previous one (gdsfactory's
+    ``_prune_foreign_layers``), so the generic slots 0, 3, 4, ... are free until
+    the generic PDK is activated again. A raw ``(layer, datatype)`` registered
+    meanwhile takes the lowest free slot, say ``(2, 0)`` at slot 0. When the
+    generic PDK returns, gdsfactory moves that layer to ``SLAB150``'s slot 3
+    with ``Layout.move_layer`` and ``delete_layer``. Both raise ``RuntimeError``
+    once any cached (locked) cell exists, and gdsfactory logs and swallows it.
+    Slot 3 is then re-inserted without the layer name and the layout holds two
+    ``(2, 0)`` layers: ``LAYER.SLAB150`` writes to one while a ``(2, 0)`` lookup
+    reads the other, and the region comes back empty.
+
+    This activates the generic PDK, moves a foreign layer out of any generic
+    slot, names each slot as the enum does and merges duplicate ``(layer,
+    datatype)`` layers into the enum's slot, unlocking cells for the moment it
+    takes. Shapes are moved, never dropped.
+    """
+    try:
+        import gdsfactory as gf
+        import kfactory as kf
+        from kfactory import kdb
+    except ImportError:
+        return
+
+    gf.gpdk.PDK.activate()
+    layout = kf.kcl.layout
+
+    def tuple_of(index: int) -> tuple[int, int]:
+        info = layout.get_info(index)
+        return info.layer, info.datatype
+
+    locked = [cell for cell in layout.each_cell() if cell.is_locked()]
+    for cell in locked:
+        cell.locked = False
+    changed = False
+    try:
+        for layer in gf.gpdk.LAYER:  # ty: ignore[not-iterable]
+            slot = int(layer)
+            key = (layer.layer, layer.datatype)
+            wanted = kdb.LayerInfo(layer.layer, layer.datatype, layer.name)
+            if layout.is_valid_layer(slot) and tuple_of(slot) != key:
+                held = tuple_of(slot)
+                twins = [
+                    index
+                    for index in layout.layer_indexes()
+                    if index != slot and tuple_of(index) == held
+                ]
+                if twins:
+                    new_home = twins[0]
+                else:
+                    new_home = layout.insert_layer(kdb.LayerInfo(*held))
+                layout.move_layer(slot, new_home)
+                layout.delete_layer(slot)
+                changed = True
+            if not layout.is_valid_layer(slot):
+                layout.insert_layer_at(slot, wanted)
+                changed = True
+            elif layout.get_info(slot) != wanted:
+                layout.set_info(slot, wanted)
+                changed = True
+            for other in list(layout.layer_indexes()):
+                if other != slot and tuple_of(other) == key:
+                    layout.move_layer(other, slot)
+                    layout.delete_layer(other)
+                    changed = True
+    finally:
+        for cell in locked:
+            cell.locked = True
+    if changed:
+        gf.gpdk.PDK.activate(force=True)
+
+
 def series_rc_admittance(
     freq_hz: ArrayLike, r_ohm_m: float | ArrayLike, c_f_per_m: float | ArrayLike
 ) -> NDArray[np.complex128]:
