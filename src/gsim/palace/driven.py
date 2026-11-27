@@ -152,7 +152,7 @@ class DrivenSim(_PalaceSimBase):
         compute_s_params: bool = True,
         reference_impedance: float = 50.0,
         excitation_port: str | None = None,
-        waveport_boundary: Literal["pec", "inherit"] = "pec",
+        waveport_boundary: Literal["pec", "inherit"] = "inherit",
         save_step: int = 0,
         save_fields_at: list[float] | None = None,
         save_freq: str | None = None,
@@ -184,10 +184,14 @@ class DrivenSim(_PalaceSimBase):
             compute_s_params: Compute S-parameters
             reference_impedance: Reference impedance for S-params (Ohms)
             excitation_port: Port to excite (None = first port)
-            waveport_boundary: Numeric port boundary policy: ``"pec"``
-                (default) approximates conductivity, impedance and absorbing
-                boundaries as PEC in the port eigenproblem; ``"inherit"``
-                keeps those physical conditions. Does not change 3D boundaries.
+            waveport_boundary: Numeric port boundary policy. ``"inherit"``
+                (default since 0.11.0) keeps the conductivity, impedance and
+                absorbing conditions in the port eigenproblem, so the port
+                mode carries the same loss as the 3D line. ``"pec"``
+                approximates them as PEC there: about twice as fast, but the
+                port mode then mismatches the lossy line and adds a small
+                spurious reflection. It was the default before 0.11.0. Does
+                not change 3D boundaries.
             save_step: Save fields every N frequency steps for ParaView
                 (0 = disabled)
             save_fields_at: Specific frequencies (Hz) at which to save

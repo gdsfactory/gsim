@@ -254,6 +254,8 @@ class TestMultimodeEntries:
             pilot_paths={1: PILOT, 2: other},
             eigensolver_type="SLEPc",
             eigensolver_max_size=40,
+            eigensolver_max_its=400,
+            eigensolver_complex_coarse_solve=True,
         )
         by_index = {e["Index"]: e for e in _entries(_generate(tmp_path, ports))}
         assert by_index[1]["VoltagePath"] == PILOT
@@ -261,6 +263,8 @@ class TestMultimodeEntries:
         for index in (1, 2, 3, 4):
             assert by_index[index]["SolverType"] == "SLEPc"
             assert by_index[index]["MaxSize"] == 40
+            assert by_index[index]["MaxIts"] == 400
+            assert by_index[index]["ComplexCoarseSolve"] is True
 
     def test_a_mode_without_a_pilot_path_has_no_voltage_path(self, tmp_path) -> None:
         ports = _two_ports(modes=(1, 2), pilot_paths={2: PILOT})
@@ -334,6 +338,8 @@ class TestSchema:
             eigensolver_type="SLEPc",
             eigensolver_tol=1e-8,
             eigensolver_max_size=40,
+            eigensolver_max_its=400,
+            eigensolver_complex_coarse_solve=False,
         )
         entries = _entries(_generate(tmp_path, ports))
         assert len(entries) == 6

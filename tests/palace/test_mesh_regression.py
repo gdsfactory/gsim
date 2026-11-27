@@ -126,13 +126,14 @@ def test_cpw_write_config_preserves_waveport_boundary_policy(cpw_waveport_sim):
     original = sim.driven.model_copy(deep=True)
     try:
         sim.set_driven(f=50e9, waveport_boundary="pec")
-        default = json.loads(sim.write_config().read_text())
-        assert default["Boundaries"]["WavePort"]
-        assert default["Boundaries"].pop("WavePortPEC")["Attributes"]
+        pec = json.loads(sim.write_config().read_text())
+        assert pec["Boundaries"]["WavePort"]
+        assert pec["Boundaries"].pop("WavePortPEC")["Attributes"]
         sim.set_driven(f=50e9, waveport_boundary="inherit")
-        assert json.loads(sim.write_config().read_text()) == default
+        assert json.loads(sim.write_config().read_text()) == pec
         sim.set_driven(f=50e9)
-        assert sim.driven.waveport_boundary == "pec"
+        assert sim.driven.waveport_boundary == "inherit"
+        assert json.loads(sim.write_config().read_text()) == pec
     finally:
         sim.driven = original
 

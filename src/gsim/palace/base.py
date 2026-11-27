@@ -2084,6 +2084,10 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                     eigensolver_ksp_tol=port_config.eigensolver_ksp_tol,
                     eigensolver_max_size=port_config.eigensolver_max_size,
                     eigensolver_verbose=port_config.eigensolver_verbose,
+                    eigensolver_max_its=port_config.eigensolver_max_its,
+                    eigensolver_complex_coarse_solve=(
+                        port_config.eigensolver_complex_coarse_solve
+                    ),
                     modes=port_config.modes,
                     excite_modes=port_config.excite_modes,
                     pilot_paths=port_config.pilot_paths,
@@ -3801,6 +3805,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         eigensolver_ksp_tol: float | None = None,
         eigensolver_max_size: int | None = None,
         eigensolver_verbose: int | None = None,
+        eigensolver_max_its: int | None = None,
+        eigensolver_complex_coarse_solve: bool | None = None,
     ) -> None:
         """Add a single element wave port.
 
@@ -3829,6 +3835,17 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 pick its own default.
             eigensolver_verbose: Palace Verbose level for this port's
                 mode solve. None uses Palace's own default.
+            eigensolver_max_its: Palace MaxIts (GMRES iteration limit of
+                the linear solve inside the eigenvalue iteration) for this
+                port's mode solve. None uses Palace's own default (45).
+                Raise it when the two ends of a uniform line report
+                different propagation constants in ``palace.log``.
+            eigensolver_complex_coarse_solve: Palace ComplexCoarseSolve for
+                this port's mode solve: True factorizes the complex system
+                exactly, False uses a real-valued approximation. None
+                inherits the simulation's linear-solver setting
+                (``complex_coarse_solve``, True by default). Needs Palace
+                v0.19 or later.
 
         Example:
             >>> sim.add_wave_port(
@@ -3857,6 +3874,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
                 eigensolver_ksp_tol=eigensolver_ksp_tol,
                 eigensolver_max_size=eigensolver_max_size,
                 eigensolver_verbose=eigensolver_verbose,
+                eigensolver_max_its=eigensolver_max_its,
+                eigensolver_complex_coarse_solve=eigensolver_complex_coarse_solve,
             )
         )
 
@@ -3879,6 +3898,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
         eigensolver_ksp_tol: float | None = None,
         eigensolver_max_size: int | None = None,
         eigensolver_verbose: int | None = None,
+        eigensolver_max_its: int | None = None,
+        eigensolver_complex_coarse_solve: bool | None = None,
     ) -> None:
         """Add a wave port that follows several modes on one port face.
 
@@ -3925,6 +3946,9 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             eigensolver_ksp_tol: Palace KSPTol of the mode solve.
             eigensolver_max_size: Palace MaxSize of the mode solve.
             eigensolver_verbose: Palace Verbose level of the mode solve.
+            eigensolver_max_its: Palace MaxIts of the mode solve.
+            eigensolver_complex_coarse_solve: Palace ComplexCoarseSolve of
+                the mode solve (Palace v0.19 or later).
 
         Raises:
             ValueError: If this is not a driven simulation, or the modes,
@@ -3970,6 +3994,8 @@ class PalaceSimMixin(CloudJobMixin, SolverSettingsMixin):
             eigensolver_ksp_tol=eigensolver_ksp_tol,
             eigensolver_max_size=eigensolver_max_size,
             eigensolver_verbose=eigensolver_verbose,
+            eigensolver_max_its=eigensolver_max_its,
+            eigensolver_complex_coarse_solve=eigensolver_complex_coarse_solve,
         )
         self.wave_ports = [p for p in self.wave_ports if p.name != name]
         self.wave_ports.append(config)

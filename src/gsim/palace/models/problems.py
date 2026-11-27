@@ -48,9 +48,10 @@ class DrivenConfig(BaseModel):
         reference_impedance: Reference impedance for S-parameter normalization
             in Ohms. Standard is 50 Ohm.
         excitation_port: Name of port to excite. None = first port.
-        waveport_boundary: ``"pec"`` replaces Robin boundaries by PEC in the
-            numeric port eigenproblem (default). ``"inherit"`` retains their
-            physical conductivity, impedance and absorbing conditions.
+        waveport_boundary: ``"inherit"`` (default since gsim 0.11.0) keeps
+            the physical conductivity, impedance and absorbing conditions in
+            the numeric port eigenproblem. ``"pec"`` replaces those Robin
+            boundaries by PEC there, the default before 0.11.0.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -105,11 +106,12 @@ class DrivenConfig(BaseModel):
     )
 
     waveport_boundary: Literal["pec", "inherit"] = Field(
-        default="pec",
+        default="inherit",
         description="Boundary treatment in numeric wave-port eigenproblems. "
-        "'pec' preserves the default PEC approximation; 'inherit' retains "
-        "conductivity, impedance and absorbing boundaries. The 3D problem "
-        "keeps its physical boundaries in both cases.",
+        "'inherit' (default since 0.11.0) retains conductivity, impedance and "
+        "absorbing boundaries; 'pec' approximates them as PEC, the default "
+        "before 0.11.0. The 3D problem keeps its physical boundaries in both "
+        "cases.",
     )
 
     save_step: int = Field(

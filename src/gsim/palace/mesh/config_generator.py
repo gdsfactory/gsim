@@ -501,7 +501,15 @@ def _multimode_entries(
                 "Attributes": [attrs_by_port[number]],
                 "Active": False,
             }
-            for key in ("SolverType", "EigenTol", "KSPTol", "MaxSize", "Verbose"):
+            for key in (
+                "SolverType",
+                "EigenTol",
+                "KSPTol",
+                "MaxSize",
+                "Verbose",
+                "MaxIts",
+                "ComplexCoarseSolve",
+            ):
                 if key in template:
                     entry[key] = template[key]
             if pilot := port.pilot_paths.get(mode):
@@ -653,6 +661,9 @@ def generate_palace_config(
         driven_config: Optional DrivenConfig for frequency sweep settings.
             When provided, material dispersion is evaluated at the center
             frequency ``(fmin + fmax) / 2`` of the sweep band.
+            Its ``waveport_boundary`` sets the numeric wave-port policy; a
+            driven run without it uses ``"inherit"``, the ``DrivenConfig``
+            default, and other run types keep the PEC approximation.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
@@ -1228,6 +1239,12 @@ def generate_palace_config(
                             wave_port_entry["MaxSize"] = port.eigensolver_max_size
                         if port.eigensolver_verbose is not None:
                             wave_port_entry["Verbose"] = port.eigensolver_verbose
+                        if port.eigensolver_max_its is not None:
+                            wave_port_entry["MaxIts"] = port.eigensolver_max_its
+                        if port.eigensolver_complex_coarse_solve is not None:
+                            wave_port_entry["ComplexCoarseSolve"] = (
+                                port.eigensolver_complex_coarse_solve
+                            )
                         if pilot := port.pilot_paths.get(port.mode):
                             wave_port_entry["VoltagePath"] = _voltage_path(pilot)
                         wave_ports.append(wave_port_entry)
@@ -1326,12 +1343,18 @@ def generate_palace_config(
     if sc_entries and not sc_as_pec:
         boundaries.setdefault("Impedance", []).extend(sc_entries)
 
-    # Preserve the default PEC approximation in the numeric port eigenproblem.
-    # Explicit "inherit" keeps its physical Robin terms, including conductor
-    # loss. This policy never changes the 3D problem's boundary conditions.
-    port_boundary = (
-        driven_config.waveport_boundary if driven_config is not None else "pec"
-    )
+    # Driven runs follow set_driven(waveport_boundary=...), "inherit" by
+    # default, also when no DrivenConfig is passed: the port eigenproblem keeps
+    # its physical Robin terms, including conductor loss. Other run types
+    # (eigenmode) have no way to choose, so they keep the PEC approximation
+    # they always had. This policy never changes the 3D problem's boundary
+    # conditions.
+    if driven_config is not None:
+        port_boundary = driven_config.waveport_boundary
+    elif simulation_type == "driven":
+        port_boundary = "inherit"
+    else:
+        port_boundary = "pec"
     if boundaries.get("WavePort") and port_boundary == "pec":
         waveport_pec_attrs: set[int] = set()
         absorbing_entry = boundaries.get("Absorbing")
@@ -1626,6 +1649,9 @@ def write_config(
         driven_config: Optional DrivenConfig for frequency sweep settings.
             When provided, material dispersion is evaluated at the center
             frequency of the sweep band.
+            Its ``waveport_boundary`` sets the numeric wave-port policy; a
+            driven run without it uses ``"inherit"``, the ``DrivenConfig``
+            default, and other run types keep the PEC approximation.
         eigenmode_config: Optional EigenmodeConfig for eigenproblems settings
         absorbing_boundary: Whether to add an absorbing boundary on the outer walls
         absorbing_order: Order (1 or 2) of that absorbing boundary condition
