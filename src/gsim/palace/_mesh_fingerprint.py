@@ -193,6 +193,9 @@ def mesh_inputs_fingerprint(
     referenced: list[str] = []
     for name, layer in stack.layers.items():
         entry = layer.model_dump(mode="json", exclude={"mesh_resolution"})
+        if layer.derived_source is not None:
+            # the mesher meshes the evaluated expression, not the GDS tuple
+            entry["derived_layer"] = str(layer.derived_source.layer)
         if layer.layer_type == "via":
             entry["via_conductive"] = _via_conductive(stack, layer.material)
         fingerprint[f"layer:{name}"] = _canonical(entry)

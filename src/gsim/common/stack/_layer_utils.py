@@ -57,6 +57,18 @@ def _tuple_from_layer_expression(layer: Any) -> tuple[int, int] | None:
     return None
 
 
+def has_boolean_layer(layer_level: LayerLevel) -> bool:
+    """Return True when the level's ``layer`` is a boolean expression.
+
+    gdsfactory's ``DerivedLayer`` (e.g. ``(WG - DEEP_ETCH) - SHALLOW_ETCH``)
+    has two operands; a plain ``LogicalLayer``, a tuple or an integer does not.
+    The level's geometry is then the evaluated region, not the polygons of one
+    GDS layer.
+    """
+    layer = getattr(layer_level, "layer", None)
+    return hasattr(layer, "layer1") and hasattr(layer, "layer2")
+
+
 def get_gds_layer_tuple(layer_level: LayerLevel) -> tuple[int, int] | None:
     """Extract GDS layer tuple (layer, datatype) from a gdsfactory LayerLevel.
 
