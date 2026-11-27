@@ -1,0 +1,27 @@
+{
+  "case": "gfem-cpw",
+  "title": "gfem as a third curve on the same coplanar waveguide",
+  "status": "planned",
+  "device": {
+    "name": "the CPW of the CST case",
+    "picture": null,
+    "geometry_source": null
+  },
+  "reference": {
+    "type": "solver",
+    "citation": "gfem (differentiable FEM) against Palace and CST on the same CPW",
+    "file": null
+  },
+  "planned": {
+    "owner": "Ben (gfem)",
+    "device": "same device as cst-cpw",
+    "quantities": [
+      "S21 magnitude, 1 to 50 GHz",
+      "S21 phase, 1 to 50 GHz",
+      "Z0",
+      "effective permittivity"
+    ],
+    "note": "No runs yet."
+  },
+  "rows": []
+}

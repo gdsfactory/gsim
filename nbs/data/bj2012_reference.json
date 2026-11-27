@@ -1,0 +1,81 @@
+{
+  "citation": {
+    "authors": "Baehr-Jones, T. et al.",
+    "title": "Ultralow drive voltage silicon traveling-wave modulator",
+    "journal": "Optics Express",
+    "volume": 20,
+    "issue": 11,
+    "pages": "12014-12020",
+    "year": 2012,
+    "doi": "10.1364/OE.20.012014"
+  },
+  "digitisation_note": "Figure values (Fig. 2c, Fig. 2d) were read by eye from the published figures, uncertainty about +/- 1 marker (about 0.01 fF/um in C, 0.1-0.2 V*cm in VpiL). Scalar values are quoted from the text. Positive voltage is reverse bias.",
+  "geometry": {
+    "soi_top_si_thickness_um": 0.22,
+    "box_thickness_um": 2.0,
+    "rib_width_um": 0.5,
+    "rib_height_um": 0.22,
+    "slab_height_um": 0.09,
+    "contact_start_from_rib_edge_um": 0.95,
+    "rib_edge_to_via_side_um": 3.55,
+    "lower_metal_thickness_um": 0.75,
+    "top_metal_thickness_um": 2.0,
+    "electrode_strip_width_um": 50.0,
+    "electrode_gap_um": 5.0,
+    "handle_resistivity_ohm_cm": 750.0,
+    "top_si_background_resistivity_ohm_cm": 10.0,
+    "phase_shifter_length_um": 5000.0,
+    "mzi_imbalance_um": 100.0,
+    "implant_striation_period_um": 10.0,
+    "implant_striation_gap_um": 1.0,
+    "wavelength_um": 1.55
+  },
+  "doping": {
+    "p_peak_cm3": 7e17,
+    "n_peak_cm3": 5e17,
+    "slab_sheet_resistance_p_kohm_per_sq": 10.0,
+    "slab_sheet_resistance_n_kohm_per_sq": 7.0,
+    "rib_to_contact_resistance_ohm_cm": 1.6
+  },
+  "vpil_V_cm": {
+    "bias_v_reverse": [-0.4, -0.1, 0.1, 0.4, 0.75, 1.25, 1.75, 2.5, 3.5, 4.5],
+    "top_arm": [1.1, 1.75, 1.85, 1.95, 2.05, 2.2, 2.45, 2.95, 3.8, 4.6],
+    "bottom_arm": [0.95, 1.6, 2.0, 2.2, 2.6, 2.95, 3.4, 3.9, 4.6, 5.35]
+  },
+  "capacitance": {
+    "bias_v_reverse": [-0.4, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0],
+    "c_fF_per_um": [
+      0.27, 0.25, 0.225, 0.21, 0.197, 0.19, 0.183, 0.165, 0.155, 0.147
+    ],
+    "note": "Both arms about equal; normalised to the metal-only control line."
+  },
+  "metal_only_line_10GHz": {
+    "freq_ghz": 10.0,
+    "z0_real_ohm": 61.0,
+    "z0_imag_ohm": -5.0,
+    "alpha_dB_per_cm": 3.8,
+    "l_nH_per_m": 457.0,
+    "r_kohm_per_m": 4.9,
+    "c_nF_per_m": 0.12
+  },
+  "loaded_line_10GHz": {
+    "freq_ghz": 10.0,
+    "z0_real_ohm": 37.0,
+    "z0_imag_ohm": -1.0,
+    "alpha_dB_per_cm": 10.8,
+    "n_rf": 3.75
+  },
+  "optical": {
+    "n_group": 3.86,
+    "implant_loss_dB_per_cm_measured": 10.0,
+    "implant_loss_dB_per_cm_paper_prediction": 6.7,
+    "mzi_insertion_loss_dB": 8.7,
+    "mzi_insertion_loss_err_dB": 0.7,
+    "y_junction_loss_dB": 2.6
+  },
+  "electro_optic": {
+    "f_3dB_GHz": 10.0,
+    "termination_ohm_per_arm": 25.0,
+    "leakage_uA_max_to_5V": 1.0
+  }
+}

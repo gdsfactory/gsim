@@ -1,0 +1,209 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gsim RF benchmark case",
+  "description": "One case file of the RF benchmark. A row with status 'published' carries the full provenance, a row with status 'reported' lists what is missing, and a 'planned' case has no rows. The status of the file is 'published' when every row is, 'reported' when at least one row is reported, and 'planned' when it has no rows yet. Agreement with the reference is computed by the reader and never stored.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case", "status", "device", "reference", "rows"],
+  "properties": {
+    "case": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "status": { "enum": ["published", "reported", "planned"] },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "picture": { "type": ["string", "null"] },
+        "geometry_source": { "type": ["string", "null"] }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "citation"],
+      "properties": {
+        "type": {
+          "enum": [
+            "paper",
+            "analytic",
+            "measurement",
+            "solver",
+            "self-consistency"
+          ]
+        },
+        "citation": { "type": "string", "minLength": 1 },
+        "file": { "type": ["string", "null"] }
+      }
+    },
+    "planned": {
+      "type": "object",
+      "description": "Only for status 'planned': what is intended and who owns it.",
+      "additionalProperties": false,
+      "properties": {
+        "owner": { "type": "string" },
+        "device": { "type": "string" },
+        "quantities": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "string" }
+      }
+    },
+    "rows": { "type": "array", "items": { "$ref": "#/definitions/row" } },
+    "curves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "kind", "label"],
+        "properties": {
+          "file": { "type": "string" },
+          "kind": { "enum": ["touchstone", "csv"] },
+          "label": { "type": "string" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "planned" } } },
+      "then": { "properties": { "rows": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "published" } } },
+      "then": {
+        "properties": {
+          "rows": {
+            "minItems": 1,
+            "items": { "properties": { "status": { "const": "published" } } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "reported" } } },
+      "then": { "properties": { "rows": { "minItems": 1 } } }
+    }
+  ],
+  "definitions": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "quantity",
+        "unit",
+        "value",
+        "method",
+        "solver",
+        "origin",
+        "role",
+        "source",
+        "provenance_missing"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["published", "reported"] },
+        "quantity": { "type": "string" },
+        "unit": { "type": "string" },
+        "freq_ghz": { "type": ["number", "null"] },
+        "reference_label": { "type": ["string", "null"] },
+        "reference_value": { "type": ["number", "null"] },
+        "reference_value_imag": { "type": ["number", "null"] },
+        "reference_key": {
+          "type": ["string", "null"],
+          "description": "Dotted path of the reference value in the reference file, checked by the tests. A list index is a number in the path; two paths joined by '|' mean the average of the two values."
+        },
+        "reference_key_imag": {
+          "type": ["string", "null"],
+          "description": "Dotted path of the imaginary part of a complex reference value."
+        },
+        "bias_v": {
+          "type": ["number", "null"],
+          "description": "Reverse bias in volts for rows of a bias sweep."
+        },
+        "reference_row": {
+          "type": ["string", "null"],
+          "description": "Id of another row of this file whose value is the reference (a solver compared with another solver)."
+        },
+        "value": { "type": ["number", "null"] },
+        "value_imag": { "type": ["number", "null"] },
+        "verdict": { "type": ["string", "null"] },
+        "method": { "type": "string" },
+        "solver": {
+          "enum": [
+            "Palace",
+            "femwell",
+            "DEVSIM",
+            "DEVSIM+femwell",
+            "closed form",
+            "openEMS",
+            "CST",
+            "gfem"
+          ]
+        },
+        "origin": {
+          "enum": ["local", "cloud"],
+          "description": "'local': recomputed by the notebook on a laptop or in docs CI. 'cloud': taken from a cloud run, which this notebook does not repeat; where the run's outputs are stored they are in the case's folder."
+        },
+        "role": {
+          "enum": ["prediction", "calibration", "consistency", "not-scored"]
+        },
+        "solver_version": { "type": ["string", "null"] },
+        "gsim_version": { "type": ["string", "null"] },
+        "gsim_commit": { "type": ["string", "null"] },
+        "element_order": { "type": ["integer", "null"] },
+        "mesh": { "type": ["string", "null"] },
+        "convergence": { "type": ["string", "null"] },
+        "hardware": { "type": ["string", "null"] },
+        "run_seconds": { "type": ["number", "null"] },
+        "date": { "type": ["string", "null"] },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["notebook", "cell_id"],
+          "properties": {
+            "notebook": { "type": "string" },
+            "cell_id": { "type": "string" },
+            "job": { "type": ["string", "null"] }
+          }
+        },
+        "provenance_missing": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "note": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "published" } } },
+          "then": {
+            "required": [
+              "solver_version",
+              "gsim_version",
+              "gsim_commit",
+              "element_order",
+              "mesh",
+              "convergence",
+              "hardware",
+              "run_seconds",
+              "date"
+            ],
+            "properties": {
+              "provenance_missing": { "type": "array", "maxItems": 0 },
+              "solver_version": { "type": "string" },
+              "gsim_version": { "type": "string" },
+              "gsim_commit": { "type": "string" },
+              "element_order": { "type": "integer" },
+              "mesh": { "type": "string" },
+              "convergence": { "type": "string" },
+              "hardware": { "type": "string" },
+              "run_seconds": { "type": "number" },
+              "date": { "type": "string" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

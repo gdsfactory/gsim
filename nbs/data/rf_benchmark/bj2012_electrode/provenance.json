@@ -1,0 +1,35 @@
+{
+  "notebook": "palace_bj2012_electrode_details.ipynb",
+  "date": "2026-11-12",
+  "jobs_submitted": [
+    "('J1', 10.0)",
+    "('J1b', 10.0)",
+    "('J1vb', 10.0)",
+    "J2",
+    "J3"
+  ],
+  "palace_version": {
+    "J2": "0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5",
+    "J3": "0dd8d015034c0fc1f0cf4c9ff952b533f9cb91d5"
+  },
+  "element_order": 2,
+  "mg_max_levels_2d": 1,
+  "tetrahedra": {
+    "J2": 184155,
+    "J3": 396726
+  },
+  "triangles_2d": {
+    "J1": 13424,
+    "J1vb": 22380
+  },
+  "package_versions": {
+    "gsim": "0.8.0",
+    "femwell": "0.1.12",
+    "scikit-fem": "12.0.2",
+    "gmsh": "4.15.2",
+    "scikit-rf": "1.13.0"
+  },
+  "client": "Windows-11-10.0.26200-SP0",
+  "hardware_of_the_cloud_run": null,
+  "note": "S-parameters keep the 50 ohm reference that to_skrf assigns; the port reference of the wave ports is the perfect-metal line mode (Step 5)."
+}
