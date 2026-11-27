@@ -19,9 +19,12 @@ tests named in the text. Nothing on this page was solved: the snippets stop at `
 
 What is meshed and written:
 
-- **Shell.** The metal volume is removed and its faces are kept, so there are no elements inside the metal. Each layer gets one entry for
-  its top and bottom faces and one for its side walls. Each entry has `Conductivity`, `Thickness` and `Crack`.
-- **PEC sheet.** A zero-thickness surface. It has no `Conductivity` entry and no `Thickness`.
+- **Shell.** The metal volume is removed and its faces are kept as surfaces. The faces are not the wall of a hole: on the line below
+  (coarse preset) 340 tetrahedra have their centroid inside the signal strip, all 1,074 triangles of the top and bottom faces have a
+  tetrahedron on both sides, and so do 364 of the 400 triangles of the side walls. Each layer gets one entry for its top and bottom
+  faces and one for its side walls. Each entry has `Conductivity`, `Thickness` and `Crack`.
+- **PEC sheet.** A zero-thickness surface with elements on both sides (all 542 triangles of the sheet on that line). It has no
+  `Conductivity` entry and no `Thickness`.
 - **Lossy volume.** Elements fill the volume. Doped silicon is the example of a polygon dielectric with a conductivity.
 
 Details that follow from the code:
@@ -144,8 +147,9 @@ For a `BoundaryModeSim`, `sim.conductor_boundary = "pec"` moves the conductor at
   superconductivity, does not mean that the surface, internal or kinetic inductance of the metal is negligible: a metal surface has a
   reactive surface impedance, and a superconducting film adds a kinetic inductance that grows as the film gets thin (textbook statements,
   not measured here). A PEC sheet has none of these. Use it only if the phase, the impedance or the resonant frequency you want does not
-  depend on them.
-- A fast check of the geometry, ports and mesh. A PEC sheet has no elements inside the metal and no `Thickness`, so it is cheaper (7,897
+  depend on them. For a superconducting layer, see
+  [Superconducting layers](#superconducting-layers-london-penetration-depth).
+- A fast check of the geometry, ports and mesh. A PEC sheet has no `Thickness` and no tetrahedra inside the metal, so it is cheaper (7,897
   against 6,074 tetrahedra above).
 - The layer is thinner than 0.02 um. gsim makes it a PEC sheet on its own.
 
@@ -234,6 +238,173 @@ Reading the table:
 How large the error of the surface condition is for a given t / delta is not shown on this page. No comparison with a meshed-metal run
 is stored in the repository (the previous section only writes its config), so no number is given.
 
+## Superconducting layers (London penetration depth)
+
+`sim.set_superconductor(layer, london_depth=..., thickness=None)` makes a conductor layer superconducting. Lengths are in um. gsim then
+writes a lossless `Boundaries.Impedance` entry with a surface inductance `Ls` (H per square) on the layer's surfaces, in place of the
+layer's `Conductivity` or `PEC` entry. It works for driven, eigenmode and boundary-mode simulations, and is refused for electrostatic and
+magnetostatic ones. `thickness` defaults to the layer's thickness in the stack. gsim has no table of London depths: take the value for
+your material, film and temperature from a cited source. Nothing on this page was solved in Palace.
+
+```text
+sim.set_superconductor("metal1", london_depth=0.1)                 # lambda = 0.1 um, thickness from the stack
+sim.set_superconductor("metal1", london_depth=0.2, thickness=0.1)  # film thickness given in um
+sim.superconductors.pop("metal1")                                  # normal metal again
+```
+
+### What gsim writes
+
+The value of `Ls` depends on how the layer is meshed (see [Three models](#three-models)). With lambda the London depth and t the
+thickness:
+
+| Conductor model | Surfaces that get an entry | `Ls` written |
+| --- | --- | --- |
+| Planar sheet | The one two-sided sheet, `pec_surfaces[layer]` | mu0 (lambda / 2) coth(t / 2 lambda) |
+| 3D shell (default) | Each face group, `conductor_surfaces[layer_xy]` and `[layer_z]` | mu0 lambda coth(t / 2 lambda) per face |
+| Boundary mode (a hole) | The exterior faces of the hole | The per-face value of the shell |
+
+When each value is exact:
+
+- **Planar sheet** (`planar_conductors=True`, or a layer under 0.02 um): for t << lambda in any field, and at any t when the field is
+  antisymmetric across the film.
+- **3D shell:** the interior between the faces is field-transparent, so the value is exact for an antisymmetric field at any t, and for
+  t << lambda or t >> lambda in any field. For a field on one side only the error is -2% at t / lambda = 1, up to -14% at 4.
+- **Boundary mode:** the conductor is a hole, so each face sees only the exterior field. Exact for an antisymmetric field; for a thin film
+  in a field on one side only, up to 2 times too high.
+
+Each entry is `{"Attributes": [group], "Ls": value}`. There is no `Crack` key and the value is per square already: it does not go through
+the division by a curve length that `add_impedance_boundary` applies. Entries are sorted by group name and come after any user `Impedance`
+entries. A planar layer needs `thickness` when the stack gives it zero thickness (QPDK-style stacks). An explicit `thickness` that differs
+from the meshed thickness of a shell or a 2D conductor is logged.
+
+### Derivation
+
+A film fills 0 < z < t and carries current along x. In the lossless London limit (T much below Tc), E = i w mu0 lambda^2 J and
+J = -dH/dz, so H'' = H / lambda^2. With u = t / lambda, K_b = H(0), K_t = -H(t) and the total sheet current K = K_b + K_t:
+
+```text
+E_bottom = i w mu0 lambda [coth(u) K_b + csch(u) K_t]
+E_top    = i w mu0 lambda [csch(u) K_b + coth(u) K_t]
+
+field on one side only (K_t = 0):   Ls = mu0 lambda coth(t / lambda)                (the textbook value)
+field antisymmetric (K_b = K_t):    E is equal on both faces
+    one sheet carrying all of K:    Ls_sheet = mu0 (lambda / 2) coth(t / 2 lambda)
+    each of two faces carrying K/2: Ls_face  = mu0 lambda coth(t / 2 lambda) = 2 Ls_sheet
+t << lambda:  E = i w mu0 (lambda^2 / t) K for any split between the faces
+t >> lambda:  the faces decouple and each has mu0 lambda
+```
+
+A finite-difference solve of H'' = H / lambda^2 across the film reproduces the three closed forms, and
+`tests/palace/test_superconductor.py` checks them to 1e-5. For a coplanar line without a nearby ground plane the quasi-static magnetic
+field is mirror-symmetric about the film plane, so the antisymmetric case applies.
+
+What Palace does on an interior face is an assumption here (*not verified*): that its weak form adds the Impedance term once over the face,
+which gives the jump condition n x (H+ - H-) = E_t / Zs, a sheet that carries the total current. The shell is meshed with elements on both
+sides of its faces (see [Three models](#three-models)), so each face is such a two-sided surface. With no `Crack` the sheet is read once;
+a cracked face would be one-sided, which doubles the kinetic inductance of a thin film for a one-sided field.
+
+The hollow shell is a three-layer model: two face sheets with a field-transparent interior of thickness t between them. Solving it
+(Faraday's law across the interior, a jump condition at each face) gives, for a field on one side only, the ratio to the exact film value
+c (c + u) / (2 c + u) / coth(u) with c = coth(u / 2). It is exactly 1 for an antisymmetric field. The test class
+`TestHollowShellModel` solves this as a linear system and compares:
+
+| t / lambda | 1 | 2 | 4 | 10 |
+| --- | --- | --- | --- | --- |
+| Hollow shell against the exact one-sided film | -2.1% | -9.3% | -14.0% | -8.3% |
+
+### A quasi-static reference
+
+To choose a formula for each model, a coplanar line (centre strip 10 um, gap 6 um, grounds 50 um wide, no substrate) was solved with
+and without London. The solver is a partial-inductance solve of mu0 lambda^2 J + A = const over rectangular cells, giving
+L(lambda) / L(0) = 1 + alpha, alpha = L_kin / L_geo. Three models of the same cross-section:
+
+- full London: solid rectangles, the London term in every cell;
+- sheet: one row of cells with Lambda = Ls_sheet t;
+- hollow shell: thin cells on the faces with the per-face value, relative to the hollow shell with Ls = 0.
+
+The geometric inductance of the reference, about 4.20e-7 H/m, agrees with conformal mapping (4.236e-7 H/m for t = 0 and infinite
+grounds) and with scikit-rf (4.13e-7 H/m for t = 0.1 um, with its thickness correction); the test class
+`TestQuasiStaticCoplanarReference` checks both within 3%, and reproduces the first row below on a coarse grid (sheet within 2%, hollow
+shell within 6% of the full result).
+
+| lambda, t (um) | Full London, alpha | Planar sheet | Hollow shell | Shell with coth(t / lambda) |
+| --- | --- | --- | --- | --- |
+| 0.2, 0.1 | 0.2168 (two grids agree to 1e-4) | 0.2144 (-1.1%) | 0.2085 (-3.8%) | 0.122 (-44%) |
+| 0.1, 0.1 | 0.0731 (two grids agree to 1e-4) | 0.0729 (-0.3%) | 0.0674 (-8%) | 0.044 (-40%) |
+| 0.05, 0.1 | 0.027 to 0.028 (not converged) | 0.0293 | 0.0236 | not computed |
+| 0.1, 0.2 | 0.045 to 0.051 (not converged) | 0.0591 | 0.0430 | not computed |
+| 0.05, 0.2 | 0.019 to 0.023 (not converged) | 0.0293 | 0.0185 | not computed |
+| 0.05, 0.5 | 0.014 to 0.017 (not converged) | 0.0497 | 0.0171 | not computed |
+
+Reading it:
+
+- The textbook value mu0 lambda coth(t / lambda) on each face is 40% or more too low for a coplanar line, which is why gsim does not
+  write it.
+- For t <= lambda the sheet is within about 1%, and the hollow shell 4% to 8% low.
+- At large t / lambda the sheet is too high: 3% to 30% at t / lambda = 2, 30% to 51% at 4 and about 3 times at 10. The sheet carries its
+  current in one plane, with no side walls. The hollow shell is within about 20% of the full result in the last two rows. The rows with
+  t / lambda of 2 and more were not converged between two grids, so these percentages are ranges, not values.
+- The reference has no ground plane near the line and no substrate. For a film over a ground plane the field is closer to one-sided and
+  the 1D analysis above applies instead: the shell is within the errors listed under "What gsim writes", and the 2D hole is up to 2 times
+  too high for a thin film. That case was not run.
+
+### Which model for which film
+
+- t <= lambda: use the sheet (`planar_conductors=True`).
+- t >= 4 lambda: use the shell (the default).
+- Between: not validated. In the reference the sheet was 3% to 30% high and the shell 12% to 17% low at t / lambda = 2, and both were not
+  converged; expect errors up to about 20%.
+- A 2D boundary-mode conductor is always a hole, so there is no sheet alternative. Keep t / lambda above 1, or accept the one-sided error
+  above.
+
+gsim logs a warning, once per layer and setting, for a planar sheet with t > 2 lambda, a shell or 2D conductor with t < lambda, and an
+eigenmode shell with t < lambda (the hollow interior may hold spurious slow-wave modes in large ground planes; *not verified*).
+
+### Interactions
+
+- **Wave ports.** `waveport_boundary="pec"` lists the superconducting attributes under `Boundaries.WavePortPEC` with the other
+  `Impedance` attributes, so the port mode solve treats the layer as PEC. The port mode then misses the kinetic inductance that the line
+  carries, and port and line differ by about sqrt(1 + alpha) in the propagation constant. With `"inherit"`, no `WavePortPEC` is written;
+  whether Palace's port eigenproblem includes the `Ls` term is *not verified*. gsim logs a warning for either policy.
+- **Boundary mode.** With `conductor_boundary="pec"` the superconducting layers become PEC like every other conductor, with a warning
+  that names them, so the 2D modes stay comparable with the port modes.
+- **Symmetry planes, metallic outer wall.** The plane and the wall are merged into `PEC` or `PMC` without touching the `Impedance`
+  entries.
+- **Refused combinations.** A superconducting surface that also appears in another boundary entry, for example a user `Impedance` entry
+  with the same attributes, raises `ValueError`. So do a layer that is not in the stack, a via layer, and a zero-thickness layer with no
+  `thickness`.
+- **Mesh reuse.** `reuse_mesh` copies the superconducting layers with the other layer properties (a different setting of the receiver is
+  replaced, with a warning). They are not a mesh input, so changing them after the mesh never invalidates it.
+- **Saved settings and the cache.** `superconductors` is a public field, so `model_dump_json()` keeps it. The input hash covers the written
+  files, so a changed London depth changes the key by itself.
+- **`generate_mesh(write_config=True)`** writes no superconducting entries, like it writes no impedance boundaries; `sim.write_config()`
+  does, and `sim.mesh()` leaves the config to it.
+- **Validation.** A chip whose conductors are all superconducting has no `Conductivity` or `PEC` entry. The mesh validation counts the
+  superconducting `Impedance` entries as conductor boundaries, and the lumped-port contact check counts their shell faces.
+- **`run_local`.** It logs a warning for a Palace older than 0.19 or of unknown version.
+
+### Not done
+
+A two-fluid loss term (`Rs`) is deferred: the same face and sheet conversion applies to it, but the quasi-particle conductivity would need a
+published source for its value. The default is lossless.
+
+### Cloud runs
+
+Runs on Palace 295645f, on a coplanar line on sapphire (strip 10 um, gaps 6 um, film 0.1 um). `alpha` is the kinetic over the geometric
+inductance of the line. It is measured from the rise of the mode index in 2D and from the fall of the resonance frequency of a 1 mm
+half-wave resonator in 3D, each against the PEC case of the same mesh. The expected values are the quasi-static London reference of this
+section, which has no substrate.
+
+| Case | lambda (um) | alpha measured | alpha expected |
+| --- | --- | --- | --- |
+| 2D boundary mode | 0.2 | 0.212 | 0.209 |
+| 2D boundary mode | 0.1 | 0.069 | 0.067 |
+| 3D resonator, planar sheet | 0.2 | 0.211 | 0.214 |
+| 3D resonator, shell | 0.2 | 0.202 | 0.209 |
+
+These runs are not stored in this repository. The 3D sheet result shows that Palace applies an interior `Impedance` once: applied on both
+sides, alpha would be about half. In the 3D runs the lowest mode was taken as the coplanar mode without checking its fields.
+
 ## Not verified
 
 - Anything Palace does with these keys: no solver was run for this page. In particular what `Thickness` does on a cracked boundary, and
@@ -244,3 +415,11 @@ is stored in the repository (the previous section only writes its config), so no
   only as far as `write_config()`.
 - That PEC is adequate for a phase, an impedance or a resonant frequency: the page gives the textbook reason to check, not a measurement.
 - The numbers in the line table were produced on one Windows machine with the coarse preset; the tetrahedron counts depend on the mesher.
+- Everything under [Superconducting layers](#superconducting-layers-london-penetration-depth) about Palace: that `Ls` is read in H per
+  square (SI), that an interior `Impedance` is applied once as a sheet and not cracked, what the port eigenproblem does with it, and
+  whether the Palace schema accepts the entries as written. The formulas are checked against a 1D finite-difference solve and a
+  quasi-static coplanar reference, not against Palace.
+- The superconducting reference rows with t / lambda of 2 and more are not converged; no film over a ground plane was run.
+- The quasi-static reference solver is reproduced in the tests for one row only; the other rows came from the same solver run outside
+  the test suite.
+- The scikit-rf comparison uses the installed 1.13.0; the source tool shows 2.1.0, with the same `CPW.analyse_quasi_static` signature.
