@@ -160,6 +160,34 @@ and clipped to that interval; films wholly outside it are omitted. Preview and
 written Gmsh geometry use the same domain. Automatic padding is applied once,
 and neither the component nor the PDK stack is modified.
 
+Levels that the PDK declares on its wafer layer (`LAYER.WAFER`; in the generic
+PDK these are `substrate`, `box` and `clad`) are blanket films too, although the
+PDK does not set `background=True` on them. No polygon on the wafer layer is
+needed, and their material names resolve like any other (see
+[Materials](../materials.md)). Unlike levels the PDK marks `background=True`,
+wafer films fill the domain without sizing it:
+
+- Automatic padding and automatic Z sizing follow the patterned layers, so the
+  generic PDK with `domain(padding=1)` gives the core thickness plus 1 µm on
+  each side, not the 16 µm wafer stack.
+- A wafer film wholly outside the domain's Z interval is omitted, and any other
+  is trimmed to it. This holds with or without `clip_geometry`, and
+  `GeometryClippingWarning` does not report it.
+- An explicit `z_bounds` therefore works without `clip_geometry`. It must still
+  contain the patterned layers.
+
+To simulate without a wafer film, pass a PDK copy whose stack lacks that level:
+
+```python
+layer_stack = pdk.layer_stack.model_copy(deep=True)
+del layer_stack.layers["clad"]
+pdk = pdk.model_copy(update={"layer_stack": layer_stack})
+sim = fdtd.Simulation(pdk=pdk)
+```
+
+A level on which the PDK itself sets `background=True` keeps the earlier
+behavior: it fills the domain and also sizes it.
+
 Display metadata such as `info.visible=False` only changes initial viewer
 visibility. Hidden films remain in the simulation and can be enabled for
 inspection.
@@ -228,12 +256,13 @@ sim.domain(
 ```
 
 Explicit axis padding is measured from the resolved geometry bounds. Without
-`padding_z`, automatic Z sizing uses the PDK background stack when present,
-otherwise the shared padding. The shared fallback retains automatic guided-port
-alignment. Explicit axis padding must be zero on a side containing a guided
-port: waveguide extensions into padding are not currently supported, and a
-nonzero value on that side raises an error. For a bend with an input on the
-negative X face and an output on the positive Y face, use
+`padding_z`, automatic Z sizing uses the PDK background stack when present
+(wafer-layer films excepted), otherwise the shared padding. The shared
+fallback retains automatic guided-port alignment. Explicit axis padding must
+be zero on a side containing a guided port: waveguide extensions into padding
+are not currently supported, and a nonzero value on that side raises an error.
+For a bend with an input on the negative X face and an output on the positive Y
+face, use
 `padding_x=(0, 1)` and `padding_y=(1, 0)` to pad its other sides.
 
 The old `padding_um` domain argument and `background_padding_um` constructor
@@ -277,13 +306,21 @@ levels when available. Unused Air declarations (such as an undrawn undercut)
 do not enlarge the automatic domain. `Air` and its built-in `air` alias use
 the same bounds. Explicit domain bounds remain in force.
 
-For example, a bare gpdk silicon component with no drawn oxide simulates silicon
-in air when the background is omitted, once its material names resolve.
-GDSFactory 9.x uses the lowercase `si` name; with those releases, supply
-`sim.materials(overrides={"si": 3.47})` when the PDK has no card for it.
-Declaring oxide in the LayerStack does
-not create oxide geometry. Select `background="SiO2"` to fill otherwise
-unoccupied space with oxide.
+For example, a bare gpdk component resolves the whole generic stack, because
+the PDK declares its substrate, buried oxide and cladding on the wafer layer (see
+the blanket-film notes above). Its core is silicon, `box` and `clad` are
+silica, and the lowercase `si` and `sio2` names resolve to the built-in `Si`
+and `SiO2` cards, so no override is needed to get a material. With the default
+`Air` background the domain is still core plus padding, but the oxide films
+fill it, so the component sits in oxide rather than in air. The 10 µm substrate
+lies outside a padded domain and is omitted. `background="SiO2"` gives the same
+materials; it only fills space that no film covers.
+
+`sim.materials(overrides={"si": 3.47})` still works and replaces the index of
+the `Si` card. The keys of `resolved.materials` and of the `materials` section
+of `config.json` for gpdk runs are now `Si` and `SiO2`, where earlier releases
+used the PDK's `si` and `sio2`. Code that reads `resolved.materials["si"]` must
+use the new key.
 
 To preserve the former environment, add `sim.materials(background="SiO2")`,
 or retain `background_material="SiO2"` in the historical constructor API.
@@ -293,6 +330,11 @@ preserving an automatically chosen vertical extent matters. Re-exporting
 updates inputs and cache keys; previously generated inputs and results are
 unchanged. The existing FDTD notebooks already choose their backgrounds
 explicitly.
+
+The generic-PDK notebooks that use `domain(padding=1)` keep their domain
+(z = -1 to 1.22 µm). Their mesh now also contains the `box` and `clad` volumes
+and the config uses the `Si` and `SiO2` material keys, so their first export
+after this change does not match earlier cache entries.
 
 ## Setup visualization
 

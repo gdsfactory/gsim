@@ -12,6 +12,7 @@ from pdk_schema import MaterialCard
 from shapely import box
 
 from gsim.common.materials import (
+    AmbiguousMaterialNameError,
     MaterialResolutionError,
     canonical_material_name,
     get_project_material_cards,
@@ -27,6 +28,7 @@ from gsim.common.pdk.models import (
 from gsim.common.pdk.models import ResolvedPort as ResolvedPort
 from gsim.common.pdk.models import UnsupportedPortError as UnsupportedPortError
 from gsim.common.pdk.ports import _resolved_ports
+from gsim.common.pdk.wafer import wafer_film_keys, with_wafer_films
 from gsim.common.polygon import fuse_polygons
 
 
@@ -127,9 +129,22 @@ def _resolved_layers(
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
     clipped_layers: dict[str, tuple[str, ...]] | None = None,
+    wafer_films: frozenset[str] = frozenset(),
+    wafer_z_bounds: tuple[float, float] | None = None,
 ) -> dict[str, ResolvedLayer]:
-    """Extract nonempty physical layers while preserving fabrication fields."""
-    for axis, bounds in (("x", x_bounds), ("y", y_bounds), ("z", z_bounds)):
+    """Extract nonempty physical layers while preserving fabrication fields.
+
+    *wafer_films* are blanket films that fill a window without sizing it: they
+    are never reported as clipped, and *wafer_z_bounds* (default: *z_bounds*)
+    omits those outside it. With *wafer_z_bounds* given they are also trimmed
+    to it.
+    """
+    for axis, bounds in (
+        ("x", x_bounds),
+        ("y", y_bounds),
+        ("z", z_bounds),
+        ("wafer z", wafer_z_bounds),
+    ):
         if bounds is not None and (
             not all(isfinite(value) for value in bounds) or bounds[0] >= bounds[1]
         ):
@@ -155,14 +170,16 @@ def _resolved_layers(
             else None,
             background_overhang_axes=(x_bounds is not None, y_bounds is not None),
         )
-        if clipped_layers is not None:
+        is_film = layer_key in wafer_films
+        if clipped_layers is not None and not is_film:
             axes = material_clipping_axes(
                 geometry, layer_level, x_bounds, y_bounds, z_bounds
             )
             if axes:
                 clipped_layers[layer_key] = axes
-        if z_bounds is not None and (
-            max(z_start, z_end) <= z_bounds[0] or min(z_start, z_end) >= z_bounds[1]
+        window = wafer_z_bounds if is_film and wafer_z_bounds is not None else z_bounds
+        if window is not None and (
+            max(z_start, z_end) <= window[0] or min(z_start, z_end) >= window[1]
         ):
             continue
         if geometry.is_empty or not _inside_xy_window(
@@ -180,6 +197,11 @@ def _resolved_layers(
                 f"LayerStack entry {layer_key!r} has zero thickness."
             )
         zmin = float(layer_level.zmin)
+        if is_film and wafer_z_bounds is not None:
+            # Trim the film to the window it fills. Its extent never sizes it.
+            low = max(min(z_start, z_end), wafer_z_bounds[0])
+            high = min(max(z_start, z_end), wafer_z_bounds[1])
+            zmin, thickness = low, high - low
         resolved[layer_key] = ResolvedLayer(
             key=layer_key,
             declared_name=layer_level.name,
@@ -205,8 +227,14 @@ def _resolved_layers(
 
 def _bounds(
     layers: Mapping[str, ResolvedLayer],
+    wafer_films: frozenset[str] = frozenset(),
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    """Return combined three-dimensional bounds for resolved layers."""
+    """Return combined three-dimensional bounds for resolved layers.
+
+    Wafer films fill a domain without sizing it, so they only count when the
+    component has no other layer.
+    """
+    layers = {k: v for k, v in layers.items() if k not in wafer_films} or layers
     xy_bounds = [layer.geometry.bounds for layer in layers.values()]
     z_bounds = [layer.z_bounds for layer in layers.values()]
     return (
@@ -233,6 +261,7 @@ def resolve_passive_pcell(
     z_bounds: tuple[float, float] | None = None,
     x_bounds: tuple[float, float] | None = None,
     y_bounds: tuple[float, float] | None = None,
+    wafer_z_bounds: tuple[float, float] | None = None,
 ) -> ResolvedPassivePcell:
     """Resolve a passive component, fabrication stack, materials, and ports.
 
@@ -249,6 +278,17 @@ def resolve_passive_pcell(
     sections identify physical bands; ambiguous bands require an explicit map.
     Existing direct matches and explicit selections keep their precedence.
 
+    Levels declared on the PDK's wafer layer (``LAYER.WAFER`` in gdsfactory,
+    typically substrate, buried oxide and cladding) are blanket films: they
+    cover the whole component, or the requested XY bounds, without any polygon
+    on that layer. ``resolved.layer_stack`` is a copy that marks them with
+    ``background=True``; the PDK's own stack is not modified. They fill a
+    window without sizing it: ``resolved.bounds`` covers the other layers, and
+    ``resolved.wafer_films`` names them. ``wafer_z_bounds`` omits wafer films
+    outside a vertical window and trims the others to it, without reporting
+    them as clipped and without touching ports or other layers. Material names
+    that differ from a card only by letter case resolve to that card.
+
     Optional axis bounds omit external films and footprints before material
     lookup. Blanket films fill the requested XY bounds, retaining their exclusion
     masks. Intersecting layers retain their original extrusion profiles; the
@@ -257,7 +297,11 @@ def resolve_passive_pcell(
     """
     pdk_object, pdk_or_module = _resolve_pdk(pdk)
     resolved_component = _resolve_component(pdk_object, component, settings)
-    layer_stack = _resolve_layer_stack(pdk_object)
+    # Levels on the wafer layer fill the chip. The marked copy keeps the PDK's
+    # own stack unchanged.
+    declared_stack = _resolve_layer_stack(pdk_object)
+    wafer_films = wafer_film_keys(declared_stack, pdk_object)
+    layer_stack = with_wafer_films(declared_stack, pdk_object)
     try:
         derived_component = layer_stack.get_component_with_derived_layers(
             resolved_component
@@ -268,19 +312,29 @@ def resolve_passive_pcell(
         ) from error
     clipped_layers: dict[str, tuple[str, ...]] = {}
     layers = _resolved_layers(
-        resolved_component, layer_stack, z_bounds, x_bounds, y_bounds, clipped_layers
+        resolved_component,
+        layer_stack,
+        z_bounds,
+        x_bounds,
+        y_bounds,
+        clipped_layers,
+        wafer_films,
+        wafer_z_bounds,
     )
     project_cards = _resolve_project_cards(pdk_object, pdk_or_module)
-    layers = {
-        key: replace(
-            layer,
-            material=canonical_material_name(
-                layer.material,
-                pdk_or_module if pdk_or_module is not None else pdk_object,
-            ),
-        )
-        for key, layer in layers.items()
-    }
+    try:
+        layers = {
+            key: replace(
+                layer,
+                material=canonical_material_name(
+                    layer.material,
+                    pdk_or_module if pdk_or_module is not None else pdk_object,
+                ),
+            )
+            for key, layer in layers.items()
+        }
+    except AmbiguousMaterialNameError as error:
+        raise LayerResolutionError(f"Could not resolve a material: {error}") from error
     materials = {}
     for material_name in dict.fromkeys(layer.material for layer in layers.values()):
         try:
@@ -310,10 +364,11 @@ def resolve_passive_pcell(
         layers=layers,
         materials=materials,
         ports=ports,
-        bounds=_bounds(layers),
+        bounds=_bounds(layers, wafer_films),
         wavelength_um=float(wavelength_um),
         pdk_module=pdk_or_module if pdk_or_module is not pdk_object else None,
         clipped_layers=clipped_layers,
+        wafer_films=wafer_films,
     )
 
 

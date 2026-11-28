@@ -266,8 +266,11 @@ def test_resolves_component_from_gdsfactory_generic_pdk() -> None:
         settings={"length": 1.0},
     )
 
-    assert set(result.layers) == {"core"}
+    # Substrate, buried oxide and cladding sit on the wafer layer: blanket films.
+    assert set(result.layers) == {"substrate", "box", "core", "clad"}
+    # An exact project card wins; ``sio2`` falls back to the built-in card.
     assert result.materials["si"].source == "project"
+    assert result.materials["SiO2"].source == "gsim"
     assert set(result.ports) == {"o1", "o2"}
 
 

@@ -88,6 +88,12 @@ class ResolvedPassivePcell:
     height when a backend extends blanket films over its domain. Retain an
     originating PDK module for material-card and alias lookup, while keeping
     ``pdk`` as the authoritative inner PDK object.
+
+    ``wafer_films`` holds the LayerStack keys that are blanket films only
+    because they sit on the PDK's wafer layer (typically substrate, buried oxide
+    and cladding), whether or not a vertical window left them in ``layers``.
+    They fill the domain of a backend but do not size it, so ``bounds`` covers
+    the other layers when there are any.
     """
 
     component: Any
@@ -102,6 +108,7 @@ class ResolvedPassivePcell:
     pdk_module: Any | None = None
     layout_bounds: Bounds3D | None = None
     clipped_layers: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    wafer_films: frozenset[str] = frozenset()
 
 
 __all__ = [

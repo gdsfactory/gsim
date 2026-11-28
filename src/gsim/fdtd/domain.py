@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pydantic
 
-from gsim.common.materials import canonical_material_name
+from gsim.common.materials import AmbiguousMaterialNameError, canonical_material_name
 from gsim.common.pdk import ResolvedPassivePcell
 from gsim.fdtd.mesh_geometry import UM_TO_NM
-from gsim.fdtd.models import FDTDGeometryError
+from gsim.fdtd.models import FDTDConfigError, FDTDGeometryError
 
 Padding = float | tuple[float, float]
 
@@ -103,10 +103,19 @@ def background_bounds_nm(
         material_context = (
             resolved.pdk_module if resolved.pdk_module is not None else resolved.pdk
         )
-        background = canonical_material_name(background_material, material_context)
+        try:
+            background = canonical_material_name(background_material, material_context)
+            level_materials = {
+                key: canonical_material_name(level.material, material_context)
+                for key, level in resolved.layer_stack.layers.items()
+            }
+        except AmbiguousMaterialNameError as error:
+            raise FDTDConfigError(f"Could not resolve a material: {error}") from error
         for key, level in resolved.layer_stack.layers.items():
+            # Wafer films (substrate, oxide) fill the domain without sizing it.
             if (
-                canonical_material_name(level.material, material_context) != background
+                key in resolved.wafer_films
+                or level_materials[key] != background
                 or level.thickness == 0
             ):
                 continue

@@ -91,12 +91,35 @@ snapshot = resolve_material_snapshot("Si", wavelength_um=1.55)
 print(snapshot.refractive_index)
 ```
 
-Lookup is case-sensitive. A project card with the same name replaces that fallback.
+A name is resolved in this order, and the first rule that matches wins:
+
+1. An exact project card. A project card with the same name as a built-in card
+   replaces that fallback.
+2. An exact PDK alias, followed to its target.
+3. An exact built-in card.
+4. A unique case-insensitive match, searching project cards and PDK aliases
+   first and built-in cards second. For example `si`, as declared by gdsfactory's
+   generic PDK, resolves to `Si`, and `sio2` to `SiO2`.
+
+If a case-insensitive search finds several cards that differ in more than their
+name, the lookup raises `AmbiguousMaterialNameError`. `Air` and `air` are the same
+built-in card and do not count as ambiguous. Layer resolution reports the error
+as `LayerResolutionError`, the material snapshot resolver as
+`MaterialResolutionError`, and FDTD setup as `FDTDConfigError`. Use the exact card
+name to pick one card. Exact names always keep working, so distinct project
+names such as `Core` and `core` remain distinct.
+
 PDKs can declare `material_aliases` (or module-level `MATERIAL_ALIASES`) mapping
 compatibility names to canonical card keys. These aliases also apply to layer
-materials and FDTD index overrides. No general case folding is performed;
-distinct project material names remain distinct. The built-in `air` alias
-resolves to `Air` unless an exact project card overrides it.
+materials and FDTD index overrides. An alias target is looked up by the same
+rules, so an alias `Legacy -> si` resolves to the `Si` card for `Legacy` and for
+`LEGACY`. The built-in `air` alias resolves to `Air` unless an exact project
+card overrides it.
+
+Because names fold to the card name, the keys of `resolved.materials` and of the
+`materials` section of an FDTD `config.json` use the card name (`Si`, `SiO2`),
+not the spelling used in the PDK (`si`, `sio2`).
+
 At gsim's material boundary, alias targets can come from project cards, built-in
 fallbacks, or explicit FDTD overrides. Missing targets are reported when used.
 

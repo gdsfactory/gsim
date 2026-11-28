@@ -15,6 +15,7 @@ from pdk_schema import Index, ScalarValue
 
 from gsim.common.cloud import CloudJobMixin
 from gsim.common.materials import (
+    AmbiguousMaterialNameError,
     MaterialResolutionError,
     MaterialSnapshot,
     canonical_material_name,
@@ -410,13 +411,24 @@ class Simulation(CloudJobMixin, VisualizationMixin):
     @property
     def _background_material_name(self) -> str:
         """Use the same canonical background for geometry and generated inputs."""
-        return canonical_material_name(self.materials.background, self.pdk)
+        try:
+            return canonical_material_name(self.materials.background, self.pdk)
+        except AmbiguousMaterialNameError as error:
+            raise FDTDConfigError(
+                f"Could not resolve background material "
+                f"{self.materials.background!r}: {error}"
+            ) from error
 
     def _canonical_material_overrides(self) -> dict[str, Any]:
         """Keep legacy override names working with canonical PDK layer names."""
         overrides = {}
         for name, material in self.materials.overrides.items():
-            canonical = canonical_material_name(name, self.pdk)
+            try:
+                canonical = canonical_material_name(name, self.pdk)
+            except AmbiguousMaterialNameError as error:
+                raise FDTDConfigError(
+                    f"Could not resolve material override {name!r}: {error}"
+                ) from error
             if canonical in overrides and overrides[canonical] != material:
                 raise FDTDConfigError(
                     f"Conflicting material overrides for {canonical!r}."
